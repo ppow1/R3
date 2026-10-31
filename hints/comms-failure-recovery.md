@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/comms-failure-recovery.md
 Component: COMMS-RECOVERY
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Capture failed and blocked Riverview Comms operations
@@ -10,11 +10,11 @@ Execution Model: N/A
 Observability: Incident ledger and punch list
 Dependencies: Riverview Comms 1.1 and applicable operational runbooks
 Authority: Steward direction
-Changed: 2026-10-31 UTC | R3-COMMS-002 | ChatGPT GPT-6 | Define objective-level recovery and bounded fallback
+Changed: 2026-10-31 UTC | R3-COMMS-002 | ChatGPT GPT-6 | Require shell-aware clipboard-first manual fallback
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Not applicable
-History/Predecessor: Git blob cab1541b9550fa140182ccedd21d2f42d727103f
+History/Predecessor: Git blob c6765f8b5640f807588301ae7b4493c464b57d0e
 -->
 # Comms failure recording and recovery
 
@@ -50,3 +50,9 @@ A failed **method** is not a failed **objective**. Grace and engineering agents 
 **State classification:** `METHOD_FAILED` means one attempt failed; `RECOVERY_IN_PROGRESS` means alternatives are being examined; `OBJECTIVE_BLOCKED` requires evidence that all reasonable authorized paths were exhausted or a genuine authority/safety dependency prevents continuation; `OBJECTIVE_VERIFIED` requires independent outcome evidence.
 
 **2026-10-31 learning event:** A GitHub incident-record update was initially blocked at the tool invocation layer. The assistant prematurely reported it as blocked. Following the Steward's challenge, the assistant enumerated available GitHub write operations and retried the Contents API update; the retry succeeded (commit `179e512eec4d11c33552af82245f91b7175135b6`). The Git tree/commit/ref alternative was **discovered but not exercised**. The observed defect was premature abandonment and inadequate tool discovery, not proof of a broken GitHub repository or that an alternate write interface was required.
+
+## Manual fallback command contract
+
+When Comms execution fails and user intervention is necessary, identify the **terminal in which the user will paste** before issuing commands. For Windows PowerShell 7, begin with `Clear-Host`, capture diagnostic output in `$result`, display it, and call `Set-Clipboard -Value $result`. To diagnose Linux from a Windows terminal, use PowerShell to invoke `ssh` explicitly and execute Bash remotely; never paste Bash syntax directly into PowerShell. For POSIX Bash, begin with `clear`, capture and display output; use a verified available clipboard utility or clearly state that copying is unavailable on that host. Record manual-fallback syntax errors as assistant workflow failures, not remote host failures.
+
+- [R3-COMMS-002: Camrui deployment preflight and shell-format failure](../docs/comms-incidents/R3-COMMS-002.md)
