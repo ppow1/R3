@@ -1,3 +1,20 @@
+# R3 CONTROLLED SOURCE
+# File: r3_app.py
+# Component: R3-APP
+# File Revision: 1.0.0 (provenance baseline; prior revisions untracked)
+# Created: Unknown (legacy; initial commit can establish earliest publication)
+# Created By: Unknown (legacy)
+# Purpose: Initial shared read-only institutional API
+# Execution Model: Request-driven FastAPI service
+# Observability: HTTP health endpoint; no deployed verification
+# Dependencies: FastAPI, Git checkout, local artwork folder
+# Authority: R3 engineering guidance; approved charter prevails
+# Changed: 2026-10-31 UTC | R3-PROVENANCE-001 | ChatGPT GPT-6 | Add provenance baseline
+# Supersedes: None
+# Contracts: hints/file-provenance.md
+# Tests: Not run (metadata-only change)
+# History/Predecessor: Git blob f51be5186995262a5e5371df23e3b8155fe95ee9
+
 """R3 first vertical slice: shared read-only capabilities, not UI-owned logic.
 
 Run: R3_REPO=/path/to/R3 uvicorn r3_app:app --host 127.0.0.1 --port 8303
