@@ -18,3 +18,6 @@ Status: initial working list; items are requirements or investigations, not veri
 | R3-P012 | P1 | HMI and telemetry | Live operational state, minimizable overlays, resource indicators, drilldowns, historian | Open |
 | R3-P013 | P1 | R2 reuse inventory | Verify which services and UI mechanisms are actually reusable | Open |
 | R3-P014 | P1 | Charter Revision 2 | Incorporate institution-wide onboarding, roles, CME, registry, comms, governance and HMI | Open |
+
+| R3-P015 | P0 | Jessica–Helen character/personnel workflow | Jessica owns resident character design and evolving canon; Helen HR owns authoritative personnel files; define what is shared, approvals, provenance, versioning, and access boundaries | Open |
+| R3-P016 | P1 | Progressive character onboarding | Seed each resident with a basic definition and expand character continuity over time; no requirement to complete every character at launch | Open |
