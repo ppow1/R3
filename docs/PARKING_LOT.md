@@ -12,3 +12,5 @@ Ideas intentionally deferred from immediate delivery; not rejected or committed 
 | R3-L006 | Immersive 3D/VR Estate | Share operational state with 2D HMI; defer rendering implementation |
 | R3-L007 | Modern panoramic estate overlay library | Convert chosen raster references into accessible interactive components |
 | R3-L008 | Residential Gateway reintroduction | Only if R2 evidence shows a compelling need versus simpler messaging transport |
+
+| R3-L009 | iPhone mobile companion / voice and media | Tap an actionable notification, open the relevant R3 conversation, dictate or speak, attach images, and reply over Wi-Fi/cellular; assess PWA versus native iOS, Bluetooth headset support, and notification reliability |
