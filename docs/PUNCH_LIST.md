@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/PUNCH_LIST.md
 Component: DOCS-PUNCH-LIST-MD
-File Revision: 1.0.0 (provenance baseline; earlier revisions not tracked)
+File Revision: 1.0.1
 Created: Unknown (legacy)
 Created By: Unknown (legacy)
 Purpose: R3 project governance and planning reference
@@ -10,11 +10,11 @@ Execution Model: N/A
 Observability: N/A
 Dependencies: R3 repository
 Authority: Existing document authority unchanged; see body
-Changed: 2026-10-31 UTC | R3-PROVENANCE-001 | ChatGPT GPT-6 | Add provenance baseline
+Changed: 2026-10-31 UTC | R3-COMMS-001 | ChatGPT GPT-6 | Track Comms grant discovery and failure recovery
 Supersedes: None (see body for substantive charter revisions)
 Contracts: hints/file-provenance.md
 Tests: Not run (metadata-only)
-History/Predecessor: Git blob 5125960a1219257901f3b2a8c84a9e5f02fe07f9
+History/Predecessor: Git blob 0e66e1873cd2827a65b3c19dc095f98fdcd5fc6b
 -->
 # R3 — Punch List
 
@@ -44,3 +44,5 @@ Status: initial working list; items are requirements or investigations, not veri
 | R3-P019 | P1 | Epistemic monitoring settings and assurance policies | Build master enable and per-resident controls, evidence-class assurance thresholds, selective substantive verification, alarm severity, acknowledgement/escalation policy; never equate confidence percentage with permission to mislabel facts | Open |
 | R3-P020 | P1 | Late-arriving chat audit alerts | Persist mismatch alarms when user has scrolled away; whole-message warning, striped disputed spans, consolidated alert count, jump-to-source and return navigation, acknowledge versus resolve, historian trail | Open |
 
+
+| R3-P019 | P0 | Riverview Comms failure capture and grant recovery | [R3-COMMS-001](comms-incidents/R3-COMMS-001.md): locate V2 grant runbook, verify grant status, run Camrui header checker, and establish repeatable incident logging | Open |
