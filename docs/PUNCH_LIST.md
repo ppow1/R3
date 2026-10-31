@@ -21,3 +21,8 @@ Status: initial working list; items are requirements or investigations, not veri
 
 | R3-P015 | P0 | Jessica–Helen character/personnel workflow | Jessica owns resident character design and evolving canon; Helen HR owns authoritative personnel files; define what is shared, approvals, provenance, versioning, and access boundaries | Open |
 | R3-P016 | P1 | Progressive character onboarding | Seed each resident with a basic definition and expand character continuity over time; no requirement to complete every character at launch | Open |
+| R3-P017 | P1 | Resident communication profile settings | Define master defaults and per-resident overrides for verbosity, initiative, interests, tone and roleplay latitude; align with Jessica character canon and Helen personnel files; verify settings affect behavior without compromising professional competence | Open |
+| R3-P018 | P1 | Epistemic classification and audit prototype | Test opt-in residents; classify text spans (inline, async or hybrid), retain provenance and original labels, independently audit category correctness, show pending/pass/mismatch/indeterminate message status; measure response and audit latency | Open |
+| R3-P019 | P1 | Epistemic monitoring settings and assurance policies | Build master enable and per-resident controls, evidence-class assurance thresholds, selective substantive verification, alarm severity, acknowledgement/escalation policy; never equate confidence percentage with permission to mislabel facts | Open |
+| R3-P020 | P1 | Late-arriving chat audit alerts | Persist mismatch alarms when user has scrolled away; whole-message warning, striped disputed spans, consolidated alert count, jump-to-source and return navigation, acknowledge versus resolve, historian trail | Open |
+
