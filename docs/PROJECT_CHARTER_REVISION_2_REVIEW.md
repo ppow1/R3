@@ -1,3 +1,21 @@
+<!--
+R3 CONTROLLED DOCUMENT
+File: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md
+Component: DOCS-PROJECT-CHARTER-REVISION-2-REVIEW-MD
+File Revision: 1.0.0 (provenance baseline; earlier revisions not tracked)
+Created: Unknown (legacy)
+Created By: Unknown (legacy)
+Purpose: R3 project governance and planning reference
+Execution Model: N/A
+Observability: N/A
+Dependencies: R3 repository
+Authority: Existing document authority unchanged; see body
+Changed: 2026-10-31 UTC | R3-PROVENANCE-001 | ChatGPT GPT-6 | Add provenance baseline
+Supersedes: None (see body for substantive charter revisions)
+Contracts: hints/file-provenance.md
+Tests: Not run (metadata-only)
+History/Predecessor: Git blob 9d421974cf556b7e5f15e0401b6a5c404a3370cf
+-->
 # Riverview 3 — Project Charter, Revision 2
 
 **Status:** APPROVED — Steward approval recorded 2026-10-31  
