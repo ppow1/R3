@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: scripts/Deploy-R3.ps1
 # Component: R3-DEPLOYMENT
-# File Revision: 1.0.2
+# File Revision: 1.0.3
 # Created: 2026-10-31 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Parameterized deployment of R3 website to Camrui
@@ -9,12 +9,12 @@
 # Observability: Console and clipboard, HTTP checks, Git revision, process checks
 # Dependencies: PowerShell 7, SSH alias camrui, Git, flock, curl, Python venv, ss
 # Authority: Steward instruction to automate second deployment
-# Changed: 2026-10-31 UTC | R3-DEPLOY-007 | ChatGPT GPT-6 | Permit known runtime directories
+# Changed: 2026-10-31 UTC | R3-DEPLOY-008 | ChatGPT GPT-6 | Verify Uvicorn process via user, cwd, executable and argv
 # Supersedes: None
 # Superseded By: None
 # Contracts: docs/runbooks/R3_FIRST_WEBSITE_DEPLOYMENT.md; hints/file-provenance.md
 # Tests: Not executed; live validation pending
-# History/Predecessor: Git blob 2a60959d1b1c607d0826b7b0a1df2e75fcae6d34
+# History/Predecessor: Git blob df394fc6f5f2a32b384753083ec1b2e70bc96a3f
 
 [CmdletBinding()]
 param(
@@ -36,10 +36,16 @@ say() { printf '\n=== %s ===\n' "$1"; }
 fail() { echo "ERROR: $*" >&2; exit 1; }
 listener() { ss -ltnp '( sport = :8303 )' | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -1; }
 owned() {
-  local args user
+  local args user cwd exe
   args=$(ps -p "$1" -o args=) || return 1
   user=$(ps -p "$1" -o user= | tr -d ' ') || return 1
-  [ "$user" = admin1 ] && [[ "$args" == *"/home/admin1/R3/.venv/bin/uvicorn r3_app:app"* ]]
+  cwd=$(readlink -f "/proc/$1/cwd") || return 1
+  exe=$(readlink -f "/proc/$1/exe") || return 1
+  [ "$user" = admin1 ] || return 1
+  [ "$cwd" = /home/admin1/R3 ] || return 1
+  [[ "$exe" == /home/admin1/R3/.venv/bin/python* || "$exe" == /usr/bin/python3* ]] || return 1
+  [[ "$args" == *"uvicorn r3_app:app"* ]] || return 1
+  [[ "$args" == *"--port 8303"* ]] || return 1
 }
 check_http() {
   local status
