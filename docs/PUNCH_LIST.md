@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/PUNCH_LIST.md
 Component: DOCS-PUNCH-LIST-MD
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: Unknown (legacy)
 Created By: Unknown (legacy)
 Purpose: R3 project governance and planning reference
@@ -10,11 +10,11 @@ Execution Model: N/A
 Observability: N/A
 Dependencies: R3 repository
 Authority: Existing document authority unchanged; see body
-Changed: 2026-10-31 UTC | R3-COMMS-001 | ChatGPT GPT-6 | Track Comms grant discovery and failure recovery
+Changed: 2026-10-31 UTC | R3-COMMS-002 | ChatGPT GPT-6 | Track premature-abandonment prevention and qualification
 Supersedes: None (see body for substantive charter revisions)
 Contracts: hints/file-provenance.md
 Tests: Not run (metadata-only)
-History/Predecessor: Git blob 0e66e1873cd2827a65b3c19dc095f98fdcd5fc6b
+History/Predecessor: Git blob 0ce8efc6bd8612c55f32255bb92c424594bbd891
 -->
 # R3 — Punch List
 
@@ -46,3 +46,5 @@ Status: initial working list; items are requirements or investigations, not veri
 
 
 | R3-P019 | P0 | Riverview Comms failure capture and grant recovery | [R3-COMMS-001](comms-incidents/R3-COMMS-001.md): locate V2 grant runbook, verify grant status, run Camrui header checker, and establish repeatable incident logging | Open |
+
+| R3-P020 | P0 | Grace and engineering agents: objective-level recovery instead of premature abandonment | Implement and test `METHOD_FAILED` → `RECOVERY_IN_PROGRESS` → verified outcome or evidence-backed block; discover existing grants and alternate authorized interfaces; preserve attempt history and avoid safety bypass | Open |
