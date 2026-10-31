@@ -1,3 +1,21 @@
+<!--
+R3 CONTROLLED DOCUMENT
+File: docs/IMPLEMENTATION_HANDOFF.md
+Component: IMPLEMENTATION-HANDOFF
+File Revision: 1.0.0 (provenance baseline; prior revisions untracked)
+Created: Unknown (legacy; initial commit can establish earliest publication)
+Created By: Unknown (legacy)
+Purpose: R3 engineering reference and continuation guidance
+Execution Model: N/A
+Observability: N/A
+Dependencies: R3 docs and hints index
+Authority: R3 engineering guidance; approved charter prevails
+Changed: 2026-10-31 UTC | R3-PROVENANCE-001 | ChatGPT GPT-6 | Add provenance baseline
+Supersedes: None
+Contracts: hints/file-provenance.md
+Tests: Not run (metadata-only change)
+History/Predecessor: Git blob df5e1178aeedc130f5f655a35f88529d874a7831
+-->
 # R3 — Implementation Handoff and Working Decisions
 
 **Recorded:** 2026-10-31  
