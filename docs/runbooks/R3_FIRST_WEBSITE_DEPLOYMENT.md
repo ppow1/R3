@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/runbooks/R3_FIRST_WEBSITE_DEPLOYMENT.md
 Component: R3-DEPLOYMENT-RUNBOOK
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-10-31 UTC (exact time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Preserve observed first Camrui R3 website deployment and derive deployment-script requirements
@@ -10,12 +10,12 @@ Execution Model: Human-executed PowerShell 7 -> SSH alias camrui -> Ubuntu Bash;
 Observability: Git SHA, SSH exit, PID/port, HTTP checks, image bytes, browser acceptance
 Dependencies: ppow1/R3; Camrui; Python 3.12; FastAPI; Uvicorn; approved visual ZIP
 Authority: Steward direction to capture first deployment before further deployment
-Changed: 2026-10-31 UTC | R3-DEPLOY-002 | ChatGPT GPT-6 | Append reconstructed PowerShell and remote Bash commands, outputs, and failure classifications
+Changed: 2026-10-31 UTC | R3-DEPLOY-005 | ChatGPT GPT-6 | Record HTTP 404 on public raw script retrieval and private-repository-safe fallback
 Supersedes: None
 Superseded By: None
 Contracts: docs/IMPLEMENTATION_HANDOFF.md; hints/file-provenance.md; hints/comms-failure-recovery.md
 Tests: Documentation only; proposed deploy script not implemented or tested
-History/Predecessor: Git blob e69824cef5541992a713237f14d4b57743df222f
+History/Predecessor: Git blob 78215e415cb6529c6f6c99af6cea311a7918dc58
 -->
 # R3 first website deployment — observed runbook and deploy-script investigation
 
@@ -497,3 +497,7 @@ Set-Clipboard -Value "$result`nSSH exit code: $exitCode"
 - [ ] Preserve rollback and a durable failure report.
 
 **Important:** This appendix reconstructs the available issued commands. It does not assert that all were executed or successful. It does not include unknown early bootstrap commands as invented exact transcripts.
+
+## 7. First scripted-deployment retrieval failure (2026-10-31)
+
+The assistant issued a PowerShell 7 wrapper that attempted to download `scripts/Deploy-R3.ps1` from `https://raw.githubusercontent.com/ppow1/R3/c081fbbb5aba3ae3d7f7798ab412d7664ad7dd87/scripts/Deploy-R3.ps1` with `Invoke-WebRequest -OutFile`. The user observed **404 Not Found**. No script execution or website deployment is evidenced. GitHub connector `fetch_file` successfully fetched the file at the exact commit and path; thus the file exists, while unauthenticated raw URL access failed (private repository access is a plausible explanation, not independently proven). Corrective design: use the existing authenticated Camrui Git checkout, or an authenticated artifact transport; do not rely on unauthenticated raw GitHub URLs. Verify fetched SHA and script presence before execution. Capture and propagate download errors and do not run a stale temp copy.
