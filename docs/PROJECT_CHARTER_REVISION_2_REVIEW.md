@@ -90,6 +90,14 @@ Epistemic category styling and **audit-discrepancy styling are independent layer
 
 Color palettes, stripe patterns, contrast, animation, typography, and accessible alternatives belong to the presentation layer and may change without modifying underlying classification/audit records. The display must remain readable and provide a non-color-only indicator for accessibility. Distinguish pending, passed, disputed, and indeterminate audits; do not use a success mark for an uncompleted audit.
 
+### Epistemic monitoring configuration and late-arriving alarms
+
+Epistemic classification and audit shall be **configurable and phased**, initially with **per-resident opt-in** for test cohorts, plus an institutional master enable/disable control. A dedicated settings page shall expose resident participation, classification/auditor modes, notification and alarm severity, visual treatments, acknowledgement requirements, and escalation behavior. Settings shall distinguish global defaults from resident overrides and permit experimentation without rewriting the underlying evidence records.
+
+A classification mismatch may arrive **after the Steward has already read the response or scrolled far beyond it**. The chat must therefore support a persistent, discoverable, late-arriving alert that identifies the resident and affected message, visibly signals unresolved discrepancies at the conversation level (potentially through a configurable background treatment), and offers a **jump directly to the original message and disputed span**. The alert must not depend on the original message remaining on screen. Provide an alert list/count and a way to return to the previous reading position.
+
+**Acknowledged** (the Steward has seen the warning) and **resolved** (the issue has been corrected, superseded, or dispositioned) are distinct recorded states. Whether warnings require acknowledgement, whether they persist, and whether they escalate shall be configurable by significance and environment. Preserve original classifications, audit findings, notifications, acknowledgements, corrections, and disposition in the historian. Avoid disruptive alarms for trivial or harmless roleplay; ensure serious late-arriving discrepancies cannot silently disappear.
+
 ## 6. Resident health, mistakes, and continuous improvement
 
 Mistakes are part of learning. **Learning from them is mandatory; repeated preventable mistakes are a performance concern.** Maintain durable mistake logs linked to causes, corrections, lessons, recurrence, and subsequent outcomes. Do not erase mistakes merely because the immediate problem was fixed, and do not discourage candid self-reporting.
