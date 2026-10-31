@@ -1,5 +1,9 @@
 # AI_HINTS.md — Riverview 3
 
+## How to use AI_HINTS.md
+
+When adding project knowledge, **store the substantive document in `hints/` and add a short index pointer here**. Update an existing topic document when appropriate; do not duplicate detailed content in this root file. The pointer should name the topic and link to its source. See [the hints index](hints/README.md) for organization and onward references.
+
 Start with [the hints index](hints/README.md). Keep this root file short; put detailed guidance in `hints/` and link onward to authoritative documents.
 
 ## Essential rules
