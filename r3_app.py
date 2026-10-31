@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.1
+# File Revision: 1.0.2
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Initial shared read-only institutional API
@@ -9,11 +9,11 @@
 # Observability: HTTP health endpoint; no deployed verification
 # Dependencies: FastAPI, Git checkout, local artwork folder
 # Authority: R3 engineering guidance; approved charter prevails
-# Changed: 2026-10-31 UTC | R3-VISUAL-001 | ChatGPT GPT-6 | Serve visual prototype and approved background from archive
+# Changed: 2026-10-31 UTC | R3-VISUAL-002 | ChatGPT GPT-6 | Correct approved background ZIP entry path
 # Supersedes: None
 # Contracts: hints/file-provenance.md
 # Tests: Not run (metadata-only change)
-# History/Predecessor: Git blob c15b911d5e72d4e292a6a1dbf30dfffc8d6b0e48
+# History/Predecessor: Git blob 06b5906ffc2756139c4db6d42fb0c34776031bc0
 
 """R3 first vertical slice: shared read-only capabilities, not UI-owned logic.
 
@@ -86,7 +86,7 @@ def artwork_file(relative_path: str):
 
 # Visual prototype: source approved art directly from preserved ZIP; do not use substitute imagery.
 ZIP_PATH = ROOT / "assets" / "visual-concepts" / "Riverview3_Visual_Concept_Library.zip"
-VISUAL_NAME = "backgrounds/R3_modern_dashboard_as_is.png"
+VISUAL_NAME = "Riverview3_Visual_Concept_Library/backgrounds/R3_modern_dashboard_as_is.png"
 
 @app.get("/")
 def visual_home():
