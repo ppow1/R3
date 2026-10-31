@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.0 (provenance baseline; prior revisions untracked)
+# File Revision: 1.0.1
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Initial shared read-only institutional API
@@ -9,11 +9,11 @@
 # Observability: HTTP health endpoint; no deployed verification
 # Dependencies: FastAPI, Git checkout, local artwork folder
 # Authority: R3 engineering guidance; approved charter prevails
-# Changed: 2026-10-31 UTC | R3-PROVENANCE-001 | ChatGPT GPT-6 | Add provenance baseline
+# Changed: 2026-10-31 UTC | R3-VISUAL-001 | ChatGPT GPT-6 | Serve visual prototype and approved background from archive
 # Supersedes: None
 # Contracts: hints/file-provenance.md
 # Tests: Not run (metadata-only change)
-# History/Predecessor: Git blob f51be5186995262a5e5371df23e3b8155fe95ee9
+# History/Predecessor: Git blob c15b911d5e72d4e292a6a1dbf30dfffc8d6b0e48
 
 """R3 first vertical slice: shared read-only capabilities, not UI-owned logic.
 
@@ -21,10 +21,12 @@ Run: R3_REPO=/path/to/R3 uvicorn r3_app:app --host 127.0.0.1 --port 8303
 Requires: fastapi, uvicorn. No GitHub credentials exposed to browsers.
 """
 import os
+import io
+import zipfile
 import subprocess
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 ROOT = Path(os.environ.get("R3_REPO", Path(__file__).resolve().parent)).resolve()
 ART = (ROOT / "assets" / "artwork").resolve()
@@ -81,3 +83,27 @@ def artwork_file(relative_path: str):
     if not path.is_relative_to(ART) or path.suffix.lower() not in EXTENSIONS or not path.is_file():
         raise HTTPException(404, "Artwork not found")
     return FileResponse(path)
+
+# Visual prototype: source approved art directly from preserved ZIP; do not use substitute imagery.
+ZIP_PATH = ROOT / "assets" / "visual-concepts" / "Riverview3_Visual_Concept_Library.zip"
+VISUAL_NAME = "backgrounds/R3_modern_dashboard_as_is.png"
+
+@app.get("/")
+def visual_home():
+    page = ROOT / "web" / "index.html"
+    if not page.is_file():
+        raise HTTPException(404, "Visual prototype not installed")
+    return FileResponse(page, media_type="text/html")
+
+@app.get("/api/v1/visual/background")
+def visual_background():
+    if not ZIP_PATH.is_file():
+        raise HTTPException(503, "Approved visual archive unavailable")
+    try:
+        with zipfile.ZipFile(ZIP_PATH) as archive:
+            if VISUAL_NAME not in archive.namelist():
+                raise HTTPException(503, "Approved background missing from archive")
+            data = archive.read(VISUAL_NAME)
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise HTTPException(503, "Approved visual archive unreadable") from exc
+    return Response(content=data, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
