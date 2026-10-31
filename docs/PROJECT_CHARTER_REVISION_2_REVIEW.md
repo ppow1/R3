@@ -1,8 +1,8 @@
 # Riverview 3 — Project Charter, Revision 2
 
-**Status:** PROPOSED — Steward review; not approved or operationally binding  
-**Authority:** Steward approval by explicit yay/nay  
-**Supersedes:** Initial Draft only upon approval  
+**Status:** APPROVED — Steward approval recorded 2026-10-31  
+**Authority:** Steward explicitly approved Revision 2 on 2026-10-31  
+**Supersedes:** Initial Draft upon Steward approval 2026-10-31  
 **Purpose:** Institutional mission, governance, and engineering direction; not a detailed implementation specification
 
 ## 1. Mission and character
@@ -164,4 +164,4 @@ This charter defines **what R3 must become**, not every technical implementation
 
 Initial engineering priorities include: authoritative roster and canon recovery; knowledge-first grounding; persistent resident autonomy; direct communications/historian; Internet/mobile access; hybrid reasoning handoffs; Foundry delivery and verification; resident performance/learning; capability inventory; and progressive Quest 2 spatial experiments. Priorities may be sequenced dynamically by Grace, Chloe, and Vicky within delegated authority.
 
-**Review rule:** The Steward reads, requests revisions, and gives explicit **yay or nay**. No committee or elaborate approval chain is required. Until that approval, this document remains a proposed charter, not enacted policy.
+**Approval record:** Steward explicitly approved Project Charter Revision 2 on 2026-10-31. This revision is the governing charter; implementation details remain subject to engineering qualification.
