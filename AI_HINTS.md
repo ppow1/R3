@@ -1,6 +1,26 @@
+<!--
+R3 CONTROLLED DOCUMENT
+File: AI_HINTS.md
+Component: ENG-AGENT-INDEX
+File Revision: 1.0.1 (R3 provenance baseline; earlier per-file revisions not recorded)
+Created: Unknown (legacy; inspect initial Git commit for earliest published version)
+Created By: Unknown (legacy)
+Purpose: Lightweight agent startup and knowledge index
+Execution Model: N/A
+Observability: N/A
+Dependencies: hints/README.md
+Authority: R3 engineering navigation, subordinate to approved charter
+Changed: 2026-10-31 UTC | R3-PROVENANCE-001 | ChatGPT GPT-6 | Add mandatory provenance pointer and header
+Supersedes: None
+Contracts: hints/file-provenance.md
+Tests: Manual source inspection; automated validation pending
+History/Predecessor: Git blob ee1462d14edcbea8e69154a018a38a6b160e0a11
+-->
 # AI_HINTS.md — Riverview 3
 
 ## How to use AI_HINTS.md
+
+**Mandatory for every repository file:** read [file provenance and header rules](hints/file-provenance.md) before creating or changing a file. Put a complete language-appropriate header (or binary sidecar) on each file; include creation actor/time, revision, purpose, change history, and explicit supersession. Preserve the predecessor before updates.
 
 When adding project knowledge, **store the substantive document in `hints/` and add a short index pointer here**. Update an existing topic document when appropriate; do not duplicate detailed content in this root file. The pointer should name the topic and link to its source. See [the hints index](hints/README.md) for organization and onward references.
 
