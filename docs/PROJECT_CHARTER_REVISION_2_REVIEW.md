@@ -35,6 +35,8 @@ Residents shall retain distinct personalities, appearance and relationship canon
 
 Grace and other authorized residents shall reason, select tools, communicate, act, inspect results, recover, and continue without a human prescribing each next step. **Engineering scope is not operational scope**: a focused test or implementation change shall not hardcode ceilings on objectives, work orders, cycles, assignments, concurrency, tools, or resident activities.
 
+**Resident communication profiles:** Each resident shall have a distinctive, adjustable conversational style consistent with her established personality and personnel canon. Configuration may govern verbosity, initiative to speak, topical interests, professional versus social tone, humor, playfulness, and roleplay latitude. Institution-wide defaults and per-resident settings shall support gradual experimentation without homogenizing personalities. Character latitude and communication style must never lower the requirement to distinguish evidence, inference, uncertainty, fiction, and operational verification. Configurable risk/assurance thresholds govern when to request more evidence, audit, or alert; they are not permission to falsely present an unsupported assertion as verified fact.
+
 Onboarding may be minimal and progressive. Resident presence does not require a permanently dedicated GPU process.
 
 ## 4. Shared hybrid reasoning and continuity
