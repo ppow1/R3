@@ -1,3 +1,21 @@
+<!--
+R3 CONTROLLED DOCUMENT
+File: docs/PARKING_LOT.md
+Component: DOCS-PARKING-LOT-MD
+File Revision: 1.0.0 (provenance baseline; earlier revisions not tracked)
+Created: Unknown (legacy)
+Created By: Unknown (legacy)
+Purpose: R3 project governance and planning reference
+Execution Model: N/A
+Observability: N/A
+Dependencies: R3 repository
+Authority: Existing document authority unchanged; see body
+Changed: 2026-10-31 UTC | R3-PROVENANCE-001 | ChatGPT GPT-6 | Add provenance baseline
+Supersedes: None (see body for substantive charter revisions)
+Contracts: hints/file-provenance.md
+Tests: Not run (metadata-only)
+History/Predecessor: Git blob b650ae24c29d92806036e213a3e75b03078c4d32
+-->
 # R3 — Parking Lot
 
 Ideas intentionally deferred from immediate delivery; not rejected or committed implementations.
