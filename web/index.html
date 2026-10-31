@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: web/index.html
 Component: R3-VISUAL-PROTOTYPE
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Demonstrate genuinely translucent draggable floating windows over approved estate artwork
@@ -10,11 +10,11 @@ Execution Model: Browser client
 Observability: Background load status, adjustable opacity
 Dependencies: /api/v1/visual/background, R3 visual concepts ZIP
 Authority: Steward visual direction 2026-10-31
-Changed: 2026-10-31 UTC | R3-VISUAL-003 | ChatGPT GPT-6 | Repair dragging, true centering and compact minimize
+Changed: 2026-10-31 UTC | R3-VISUAL-004 | ChatGPT GPT-6 | Return minimized marker to Engineering entrance at 45% opacity
 Supersedes: Rejected illustrative mockup
 Contracts: docs/IMPLEMENTATION_HANDOFF.md
 Tests: Not runtime-tested
-History/Predecessor: Git blob 2cae5b761340551f74a97908bdbabda74a11f0d2
+History/Predecessor: Git blob 387c2954102557afbb7fe8ee93ecb968485acff8
 -->
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Riverview 3 · Visual prototype</title>
 <style>
@@ -43,13 +43,36 @@ slider.oninput=()=>{document.documentElement.style.setProperty('--panel-opacity'
 const minimize=document.getElementById('minimize'),reset=document.getElementById('reset'),handle=document.getElementById('drag');
 function clampPosition(x,y){const maxX=Math.max(0,innerWidth-win.offsetWidth),maxY=Math.max(58,innerHeight-win.offsetHeight);win.style.left=Math.max(0,Math.min(maxX,x))+'px';win.style.top=Math.max(58,Math.min(maxY,y))+'px';}
 function centerWindow(){clampPosition((innerWidth-win.offsetWidth)/2,(innerHeight-win.offsetHeight)/2);}
-minimize.addEventListener('click',e=>{e.stopPropagation();win.classList.toggle('min');minimize.textContent=win.classList.contains('min')?'□':'−';minimize.setAttribute('aria-label',win.classList.contains('min')?'Restore panel':'Minimize panel');clampPosition(win.offsetLeft,win.offsetTop);});
+// Engineering entrance: approximate image-relative anchor from Steward's estate screenshot.
+// The background uses cover; calculate its cropped/scaled position rather than viewport percentages.
+const engineeringEntrance={x:.25,y:.48};
+let expandedState=null;
+function entrancePosition(){
+  const imageWidth=1452,imageHeight=1024;
+  const scale=Math.max(innerWidth/imageWidth,innerHeight/imageHeight);
+  const drawnWidth=imageWidth*scale,drawnHeight=imageHeight*scale;
+  return {x:(innerWidth-drawnWidth)/2+engineeringEntrance.x*drawnWidth,
+          y:(innerHeight-drawnHeight)/2+engineeringEntrance.y*drawnHeight};
+}
+function placeMinimized(){const p=entrancePosition();clampPosition(p.x-win.offsetWidth/2,p.y-win.offsetHeight/2);}
+minimize.addEventListener('click',e=>{
+  e.stopPropagation();
+  if(!win.classList.contains('min')){
+    expandedState={left:win.offsetLeft,top:win.offsetTop,opacity:slider.value};
+    win.classList.add('min');slider.value='45';slider.oninput();placeMinimized();
+  }else{
+    win.classList.remove('min');
+    if(expandedState){slider.value=expandedState.opacity;slider.oninput();clampPosition(expandedState.left,expandedState.top);}
+  }
+  minimize.textContent=win.classList.contains('min')?'□':'−';
+  minimize.setAttribute('aria-label',win.classList.contains('min')?'Restore panel':'Minimize panel');
+});
 reset.addEventListener('click',centerWindow);
 let drag=null;
 handle.addEventListener('pointerdown',e=>{if(e.target.closest('button')||e.button!==0)return;e.preventDefault();drag={id:e.pointerId,x:e.clientX,y:e.clientY,left:win.offsetLeft,top:win.offsetTop};handle.setPointerCapture(e.pointerId);});
 handle.addEventListener('pointermove',e=>{if(!drag||e.pointerId!==drag.id)return;clampPosition(drag.left+e.clientX-drag.x,drag.top+e.clientY-drag.y);});
 function endDrag(e){if(drag&&e.pointerId===drag.id){drag=null;if(handle.hasPointerCapture(e.pointerId))handle.releasePointerCapture(e.pointerId);}}
 handle.addEventListener('pointerup',endDrag);handle.addEventListener('pointercancel',endDrag);handle.addEventListener('lostpointercapture',()=>{drag=null;});
-window.addEventListener('resize',()=>clampPosition(win.offsetLeft,win.offsetTop));
+window.addEventListener('resize',()=>win.classList.contains('min')?placeMinimized():clampPosition(win.offsetLeft,win.offsetTop));
 const img=new Image();img.onload=()=>document.getElementById('bgstatus').textContent='approved artwork loaded';img.onerror=()=>{const el=document.getElementById('bgstatus');el.textContent='artwork unavailable';el.style.color='#ffb7a5'};img.src='/api/v1/visual/background';
 </script></body></html>
