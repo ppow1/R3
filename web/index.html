@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: web/index.html
 Component: R3-VISUAL-PROTOTYPE
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Demonstrate genuinely translucent draggable floating windows over approved estate artwork
@@ -10,11 +10,11 @@ Execution Model: Browser client
 Observability: Background load status, adjustable opacity
 Dependencies: /api/v1/visual/background, R3 visual concepts ZIP
 Authority: Steward visual direction 2026-10-31
-Changed: 2026-10-31 UTC | R3-VISUAL-001 | ChatGPT GPT-6 | Initial prototype
+Changed: 2026-10-31 UTC | R3-VISUAL-003 | ChatGPT GPT-6 | Repair dragging, true centering and compact minimize
 Supersedes: Rejected illustrative mockup
 Contracts: docs/IMPLEMENTATION_HANDOFF.md
 Tests: Not runtime-tested
-History/Predecessor: None
+History/Predecessor: Git blob 2cae5b761340551f74a97908bdbabda74a11f0d2
 -->
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Riverview 3 · Visual prototype</title>
 <style>
@@ -28,7 +28,7 @@ input[type=range]{width:180px;accent-color:#8fb9ec}button{cursor:pointer;border:
 .window{position:absolute;left:12%;top:19%;width:min(740px,76vw);height:min(430px,60vh);min-width:320px;min-height:180px;resize:both;overflow:auto;background:rgba(12,25,42,var(--panel-opacity));border:1px solid rgba(205,227,255,.55);border-radius:14px;box-shadow:0 18px 50px #0008;z-index:5}
 .window header{padding:15px 19px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #c2d5ec55;cursor:move;user-select:none}.window header b{font-size:20px}.window header button{margin-left:auto}
 .content{padding:24px}.content p{max-width:550px;line-height:1.6}.tile{display:inline-block;background:rgba(30,57,80,.75);padding:14px 18px;border-radius:9px;margin:8px 8px 8px 0}
-.window.min{height:56px!important;min-height:56px;resize:none}.window.min .content{display:none}
+.window.min{height:52px!important;min-height:52px;width:240px!important;min-width:240px;resize:none;overflow:hidden}.window.min .content{display:none}.window.min header{height:50px;padding:9px 12px}.window.min header b{font-size:15px;white-space:nowrap}.window header{touch-action:none}
 .note{position:fixed;right:20px;bottom:20px;font-size:12px;background:#091522cc;padding:9px;border-radius:8px;z-index:2}
 @media(max-width:650px){.window{left:4%;top:14%;width:92vw;height:56vh}.controls{left:4%;right:4%;bottom:12px}.note{display:none}}
 </style></head><body>
@@ -40,10 +40,16 @@ input[type=range]{width:180px;accent-color:#8fb9ec}button{cursor:pointer;border:
 <script>
 const win=document.getElementById('win'),slider=document.getElementById('opacity'),value=document.getElementById('value');
 slider.oninput=()=>{document.documentElement.style.setProperty('--panel-opacity',slider.value/100);value.textContent=slider.value+'%';};
-document.getElementById('minimize').onclick=()=>{win.classList.toggle('min');document.getElementById('minimize').textContent=win.classList.contains('min')?'□':'−'};
-document.getElementById('reset').onclick=()=>{win.style.left='12%';win.style.top='19%'};
-let drag=null;document.getElementById('drag').addEventListener('pointerdown',e=>{if(e.target.closest('button'))return;drag={x:e.clientX,y:e.clientY,left:win.offsetLeft,top:win.offsetTop};e.currentTarget.setPointerCapture(e.pointerId)});
-document.getElementById('drag').addEventListener('pointermove',e=>{if(!drag)return;win.style.left=Math.max(0,Math.min(innerWidth-90,drag.left+e.clientX-drag.x))+'px';win.style.top=Math.max(58,Math.min(innerHeight-80,drag.top+e.clientY-drag.y))+'px'});
-document.getElementById('drag').addEventListener('pointerup',()=>drag=null);
+const minimize=document.getElementById('minimize'),reset=document.getElementById('reset'),handle=document.getElementById('drag');
+function clampPosition(x,y){const maxX=Math.max(0,innerWidth-win.offsetWidth),maxY=Math.max(58,innerHeight-win.offsetHeight);win.style.left=Math.max(0,Math.min(maxX,x))+'px';win.style.top=Math.max(58,Math.min(maxY,y))+'px';}
+function centerWindow(){clampPosition((innerWidth-win.offsetWidth)/2,(innerHeight-win.offsetHeight)/2);}
+minimize.addEventListener('click',e=>{e.stopPropagation();win.classList.toggle('min');minimize.textContent=win.classList.contains('min')?'□':'−';minimize.setAttribute('aria-label',win.classList.contains('min')?'Restore panel':'Minimize panel');clampPosition(win.offsetLeft,win.offsetTop);});
+reset.addEventListener('click',centerWindow);
+let drag=null;
+handle.addEventListener('pointerdown',e=>{if(e.target.closest('button')||e.button!==0)return;e.preventDefault();drag={id:e.pointerId,x:e.clientX,y:e.clientY,left:win.offsetLeft,top:win.offsetTop};handle.setPointerCapture(e.pointerId);});
+handle.addEventListener('pointermove',e=>{if(!drag||e.pointerId!==drag.id)return;clampPosition(drag.left+e.clientX-drag.x,drag.top+e.clientY-drag.y);});
+function endDrag(e){if(drag&&e.pointerId===drag.id){drag=null;if(handle.hasPointerCapture(e.pointerId))handle.releasePointerCapture(e.pointerId);}}
+handle.addEventListener('pointerup',endDrag);handle.addEventListener('pointercancel',endDrag);handle.addEventListener('lostpointercapture',()=>{drag=null;});
+window.addEventListener('resize',()=>clampPosition(win.offsetLeft,win.offsetTop));
 const img=new Image();img.onload=()=>document.getElementById('bgstatus').textContent='approved artwork loaded';img.onerror=()=>{const el=document.getElementById('bgstatus');el.textContent='artwork unavailable';el.style.color='#ffb7a5'};img.src='/api/v1/visual/background';
 </script></body></html>
