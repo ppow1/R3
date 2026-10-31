@@ -14,3 +14,7 @@ Ideas intentionally deferred from immediate delivery; not rejected or committed 
 | R3-L008 | Residential Gateway reintroduction | Only if R2 evidence shows a compelling need versus simpler messaging transport |
 
 | R3-L009 | iPhone mobile companion / voice and media | Tap an actionable notification, open the relevant R3 conversation, dictate or speak, attach images, and reply over Wi-Fi/cellular; assess PWA versus native iOS, Bluetooth headset support, and notification reliability |
+| R3-L010 | Resident communication-profile tuning | Evaluate per-resident sliders for verbosity, unsolicited conversation, topical interests, social/professional tone, humor, flirtation and roleplay; recover canon and avoid one-dimensional personality controls |
+| R3-L011 | Epistemic threshold and audit architecture experiments | Compare inline, background and hybrid classification; experiment with confidence/assurance thresholds by evidence class and consequence, including 100% required evidence compliance for claims presented as verified versus more latitude for clearly marked inference/roleplay; measure latency and false alarms |
+| R3-L012 | Epistemic visual/alarm UX experiments | Evaluate configurable category palettes, brighter diagonal candy-cane mismatch stripes, chat-wide late-alert treatment, jump-to-span, return-to-reading-position, severity and acknowledgement settings |
+
