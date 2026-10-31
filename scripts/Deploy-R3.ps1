@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: scripts/Deploy-R3.ps1
 # Component: R3-DEPLOYMENT
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-10-31 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Parameterized deployment of R3 website to Camrui
@@ -9,12 +9,12 @@
 # Observability: Console and clipboard, HTTP checks, Git revision, process checks
 # Dependencies: PowerShell 7, SSH alias camrui, Git, flock, curl, Python venv, ss
 # Authority: Steward instruction to automate second deployment
-# Changed: 2026-10-31 UTC | R3-DEPLOY-003 | ChatGPT GPT-6 | Initial deployment script
+# Changed: 2026-10-31 UTC | R3-DEPLOY-004 | ChatGPT GPT-6 | Remove unproven running-version shortcut and pipefail-sensitive grep
 # Supersedes: None
 # Superseded By: None
 # Contracts: docs/runbooks/R3_FIRST_WEBSITE_DEPLOYMENT.md; hints/file-provenance.md
 # Tests: Not executed; live validation pending
-# History/Predecessor: None
+# History/Predecessor: Git blob 050fe4809abadf995951dfc4eb7bf77979c6dde5
 
 [CmdletBinding()]
 param(
@@ -113,7 +113,8 @@ git fetch --quiet origin main
 resolved=$(git rev-parse --verify "$target^{commit}") || fail "Unknown commit"
 git merge-base --is-ancestor "$resolved" origin/main || fail "Target not on main"
 echo "TARGET_COMMIT=$resolved"
-git show "$resolved:r3_app.py" | grep -Fq 'R3_modern_estate_clean_concept.png' || fail "Target does not select clean estate image"
+target_app=$(git show "${resolved}:r3_app.py") || fail "Target app missing"
+[[ "$target_app" == *'R3_modern_estate_clean_concept.png'* ]] || fail "Target does not select clean estate image"
 .venv/bin/python - <<'PY'
 import zipfile
 p="assets/visual-concepts/Riverview3_Visual_Concept_Library.zip"
@@ -125,10 +126,7 @@ with zipfile.ZipFile(p) as z:
 PY
 pid=$(listener)
 if [ -n "$pid" ]; then owned "$pid" || fail "Foreign owner of port 8303"; fi
-if [ "$resolved" = "$old" ] && [ -n "$pid" ] && check_http; then
-  echo "ALREADY_DEPLOYED_AND_HEALTHY=$resolved"
-  exit 0
-fi
+echo "RUNNING_VERSION_UNVERIFIED: controlled restart required"
 say ACTIVATE
 if [ -n "$pid" ]; then stop_r3 "$pid"; fi
 changed=1
