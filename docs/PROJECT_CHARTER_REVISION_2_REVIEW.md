@@ -84,6 +84,12 @@ The primary post-response auditor shall check **epistemic labeling correctness**
 
 Each entire message shall show a clear, compact **classification-audit status**: pending, passed, mismatch, or unable to determine. A passed indicator means the labels were audited and found appropriate on the evidence available, **not** that every assertion is independently true. If any span has a consequential mismatch, flag the **entire message** prominently and allow drilldown to the affected span, expected category, rationale, and supporting record. Preserve the resident's original annotation and the auditor's finding separately in the historian; corrections shall be traceable and feed resident learning. The audit runs behind the response and must not block ordinary conversational delivery.
 
+### Visual treatment of classification discrepancies
+
+Epistemic category styling and **audit-discrepancy styling are independent layers**. The original classification (for example, a fact rendered in green) remains identifiable after an auditor disputes it. A configurable high-visibility treatment may use alternating diagonal **candy-cane stripes** in brighter and muted variants of the original category color (for example, fluorescent lime-green stripes for a disputed green fact), applied to the affected sentence or exact claim span. The **whole message** shall simultaneously display a visible mismatch indicator, with drilldown to the reason and any corrected classification. A mismatch signifies that the **label is challenged**, not automatically that the underlying claim has been proved false.
+
+Color palettes, stripe patterns, contrast, animation, typography, and accessible alternatives belong to the presentation layer and may change without modifying underlying classification/audit records. The display must remain readable and provide a non-color-only indicator for accessibility. Distinguish pending, passed, disputed, and indeterminate audits; do not use a success mark for an uncompleted audit.
+
 ## 6. Resident health, mistakes, and continuous improvement
 
 Mistakes are part of learning. **Learning from them is mandatory; repeated preventable mistakes are a performance concern.** Maintain durable mistake logs linked to causes, corrections, lessons, recurrence, and subsequent outcomes. Do not erase mistakes merely because the immediate problem was fixed, and do not discourage candid self-reporting.
