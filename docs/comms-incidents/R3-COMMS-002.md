@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/comms-incidents/R3-COMMS-002.md
 Component: COMMS-INCIDENT
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Record blocked Camrui deployment preflight and incorrect manual fallback
@@ -10,11 +10,11 @@ Execution Model: N/A
 Observability: GitHub incident record
 Dependencies: Riverview Comms 1.1, R3 visual prototype
 Authority: Steward direction to capture every failed operation
-Changed: 2026-10-31 UTC | R3-COMMS-002 | ChatGPT GPT-6 | Initial incident
+Changed: 2026-10-31 UTC | R3-COMMS-002 | ChatGPT GPT-6 | Record bypassed SSH alias and password prompt
 Supersedes: None
 Contracts: hints/comms-failure-recovery.md; hints/file-provenance.md
 Tests: Pending
-History/Predecessor: None
+History/Predecessor: Git blob dd3efc2b3c393c0cc96b438f24d9003705426911
 -->
 # R3-COMMS-002 — Camrui visual prototype preflight failed
 
@@ -27,3 +27,7 @@ History/Predecessor: None
 **Recovery:** Provide a Windows PowerShell 7 command beginning with `Clear-Host`, collecting diagnostic output into a variable, displaying and copying it to clipboard; SSH to Camrui and run Bash there. Avoid unverified assumptions about host path. Retry authorized Comms when tool available; independently verify deployment and record result.
 **Status:** OPEN. Neither command execution nor deployment verified.
 **Related:** `hints/comms-failure-recovery.md`, `docs/PUNCH_LIST.md`, R3-P019, R3-P020.
+
+## Subsequent manual fallback failure — SSH identity selection
+
+The next PowerShell fallback invoked `ssh admin1@192.168.1.155` rather than the established `camrui` SSH alias. The user's screenshot shows a password prompt for `admin1@192.168.1.155`; the diagnostic command had not produced results. This is a separate assistant failure to discover/reuse the existing SSH identity and alias configuration. The screenshot does **not** prove aliases were modified or damaged. Recovery: cancel the prompt, inspect effective alias configuration with `ssh -G camrui` and use the existing alias if it resolves correctly; do not overwrite SSH config, generate keys, or prompt for credentials without necessity. **Status: unresolved.**
