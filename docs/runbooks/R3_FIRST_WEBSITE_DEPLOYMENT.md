@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/runbooks/R3_FIRST_WEBSITE_DEPLOYMENT.md
 Component: R3-DEPLOYMENT-RUNBOOK
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-10-31 UTC (exact time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Preserve observed first Camrui R3 website deployment and derive deployment-script requirements
@@ -10,12 +10,12 @@ Execution Model: Human-executed PowerShell 7 -> SSH alias camrui -> Ubuntu Bash;
 Observability: Git SHA, SSH exit, PID/port, HTTP checks, image bytes, browser acceptance
 Dependencies: ppow1/R3; Camrui; Python 3.12; FastAPI; Uvicorn; approved visual ZIP
 Authority: Steward direction to capture first deployment before further deployment
-Changed: 2026-10-31 UTC | R3-DEPLOY-001 | ChatGPT GPT-6 | Initial evidence-based deployment runbook
+Changed: 2026-10-31 UTC | R3-DEPLOY-002 | ChatGPT GPT-6 | Append reconstructed PowerShell and remote Bash commands, outputs, and failure classifications
 Supersedes: None
 Superseded By: None
 Contracts: docs/IMPLEMENTATION_HANDOFF.md; hints/file-provenance.md; hints/comms-failure-recovery.md
 Tests: Documentation only; proposed deploy script not implemented or tested
-History/Predecessor: None
+History/Predecessor: Git blob e69824cef5541992a713237f14d4b57743df222f
 -->
 # R3 first website deployment — observed runbook and deploy-script investigation
 
@@ -94,3 +94,406 @@ For a production-safe future implementation, staging and reversible activation m
 - Which CI/browser-test runner and durable deployment journal should be used?
 
 **Next gate:** Do not deploy again until the deployment runbook has been reviewed and a minimal repeatable deployment script design is agreed. This document records findings; it does not claim the script or its tests exist.
+
+## 6. Command-by-command deployment reconstruction
+
+**Provenance:** Commands below are reconstructed from the actual assistant-issued PowerShell commands visible in the deployment conversation. They are historical evidence, **not a recommended deployment script**. Where the earlier exact command is not present in the retained conversation context, it is explicitly marked **not recoverable verbatim**; no replacement is misrepresented as historical. User-returned outputs are transcribed as excerpts rather than full pip progress logs. Do not paste the unsafe commands into production.
+
+### 6.1 SSH alias verification and initial clone — partial record
+
+The working transport test was:
+
+~~~powershell
+ssh -o BatchMode=yes -o ConnectTimeout=8 camrui hostname
+~~~
+
+**Observed:** Successful SSH to Camrui. Effective alias resolved to user \`admin1\`, host \`192.168.1.155\`, \`IdentitiesOnly yes\`, identity \`C:/Users/wille/.ssh/octominer1_nopass\`. Earlier raw \`ssh admin1@192.168.1.155\` requested a password; it must **not** be treated as equivalent to the alias.
+
+**Clone:** The exact first-clone PowerShell wrapper and remote Bash body are **not recoverable verbatim from this conversation excerpt**. The observed result was a new checkout at \`/home/admin1/R3\`, origin \`https://github.com/ppow1/R3.git\`, SHA \`e063f7d\`, \`r3_app.py\`, \`web/index.html\`, and approved ZIP present; SSH exit 0. The script must later codify idempotent clone-or-update behavior without overwriting the other Riverview checkout.
+
+### 6.2 Virtual environment and dependencies — exact issued command
+
+~~~powershell
+Clear-Host
+
+$remoteCommand = @'
+set -e
+cd /home/admin1/R3
+
+python3 -m venv .venv
+.venv/bin/python -m pip install fastapi uvicorn
+
+printf "\n=== INSTALLED VERSIONS ===\n"
+.venv/bin/python -c 'import fastapi, uvicorn; print("FastAPI:", fastapi.__version__); print("Uvicorn:", uvicorn.__version__)'
+
+printf "\n=== VIRTUAL ENVIRONMENT ===\n"
+ls -l .venv/bin/python
+'@
+
+$result = & ssh `
+    -o BatchMode=yes `
+    -o ConnectTimeout=5 `
+    camrui `
+    $remoteCommand 2>&1 | Out-String
+
+$exitCode = $LASTEXITCODE
+
+Clear-Host
+$result
+"SSH exit code: $exitCode"
+
+$clipboard = "$result`nSSH exit code: $exitCode"
+Set-Clipboard -Value $clipboard
+~~~
+
+**Observed:** \`Successfully installed\`; FastAPI \`0.162.0\`, Uvicorn \`0.54.0\`, \`.venv/bin/python -> python3\`, SSH exit 0. **Design correction:** pin and audit dependency versions; avoid unbounded install on every deploy.
+
+### 6.3 First start and verification — exact issued command
+
+~~~powershell
+Clear-Host
+
+$remoteCommand = @'
+set -e
+cd /home/admin1/R3
+
+if ss -ltn '( sport = :8303 )' | grep -q ':8303'; then
+    echo "STOP: Port 8303 is already in use."
+    exit 1
+fi
+
+nohup .venv/bin/uvicorn r3_app:app \
+    --host 0.0.0.0 \
+    --port 8303 \
+    > /tmp/r3-website.log 2>&1 < /dev/null &
+
+sleep 3
+
+printf "=== WEBSITE PROCESS ===\n"
+pgrep -af '[u]vicorn r3_app:app' || true
+
+printf "\n=== HEALTH CHECK ===\n"
+curl --max-time 5 -fsS http://127.0.0.1:8303/api/v1/health
+
+printf "\n\n=== BACKGROUND IMAGE HTTP STATUS ===\n"
+curl --max-time 15 -s -o /dev/null -w '%{http_code} %{content_type} %{size_download} bytes\n' \
+    http://127.0.0.1:8303/api/v1/visual/background
+
+printf "\n=== WEBSITE LOG ===\n"
+tail -n 12 /tmp/r3-website.log
+'@
+
+$result = & ssh `
+    -o BatchMode=yes `
+    -o ConnectTimeout=5 `
+    camrui `
+    $remoteCommand 2>&1 | Out-String
+
+$exitCode = $LASTEXITCODE
+
+Clear-Host
+$result
+"SSH exit code: $exitCode"
+
+$clipboard = "$result`nSSH exit code: $exitCode"
+Set-Clipboard -Value $clipboard
+~~~
+
+**Observed:** PID \`1030583\`, health \`{"service":"r3","status":"running","repository_present":true,"artwork_directory_present":false}\`, image \`503 application/json 53 bytes\`, SSH exit 0. **Design correction:** script must fail if a required endpoint returns non-2xx; SSH exit 0 was a false overall success.
+
+### 6.4 Inspect approved ZIP — exact issued command
+
+~~~powershell
+Clear-Host
+
+$remoteCommand = @'
+cd /home/admin1/R3
+.venv/bin/python -c 'import zipfile; p="assets/visual-concepts/Riverview3_Visual_Concept_Library.zip"; z=zipfile.ZipFile(p); print("ZIP VALID:", z.testzip() is None); print("MATCHING BACKGROUNDS:"); [print(n) for n in z.namelist() if "dashboard" in n.lower() or "background" in n.lower()]'
+'@
+
+$result = & ssh `
+    -o BatchMode=yes `
+    -o ConnectTimeout=5 `
+    camrui `
+    $remoteCommand 2>&1 | Out-String
+
+$exitCode = $LASTEXITCODE
+
+Clear-Host
+$result
+"SSH exit code: $exitCode"
+
+Set-Clipboard -Value "$result`nSSH exit code: $exitCode"
+~~~
+
+**Observed:** \`ZIP VALID: True\`; entries include \`Riverview3_Visual_Concept_Library/backgrounds/R3_modern_dashboard_as_is.png\` and \`Riverview3_Visual_Concept_Library/backgrounds/R3_modern_estate_clean_concept.png\`; SSH exit 0. Source ZIP-path correction commit: \`66655e4\`.
+
+### 6.5 Failed update/restart — exact issued command; UNSAFE, DO NOT REUSE
+
+~~~powershell
+Clear-Host
+
+$remoteCommand = @'
+set -e
+cd /home/admin1/R3
+
+printf "=== UPDATE SOURCE ===\n"
+git pull --ff-only origin main
+
+printf "\n=== RESTART R3 ===\n"
+pkill -f '[u]vicorn r3_app:app' || true
+sleep 2
+
+nohup .venv/bin/uvicorn r3_app:app \
+    --host 0.0.0.0 \
+    --port 8303 \
+    > /tmp/r3-website.log 2>&1 < /dev/null &
+
+sleep 3
+
+printf "\n=== HEALTH CHECK ===\n"
+curl --max-time 5 -fsS http://127.0.0.1:8303/api/v1/health
+
+printf "\n\n=== BACKGROUND IMAGE ===\n"
+curl --max-time 20 -s -o /dev/null \
+    -w 'HTTP %{http_code} | %{content_type} | %{size_download} bytes\n' \
+    http://127.0.0.1:8303/api/v1/visual/background
+
+printf "\n=== DEPLOYED COMMIT ===\n"
+git rev-parse --short HEAD
+'@
+
+$result = & ssh `
+    -o BatchMode=yes `
+    -o ConnectTimeout=5 `
+    camrui `
+    $remoteCommand 2>&1 | Out-String
+
+$exitCode = $LASTEXITCODE
+
+Clear-Host
+$result
+"SSH exit code: $exitCode"
+
+Set-Clipboard -Value "$result`nSSH exit code: $exitCode"
+~~~
+
+**Observed:** Fast-forward \`e063f7d..66655e4\`, then \`=== RESTART R3 ===\`, SSH exit **-1**. No later steps verified. The pattern can match its own SSH shell. **Never use broad \`pkill -f\` as an automated restart.**
+
+### 6.6 Post-failure read-only check — exact issued command
+
+~~~powershell
+Clear-Host
+
+$remoteCommand = @'
+printf "=== R3 PROCESS ===\n"
+ps -eo pid,comm,args | grep '[u]vicorn' || true
+
+printf "\n=== PORT 8303 ===\n"
+ss -ltn '( sport = :8303 )'
+
+printf "\n=== HEALTH ===\n"
+curl --max-time 5 -s -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1:8303/api/v1/health
+
+printf "\n=== BACKGROUND ===\n"
+curl --max-time 15 -s -o /dev/null -w 'HTTP %{http_code} | %{content_type} | %{size_download} bytes\n' http://127.0.0.1:8303/api/v1/visual/background
+
+printf "\n=== LOG ===\n"
+tail -n 10 /tmp/r3-website.log
+'@
+
+$result = & ssh -o BatchMode=yes -o ConnectTimeout=5 camrui $remoteCommand 2>&1 |
+    Out-String
+
+$exitCode = $LASTEXITCODE
+
+Clear-Host
+$result
+"SSH exit code: $exitCode"
+
+Set-Clipboard -Value "$result`nSSH exit code: $exitCode"
+~~~
+
+**Observed:** No Uvicorn process or listener, health/background HTTP 000, clean shutdown of PID \`1030583\`, SSH exit 0. **Design correction:** transport success and service failure must have different statuses.
+
+### 6.7 Start attempt after failure — exact issued command
+
+~~~powershell
+Clear-Host
+
+$remoteCommand = @'
+set -e
+cd /home/admin1/R3
+
+printf "=== START R3 ===\n"
+
+if ss -ltn '( sport = :8303 )' | grep -q ':8303'; then
+    echo "STOP: Port 8303 is occupied."
+    exit 1
+fi
+
+nohup .venv/bin/uvicorn r3_app:app \
+    --host 0.0.0.0 \
+    --port 8303 \
+    > /tmp/r3-website.log 2>&1 < /dev/null &
+
+sleep 3
+
+printf "\n=== HEALTH ===\n"
+curl --max-time 5 -fsS http://127.0.0.1:8303/api/v1/health
+
+printf "\n\n=== APPROVED BACKGROUND ===\n"
+curl --max-time 20 -s -o /dev/null \
+    -w 'HTTP %{http_code} | %{content_type} | %{size_download} bytes\n' \
+    http://127.0.0.1:8303/api/v1/visual/background
+
+printf "\n=== DEPLOYED COMMIT ===\n"
+git rev-parse --short HEAD
+
+printf "\n=== LOG ===\n"
+tail -n 8 /tmp/r3-website.log
+'@
+
+$result = & ssh `
+    -o BatchMode=yes `
+    -o ConnectTimeout=5 `
+    camrui `
+    $remoteCommand 2>&1 | Out-String
+
+$exitCode = $LASTEXITCODE
+
+Clear-Host
+$result
+"SSH exit code: $exitCode"
+
+Set-Clipboard -Value "$result`nSSH exit code: $exitCode"
+~~~
+
+**Observed:** \`STOP: Port 8303 is occupied.\`, SSH exit 1. **Design correction:** race-aware, idempotent inspect-and-adopt healthy R3 rather than assuming all occupancy is failure.
+
+### 6.8 Port owner identification — exact issued command
+
+~~~powershell
+Clear-Host
+
+$remoteCommand = @'
+printf "=== PORT 8303 OWNER ===\n"
+ss -ltnp '( sport = :8303 )'
+
+printf "\n=== LISTENING PROCESSES ===\n"
+sudo -n fuser -v 8303/tcp 2>&1 || fuser -v 8303/tcp 2>&1 || true
+
+printf "\n=== R3 PROCESSES ===\n"
+ps -eo pid,ppid,comm,args | grep -E '[u]vicorn|[r]3_app' || true
+
+printf "\n=== HEALTH CHECK ===\n"
+curl --max-time 5 -s -o /dev/null \
+    -w 'HTTP %{http_code}\n' \
+    http://127.0.0.1:8303/api/v1/health
+
+printf "\n=== BACKGROUND CHECK ===\n"
+curl --max-time 15 -s -o /dev/null \
+    -w 'HTTP %{http_code} | %{content_type} | %{size_download} bytes\n' \
+    http://127.0.0.1:8303/api/v1/visual/background
+'@
+
+$result = & ssh `
+    -o BatchMode=yes `
+    -o ConnectTimeout=5 `
+    camrui `
+    $remoteCommand 2>&1 | Out-String
+
+$exitCode = $LASTEXITCODE
+
+Clear-Host
+$result
+"SSH exit code: $exitCode"
+
+Set-Clipboard -Value "$result`nSSH exit code: $exitCode"
+~~~
+
+**Observed:** \`0.0.0.0:8303\` owned by \`admin1\` Uvicorn PID \`1032826\`, PPID 1, correct executable and module; health 200, background 200 \`image/png\` 3,053,883 bytes; SSH exit 0. Source of this running process remains unknown.
+
+### 6.9 Second visual correction deploy — exact command issued; outcome UNVERIFIED
+
+The following was issued after commits \`c587bdb\` and \`f4ff84b\`. The conversation contains **no returned execution output** for this command. It must not be classified as successful.
+
+~~~powershell
+Clear-Host
+
+$remoteCommand = @'
+set -e
+cd /home/admin1/R3
+
+printf "=== UPDATE R3 ===\n"
+git pull --ff-only origin main
+
+printf "\n=== IDENTIFY R3 SERVER ===\n"
+pid=$(ss -ltnp '( sport = :8303 )' | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -1)
+
+if [ -n "$pid" ]; then
+    args=$(ps -p "$pid" -o args=)
+    case "$args" in
+        *"/home/admin1/R3/.venv/bin/uvicorn r3_app:app"*)
+            echo "Stopping verified R3 PID $pid"
+            kill "$pid"
+            for i in 1 2 3 4 5; do
+                if ! kill -0 "$pid" 2>/dev/null; then break; fi
+                sleep 1
+            done
+            ;;
+        *)
+            echo "STOP: Port belongs to an unrecognized process: $args"
+            exit 1
+            ;;
+    esac
+fi
+
+if ss -ltn '( sport = :8303 )' | grep -q ':8303'; then
+    echo "STOP: Port 8303 remains occupied."
+    exit 1
+fi
+
+printf "\n=== START UPDATED R3 ===\n"
+nohup .venv/bin/uvicorn r3_app:app --host 0.0.0.0 --port 8303 \
+    > /tmp/r3-website.log 2>&1 < /dev/null &
+
+sleep 3
+
+printf "\n=== HEALTH ===\n"
+curl --max-time 5 -fsS http://127.0.0.1:8303/api/v1/health
+
+printf "\n\n=== CLEAN BACKGROUND ===\n"
+curl --max-time 20 -s -o /dev/null \
+    -w 'HTTP %{http_code} | %{content_type} | %{size_download} bytes\n' \
+    http://127.0.0.1:8303/api/v1/visual/background
+
+printf "\n=== DEPLOYED COMMIT ===\n"
+git rev-parse --short HEAD
+'@
+
+$result = & ssh -o BatchMode=yes -o ConnectTimeout=5 camrui $remoteCommand 2>&1 | Out-String
+$exitCode = $LASTEXITCODE
+
+Clear-Host
+$result
+"SSH exit code: $exitCode"
+
+Set-Clipboard -Value "$result`nSSH exit code: $exitCode"
+~~~
+
+**Known weaknesses:** \`git pull\` modifies the active checkout before a validated staged release; \`kill -0\` can stay true for a zombie process; PID inspection is not a supervisor ownership contract; HTTP checks lack strict failure handling; visual acceptance not automated.
+
+### 6.10 Future deployment-script acceptance checklist
+
+- [ ] Preserve exact invocation, stdout/stderr, exit status and Git SHA per step.
+- [ ] No credentials, destructive broad process matching, or foreign service restarts.
+- [ ] Dependency versions pinned; ZIP member name and content validated pre-restart.
+- [ ] Lock deployment, stage candidate, verify expected process owner, activate with bounded health checks.
+- [ ] Handle healthy preexisting R3 on port 8303 as idempotent success when revision matches.
+- [ ] Fail deployment if **any** required HTTP status, content type, content hash, or version check fails.
+- [ ] Expose revision and asset manifest for browser cache diagnosis.
+- [ ] Keep visual acceptance separate from server readiness.
+- [ ] Preserve rollback and a durable failure report.
+
+**Important:** This appendix reconstructs the available issued commands. It does not assert that all were executed or successful. It does not include unknown early bootstrap commands as invented exact transcripts.
