@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/runbooks/R3_FIRST_WEBSITE_DEPLOYMENT.md
 Component: R3-DEPLOYMENT-RUNBOOK
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-10-31 UTC (exact time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Preserve observed first Camrui R3 website deployment and derive deployment-script requirements
@@ -10,12 +10,12 @@ Execution Model: Human-executed PowerShell 7 -> SSH alias camrui -> Ubuntu Bash;
 Observability: Git SHA, SSH exit, PID/port, HTTP checks, image bytes, browser acceptance
 Dependencies: ppow1/R3; Camrui; Python 3.12; FastAPI; Uvicorn; approved visual ZIP
 Authority: Steward direction to capture first deployment before further deployment
-Changed: 2026-10-31 UTC | R3-DEPLOY-005 | ChatGPT GPT-6 | Record HTTP 404 on public raw script retrieval and private-repository-safe fallback
+Changed: 2026-10-31 UTC | R3-DEPLOY-006 | ChatGPT GPT-6 | Record script-file contamination and link Comms incident punch list
 Supersedes: None
 Superseded By: None
 Contracts: docs/IMPLEMENTATION_HANDOFF.md; hints/file-provenance.md; hints/comms-failure-recovery.md
 Tests: Documentation only; proposed deploy script not implemented or tested
-History/Predecessor: Git blob 78215e415cb6529c6f6c99af6cea311a7918dc58
+History/Predecessor: Git blob c0a6801190a60a7bde29bef6d884ffb67c4cf384
 -->
 # R3 first website deployment — observed runbook and deploy-script investigation
 
@@ -501,3 +501,9 @@ Set-Clipboard -Value "$result`nSSH exit code: $exitCode"
 ## 7. First scripted-deployment retrieval failure (2026-10-31)
 
 The assistant issued a PowerShell 7 wrapper that attempted to download `scripts/Deploy-R3.ps1` from `https://raw.githubusercontent.com/ppow1/R3/c081fbbb5aba3ae3d7f7798ab412d7664ad7dd87/scripts/Deploy-R3.ps1` with `Invoke-WebRequest -OutFile`. The user observed **404 Not Found**. No script execution or website deployment is evidenced. GitHub connector `fetch_file` successfully fetched the file at the exact commit and path; thus the file exists, while unauthenticated raw URL access failed (private repository access is a plausible explanation, not independently proven). Corrective design: use the existing authenticated Camrui Git checkout, or an authenticated artifact transport; do not rely on unauthenticated raw GitHub URLs. Verify fetched SHA and script presence before execution. Capture and propagate download errors and do not run a stale temp copy.
+
+## 8. Script retrieval contamination and Comms punch list (2026-10-31)
+
+- **Comms:** Read-only Camrui preflight via `comms5_command_task_submit` returned `The tool failed internally.` The executor grant was verified active; execution was **not** verified. Open incident and remediation punch list: [R3-COMMS-004](../comms-incidents/R3-COMMS-004.md).
+- **Manual fallback defect:** A PowerShell wrapper used `ssh ... 'git fetch ... && git show ...'` with `2>&1 | Out-String`, then wrote the combined output to `Deploy-R3.ps1`. The user showed the resulting file started `From https://github.com/ppow1/R3` followed by Git fetch progress and then the actual script. Executing it caused `ParserError ... :1`, `The 'from' keyword is not supported in this version of the language.` **The deployment script never executed; no website change was evidenced.** The prior `SSH exit code: 0` proved remote command success, **not script integrity**.
+- **Punch list:** Separate stderr and stdout; do not mix Git fetch progress into file content. Prefer `git show COMMIT:path` alone on stdout after a distinct fetch, or fetch authenticated source through GitHub tooling; validate file begins with expected provenance header, parse with PowerShell's parser, verify Git blob or SHA-256, and only then execute. Never run a file saved from merged diagnostics. Maintain Comms gateway repair as a separate open item.
