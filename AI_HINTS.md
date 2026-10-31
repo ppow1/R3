@@ -25,3 +25,7 @@
 ## Work discipline
 
 Provide concise evidence and exact repository paths/functions. Avoid speculative large refactors and repeated diagnostic loops. Treat all earlier Riverview 2 observations as historical context until verified against R3.
+
+## Current implementation continuation
+
+Before starting new R3 website or capability work, read [`docs/IMPLEMENTATION_HANDOFF.md`](docs/IMPLEMENTATION_HANDOFF.md). It records the approved design, capability-first and institutional-durability decisions, R3-only Git/worktree coordination, execution preference for Riverview Comms 1.1, verified implementation status, and immediate next steps. Treat its pending items as pending, not implemented.
