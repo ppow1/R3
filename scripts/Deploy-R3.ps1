@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: scripts/Deploy-R3.ps1
 # Component: R3-DEPLOYMENT
-# File Revision: 1.0.1
+# File Revision: 1.0.2
 # Created: 2026-10-31 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Parameterized deployment of R3 website to Camrui
@@ -9,12 +9,12 @@
 # Observability: Console and clipboard, HTTP checks, Git revision, process checks
 # Dependencies: PowerShell 7, SSH alias camrui, Git, flock, curl, Python venv, ss
 # Authority: Steward instruction to automate second deployment
-# Changed: 2026-10-31 UTC | R3-DEPLOY-004 | ChatGPT GPT-6 | Remove unproven running-version shortcut and pipefail-sensitive grep
+# Changed: 2026-10-31 UTC | R3-DEPLOY-007 | ChatGPT GPT-6 | Permit known runtime directories
 # Supersedes: None
 # Superseded By: None
 # Contracts: docs/runbooks/R3_FIRST_WEBSITE_DEPLOYMENT.md; hints/file-provenance.md
 # Tests: Not executed; live validation pending
-# History/Predecessor: Git blob 050fe4809abadf995951dfc4eb7bf77979c6dde5
+# History/Predecessor: Git blob 2a60959d1b1c607d0826b7b0a1df2e75fcae6d34
 
 [CmdletBinding()]
 param(
@@ -103,7 +103,11 @@ flock -n 9 || fail "Another R3 deployment is in progress"
 say PREFLIGHT
 [ "$(id -un)" = admin1 ] || fail "Unexpected user"
 [ "$(git remote get-url origin)" = https://github.com/ppow1/R3.git ] || fail "Wrong repository"
-[ -z "$(git status --porcelain)" ] || fail "Working tree dirty"
+[ -z "$(git diff --name-only)" ] || fail "Tracked working tree modified"
+[ -z "$(git diff --cached --name-only)" ] || fail "Staged changes present"
+unexpected=$(git ls-files --others --exclude-standard | grep -Ev '^([.]venv/|__pycache__/)' || true)
+[ -z "$unexpected" ] || fail "Unexpected untracked files: $unexpected"
+echo "RUNTIME_DIRECTORIES_PRESERVED=.venv/,__pycache__/"
 [ -x .venv/bin/uvicorn ] || fail "Missing Python environment"
 [ -f web/index.html ] || fail "Missing frontend"
 [ -f assets/visual-concepts/Riverview3_Visual_Concept_Library.zip ] || fail "Missing ZIP"
