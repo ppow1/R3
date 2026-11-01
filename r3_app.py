@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.3
+# File Revision: 1.0.4
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Initial shared read-only institutional API
@@ -9,7 +9,7 @@
 # Observability: HTTP health endpoint; no deployed verification
 # Dependencies: FastAPI, Git checkout, local artwork folder
 # Authority: R3 engineering guidance; approved charter prevails
-# Changed: 2026-10-31 UTC | R3-VISUAL-003 | ChatGPT GPT-6 | Serve clean approved estate background
+# Changed: 2026-11-01 UTC | R3-SNAPSHOT-001 | ChatGPT GPT-6 | Expose bounded read-only website diagnostic snapshot API
 # Supersedes: None
 # Contracts: hints/file-provenance.md
 # Tests: Not run (metadata-only change)
@@ -24,6 +24,11 @@ import os
 import io
 import zipfile
 import subprocess
+import hashlib
+import platform
+import sys
+import struct
+from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
@@ -94,6 +99,59 @@ def visual_home():
     if not page.is_file():
         raise HTTPException(404, "Visual prototype not installed")
     return FileResponse(page, media_type="text/html")
+
+
+@app.get("/api/v1/snapshot")
+def snapshot():
+    """Return a bounded, read-only diagnostic snapshot for the website and authorized clients."""
+    try:
+        source_commit = git("rev-parse", "HEAD")
+        source_branch = git("branch", "--show-current") or "detached"
+        working_tree_clean = not bool(git("status", "--porcelain"))
+    except HTTPException:
+        source_commit, source_branch, working_tree_clean = None, None, None
+
+    if not ZIP_PATH.is_file():
+        raise HTTPException(503, "Approved visual archive unavailable")
+    try:
+        with zipfile.ZipFile(ZIP_PATH) as archive:
+            data = archive.read(VISUAL_NAME)
+    except (OSError, KeyError, zipfile.BadZipFile) as exc:
+        raise HTTPException(503, "Approved visual background unavailable") from exc
+    if len(data) < 24 or data[:8] != bytes([137, 80, 78, 71, 13, 10, 26, 10]):
+        raise HTTPException(503, "Approved visual background is not a valid PNG")
+    width, height = struct.unpack(">II", data[16:24])
+
+    return {
+        "schema_version": "r3.website.diagnostic-snapshot.v1",
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "service": {"name": "r3", "status": "running", "api_version": app.version},
+        "source": {
+            "repository": "R3",
+            "branch": source_branch,
+            "commit": source_commit,
+            "working_tree_clean": working_tree_clean,
+        },
+        "runtime": {"python": platform.python_version(), "platform": platform.system()},
+        "artwork": {
+            "file": Path(VISUAL_NAME).name,
+            "media_type": "image/png",
+            "bytes": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "width_px": width,
+            "height_px": height,
+        },
+        "engineering": {
+            "branches": branches()["branches"],
+            "worktrees": worktrees()["worktrees"],
+        },
+        "privacy": {
+            "credentials": "excluded",
+            "environment_variables": "excluded",
+            "absolute_paths": "excluded",
+            "arbitrary_file_contents": "excluded",
+        },
+    }
 
 @app.get("/api/v1/visual/background")
 def visual_background():
