@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/comms-incidents/R3-COMMS-004.md
 Component: COMMS-INCIDENT
-File Revision: 1.0.8
+File Revision: 1.0.9
 Created: 2026-10-31 UTC (exact time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Record Camrui Comms command gateway internal failure during R3 deployment preflight
@@ -10,11 +10,11 @@ Execution Model: Comms 1.1 command task submit
 Observability: Tool error and verified grant status
 Dependencies: R3 deployment; Camrui command gateway
 Authority: Steward instruction to log Comms failures and punch list
-Changed: 2026-11-01T15:04:54.615Z | R3-P020 | ChatGPT GPT-6 | Record current deployment interruption and staged recovery
+Changed: 2026-11-01T15:06:03.086Z | R3-P020 | ChatGPT GPT-6 | Record successful queued deployment and remaining visual acceptance
 Supersedes: None
 Contracts: hints/comms-failure-recovery.md; hints/file-provenance.md
 Tests: Pending reproduction and gateway diagnostics
-History/Predecessor: Git blob 35f4c33649cd8c0668816a8205e4b323ad43824f
+History/Predecessor: Git blob 14aa05d460ac91dfd45386ee8ffa9eddcdf22017
 -->
 # R3-COMMS-004 — Camrui command task submission fails internally
 
@@ -73,3 +73,12 @@ History/Predecessor: Git blob 35f4c33649cd8c0668816a8205e4b323ad43824f
 - Likely cause of the interrupted activation is PowerShell terminating the SSH pipeline on Git's normal detached-checkout message; this remains an inference pending the recovery run.
 - `Recover-Deploy-R3-Website-20261101.ps1` is now staged in `A:\\AI\\Scripts\\Riverview\\Q2\\` (SHA-256 `57E43D808EEF0D3CA9A33BB10A07D294EDC0928AFCE8FEA99C30CF83B3A115F1`; PowerShell parse result `PARSE=OK`). It temporarily merges the existing deployer's Git checkout diagnostics into stdout, invokes the same `Run.bat Deploy-R3` path, restores the original deployer file, and performs a post-deploy health/page-marker read-back. It has not run yet.
 - **Punch-list reference:** `R3-P020` — verify the current server recovery through the Q2 → Queue → Results workflow before further changes.
+
+
+## 2026-11-01 — queued deployment recovered
+
+- The recovery script was moved through the user's Q2 → Queue workflow and its result was read from `A:\\AI\\Scripts\\Riverview\\Queue\\Results\\Recover-Deploy-R3-Website-20261101.ps1.txt`.
+- It temporarily merged Git checkout status output into stdout, ran the existing `Run.bat Deploy-R3` path, and restored the installed `Deploy-R3.ps1` (`DEPLOYER_RESTORED=True`). Deployment exited 0 and reported `DEPLOYED_COMMIT=f5d689cf9ff307c2ae9c18edcc8a81ca44e4f6a6`, `HEALTHY_PID=1815431`, and approved background HTTP 200.
+- Independent read-back confirmed remote HEAD `f5d689cf9ff307c2ae9c18edcc8a81ca44e4f6a6`, health HTTP 200, title `Riverview 3`, old prototype/demo labels absent, top bar absent, Engineering status UI present, and target marker code present. The read-back shell returned exit 2 after these checks because its final `exit 0` line retained a carriage return; the deployer's own activation and health checks completed successfully.
+- The recovery was temporary; the installed deployment script was restored. Browser visual acceptance remains pending.
+- **Punch-list reference:** `R3-P020` — preserve this successful outcome and finish visual acceptance against the Steward's screenshot.
