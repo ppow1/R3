@@ -92,6 +92,14 @@ class Journal:
                     event.update(parsed)
             except (ValueError, TypeError):
                 pass
+        events = [dict(zip(("id","at","resident","kind","detail"), row)) for row in last]
+        for event in events:
+            try:
+                data = json.loads(event["detail"])
+                if isinstance(data, dict) and "state_number" in data:
+                    event.update(data)
+            except (ValueError, TypeError):
+                pass
         return {
             "residents": residents,
             "events": events,
@@ -115,6 +123,7 @@ class Institution:
         self.residents: dict[str, Resident] = {}
         self.active: dict[str, asyncio.Task] = {}
         self._timed_out: set[str] = set()
+        self._timed_out: set[str] = set()
         self._stop = asyncio.Event()
         self._main_heartbeat = time.monotonic()
         self._supervisor_heartbeat = time.monotonic()
@@ -135,7 +144,7 @@ class Institution:
         except asyncio.CancelledError:
             if name not in self._timed_out:
                 self.journal.transition(name, "READY", "INTERRUPTED",
-                                        next_due=time.time())
+                                            next_due=time.time())
             raise
         except Exception as exc:
             self.journal.transition(name, "RECOVERING", "FAILED",
@@ -174,6 +183,7 @@ class Institution:
                     self._timed_out.discard(name)
                 elif (name not in self._timed_out and
                       time.monotonic() - getattr(task, "_r3_started", time.monotonic()) > self.watchdog_seconds):
+                    self._timed_out.add(name)
                     self._timed_out.add(name)
                     self.journal.transition(name, "RECOVERING", "WATCHDOG_TIMEOUT",
                                             next_due=time.time(), failure=True)
