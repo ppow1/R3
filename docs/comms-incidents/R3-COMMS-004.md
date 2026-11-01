@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/comms-incidents/R3-COMMS-004.md
 Component: COMMS-INCIDENT
-File Revision: 1.0.6
+File Revision: 1.0.7
 Created: 2026-10-31 UTC (exact time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Record Camrui Comms command gateway internal failure during R3 deployment preflight
@@ -10,11 +10,11 @@ Execution Model: Comms 1.1 command task submit
 Observability: Tool error and verified grant status
 Dependencies: R3 deployment; Camrui command gateway
 Authority: Steward instruction to log Comms failures and punch list
-Changed: 2026-11-01T06:42:00Z | R3-P020 | ChatGPT GPT-6 | Record verified Q2 read-only diagnostic staging
+Changed: 2026-11-01T15:01:47.636Z | R3-P020 | ChatGPT GPT-6 | Record deployment-state result and diagnostic shell error
 Supersedes: None
 Contracts: hints/comms-failure-recovery.md; hints/file-provenance.md
 Tests: Pending reproduction and gateway diagnostics
-History/Predecessor: Git blob 6bc00913438245dfb41a81c4e58361201ee7c6f5
+History/Predecessor: Git blob 2b7d3332275484b4d0a57b4ba453b18a11e9a212
 -->
 # R3-COMMS-004 — Camrui command task submission fails internally
 
@@ -61,6 +61,6 @@ History/Predecessor: Git blob 6bc00913438245dfb41a81c4e58361201ee7c6f5
 - The staged `Deploy-R3-Engineering-Panel.ps1` was subsequently found under `A:\\AI\\Scripts\\Riverview\\Queue\\Completed\\`, with its result at `A:\\AI\\Scripts\\Riverview\\Queue\\Results\\Deploy-R3-Engineering-Panel.ps1.txt`. The earlier Q2 read-back missed the nested Queue folders; the script did execute.
 - Result timestamp: `2026-11-01T01:27:24.6186412-05:00`; target `a11282a6e217cadcafe9e630e6dcf6c6d9cae889`. It reported `Previous HEAD position was c8420b8 Use documented R3 Uvicorn process identity for safe deployment restart`, SSH exit code 1, and the deployer's failure exception. The queue wrapper's `EXIT_CODE` field was empty.
 - The installed deployer source contains an exit trap that attempts rollback to its recorded prior commit if activation fails. The Queue result does not expose the rollback outcome. **Inference:** the PowerShell catch may have surfaced only the exception message and omitted later remote-shell output; this has not been independently confirmed.
-- Current server HEAD, listener health, rollback state, and visual acceptance remain unverified. The current visual source changes are after the attempted target and were not part of that deployment.
-- The read-only status-check script `Inspect-R3-Deployment-State.ps1` is staged in `A:\\AI\\Scripts\\Riverview\\Q2\\` (execution `8583c284-52cb-470e-ab4f-359c154682cf`, SHA-256 `4D4BE3C442E2AB89A87919389D6CAB4B5E24AA5390540DC91A36B5024F31C48D`). Placement check `081e233f-1bc2-4fe8-88a7-c100c9ff9bbd` confirmed it remains in Q2 and is absent from Queue/Completed/Results. It has not executed; its output is pending the Steward's move into Queue.
+- The earlier deploy task reported SSH exit 1, but the later read-only check confirms the server is now running at its target commit `a11282a6e217cadcafe9e630e6dcf6c6d9cae889` with HTTP health 200. This is inconsistent with the task's reported failure; the remote deployer's completion/rollback output remains unavailable. The current visual source changes are after the attempted target and were not part of that deployment.
+- The read-only status-check script `Inspect-R3-Deployment-State.ps1` later appeared in `Queue\\Completed` with output in `Queue\\Results`. It reported remote HEAD `a11282a6e217cadcafe9e630e6dcf6c6d9cae889` (detached), the expected `admin1` Uvicorn process listening on port 8303, and `HEALTH_HTTP=200`. It read the page title `Riverview 3 · Visual prototype`, confirming the requested current UI changes were not yet deployed. The diagnostic then hit a Bash syntax error in its marker-check loop and returned `SSH_EXIT=2`; checks after the title were not completed.
 - **Punch-list reference:** `R3-P020` — preserve attempt history and verify the deployment outcome before any retry.
