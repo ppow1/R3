@@ -87,6 +87,8 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
   <input id="opacity" type="range" min="45" max="95" value="45">
   <output id="value" for="opacity">45%</output>
   <button id="center-window" type="button">Center window</button>
+  <button id="snapshot-button" type="button">Snapshot</button>
+  <output id="snapshot-status" aria-live="polite"></output>
 </div>
 <script>
 const win=document.getElementById('win');
@@ -95,6 +97,8 @@ const value=document.getElementById('value');
 const minimize=document.getElementById('minimize');
 const centerButton=document.getElementById('center-window');
 const refreshButton=document.getElementById('refresh-status');
+const snapshotButton=document.getElementById('snapshot-button');
+const snapshotStatus=document.getElementById('snapshot-status');
 const handle=document.getElementById('drag');
 slider.oninput=()=>{document.documentElement.style.setProperty('--panel-opacity',slider.value/100);value.textContent=slider.value+'%';};
 function clampPosition(x,y){
@@ -213,7 +217,42 @@ async function refreshEngineeringStatus(){
     addListItem(worktreeList,'Unknown');
   }
 }
+
 refreshButton.addEventListener('click',refreshEngineeringStatus);
+snapshotButton.addEventListener('click',async()=>{
+  snapshotButton.disabled=true;
+  snapshotStatus.textContent='Capturing…';
+  try{
+    const response=await fetch('/api/v1/snapshot',{cache:'no-store'});
+    if(!response.ok)throw new Error('Snapshot API unavailable');
+    const snapshot=await response.json();
+    const rect=win.getBoundingClientRect();
+    snapshot.browser={
+      captured_at:new Date().toISOString(),
+      viewport_css_px:{width:innerWidth,height:innerHeight},
+      device_pixel_ratio:devicePixelRatio,
+      panel:{
+        state:win.classList.contains('min')?'minimized':'expanded',
+        rect_css_px:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},
+        opacity:Number(slider.value)/100
+      },
+      entrance_anchor_image_fraction:engineeringEntrance,
+      background_intrinsic_px:{width:background.naturalWidth||null,height:background.naturalHeight||null}
+    };
+    const blob=new Blob([JSON.stringify(snapshot,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement('a');
+    link.href=url;
+    link.download='r3-snapshot-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json';
+    link.click();
+    URL.revokeObjectURL(url);
+    snapshotStatus.textContent='Snapshot downloaded';
+  }catch(error){
+    snapshotStatus.textContent='Snapshot unavailable';
+  }finally{
+    snapshotButton.disabled=false;
+  }
+});
 const background=new Image();
 background.onload=()=>{if(win.classList.contains('min'))placeMinimized();};
 background.onerror=()=>{};
