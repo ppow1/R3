@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/chat-contract-draft.md
 Component: R3-CHAT-CONTRACT-DRAFT
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-01 UTC
 Created By: ChatGPT GPT-6
 Purpose: Define reviewable R3 chat interaction requirements across the website and authorized residents
@@ -10,7 +10,7 @@ Execution Model: Draft capability boundary; no implementation or live API implie
 Observability: Conversation, message, capability, and work-link lifecycle events require audit and history
 Dependencies: Approved R3 charter revision 2; R3-P002; R3-P005; existing Riverview database implementations pending backend qualification
 Authority: Working draft only. Backend qualification and Steward review required before API adoption.
-Changed: 2026-11-01 UTC | R3-CHAT-SETTINGS-UI-001 | ChatGPT GPT-6 | Add Steward's chat interaction and V2 responsiveness requirements
+Changed: 2026-11-01 UTC | R3-CHAT-WINDOW-PRESETS-001 | ChatGPT GPT-6 | Specify collapsible rail, movable panel, and remembered layout behavior
 Supersedes: Revision 1.0.0; clarify user-approved interaction direction
 Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; docs/PUNCH_LIST.md
 Tests: Not run; contract only
@@ -27,6 +27,12 @@ Preserve Riverview 2's responsive, low-latency interaction: quick navigation, in
 Provide conversation affordances for new, rename, search, archive, delete, reopen, and conference-room use. Add contextual menus at conversation and message level. Reserve message actions for copy, edit, quote, branch, generate image, save reference, and work-related actions. These affordances may be unavailable or planned until their capabilities are connected.
 
 The interface shows no synthetic conversations, messages, residents, work orders, or results. Each feature is explicitly identified as functional, unavailable, or planned. The UI distinguishes an empty account from an unavailable service.
+
+## Floating workspace and conversation rail
+
+Keep the conversation manager in a collapsible left rail that reduces to a narrow icon strip and can be expanded without closing the active conversation. The Chat window has separate minimize and close controls. Its title bar supports dragging and the panel supports resizing, while the conversation rail can collapse independently of the window.
+
+The Chat, Engineering Foundry, and Infrastructure panels may remain open at the same time. A user can save up to ten named window-placement presets and apply one to restore each panel's position, size, and open or minimized state. Saving and applying presets is a user-local presentation preference until a qualified settings service exists; label it as saved in this browser and never present it as institutional configuration.
 
 ## Shared institutional capability
 

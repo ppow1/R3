@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/settings-contract-draft.md
 Component: R3-SETTINGS-CONTRACT-DRAFT
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-01 UTC
 Created By: ChatGPT GPT-6
 Purpose: Define a reviewable hierarchical settings interaction contract for R3
@@ -10,7 +10,7 @@ Execution Model: Draft registry/capability consumer; no live setting writes impl
 Observability: Effective values, overrides, authorization, and configuration history
 Dependencies: Approved R3 charter revision 2; settings registry and capability manifests; historical database qualification
 Authority: Working draft only. Backend qualification and Steward review required before API adoption.
-Changed: 2026-11-01 UTC | R3-CHAT-SETTINGS-UI-001 | ChatGPT GPT-6 | Establish scoped settings and registry-driven UI requirements
+Changed: 2026-11-01 UTC | R3-CHAT-WINDOW-PRESETS-001 | ChatGPT GPT-6 | Add browser-local multi-panel layout preferences under User scope
 Supersedes: None; new draft
 Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; docs/IMPLEMENTATION_HANDOFF.md
 Tests: Not run; contract only
@@ -37,6 +37,10 @@ A child scope may override a parent only where the registry permits it. The effe
 ## Visual and unavailable behavior
 
 Use the existing translucent estate style and compact controls. Clearly distinguish functional, unavailable, and planned operations. When the registry or manifest is absent, show the scope navigation with an explicit unavailable state and no fabricated values. A browser-only presentation preference, if offered, must be labeled local and must not be presented as institutional configuration.
+
+## User-local presentation preferences
+
+The User scope may expose browser-local presentation controls, including panel opacity and up to ten named floating-window layouts. A saved layout captures the positions, sizes, and open or minimized state of Chat, Engineering Foundry, and Infrastructure, so a user can arrange all three together and restore that arrangement later. Identify these values as stored in this browser; they do not imply an authorized settings registry write or synchronize to another device. Keep this local preference section distinct from registry-backed institutional settings.
 
 ## Backend coordination
 
