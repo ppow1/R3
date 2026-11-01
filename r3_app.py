@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.4
+# File Revision: 1.0.5
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Initial shared read-only institutional API
@@ -9,7 +9,7 @@
 # Observability: HTTP health endpoint; no deployed verification
 # Dependencies: FastAPI, Git checkout, local artwork folder
 # Authority: R3 engineering guidance; approved charter prevails
-# Changed: 2026-11-01 UTC | R3-SNAPSHOT-001 | ChatGPT GPT-6 | Expose bounded read-only website diagnostic snapshot API
+# Changed: 2026-11-01 UTC | R3-SNAPSHOT-002 | ChatGPT GPT-6 | Capture latest browser geometry through the shared diagnostic API
 # Supersedes: None
 # Contracts: hints/file-provenance.md
 # Tests: Not run (metadata-only change)
