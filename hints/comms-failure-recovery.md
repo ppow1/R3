@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/comms-failure-recovery.md
 Component: COMMS-RECOVERY
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Capture failed and blocked Riverview Comms operations
@@ -10,11 +10,11 @@ Execution Model: N/A
 Observability: Incident ledger and punch list
 Dependencies: Riverview Comms 1.1 and applicable operational runbooks
 Authority: Steward direction
-Changed: 2026-10-31 UTC | R3-COMMS-002 | ChatGPT GPT-6 | Require shell-aware clipboard-first manual fallback
+Changed: 2026-11-01 UTC | R3-COMMS-003 | ChatGPT GPT-6 | Document dashboard saturation incident and recovery
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Not applicable
-History/Predecessor: Git blob c6765f8b5640f807588301ae7b4493c464b57d0e
+History/Predecessor: Git blob a829c797cadf2da14acea1e484d6ac13d4bf3469
 -->
 # Comms failure recording and recovery
 
@@ -56,3 +56,15 @@ A failed **method** is not a failed **objective**. Grace and engineering agents 
 When Comms execution fails and user intervention is necessary, identify the **terminal in which the user will paste** before issuing commands. For Windows PowerShell 7, begin with `Clear-Host`, capture diagnostic output in `$result`, display it, and call `Set-Clipboard -Value $result`. To diagnose Linux from a Windows terminal, use PowerShell to invoke `ssh` explicitly and execute Bash remotely; never paste Bash syntax directly into PowerShell. For POSIX Bash, begin with `clear`, capture and display output; use a verified available clipboard utility or clearly state that copying is unavailable on that host. Record manual-fallback syntax errors as assistant workflow failures, not remote host failures.
 
 - [R3-COMMS-002: Camrui deployment preflight and shell-format failure](../docs/comms-incidents/R3-COMMS-002.md)
+
+## R3-COMMS-003 — Comms5 dashboard request-slot saturation (2026-10-31/11-01)
+
+**Status:** immediate outage recovered; permanent correction OPEN. [R3 punch-list R3-P021](../docs/PUNCH_LIST.md) and [Riverview issue #370](https://github.com/ppow1/Riverview-/issues/370).
+
+**Observed failure:** `comms5_command_task_submit` to `desktop-ja3rpnq` returned `BACKEND_UNAVAILABLE`, `dashboard_operation_http_status`, `executed:false`; `comms5_transport_probe` independently returned `dashboard_http_status`. The transport probe does not require Windows command execution. Dashboard service on Camrui remained active (PID 2759636), with loopback listener 127.0.0.1:8767. Recent journal query was empty; older journal contained BrokenPipeError during dashboard HTTP response writes, but those earlier exceptions do not prove this outage's cause.
+
+**Technical evidence:** an unauthenticated local HTTP request returned 503 with an empty body; the diagnostic script also had a here-document error, which was a test-construction error. Deployed `src/riverview_core/status_dashboard/server.py` defines `_MAX_THREADS=16`; `process_request()` sends a bare 503 (Content-Length 0) if its semaphore cannot acquire a request slot. `_process_bounded()` releases the slot after the handler exits. The running process had 18 threads and **15 CLOSE-WAIT connections** on port 8767. These observations strongly support **saturated request handlers** as the immediate fault, but the precise reason handlers remained occupied is **unverified**. `src/riverview_core/comms5/dashboard_backend.py`, `DashboardReadBackend._post_operation()`, masks unrecognized HTTP failures as `dashboard_operation_http_status`; Windows task submission timeout is 25 seconds. The dashboard's `_dispatch()` also maps unexpected Comms5 operation exceptions to generic `comms5_operation_unavailable`.
+
+**Temporary recovery, verified:** An authorized operator restarted **only** `riverview-status-dashboard.service` on Camrui using `sudo -n systemctl restart riverview-status-dashboard.service`. Service returned `active` with new PID **1174196** and SSH exit 0. An authenticated Comms5 transport probe then returned `available`, healthy dashboard, **234.604 ms** round trip, request ID `a757772a4d7461c384b886f2`. A real Windows PowerShell command executed on `DESKTOP-JA3RPNQ` as `riverviewcmdagent`, exit **0**, execution ID `2a01531e-96d1-4c09-8976-3e53800dbcd5`. Restart interrupts active dashboard requests; it is a workaround, **not a permanent fix**. Always confirm authorization, verify active/new PID, then run authenticated transport probe and benign Windows command with valid host grants. Do not restart unrelated services or bypass authorization.
+
+**Permanent repair required:** determine handler retention/CLOSE-WAIT cause (client disconnects, keepalive, read/write deadlines, blocked work); bound handler lifetime and reclaim slots; add sanitized saturation metrics and request correlation; improve safe HTTP error reporting; test slow/disconnected clients and slot exhaustion/recovery; deploy with rollback and verify Comms5, Windows command execution, and other dashboard/Grace endpoints. **Do not mark permanently resolved** until code correction and regression verification. A subsequent Windows-gateway SSH inspection was denied with `bounded_request_or_state_invalid`; do not treat it as a successful inspection.
