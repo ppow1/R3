@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: web/index.html
 Component: R3-ESTATE-HOME
-File Revision: 1.0.8
+File Revision: 1.0.9
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Present the R3 estate home with Engineering and Infrastructure observability panels
@@ -10,9 +10,9 @@ Execution Model: Browser client consuming same-origin read-only R3 APIs
 Observability: Engineering API state; Infrastructure telemetry adapter availability
 Dependencies: /api/v1/visual/background; /api/v1/health; /api/v1/engineering/branches; /api/v1/engineering/worktrees
 Authority: Steward visual placement references and approved R3 website direction
-Changed: 2026-11-01 UTC | R3-WEB-UI-002 | ChatGPT GPT-6 | Add minimized entrance markers and move display tools into profile settings
+Changed: 2026-11-01 UTC | R3-CHAT-SETTINGS-UI-001 | ChatGPT GPT-6 | Add honest Chat and hierarchical Settings shells
 Supersedes: R3-VISUAL-PROTOTYPE framing
-Contracts: docs/IMPLEMENTATION_HANDOFF.md; docs/architecture/ESTATE_SPATIAL_CANON.md; Infrastructure Observability Contract v0.1 (UI draft only)
+Contracts: docs/IMPLEMENTATION_HANDOFF.md; docs/architecture/ESTATE_SPATIAL_CANON.md; hints/chat-contract-draft.md; hints/settings-contract-draft.md
 Tests: Not run; runtime telemetry adapter and visual acceptance pending
 History/Predecessor: Git blob 5f681d1009aa1ad9b6a2645b149586cae5f60aea
 -->
@@ -42,7 +42,7 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 #side-rail.expanded .rail-button{width:100%;justify-content:flex-start;padding:0 8px}
 #side-rail.expanded .rail-label{display:inline}
 #profile-button{position:fixed;z-index:35;left:20px;bottom:20px;width:34px;height:34px;padding:0;border-radius:50%;background:rgba(35,55,76,.62);border-color:rgba(205,227,255,.35);font-size:11px;font-weight:700}
-#profile-menu{position:fixed;z-index:36;left:14px;bottom:62px;width:244px;padding:8px;background:rgba(8,18,30,.82);border:1px solid rgba(205,227,255,.24);border-radius:13px;backdrop-filter:blur(12px);box-shadow:0 12px 32px #0006}
+#profile-menu{position:fixed;z-index:36;left:14px;bottom:62px;width:min(540px,calc(100vw - 28px));max-height:78vh;overflow:auto;padding:8px;background:rgba(8,18,30,.82);border:1px solid rgba(205,227,255,.24);border-radius:13px;backdrop-filter:blur(12px);box-shadow:0 12px 32px #0006}
 #profile-menu[hidden],#infrastructure-panel[hidden],#infrastructure-anchor[hidden],#profile-settings-panel[hidden]{display:none}
 .profile-title{padding:8px 10px 10px;color:#c8d9ea;font-size:12px;border-bottom:1px solid #c2d5ec33;margin-bottom:5px}
 .profile-menu-item{width:100%;display:block;text-align:left;padding:9px 10px;margin:2px 0;background:transparent;border-color:transparent;font-size:13px}
@@ -88,6 +88,7 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 @media(max-width:650px){
  .window{left:4%;top:14%;width:92vw;height:56vh}
  }
+#browser-appearance[hidden]{display:none}#settings-shell{display:grid;grid-template-columns:135px minmax(0,1fr);gap:9px;padding:8px 2px}.settings-scopes{display:grid;gap:3px;align-content:start}.settings-scope{padding:7px 8px;text-align:left;font-size:12px;background:transparent;border-color:transparent}.settings-scope[aria-current=true]{background:#2b496633;border-color:#9dbce544}.settings-detail{min-width:0;padding:10px;border:1px solid #c2d5ec22;border-radius:10px;background:#10223844}.settings-detail h3{margin:0 0 5px;font-size:13px}.settings-detail p{margin:5px 0;font-size:11px;color:#c2d5ec}.settings-row{display:grid;grid-template-columns:1fr auto;gap:4px 8px;padding:7px 0;border-top:1px solid #c2d5ec22;font-size:11px}.settings-unavailable{color:#d6c79a}.settings-local{border-top:1px solid #c2d5ec33;margin-top:8px;padding-top:6px;font-size:11px}#chat-panel{position:fixed;z-index:17;inset:5vh 6vw 5vh 74px;display:grid;grid-template-columns:minmax(210px,260px) minmax(0,1fr);overflow:hidden;background:rgba(8,18,30,.86);border:1px solid rgba(205,227,255,.32);border-radius:18px;backdrop-filter:blur(14px);box-shadow:0 22px 56px #0009}#chat-panel[hidden]{display:none}.chat-sidebar,.chat-main{display:flex;flex-direction:column;min-width:0;padding:14px}.chat-sidebar{border-right:1px solid #c2d5ec22}.chat-head,.chat-toolbar{display:flex;align-items:center;gap:7px}.chat-head h1{font-size:17px;margin:0 auto 0 0}.icon-button{width:30px;height:30px;padding:0;display:grid;place-items:center;background:#23374c88;border-color:#c2d5ec33;color:#dcecff}.chat-search{width:100%;margin:10px 0;padding:8px;border-radius:9px;background:#08152288;color:#eaf4ff;border:1px solid #c2d5ec33}.chat-empty{display:grid;place-items:center;flex:1;text-align:center;padding:20px;color:#c6d6e6;font-size:13px}.chat-empty strong{display:block;margin-bottom:6px;color:#e5effb}.chat-status{font-size:11px;color:#d6c79a;margin:8px 0}.chat-toolbar{justify-content:center;gap:5px;flex-wrap:wrap;padding:9px 0;border-top:1px solid #c2d5ec22}.chat-toolbar button{width:30px;height:30px;padding:0;opacity:.46}.chat-composer{display:flex;gap:8px;align-items:end}.chat-composer textarea{flex:1;min-height:42px;max-height:120px;resize:vertical;border:1px solid #c2d5ec33;border-radius:11px;background:#091522aa;color:#eaf4ff;padding:10px}.chat-menu-template{display:none}@media(max-width:760px){#chat-panel{inset:8px;grid-template-columns:1fr}#chat-panel{grid-template-columns:minmax(115px,34%) minmax(0,1fr)}#chat-panel .chat-sidebar{display:flex;padding:8px}.chat-main{padding:8px}#settings-shell{grid-template-columns:100px minmax(0,1fr)}}
 </style>
 </head>
 <body>
@@ -96,7 +97,8 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
   <div class="rail-brand" aria-label="Riverview 3">R</div>
   <button class="rail-button" id="rail-toggle" type="button" aria-label="Expand navigation" title="Expand navigation"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span class="rail-label">Menu</span></button>
   <button class="rail-button" id="nav-home" type="button" aria-label="Estate home" title="Estate home"><svg viewBox="0 0 24 24"><path d="m3 10 9-7 9 7M5 9v11h14V9M9 20v-7h6v7"/></svg><span class="rail-label">Home</span></button>
-  <button class="rail-button" id="nav-engineering" type="button" aria-label="Engineering Foundry" title="Engineering Foundry"><svg viewBox="0 0 24 24"><path d="m14 6 4-4 4 4-4 4M3 21l9-9M7 5l12 12M5 7l12 12"/></svg><span class="rail-label">Engineering</span></button>
+  <button class="rail-button" id="nav-chat" type="button" aria-label="Chat" title="Chat"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-5 4v-4h-.5A2.5 2.5 0 0 1 3 13.5v-8Z"/></svg><span class="rail-label">Chat</span></button>
+   <button class="rail-button" id="nav-engineering" type="button" aria-label="Engineering Foundry" title="Engineering Foundry"><svg viewBox="0 0 24 24"><path d="m14 6 4-4 4 4-4 4M3 21l9-9M7 5l12 12M5 7l12 12"/></svg><span class="rail-label">Engineering</span></button>
   <button class="rail-button" id="nav-infrastructure" type="button" aria-label="Infrastructure" title="Infrastructure observability"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><path d="M12 3v7m0 4v7M3 12h7m4 0h7M5.6 5.6l4.9 4.9m3 3 4.9 4.9m0-12.8-4.9 4.9m-3 3-4.9 4.9"/></svg><span class="rail-label">Infrastructure</span></button>
   <div class="rail-spacer"></div>
 </nav>
@@ -104,7 +106,9 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 <div id="profile-menu" hidden>
   <div class="profile-title">Pat Powell</div>
   <button class="profile-menu-item" id="profile-settings" type="button" aria-expanded="false">Settings</button>
-<div id="profile-settings-panel" hidden><div class="controls"><label for="opacity">Panel opacity</label><output id="value" for="opacity">45%</output><input id="opacity" type="range" min="45" max="95" value="45"><button id="center-window" type="button">Center window</button><button id="snapshot-button" type="button">Snapshot</button><output id="snapshot-status" aria-live="polite"></output></div></div>
+<div id="profile-settings-panel" hidden><div id="settings-shell">
+<nav class="settings-scopes" aria-label="Settings scope"><button class="settings-scope" data-settings-scope="Institutional">Institutional</button><button class="settings-scope" data-settings-scope="Departmental">Departmental</button><button class="settings-scope" data-settings-scope="Resident">Resident</button><button class="settings-scope" data-settings-scope="Chat">Chat</button><button class="settings-scope" data-settings-scope="User">User</button><button class="settings-scope" data-settings-scope="Device">Device</button><button class="settings-scope" data-settings-scope="Infrastructure">Infrastructure</button></nav>
+<section class="settings-detail" aria-live="polite"><h3 id="settings-scope-title">Institutional</h3><p class="settings-unavailable" id="settings-registry-status">Settings registry unavailable · no operational settings loaded.</p><div class="settings-row"><span>Inherited value</span><span>Unavailable</span></div><div class="settings-row"><span>Scoped override</span><span>Unavailable</span></div><div class="settings-row"><span>Effective value</span><span>Unavailable</span></div><div class="settings-row"><span>Authorization</span><span>Capability manifest unavailable</span></div><div class="settings-row"><span>Configuration history</span><span>Unavailable</span></div><div class="settings-local">Local appearance · this browser only</div><div id="browser-appearance" hidden><div class="controls"><label for="opacity">Panel opacity</label><output id="value" for="opacity">45%</output><input id="opacity" type="range" min="45" max="95" value="45"><button id="center-window" type="button">Center window</button><button id="snapshot-button" type="button">Snapshot</button><output id="snapshot-status" aria-live="polite"></output></div></div></section></div></div>
   <button class="profile-menu-item" id="profile-engineering" type="button">Engineering Foundry panel</button>
   <button class="profile-menu-item" id="profile-infrastructure" type="button">Infrastructure panel</button>
 </div>
@@ -184,6 +188,9 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
     </section>
   </div>
 </section>
+<section id="chat-panel" aria-label="Chat" hidden><aside class="chat-sidebar"><div class="chat-head"><h1>Conversations</h1><button class="icon-button" disabled title="New conversation · unavailable" aria-label="New conversation">＋</button><button class="icon-button" disabled title="Conference room · planned" aria-label="New conference room">♧</button></div><input class="chat-search" type="search" placeholder="Search conversations" aria-label="Search conversations" disabled><div class="chat-status">Functional: navigation · Unavailable: chat service · Planned: persistent conversation actions</div><div class="chat-status" id="chat-service-status">Conversation service unavailable · no live history loaded</div><div class="chat-empty"><div><strong>No conversation data</strong>Persistent conversations, archive, reopen, rename, and search will appear when the authorized service connects.</div></div></aside>
+<section class="chat-main"><div class="chat-head"><h1>Chat</h1><button class="icon-button" disabled title="Conversation menu · planned" aria-label="Conversation menu">⋯</button><button class="icon-button" id="chat-close" title="Close chat" aria-label="Close chat">×</button></div><div class="chat-empty"><div><strong>No messages loaded</strong>Messages come from the durable conversation service. No sample conversation is shown.</div></div><div class="chat-status">Action availability comes from each resident's capability manifest.</div><div class="chat-toolbar" aria-label="Planned message actions"><button disabled title="Copy · planned" aria-label="Copy">▢</button><button disabled title="Edit · planned" aria-label="Edit">✎</button><button disabled title="Quote · planned" aria-label="Quote">❝</button><button disabled title="Branch · planned" aria-label="Branch">⑂</button><button disabled title="Generate image · unavailable" aria-label="Generate image">▧</button><button disabled title="Save reference · planned" aria-label="Save reference">☆</button><button disabled title="Work-related action · unavailable" aria-label="Work action">⌘</button><button disabled title="Message menu · planned" aria-label="Message menu">⋯</button></div><div class="chat-composer"><textarea aria-label="Message" placeholder="Chat unavailable until the conversation API connects" disabled></textarea><button disabled aria-label="Send message" title="Send unavailable">↑</button></div></section>
+<template id="conversation-row-template"><div><button class="conversation-open"></button><button class="icon-button" title="Conversation actions">⋯</button><menu class="conversation-actions" data-capability-manifest="conversation"><button>Rename</button><button>Archive</button><button>Delete</button><button>Reopen</button></menu></div></template><template id="message-row-template"><article><button class="icon-button" title="Message actions">⋯</button><menu class="message-actions" data-capability-manifest="resident"><button>Copy</button><button>Edit</button><button>Quote</button><button>Branch</button><button>Generate image</button><button>Save reference</button><button>Work-related action</button></menu></article></template></section>
 <button id="infrastructure-anchor" type="button" aria-label="Open Infrastructure panel" title="Infrastructure entrance" hidden>◉ Infrastructure</button>
 <script>
 // Front-end adapter seam. It deliberately has no backend field names or inferred state values.
@@ -194,6 +201,9 @@ const infrastructureTelemetryAdapter={
   }
 };
 const infrastructurePanel=document.getElementById('infrastructure-panel');
+const chatPanel=document.getElementById('chat-panel');
+const chatAdapter={async listConversations(){return{available:false,reason:'R3 conversation API is not connected'};},async capabilityManifest(){return{available:false,reason:'Resident capability manifest is unavailable'};}};
+const settingsRegistryAdapter={async read(){return{available:false,reason:'R3 settings registry is not connected'};}};
 const infrastructureButton=document.getElementById('nav-infrastructure');
 const infrastructureClose=document.getElementById('infrastructure-close');
 const infrastructureMinimize=document.getElementById('infrastructure-minimize'),infrastructureAnchor=document.getElementById('infrastructure-anchor');
@@ -201,15 +211,18 @@ const sideRail=document.getElementById('side-rail');
 const profileButton=document.getElementById('profile-button');
 const profileMenu=document.getElementById('profile-menu');
 function closeInfrastructure(){infrastructurePanel.hidden=true;infrastructureAnchor.hidden=true;}
+function closeChat(){chatPanel.hidden=true;}
+function openChat(){closeInfrastructure();chatPanel.hidden=false;profileMenu.hidden=true;}
+document.getElementById('nav-chat').addEventListener('click',openChat);document.getElementById('chat-close').addEventListener('click',closeChat);
 function minimizeInfrastructure(){infrastructurePanel.hidden=true;infrastructureAnchor.hidden=false;placeInfrastructureAnchor();}
-function openInfrastructure(){infrastructurePanel.hidden=false;infrastructureAnchor.hidden=true;profileMenu.hidden=true;}
+function openInfrastructure(){closeChat();infrastructurePanel.hidden=false;infrastructureAnchor.hidden=true;profileMenu.hidden=true;}
 infrastructureButton.addEventListener('click',openInfrastructure);
 infrastructureClose.addEventListener('click',closeInfrastructure);infrastructureMinimize.addEventListener('click',minimizeInfrastructure);infrastructureAnchor.addEventListener('click',openInfrastructure);
 document.getElementById('rail-toggle').addEventListener('click',()=>{
   const expanded=sideRail.classList.toggle('expanded');
   document.getElementById('rail-toggle').setAttribute('aria-label',expanded?'Collapse navigation':'Expand navigation');
 });
-document.getElementById('nav-home').addEventListener('click',()=>{closeInfrastructure();});
+document.getElementById('nav-home').addEventListener('click',()=>{closeInfrastructure();closeChat();});
 document.getElementById('nav-engineering').addEventListener('click',()=>{
   closeInfrastructure();
   if(win.classList.contains('min'))restorePanel(false);
@@ -221,6 +234,8 @@ document.getElementById('profile-engineering').addEventListener('click',()=>{
   if(win.classList.contains('min'))restorePanel(false);
 });
 document.getElementById('profile-settings').addEventListener('click',event=>{const panel=document.getElementById('profile-settings-panel');panel.hidden=!panel.hidden;event.currentTarget.setAttribute('aria-expanded',String(!panel.hidden));});
+document.querySelectorAll('[data-settings-scope]').forEach(button=>button.addEventListener('click',()=>{document.getElementById('settings-scope-title').textContent=button.dataset.settingsScope;document.querySelectorAll('[data-settings-scope]').forEach(item=>item.setAttribute('aria-current',String(item===button)));document.getElementById('browser-appearance').hidden=button.dataset.settingsScope!=='User';}));document.querySelector('[data-settings-scope="Institutional"]').setAttribute('aria-current','true');
+settingsRegistryAdapter.read().then(result=>{if(!result.available)document.getElementById('settings-registry-status').textContent=result.reason+' · no live values loaded.';});chatAdapter.listConversations().then(result=>{if(!result.available)document.getElementById('chat-service-status').textContent=result.reason+' · no live history loaded.';});
 document.addEventListener('pointerdown',event=>{
   if(!profileMenu.hidden&&!profileMenu.contains(event.target)&&event.target!==profileButton)profileMenu.hidden=true;
 });
@@ -240,7 +255,8 @@ const refreshButton=document.getElementById('refresh-status');
 const snapshotButton=document.getElementById('snapshot-button');
 const snapshotStatus=document.getElementById('snapshot-status');
 const handle=document.getElementById('drag');
-slider.oninput=()=>{document.documentElement.style.setProperty('--panel-opacity',slider.value/100);value.textContent=slider.value+'%';};
+slider.oninput=()=>{document.documentElement.style.setProperty('--panel-opacity',slider.value/100);value.textContent=slider.value+'%';localStorage.setItem('r3-panel-opacity',slider.value);};
+const savedOpacity=localStorage.getItem('r3-panel-opacity');if(savedOpacity&&Number(savedOpacity)>=45&&Number(savedOpacity)<=95)slider.value=savedOpacity;slider.oninput();
 function clampPosition(x,y){
   const maxX=Math.max(0,innerWidth-win.offsetWidth);
   const maxY=Math.max(0,innerHeight-win.offsetHeight);

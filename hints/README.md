@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/README.md
 Component: README
-File Revision: 1.0.1 (provenance baseline; prior revisions untracked)
+File Revision: 1.0.2 (provenance baseline; prior revisions untracked)
 Created: Unknown (legacy; initial commit can establish earliest publication)
 Created By: Unknown (legacy)
 Purpose: R3 engineering reference and continuation guidance
@@ -10,7 +10,7 @@ Execution Model: N/A
 Observability: N/A
 Dependencies: R3 docs and hints index
 Authority: R3 engineering guidance; approved charter prevails
-Changed: 2026-11-01 UTC | R3-COMMS-CHAT-DRAFT-001 | ChatGPT GPT-6 | Index review draft for durable resident chat
+Changed: 2026-11-01 UTC | R3-CHAT-SETTINGS-UI-001 | ChatGPT GPT-6 | Index chat and scoped settings review drafts
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Not run (metadata-only change)
