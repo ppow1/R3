@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/institution.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.0.4
+# File Revision: 1.0.5
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Durable resident scheduling, supervision, and observable state transitions.
@@ -176,7 +176,7 @@ class Institution:
                       time.monotonic() - getattr(task, "_r3_started", time.monotonic()) > self.watchdog_seconds):
                     self._timed_out.add(name)
                     self.journal.transition(name, "RECOVERING", "WATCHDOG_TIMEOUT",
-                                            next_due=time.time(), failure=True)
+                                            next_due=time.time()+self.residents[name].interval, failure=True)
                     task.cancel()
             await asyncio.sleep(self.tick_seconds)
 
