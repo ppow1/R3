@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_institution_runtime.py
 # Component: R3-INSTITUTION-RUNTIME-TESTS
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Verify durable transitions, scheduling, and failure recovery.
@@ -23,6 +23,34 @@ from runtime.institution import Institution, Journal, Resident
 
 
 class RuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_numeric_transition_events(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Journal(Path(tmp) / "runtime.db")
+            journal.register("Grace")
+            journal.transition("Grace", "RUNNING", "STARTED", "objective received")
+            snap = journal.snapshot()
+            self.assertEqual(snap["residents"][0]["state_number"], 200)
+            self.assertEqual(snap["events"][0]["state_number"], 200)
+            self.assertEqual(snap["events"][0]["reason"], "objective received")
+
+    async def test_watchdog_timeout_is_single_and_remains_recovering(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Journal(Path(tmp) / "runtime.db")
+            async def work(name):
+                await asyncio.sleep(2)
+            institution = Institution(journal, watchdog_seconds=0.025,
+                                      tick_seconds=0.005)
+            institution.add(Resident("Grace", work, interval=1.0))
+            runner = asyncio.create_task(institution.run())
+            await asyncio.sleep(0.12)
+            await institution.stop()
+            await runner
+            snap = journal.snapshot()
+            timeouts = [e for e in snap["events"] if e["kind"] == "WATCHDOG_TIMEOUT"]
+            self.assertEqual(len(timeouts), 1)
+            self.assertEqual(timeouts[0]["state_number"], 900)
+            self.assertEqual(snap["residents"][0]["state"], "RECOVERING")
+
     async def test_scheduling_and_durable_events(self):
         with tempfile.TemporaryDirectory() as tmp:
             journal = Journal(Path(tmp) / "runtime.db")
