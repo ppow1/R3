@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/README.md
 Component: README
-File Revision: 1.0.2 (provenance baseline; prior revisions untracked)
+File Revision: 1.0.3 (provenance baseline; prior revisions untracked)
 Created: Unknown (legacy; initial commit can establish earliest publication)
 Created By: Unknown (legacy)
 Purpose: R3 engineering reference and continuation guidance
@@ -11,6 +11,7 @@ Observability: N/A
 Dependencies: R3 docs and hints index
 Authority: R3 engineering guidance; approved charter prevails
 Changed: 2026-11-01 UTC | R3-CHAT-SETTINGS-UI-001 | ChatGPT GPT-6 | Index chat and scoped settings review drafts
+Changed: 2026-11-01 UTC | R3-Q2-DOC-001 | ChatGPT GPT-6 | Index Q2 watched-folder runbook
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Not run (metadata-only change)
@@ -33,3 +34,4 @@ This directory is the first-level reference index for the root [AI_HINTS.md](../
 - [Engineering and continuation](engineering.md): workflow, branch/worktree discipline, and current handoff.
 - [Institutional architecture](architecture.md): charter and capability-first, durable institution principles.
 - [Deployment](deployment.md): Comms-first execution, Camrui bootstrap and verification.
+- [Q2 script queue](q2-script-queue.md): Windows watched-folder submission and execution-result retrieval.
