@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/ESTATE_SPATIAL_CANON.md
 Component: R3-ESTATE-SPATIAL
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-10-31 UTC
 Created By: ChatGPT GPT-6
 Purpose: Record Steward-defined Engineering and Infrastructure spatial relationships
@@ -10,7 +10,7 @@ Execution Model: Design canon; no runtime
 Observability: Visual and spatial acceptance
 Dependencies: Approved estate artwork; future Operations reference
 Authority: Steward's 2026-10-31 annotated screenshot and description
-Changed: 2026-11-01T06:36:32.533Z | R3-P012 | ChatGPT GPT-6 | Record Engineering marker target from Steward placement screenshot
+Changed: 2026-11-01T15:30:00Z | R3-P013 | ChatGPT GPT-6 | Require intrinsic artwork dimensions for cover-cropped Engineering anchor
 Supersedes: None
 Superseded By: None
 Contracts: docs/IMPLEMENTATION_HANDOFF.md
@@ -33,7 +33,7 @@ History/Predecessor: Git blob 13e759448d7d8e7948c41d5951d043c5728c8a71
 - Minimized Engineering Foundry becomes a compact, minimally distracting label at the Engineering entrance; use the panel's **45%** opacity slider minimum.
 - On restore, return the window to its prior expanded position and opacity.
 - The entrance anchor is image-relative and must account for background cover cropping/resizing; do not fix it to arbitrary viewport coordinates.
-- The minimized Engineering label target is the doorway/post shown in the Steward's 2026-11-01 placement screenshot. `web/index.html` represents that target with an approximate image-relative anchor `{x: .338, y: .837}`, accounting for `background-size: cover` cropping. Final position still requires visual acceptance against the full approved artwork.
+- The minimized Engineering label target is the doorway/post shown in the Steward's 2026-11-01 placement screenshot. `web/index.html` represents that target with an approximate image-relative anchor `{x: .338, y: .837}`. The runtime must use the loaded artwork's intrinsic dimensions when mapping this anchor through `background-size: cover`; placeholder dimensions can place the minimized label at the bottom edge. Final position still requires visual acceptance against the full approved artwork.
 - Distinguish surface entry points, upper offices, underground floors, and infrastructure access in future 3D/spatial navigation; they are not interchangeable.
 
 ## Pending spatial references
