@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/institution.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Durable resident scheduling, supervision, and observable state transitions.
@@ -9,11 +9,11 @@
 # Observability: SQLite event journal and current-state snapshots; PostgreSQL adapter pending.
 # Dependencies: Python 3.12 standard library.
 # Authority: Steward-approved R3 Charter Revision 2; no production deployment.
-# Changed: 2026-11-01 UTC | R3-RUNTIME-001 | Initial isolated runtime prototype
+# Changed: 2026-11-01 UTC | R3-RUNTIME-001 | Initial isolated runtime prototype; record task start for watchdog
 # Supersedes: None
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; hints/file-provenance.md
 # Tests: tests/test_institution_runtime.py (to be added)
-# History/Predecessor: New file on engineering/institution-runtime-v1-20261101
+# History/Predecessor: Git blob 36b611109da0b335152030752fc70e4e8e1202b6
 """R3 institutional runtime foundation; no inference or external tool execution yet."""
 from __future__ import annotations
 
@@ -141,8 +141,9 @@ class Institution:
                     "SELECT state,next_due FROM residents WHERE name=?", (name,)
                 ).fetchone()
                 if row and row[1] <= time.time():
-                    self.active[name] = asyncio.create_task(self._execute(resident),
-                                                            name=f"resident:{name}")
+                    task = asyncio.create_task(self._execute(resident), name=f"resident:{name}")
+                    task._r3_started = time.monotonic()
+                    self.active[name] = task
             await asyncio.sleep(self.tick_seconds)
 
     async def supervisory_loop(self) -> None:
