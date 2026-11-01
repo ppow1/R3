@@ -1,51 +1,110 @@
 <!--
 R3 CONTROLLED DOCUMENT
 File: web/index.html
-Component: R3-VISUAL-PROTOTYPE
-File Revision: 1.0.2
+Component: R3-ESTATE-HOME
+File Revision: 1.0.3
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
-Purpose: Demonstrate genuinely translucent draggable floating windows over approved estate artwork
-Execution Model: Browser client
-Observability: Background load status, adjustable opacity
-Dependencies: /api/v1/visual/background, R3 visual concepts ZIP
-Authority: Steward visual direction 2026-10-31
-Changed: 2026-10-31 UTC | R3-VISUAL-004 | ChatGPT GPT-6 | Return minimized marker to Engineering entrance at 45% opacity
-Supersedes: Rejected illustrative mockup
-Contracts: docs/IMPLEMENTATION_HANDOFF.md
-Tests: Not runtime-tested
-History/Predecessor: Git blob 387c2954102557afbb7fe8ee93ecb968485acff8
+Purpose: Present the R3 estate home and interactive Engineering status panel
+Execution Model: Browser client consuming same-origin read-only R3 APIs
+Observability: API availability, repository state, branches, worktrees
+Dependencies: /api/v1/visual/background; /api/v1/health; /api/v1/engineering/branches; /api/v1/engineering/worktrees
+Authority: Steward visual placement references and approved R3 website direction
+Changed: 2026-11-01T06:36:32.533Z | R3-VISUAL-005 | ChatGPT GPT-6 | Align minimized marker to doorway, remove prototype labels, and show live API-backed Engineering status
+Supersedes: R3-VISUAL-PROTOTYPE framing
+Contracts: docs/IMPLEMENTATION_HANDOFF.md; docs/architecture/ESTATE_SPATIAL_CANON.md
+Tests: Not run; runtime visual acceptance pending deployment
+History/Predecessor: Git blob 1d723e7a02354d79b992db1e54153094fd19c3dd
 -->
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Riverview 3 · Visual prototype</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Riverview 3</title>
 <style>
-:root{--panel-opacity:.82}*{box-sizing:border-box}body{margin:0;background:#091522;color:#edf4fc;font:15px system-ui,sans-serif;overflow:hidden}
+:root{--panel-opacity:.45}
+*{box-sizing:border-box}
+body{margin:0;background:#091522;color:#edf4fc;font:15px system-ui,sans-serif;overflow:hidden}
 #estate{position:fixed;inset:0;background:#152635 url('/api/v1/visual/background') center center/cover no-repeat}
 #estate:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(4,12,23,.3),transparent 70%);pointer-events:none}
-.top{position:fixed;top:0;left:0;right:0;height:58px;display:flex;align-items:center;gap:16px;padding:0 22px;background:rgba(9,20,34,.63);backdrop-filter:blur(5px);z-index:10}
-.top strong{font-size:19px}.top .right{margin-left:auto;font-size:13px}.status{color:#a4e7c0}
 .controls{position:fixed;bottom:20px;left:20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 16px;background:rgba(8,18,30,.85);border-radius:12px;z-index:20}
-input[type=range]{width:180px;accent-color:#8fb9ec}button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;border-radius:7px;padding:7px 12px}
+input[type=range]{width:180px;accent-color:#8fb9ec}
+button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;border-radius:7px;padding:7px 12px}
 .window{position:absolute;left:12%;top:19%;width:min(740px,76vw);height:min(430px,60vh);min-width:320px;min-height:180px;resize:both;overflow:auto;background:rgba(12,25,42,var(--panel-opacity));border:1px solid rgba(205,227,255,.55);border-radius:14px;box-shadow:0 18px 50px #0008;z-index:5}
-.window header{padding:15px 19px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #c2d5ec55;cursor:move;user-select:none}.window header b{font-size:20px}.window header button{margin-left:auto}
-.content{padding:24px}.content p{max-width:550px;line-height:1.6}.tile{display:inline-block;background:rgba(30,57,80,.75);padding:14px 18px;border-radius:9px;margin:8px 8px 8px 0}
-.window.min{height:52px!important;min-height:52px;width:240px!important;min-width:240px;resize:none;overflow:hidden}.window.min .content{display:none}.window.min header{height:50px;padding:9px 12px}.window.min header b{font-size:15px;white-space:nowrap}.window header{touch-action:none}
-.note{position:fixed;right:20px;bottom:20px;font-size:12px;background:#091522cc;padding:9px;border-radius:8px;z-index:2}
-@media(max-width:650px){.window{left:4%;top:14%;width:92vw;height:56vh}.controls{left:4%;right:4%;bottom:12px}.note{display:none}}
-</style></head><body>
-<div id="estate" role="img" aria-label="Approved Riverview 3 estate background"></div>
-<div class="top"><strong>♜ Riverview 3</strong><span>Visual prototype</span><span class="right">Estate background · <span id="bgstatus" class="status">checking…</span></span></div>
-<section class="window" id="win" aria-label="Engineering Foundry floating window"><header id="drag"><b>⚒ Engineering Foundry</b><button id="minimize" aria-label="Minimize panel">−</button></header><div class="content"><h2>Engineering workspace</h2><p>This is a translucent floating surface. The estate image remains behind the entire panel—not in a separate strip. Drag the title bar, resize the lower-right corner, or adjust opacity below.</p><div class="tile">Branches · not connected</div><div class="tile">Worker activity · unknown</div></div></section>
-<div class="controls"><label for="opacity">Panel opacity</label><input id="opacity" type="range" min="45" max="95" value="82"><output id="value">82%</output><button id="reset">Center window</button></div>
-<div class="note">Design demonstration only · no live telemetry</div>
+.window header{padding:15px 19px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #c2d5ec55;cursor:move;user-select:none;touch-action:none}
+.window header b{font-size:20px}
+.window header button{margin-left:auto}
+.content{padding:20px}
+.content h2{margin:0 0 12px;font-size:20px}
+.status-message{margin:0 0 14px;line-height:1.5;color:#cfdeef}
+.status-list{display:grid;gap:10px;margin:0 0 14px}
+.status-card{padding:11px 13px;background:rgba(30,57,80,.65);border-radius:9px}
+.status-card h3{font-size:14px;margin:0 0 6px}
+.status-card p{margin:0;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+.status-card ul{margin:6px 0 0;padding-left:18px;font-size:13px;line-height:1.55}
+.status-footnote{margin:12px 0 0;font-size:12px;line-height:1.45;color:#c0d0e2}
+.window.min{height:52px!important;min-height:52px;width:240px!important;min-width:240px;resize:none;overflow:hidden}
+.window.min .content{display:none}
+.window.min header{height:50px;padding:9px 12px}
+.window.min header b{font-size:15px;white-space:nowrap}
+@media(max-width:650px){
+ .window{left:4%;top:14%;width:92vw;height:56vh}
+ .controls{left:4%;right:4%;bottom:12px}
+}
+</style>
+</head>
+<body>
+<div id="estate" role="img" aria-label="Riverview 3 estate"></div>
+<section class="window min" id="win" aria-label="Engineering Foundry">
+  <header id="drag">
+    <b>⚒ Engineering Foundry</b>
+    <button id="minimize" aria-label="Restore panel">□</button>
+  </header>
+  <div class="content">
+    <h2>Engineering status</h2>
+    <p class="status-message" id="api-status" role="status" aria-live="polite">Loading current R3 state…</p>
+    <div class="status-list">
+      <section class="status-card" aria-labelledby="repo-title">
+        <h3 id="repo-title">Repository</h3>
+        <p id="repo-status">Checking</p>
+      </section>
+      <section class="status-card" aria-labelledby="branch-title">
+        <h3 id="branch-title">Branches</h3>
+        <ul id="branch-list"><li>Loading</li></ul>
+      </section>
+      <section class="status-card" aria-labelledby="worktree-title">
+        <h3 id="worktree-title">Worktrees</h3>
+        <ul id="worktree-list"><li>Loading</li></ul>
+      </section>
+    </div>
+    <button id="refresh-status" type="button">Refresh status</button>
+    <p class="status-footnote">Branch and worktree records do not establish that a worker is currently active.</p>
+  </div>
+</section>
+<div class="controls">
+  <label for="opacity">Panel opacity</label>
+  <input id="opacity" type="range" min="45" max="95" value="45">
+  <output id="value" for="opacity">45%</output>
+  <button id="center-window" type="button">Center window</button>
+</div>
 <script>
-const win=document.getElementById('win'),slider=document.getElementById('opacity'),value=document.getElementById('value');
+const win=document.getElementById('win');
+const slider=document.getElementById('opacity');
+const value=document.getElementById('value');
+const minimize=document.getElementById('minimize');
+const centerButton=document.getElementById('center-window');
+const refreshButton=document.getElementById('refresh-status');
+const handle=document.getElementById('drag');
 slider.oninput=()=>{document.documentElement.style.setProperty('--panel-opacity',slider.value/100);value.textContent=slider.value+'%';};
-const minimize=document.getElementById('minimize'),reset=document.getElementById('reset'),handle=document.getElementById('drag');
-function clampPosition(x,y){const maxX=Math.max(0,innerWidth-win.offsetWidth),maxY=Math.max(58,innerHeight-win.offsetHeight);win.style.left=Math.max(0,Math.min(maxX,x))+'px';win.style.top=Math.max(58,Math.min(maxY,y))+'px';}
+function clampPosition(x,y){
+  const maxX=Math.max(0,innerWidth-win.offsetWidth);
+  const maxY=Math.max(0,innerHeight-win.offsetHeight);
+  win.style.left=Math.max(0,Math.min(maxX,x))+'px';
+  win.style.top=Math.max(0,Math.min(maxY,y))+'px';
+}
 function centerWindow(){clampPosition((innerWidth-win.offsetWidth)/2,(innerHeight-win.offsetHeight)/2);}
-// Engineering entrance: approximate image-relative anchor from Steward's estate screenshot.
-// The background uses cover; calculate its cropped/scaled position rather than viewport percentages.
-const engineeringEntrance={x:.25,y:.48};
+const engineeringEntrance={x:.338,y:.837};
 let expandedState=null;
 function entrancePosition(){
   const imageWidth=1452,imageHeight=1024;
@@ -55,24 +114,113 @@ function entrancePosition(){
           y:(innerHeight-drawnHeight)/2+engineeringEntrance.y*drawnHeight};
 }
 function placeMinimized(){const p=entrancePosition();clampPosition(p.x-win.offsetWidth/2,p.y-win.offsetHeight/2);}
+function syncMinimizeButton(){
+  const minimized=win.classList.contains('min');
+  minimize.textContent=minimized?'□':'−';
+  minimize.setAttribute('aria-label',minimized?'Restore panel':'Minimize panel');
+}
+function restorePanel(centerIfNew){
+  win.classList.remove('min');
+  slider.value=expandedState?expandedState.opacity:'82';
+  slider.oninput();
+  if(expandedState&&!centerIfNew){clampPosition(expandedState.left,expandedState.top);}
+  else{centerWindow();}
+}
 minimize.addEventListener('click',e=>{
   e.stopPropagation();
   if(!win.classList.contains('min')){
     expandedState={left:win.offsetLeft,top:win.offsetTop,opacity:slider.value};
-    win.classList.add('min');slider.value='45';slider.oninput();placeMinimized();
+    win.classList.add('min');
+    slider.value='45';
+    slider.oninput();
+    placeMinimized();
   }else{
-    win.classList.remove('min');
-    if(expandedState){slider.value=expandedState.opacity;slider.oninput();clampPosition(expandedState.left,expandedState.top);}
+    restorePanel(false);
   }
-  minimize.textContent=win.classList.contains('min')?'□':'−';
-  minimize.setAttribute('aria-label',win.classList.contains('min')?'Restore panel':'Minimize panel');
+  syncMinimizeButton();
 });
-reset.addEventListener('click',centerWindow);
+centerButton.addEventListener('click',()=>{
+  if(win.classList.contains('min'))restorePanel(true);
+  else centerWindow();
+});
 let drag=null;
-handle.addEventListener('pointerdown',e=>{if(e.target.closest('button')||e.button!==0)return;e.preventDefault();drag={id:e.pointerId,x:e.clientX,y:e.clientY,left:win.offsetLeft,top:win.offsetTop};handle.setPointerCapture(e.pointerId);});
-handle.addEventListener('pointermove',e=>{if(!drag||e.pointerId!==drag.id)return;clampPosition(drag.left+e.clientX-drag.x,drag.top+e.clientY-drag.y);});
-function endDrag(e){if(drag&&e.pointerId===drag.id){drag=null;if(handle.hasPointerCapture(e.pointerId))handle.releasePointerCapture(e.pointerId);}}
-handle.addEventListener('pointerup',endDrag);handle.addEventListener('pointercancel',endDrag);handle.addEventListener('lostpointercapture',()=>{drag=null;});
+handle.addEventListener('pointerdown',e=>{
+  if(e.target.closest('button')||e.button!==0)return;
+  e.preventDefault();
+  drag={id:e.pointerId,x:e.clientX,y:e.clientY,left:win.offsetLeft,top:win.offsetTop};
+  handle.setPointerCapture(e.pointerId);
+});
+handle.addEventListener('pointermove',e=>{
+  if(!drag||e.pointerId!==drag.id)return;
+  clampPosition(drag.left+e.clientX-drag.x,drag.top+e.clientY-drag.y);
+});
+function endDrag(e){
+  if(drag&&e.pointerId===drag.id){
+    drag=null;
+    if(handle.hasPointerCapture(e.pointerId))handle.releasePointerCapture(e.pointerId);
+  }
+}
+handle.addEventListener('pointerup',endDrag);
+handle.addEventListener('pointercancel',endDrag);
+handle.addEventListener('lostpointercapture',()=>{drag=null;});
 window.addEventListener('resize',()=>win.classList.contains('min')?placeMinimized():clampPosition(win.offsetLeft,win.offsetTop));
-const img=new Image();img.onload=()=>document.getElementById('bgstatus').textContent='approved artwork loaded';img.onerror=()=>{const el=document.getElementById('bgstatus');el.textContent='artwork unavailable';el.style.color='#ffb7a5'};img.src='/api/v1/visual/background';
-</script></body></html>
+
+async function getJson(path){
+  const response=await fetch(path,{cache:'no-store'});
+  if(!response.ok)throw new Error('Request failed');
+  return response.json();
+}
+function addListItem(list,text){
+  const item=document.createElement('li');
+  item.textContent=text;
+  list.appendChild(item);
+}
+async function refreshEngineeringStatus(){
+  const apiStatus=document.getElementById('api-status');
+  const repoStatus=document.getElementById('repo-status');
+  const branchList=document.getElementById('branch-list');
+  const worktreeList=document.getElementById('worktree-list');
+  apiStatus.textContent='Loading current R3 state…';
+  repoStatus.textContent='Checking';
+  branchList.replaceChildren();
+  worktreeList.replaceChildren();
+  try{
+    const [health,branches,worktrees]=await Promise.all([
+      getJson('/api/v1/health'),
+      getJson('/api/v1/engineering/branches'),
+      getJson('/api/v1/engineering/worktrees')
+    ]);
+    apiStatus.textContent='R3 service: '+(health.status||'status not reported');
+    repoStatus.textContent='Repository '+(health.repository_present?'present':'not found')+
+      '; artwork directory '+(health.artwork_directory_present?'present':'not found');
+    if(branches.branches&&branches.branches.length){
+      branches.branches.forEach(branch=>{
+        const commit=(branch.commit||'').slice(0,8)||'commit not reported';
+        addListItem(branchList,(branch.name||'unnamed branch')+' · '+commit);
+      });
+    }else addListItem(branchList,'No branch records reported');
+    if(worktrees.worktrees&&worktrees.worktrees.length){
+      worktrees.worktrees.forEach(tree=>{
+        const commit=(tree.commit||'').slice(0,8)||'commit not reported';
+        const state=tree.locked?' · locked':'';
+        addListItem(worktreeList,(tree.branch||'detached')+' · '+commit+state);
+      });
+    }else addListItem(worktreeList,'No worktree records reported');
+  }catch(error){
+    apiStatus.textContent='R3 status unavailable';
+    repoStatus.textContent='Unknown';
+    addListItem(branchList,'Unknown');
+    addListItem(worktreeList,'Unknown');
+  }
+}
+refreshButton.addEventListener('click',refreshEngineeringStatus);
+const background=new Image();
+background.onload=()=>{};
+background.onerror=()=>{};
+background.src='/api/v1/visual/background';
+slider.oninput();
+placeMinimized();
+refreshEngineeringStatus();
+</script>
+</body>
+</html>
