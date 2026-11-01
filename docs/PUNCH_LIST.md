@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/PUNCH_LIST.md
 Component: DOCS-PUNCH-LIST-MD
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: Unknown (legacy)
 Created By: Unknown (legacy)
 Purpose: R3 project governance and planning reference
@@ -10,11 +10,11 @@ Execution Model: N/A
 Observability: N/A
 Dependencies: R3 repository
 Authority: Existing document authority unchanged; see body
-Changed: 2026-10-31 UTC | R3-COMMS-002 | ChatGPT GPT-6 | Track premature-abandonment prevention and qualification
+Changed: 2026-11-01 UTC | R3-COMMS-003 | ChatGPT GPT-6 | Track dashboard Comms5 saturation and temporary restart recovery
 Supersedes: None (see body for substantive charter revisions)
 Contracts: hints/file-provenance.md
 Tests: Not run (metadata-only)
-History/Predecessor: Git blob 0ce8efc6bd8612c55f32255bb92c424594bbd891
+History/Predecessor: Git blob 183a4b545824aec1b7c5138d15213336ff693d37
 -->
 # R3 — Punch List
 
@@ -48,3 +48,5 @@ Status: initial working list; items are requirements or investigations, not veri
 | R3-P019 | P0 | Riverview Comms failure capture and grant recovery | [R3-COMMS-001](comms-incidents/R3-COMMS-001.md): locate V2 grant runbook, verify grant status, run Camrui header checker, and establish repeatable incident logging | Open |
 
 | R3-P020 | P0 | Grace and engineering agents: objective-level recovery instead of premature abandonment | Implement and test `METHOD_FAILED` → `RECOVERY_IN_PROGRESS` → verified outcome or evidence-backed block; discover existing grants and alternate authorized interfaces; preserve attempt history and avoid safety bypass | Open |
+
+| R3-P021 | P0 | Comms5 dashboard request-slot saturation | Investigate 16-slot pool saturation with 15 CLOSE-WAIT connections; fix handler lifecycle and observability, test and deploy. **Temporary workaround:** authorized restart of only `riverview-status-dashboard.service` on Camrui, then verify authenticated Comms5 probe and Windows execution. See [Riverview issue #370](https://github.com/ppow1/Riverview-/issues/370). | Open — temporary recovery verified; permanent fix pending |
