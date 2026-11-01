@@ -147,7 +147,8 @@ def _base_snapshot():
             "engineering_entrance_image_fraction": {"x": 0.464, "y": 0.328},
             "minimized_opacity": 0.45,
             "background_rendering": "cover",
-        },\n        "engineering": {
+        },
+        "engineering": {
             "branches": branches()["branches"],
             "worktrees": worktrees()["worktrees"],
         },
