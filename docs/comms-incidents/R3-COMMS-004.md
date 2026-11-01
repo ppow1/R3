@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/comms-incidents/R3-COMMS-004.md
 Component: COMMS-INCIDENT
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-10-31 UTC (exact time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Record Camrui Comms command gateway internal failure during R3 deployment preflight
@@ -10,11 +10,11 @@ Execution Model: Comms 1.1 command task submit
 Observability: Tool error and verified grant status
 Dependencies: R3 deployment; Camrui command gateway
 Authority: Steward instruction to log Comms failures and punch list
-Changed: 2026-10-31 UTC | R3-COMMS-005 | ChatGPT GPT-6 | Record further submission failure and successful transport probe
+Changed: 2026-11-01 UTC | R3-P020 | ChatGPT GPT-6 | Record failed Windows deployment and unavailable Comms5 grant-status reads
 Supersedes: None
 Contracts: hints/comms-failure-recovery.md; hints/file-provenance.md
 Tests: Pending reproduction and gateway diagnostics
-History/Predecessor: Git blob fba1fe62bac2b5c913dc5ce15d205aaaafaf8b15
+History/Predecessor: Git blob 72c64258af90abbbd1fa04803a3667f8c02aac47
 -->
 # R3-COMMS-004 — Camrui command task submission fails internally
 
@@ -44,3 +44,13 @@ History/Predecessor: Git blob fba1fe62bac2b5c913dc5ce15d205aaaafaf8b15
 - `comms5_describe_operation` for `comms5_command_task_submit` returned `RIV-COMMS5-0004 operation is unknown`. Whether the describe endpoint expects a different operation identifier or is missing registration remains unverified.
 
 **Narrowed fault domain:** General Comms transport and dashboard read projection are operational; command submission remains broken. Next diagnose command-task route registration, caller authorization, grant lookup, dispatch queue, command gateway backend logs, and error translation, using the correlation/idempotency above. Do not infer a specific root cause yet.
+
+
+## 2026-11-01 — Windows deployment attempt blocked; grant status unavailable
+
+- Targeted frontend fix: `a11282a6e217cadcafe9e630e6dcf6c6d9cae889`, which saves the expanded panel state and returns the minimized Engineering marker to its image-relative entrance position at 45% opacity.
+- Verified locally before the attempt: the existing `Run.bat Deploy-R3 <commit-sha>` launcher and `Deploy-R3.ps1` are present; the installed script includes the SSH lock-descriptor closure (`9>&-`). No deployment code or transport was added.
+- The existing Windows Comms task ran the deployer. Its SSH step returned `{"status":"denied","reason":"bounded_request_or_state_invalid"}` with SSH exit code 2; the PowerShell deployer returned exit code 1. No successful remote activation or post-deploy health result was returned. The live revision remains unverified.
+- A subsequent read-only Comms5 discovery call listed `command_task_submit` as IMPLEMENTED. Four `comms5_get_delegation_grant_status` reads (caller and executor grants for Camrui and Windows) returned `BACKEND_UNAVAILABLE`, `error_code=INVALID_ARGUMENT`; current grant status therefore could not be verified.
+- Do not infer the denial cause or claim the website changed. Recovery remains open until the exact grants and submission route can be inspected and an authorized deployment completes with post-deploy checks.
+- **Punch-list reference:** `R3-P020` — objective-level recovery; preserve this failed attempt and continue through an existing authorized interface.
