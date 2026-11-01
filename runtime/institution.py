@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/institution.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.0.2
+# File Revision: 1.0.3
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Durable resident scheduling, supervision, and observable state transitions.
@@ -70,7 +70,7 @@ class Journal:
                 )
             self.db.execute(
                 "INSERT INTO events(at,resident,kind,detail) VALUES (?,?,?,?)",
-                (now, name, kind, detail),
+                (now, name, kind, json.dumps({"state": state, "state_number": STATE_NUMBERS[state], "reason": detail}, sort_keys=True)),
             )
 
     def snapshot(self) -> dict:
@@ -84,10 +84,17 @@ class Journal:
                      for row in rows]
         for resident in residents:
             resident["state_number"] = STATE_NUMBERS[resident["state"]]
+        events = [dict(zip(("id", "at", "resident", "kind", "detail"), row)) for row in last]
+        for event in events:
+            try:
+                parsed = json.loads(event["detail"])
+                if isinstance(parsed, dict) and "state_number" in parsed:
+                    event.update(parsed)
+            except (ValueError, TypeError):
+                pass
         return {
             "residents": residents,
-            "events": [dict(zip(("id","at","resident","kind","detail"), row))
-                       for row in last],
+            "events": events,
             "state_catalog": STATE_NUMBERS,
         }
 
@@ -107,6 +114,7 @@ class Institution:
         self.tick_seconds = tick_seconds
         self.residents: dict[str, Resident] = {}
         self.active: dict[str, asyncio.Task] = {}
+        self._timed_out: set[str] = set()
         self._stop = asyncio.Event()
         self._main_heartbeat = time.monotonic()
         self._supervisor_heartbeat = time.monotonic()
@@ -125,8 +133,9 @@ class Institution:
         try:
             await resident.work(name)
         except asyncio.CancelledError:
-            self.journal.transition(name, "READY", "INTERRUPTED",
-                                    next_due=time.time())
+            if name not in self._timed_out:
+                self.journal.transition(name, "READY", "INTERRUPTED",
+                                        next_due=time.time())
             raise
         except Exception as exc:
             self.journal.transition(name, "RECOVERING", "FAILED",
@@ -162,7 +171,10 @@ class Institution:
                                                 repr(task.exception())[:500],
                                                 next_due=time.time(), failure=True)
                     self.active.pop(name, None)
-                elif time.monotonic() - getattr(task, "_r3_started", time.monotonic()) > self.watchdog_seconds:
+                    self._timed_out.discard(name)
+                elif (name not in self._timed_out and
+                      time.monotonic() - getattr(task, "_r3_started", time.monotonic()) > self.watchdog_seconds):
+                    self._timed_out.add(name)
                     self.journal.transition(name, "RECOVERING", "WATCHDOG_TIMEOUT",
                                             next_due=time.time(), failure=True)
                     task.cancel()
