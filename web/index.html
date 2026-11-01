@@ -2,19 +2,19 @@
 R3 CONTROLLED DOCUMENT
 File: web/index.html
 Component: R3-ESTATE-HOME
-File Revision: 1.0.6
+File Revision: 1.0.7
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
-Purpose: Present the R3 estate home and interactive Engineering status panel
+Purpose: Present the R3 estate home with Engineering and Infrastructure observability panels
 Execution Model: Browser client consuming same-origin read-only R3 APIs
-Observability: API availability, repository state, branches, worktrees
+Observability: Engineering API state; Infrastructure telemetry adapter availability
 Dependencies: /api/v1/visual/background; /api/v1/health; /api/v1/engineering/branches; /api/v1/engineering/worktrees
 Authority: Steward visual placement references and approved R3 website direction
-Changed: 2026-11-01T15:42:00Z | R3-VISUAL-008 | ChatGPT GPT-6 | Correct the target screenshot height and doorway anchor calculation
+Changed: 2026-11-01 UTC | R3-INFRA-001 | ChatGPT GPT-6 | Add understated navigation rail and Infrastructure observability scaffold
 Supersedes: R3-VISUAL-PROTOTYPE framing
-Contracts: docs/IMPLEMENTATION_HANDOFF.md; docs/architecture/ESTATE_SPATIAL_CANON.md
-Tests: Not run; runtime visual acceptance pending deployment
-History/Predecessor: Git blob 1d723e7a02354d79b992db1e54153094fd19c3dd
+Contracts: docs/IMPLEMENTATION_HANDOFF.md; docs/architecture/ESTATE_SPATIAL_CANON.md; Infrastructure Observability Contract v0.1 (UI draft only)
+Tests: Not run; runtime telemetry adapter and visual acceptance pending
+History/Predecessor: Git blob 5f681d1009aa1ad9b6a2645b149586cae5f60aea
 -->
 <!doctype html>
 <html lang="en">
@@ -28,9 +28,46 @@ History/Predecessor: Git blob 1d723e7a02354d79b992db1e54153094fd19c3dd
 body{margin:0;background:#091522;color:#edf4fc;font:15px system-ui,sans-serif;overflow:hidden}
 #estate{position:fixed;inset:0;background:#152635 url('/api/v1/visual/background') center center/cover no-repeat}
 #estate:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(4,12,23,.3),transparent 70%);pointer-events:none}
-.controls{position:fixed;bottom:20px;left:20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 16px;background:rgba(8,18,30,.85);border-radius:12px;z-index:20}
+.controls{position:fixed;bottom:20px;left:auto;right:20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 16px;background:rgba(8,18,30,.85);border-radius:12px;z-index:20}
 input[type=range]{width:180px;accent-color:#8fb9ec}
 button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;border-radius:7px;padding:7px 12px}
+/* Quiet icon rail; expanded labels are opt-in. */
+#side-rail{position:fixed;z-index:30;left:14px;top:14px;bottom:14px;width:48px;display:flex;flex-direction:column;align-items:center;gap:7px;padding:8px 6px;background:rgba(8,18,30,.38);border:1px solid rgba(205,227,255,.18);border-radius:16px;backdrop-filter:blur(10px);transition:width .18s ease}
+#side-rail.expanded{width:174px;align-items:stretch}
+.rail-brand{height:34px;width:34px;display:grid;place-items:center;margin-bottom:5px;color:#eaf4ff;font-weight:800;font-size:17px;border-radius:11px;background:rgba(37,65,91,.44);border:1px solid rgba(205,227,255,.24)}
+.rail-spacer{flex:1}
+.rail-button{width:34px;height:34px;min-height:34px;padding:0;display:flex;align-items:center;justify-content:center;gap:11px;border:1px solid transparent;border-radius:11px;background:transparent;color:#eaf4ff;opacity:.82}
+.rail-button:hover,.rail-button:focus-visible{background:rgba(37,65,91,.56);border-color:rgba(205,227,255,.3);opacity:1}
+.rail-button svg{width:18px;height:18px;flex:0 0 18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.rail-label{display:none;white-space:nowrap;font-size:12px;text-align:left}
+#side-rail.expanded .rail-button{width:100%;justify-content:flex-start;padding:0 8px}
+#side-rail.expanded .rail-label{display:inline}
+#profile-button{position:fixed;z-index:35;left:20px;bottom:20px;width:34px;height:34px;padding:0;border-radius:50%;background:rgba(35,55,76,.62);border-color:rgba(205,227,255,.35);font-size:11px;font-weight:700}
+#profile-menu{position:fixed;z-index:36;left:14px;bottom:62px;width:206px;padding:8px;background:rgba(8,18,30,.82);border:1px solid rgba(205,227,255,.24);border-radius:13px;backdrop-filter:blur(12px);box-shadow:0 12px 32px #0006}
+#profile-menu[hidden],#infrastructure-panel[hidden]{display:none}
+.profile-title{padding:8px 10px 10px;color:#c8d9ea;font-size:12px;border-bottom:1px solid #c2d5ec33;margin-bottom:5px}
+.profile-menu-item{width:100%;display:block;text-align:left;padding:9px 10px;margin:2px 0;background:transparent;border-color:transparent;font-size:13px}
+.profile-menu-item:hover{background:rgba(37,65,91,.56)}
+#infrastructure-panel{position:fixed;z-index:16;inset:5vh 6vw 5vh 74px;overflow:auto;padding:22px;background:rgba(8,18,30,.83);border:1px solid rgba(205,227,255,.32);border-radius:18px;backdrop-filter:blur(14px);box-shadow:0 22px 56px #0009}
+.infra-header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.infra-header h1{font-size:20px;margin:0}
+.infra-header p{font-size:12px;color:#c0d0e2;margin:4px 0 0}
+.infra-header button{margin-left:auto}
+.infra-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.infra-card{padding:14px;background:rgba(30,57,80,.46);border:1px solid rgba(205,227,255,.16);border-radius:13px;min-width:0}
+.infra-card h2{font-size:14px;margin:0 0 8px}
+.infra-card p{font-size:12px;color:#c8d9ea;line-height:1.5;margin:6px 0}
+.infra-unavailable{display:inline-flex;align-items:center;gap:7px;color:#d6c79a;font-size:11px}
+.infra-unavailable:before{content:"";width:7px;height:7px;border-radius:50%;background:#b79a56;display:inline-block}
+.infra-sequence{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:10px}
+.infra-step{padding:6px 8px;border-radius:8px;background:rgba(8,18,30,.42);border:1px solid #c2d5ec22;font-size:11px;color:#d7e5f4}
+.infra-wheel{display:flex;align-items:center;justify-content:center;gap:14px;min-height:105px}
+.infra-wheel svg{width:84px;height:84px;stroke:#b8cde2;fill:none;stroke-width:2;opacity:.68}
+.infra-wheel-label{max-width:220px;font-size:12px;line-height:1.5;color:#c8d9ea}
+.infra-history{grid-column:1/-1}
+.infra-history-list{margin:8px 0 0;padding:0;list-style:none}
+.infra-history-list li{padding:8px 0;border-top:1px solid #c2d5ec22;font-size:12px;color:#c8d9ea}
+@media(max-width:760px){#infrastructure-panel{inset:8px 8px 8px 62px;padding:14px}.infra-grid{grid-template-columns:1fr}.infra-history{grid-column:auto}}
 .window{position:absolute;left:12%;top:19%;width:min(740px,76vw);height:min(430px,60vh);min-width:320px;min-height:180px;resize:both;overflow:auto;background:rgba(12,25,42,var(--panel-opacity));border:1px solid rgba(205,227,255,.55);border-radius:14px;box-shadow:0 18px 50px #0008;z-index:5}
 .window header{padding:15px 19px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #c2d5ec55;cursor:move;user-select:none;touch-action:none}
 .window header b{font-size:20px}
@@ -50,12 +87,27 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 .window.min header b{font-size:15px;white-space:nowrap}
 @media(max-width:650px){
  .window{left:4%;top:14%;width:92vw;height:56vh}
- .controls{left:4%;right:4%;bottom:12px}
+ .controls{left:auto;right:4%;bottom:12px}
 }
 </style>
 </head>
 <body>
 <div id="estate" role="img" aria-label="Riverview 3 estate"></div>
+<nav id="side-rail" aria-label="R3 navigation">
+  <div class="rail-brand" aria-label="Riverview 3">R</div>
+  <button class="rail-button" id="rail-toggle" type="button" aria-label="Expand navigation" title="Expand navigation"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span class="rail-label">Menu</span></button>
+  <button class="rail-button" id="nav-home" type="button" aria-label="Estate home" title="Estate home"><svg viewBox="0 0 24 24"><path d="m3 10 9-7 9 7M5 9v11h14V9M9 20v-7h6v7"/></svg><span class="rail-label">Home</span></button>
+  <button class="rail-button" id="nav-engineering" type="button" aria-label="Engineering Foundry" title="Engineering Foundry"><svg viewBox="0 0 24 24"><path d="m14 6 4-4 4 4-4 4M3 21l9-9M7 5l12 12M5 7l12 12"/></svg><span class="rail-label">Engineering</span></button>
+  <button class="rail-button" id="nav-infrastructure" type="button" aria-label="Infrastructure" title="Infrastructure observability"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><path d="M12 3v7m0 4v7M3 12h7m4 0h7M5.6 5.6l4.9 4.9m3 3 4.9 4.9m0-12.8-4.9 4.9m-3 3-4.9 4.9"/></svg><span class="rail-label">Infrastructure</span></button>
+  <div class="rail-spacer"></div>
+</nav>
+<button id="profile-button" type="button" aria-label="Open profile menu" title="Pat Powell">PP</button>
+<div id="profile-menu" hidden>
+  <div class="profile-title">Pat Powell</div>
+  <button class="profile-menu-item" id="profile-settings" type="button">Settings</button>
+  <button class="profile-menu-item" id="profile-engineering" type="button">Engineering Foundry panel</button>
+  <button class="profile-menu-item" id="profile-infrastructure" type="button">Infrastructure panel</button>
+</div>
 <section class="window min" id="win" aria-label="Engineering Foundry">
   <header id="drag">
     <b>⚒ Engineering Foundry</b>
@@ -82,6 +134,56 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
     <p class="status-footnote">Branch and worktree records do not establish that a worker is currently active.</p>
   </div>
 </section>
+<section id="infrastructure-panel" aria-label="Infrastructure observability" hidden>
+  <header class="infra-header">
+    <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true" style="fill:none;stroke:#dcecff;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><path d="M12 3v7m0 4v7M3 12h7m4 0h7M5.6 5.6l4.9 4.9m3 3 4.9 4.9m0-12.8-4.9 4.9m-3 3-4.9 4.9"/></svg>
+    <div><h1>Infrastructure</h1><p>R3 runtime observability · contract draft v0.1</p></div>
+    <button id="infrastructure-close" type="button" aria-label="Close Infrastructure">Close</button>
+  </header>
+  <div class="infra-grid">
+    <section class="infra-card">
+      <h2>Main loop</h2>
+      <div class="infra-unavailable">Runtime state unavailable</div>
+      <p id="main-loop-state">No verified state number or transition has been received from the R3 runtime.</p>
+      <div class="infra-sequence" aria-label="Documented resident learning cycle">
+        <span class="infra-step">Retrieve knowledge</span><span class="infra-step">Ground</span><span class="infra-step">Reason / act</span><span class="infra-step">Observe</span><span class="infra-step">Verify</span><span class="infra-step">Learn / update</span>
+      </div>
+    </section>
+    <section class="infra-card">
+      <h2>Supervisory loop</h2>
+      <div class="infra-unavailable">Runtime state unavailable</div>
+      <p id="supervisory-loop-state">No verified supervisory state, watchdog reading, or recovery event has been received.</p>
+      <p>Designed responsibility: detect stalls or failures, then record recovery or escalation.</p>
+    </section>
+    <section class="infra-card">
+      <h2>Water-wheel scheduler</h2>
+      <div class="infra-wheel">
+        <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="39"/><circle cx="50" cy="50" r="8"/><path d="M50 11v31m0 16v31M11 50h31m16 0h31M22.4 22.4l21.9 21.9m11.4 11.4 21.9 21.9m0-55.2L55.7 44.3M44.3 55.7 22.4 77.6"/></svg>
+        <div class="infra-wheel-label">Scheduler model only. No active resident slot or time-slice telemetry is connected.</div>
+      </div>
+    </section>
+    <section class="infra-card">
+      <h2>Residents and resources</h2>
+      <div class="infra-unavailable">Activity not reported by runtime</div>
+      <p id="resident-resource-state">No resident assignment, resource allocation, or active time slice is available.</p>
+    </section>
+    <section class="infra-card">
+      <h2>Heartbeat, watchdog, recovery</h2>
+      <div class="infra-unavailable">No runtime source connected</div>
+      <p id="watchdog-state">Heartbeat age, watchdog status, and recovery state will be shown when supplied by verified runtime telemetry.</p>
+    </section>
+    <section class="infra-card">
+      <h2>Source freshness</h2>
+      <div class="infra-unavailable">Unavailable</div>
+      <p id="freshness-state">Last source update: not reported. Freshness cannot be determined without a runtime timestamp.</p>
+    </section>
+    <section class="infra-card infra-history">
+      <h2>Ordered transition history</h2>
+      <div class="infra-unavailable">No verified transitions received</div>
+      <ol class="infra-history-list" id="transition-history"><li>History will appear here after the R3 runtime supplies verified enum transitions and timestamps.</li></ol>
+    </section>
+  </div>
+</section>
 <div class="controls">
   <label for="opacity">Panel opacity</label>
   <input id="opacity" type="range" min="45" max="95" value="45">
@@ -91,6 +193,52 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
   <output id="snapshot-status" aria-live="polite"></output>
 </div>
 <script>
+// Front-end adapter seam. It deliberately has no backend field names or inferred state values.
+// Reconcile the R3 runtime's state and scheduling contract before connecting a telemetry source.
+const infrastructureTelemetryAdapter={
+  async read(){
+    return {available:false,reason:'R3 runtime telemetry source is not connected'};
+  }
+};
+const infrastructurePanel=document.getElementById('infrastructure-panel');
+const infrastructureButton=document.getElementById('nav-infrastructure');
+const infrastructureClose=document.getElementById('infrastructure-close');
+const sideRail=document.getElementById('side-rail');
+const profileButton=document.getElementById('profile-button');
+const profileMenu=document.getElementById('profile-menu');
+function closeInfrastructure(){infrastructurePanel.hidden=true;}
+function openInfrastructure(){infrastructurePanel.hidden=false;profileMenu.hidden=true;}
+infrastructureButton.addEventListener('click',openInfrastructure);
+infrastructureClose.addEventListener('click',closeInfrastructure);
+document.getElementById('rail-toggle').addEventListener('click',()=>{
+  const expanded=sideRail.classList.toggle('expanded');
+  document.getElementById('rail-toggle').setAttribute('aria-label',expanded?'Collapse navigation':'Expand navigation');
+});
+document.getElementById('nav-home').addEventListener('click',()=>{closeInfrastructure();});
+document.getElementById('nav-engineering').addEventListener('click',()=>{
+  closeInfrastructure();
+  if(win.classList.contains('min'))restorePanel(false);
+});
+profileButton.addEventListener('click',()=>{profileMenu.hidden=!profileMenu.hidden;});
+document.getElementById('profile-infrastructure').addEventListener('click',openInfrastructure);
+document.getElementById('profile-engineering').addEventListener('click',()=>{
+  profileMenu.hidden=true;
+  if(win.classList.contains('min'))restorePanel(false);
+});
+document.getElementById('profile-settings').addEventListener('click',()=>{
+  profileMenu.hidden=true;
+  snapshotStatus.textContent='Settings panel is not yet connected';
+});
+document.addEventListener('pointerdown',event=>{
+  if(!profileMenu.hidden&&!profileMenu.contains(event.target)&&event.target!==profileButton)profileMenu.hidden=true;
+});
+async function refreshInfrastructure(){
+  const model=await infrastructureTelemetryAdapter.read();
+  const unavailable=!model||model.available!==true;
+  if(unavailable)return;
+  // Runtime-specific enum and scheduling fields are mapped here only after architecture reconciliation.
+}
+refreshInfrastructure();
 const win=document.getElementById('win');
 const slider=document.getElementById('opacity');
 const value=document.getElementById('value');
