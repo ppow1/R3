@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -12,10 +12,11 @@ Dependencies: hints/README.md
 Authority: R3 engineering navigation, subordinate to approved charter
 Changed: 2026-10-31 UTC | R3-COMMS-001 | ChatGPT GPT-6 | Index mandatory Comms incident capture
 Changed: 2026-11-01 UTC | R3-Q2-DOC-001 | ChatGPT GPT-6 | Index Q2 watched-folder runbook
+Changed: 2026-11-01 UTC | R3-IMAGE-PUBLISH-001 | ChatGPT GPT-6 | Index verified image publishing policy
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Manual source inspection; automated validation pending
-History/Predecessor: Git blob 1a12ce31f4882b916babbf85120fe06e8b1d10b2
+History/Predecessor: Git blob 1df4be3a89f303e3715fe363092280860566a097
 -->
 # AI_HINTS.md — Riverview 3
 
@@ -44,5 +45,6 @@ Start with [the hints index](hints/README.md). Keep this root file short; put de
 - [Institutional architecture and durable state](hints/architecture.md)
 - [Deployment and command execution](hints/deployment.md)
 - [Q2 watched script queue: submit, dispatch, and retrieve results](hints/q2-script-queue.md)
+- [ChatGPT-generated image publishing: Download → A: → GitHub](hints/chatgpt-image-publishing.md)
 
 When asked to add material to AI_HINTS, update a focused `hints/` document and add or adjust a concise pointer here only if needed.
