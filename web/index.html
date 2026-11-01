@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: web/index.html
 Component: R3-ESTATE-HOME
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Present the R3 estate home and interactive Engineering status panel
@@ -10,7 +10,7 @@ Execution Model: Browser client consuming same-origin read-only R3 APIs
 Observability: API availability, repository state, branches, worktrees
 Dependencies: /api/v1/visual/background; /api/v1/health; /api/v1/engineering/branches; /api/v1/engineering/worktrees
 Authority: Steward visual placement references and approved R3 website direction
-Changed: 2026-11-01T06:36:32.533Z | R3-VISUAL-005 | ChatGPT GPT-6 | Align minimized marker to doorway, remove prototype labels, and show live API-backed Engineering status
+Changed: 2026-11-01T15:30:00Z | R3-VISUAL-006 | ChatGPT GPT-6 | Calculate minimized marker from the loaded artwork's intrinsic dimensions
 Supersedes: R3-VISUAL-PROTOTYPE framing
 Contracts: docs/IMPLEMENTATION_HANDOFF.md; docs/architecture/ESTATE_SPATIAL_CANON.md
 Tests: Not run; runtime visual acceptance pending deployment
@@ -107,7 +107,7 @@ function centerWindow(){clampPosition((innerWidth-win.offsetWidth)/2,(innerHeigh
 const engineeringEntrance={x:.338,y:.837};
 let expandedState=null;
 function entrancePosition(){
-  const imageWidth=1452,imageHeight=1024;
+  const imageWidth=background.naturalWidth||1452,imageHeight=background.naturalHeight||1024;
   const scale=Math.max(innerWidth/imageWidth,innerHeight/imageHeight);
   const drawnWidth=imageWidth*scale,drawnHeight=imageHeight*scale;
   return {x:(innerWidth-drawnWidth)/2+engineeringEntrance.x*drawnWidth,
@@ -215,7 +215,7 @@ async function refreshEngineeringStatus(){
 }
 refreshButton.addEventListener('click',refreshEngineeringStatus);
 const background=new Image();
-background.onload=()=>{};
+background.onload=()=>{if(win.classList.contains('min'))placeMinimized();};
 background.onerror=()=>{};
 background.src='/api/v1/visual/background';
 slider.oninput();
