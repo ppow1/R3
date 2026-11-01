@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.5
+# File Revision: 1.0.6
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Initial shared read-only institutional API
@@ -9,7 +9,7 @@
 # Observability: HTTP health endpoint; no deployed verification
 # Dependencies: FastAPI, Git checkout, local artwork folder
 # Authority: R3 engineering guidance; approved charter prevails
-# Changed: 2026-11-01 UTC | R3-SNAPSHOT-002 | ChatGPT GPT-6 | Capture latest browser geometry through the shared diagnostic API
+# Changed: 2026-11-01 UTC | R3-SNAPSHOT-003 | ChatGPT GPT-6 | Include canonical UI anchor in shared snapshot API
 # Supersedes: None
 # Contracts: hints/file-provenance.md
 # Tests: Not run (metadata-only change)
@@ -143,7 +143,7 @@ def _base_snapshot():
             "width_px": width,
             "height_px": height,
         },
-        "engineering": {
+        "ui_contract": {\n            "engineering_entrance_image_fraction": {"x": 0.464, "y": 0.328},\n            "minimized_opacity": 0.45,\n            "background_rendering": "cover",\n        },\n        "engineering": {
             "branches": branches()["branches"],
             "worktrees": worktrees()["worktrees"],
         },
