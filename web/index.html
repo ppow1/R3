@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: web/index.html
 Component: R3-ESTATE-HOME
-File Revision: 1.0.11
+File Revision: 1.0.12
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Present the R3 estate home with Engineering and Infrastructure observability panels
@@ -10,7 +10,7 @@ Execution Model: Browser client consuming same-origin read-only R3 APIs
 Observability: Engineering API state; Infrastructure telemetry adapter availability
 Dependencies: /api/v1/visual/background; /api/v1/health; /api/v1/engineering/branches; /api/v1/engineering/worktrees
 Authority: Steward visual placement references and approved R3 website direction
-Changed: 2026-11-01 UTC | R3-CHAT-WINDOW-PRESETS-001 | ChatGPT GPT-6 | Add collapsible chat rail, movable windows and user-local layout presets
+Changed: 2026-11-01 UTC | R3-CHAT-OPACITY-QUICK-PRESET-001 | ChatGPT GPT-6 | Add per-panel opacity controls and quick layout preset launcher
 Supersedes: R3-VISUAL-PROTOTYPE framing
 Contracts: docs/IMPLEMENTATION_HANDOFF.md; docs/architecture/ESTATE_SPATIAL_CANON.md; hints/chat-contract-draft.md; hints/settings-contract-draft.md
 Tests: Not run; runtime telemetry adapter and visual acceptance pending
@@ -117,6 +117,19 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 #layout-preset-name{grid-column:1/-1}
 #layout-presets-controls button{padding:6px 8px;font-size:11px}
 @media(max-width:760px){#chat-panel{inset:auto;left:62px;top:8px;right:auto;bottom:auto;width:calc(100vw - 72px);height:82vh;min-width:0;min-height:380px}#infrastructure-panel{inset:auto;left:62px;top:8px;right:auto;bottom:auto;width:calc(100vw - 72px);height:82vh;min-width:0;min-height:340px}}
+
+#layout-quick-button{position:fixed;z-index:38;left:20px;bottom:62px;width:34px;height:34px;padding:6px;border-radius:10px;background:rgba(35,55,76,.62);border-color:rgba(205,227,255,.35);color:#d8eaff}
+#layout-quick-button svg{display:block;width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linejoin:round}
+#layout-quick-menu{position:fixed;z-index:39;left:14px;bottom:102px;width:220px;max-height:72vh;overflow:auto;padding:8px;background:rgba(8,18,30,.9);border:1px solid rgba(205,227,255,.3);border-radius:13px;backdrop-filter:blur(12px);box-shadow:0 12px 32px #0008}
+#layout-quick-menu[hidden]{display:none}.layout-quick-title{padding:5px 7px 8px;font-size:11px;color:#c8d9ea;border-bottom:1px solid #c2d5ec33;margin-bottom:5px}
+#layout-quick-slots{display:grid;gap:3px}.layout-quick-slot{display:flex;align-items:center;gap:8px;width:100%;padding:5px 7px;text-align:left;background:transparent;border-color:transparent;font-size:11px;opacity:.42}.layout-quick-slot.available{opacity:1}.layout-quick-slot.available:hover,.layout-quick-slot.available:focus-visible{background:rgba(62,104,143,.48);border-color:#c2d5ec44}
+.layout-quick-number{display:grid;place-items:center;width:24px;height:24px;flex:0 0 24px;border-radius:7px;border:1px solid #c2d5ec33;font-variant-numeric:tabular-nums}.layout-quick-slot.available .layout-quick-number{background:#294969;border-color:#9dc2e888;color:#fff}.layout-quick-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#layout-quick-settings{display:grid;place-items:center;width:30px;height:30px;margin:7px auto 0;padding:0;border-radius:8px;background:rgba(37,65,91,.48);font-size:15px}#layout-quick-status{display:block;min-height:14px;margin:5px 3px 0;font-size:10px;color:#c8d9ea}
+.opacity-control{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:0 0 30px}.opacity-trigger{width:30px;height:30px;padding:0;display:grid;place-items:center;border-radius:8px;background:rgba(35,55,76,.62);border-color:#c2d5ec44;color:#dcecff;font-size:16px}
+.opacity-popover{display:none;position:absolute;z-index:80;right:0;top:calc(100% + 5px);width:190px;padding:10px;background:rgba(8,18,30,.96);border:1px solid #c2d5ec66;border-radius:10px;box-shadow:0 8px 24px #0009}.opacity-control:hover .opacity-popover,.opacity-control:focus-within .opacity-popover{display:block}
+.opacity-popover label{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#eaf4ff}.opacity-popover input[type=range]{width:100%;margin:8px 0 0;accent-color:#8fb9ec}
+#infrastructure-panel{background:rgba(8,18,30,var(--infrastructure-opacity,.83))}.window.min .opacity-control{display:none}#chat-panel{background:rgba(8,18,30,var(--chat-opacity,.86))}.window{background:rgba(12,25,42,var(--engineering-opacity,.45))}
+.window header .window-actions{display:flex;align-items:center;gap:6px;margin-left:auto}.window header .window-actions>button{margin-left:0}.infra-header .infra-actions .opacity-control{margin-left:auto}.infra-header .infra-actions .infra-minimize-icon{margin-left:0}#chat-panel .chat-main>.chat-head #chat-minimize,#chat-panel .chat-main>.chat-head #chat-close{margin-left:0}
 </style>
 </head>
 <body>
@@ -130,20 +143,22 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
   <button class="rail-button" id="nav-infrastructure" type="button" aria-label="Infrastructure" title="Infrastructure observability"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><path d="M12 3v7m0 4v7M3 12h7m4 0h7M5.6 5.6l4.9 4.9m3 3 4.9 4.9m0-12.8-4.9 4.9m-3 3-4.9 4.9"/></svg><span class="rail-label">Infrastructure</span></button>
   <div class="rail-spacer"></div>
 </nav>
+<button id="layout-quick-button" type="button" aria-label="Open floating panel layouts" title="Floating panel layouts" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="2.5" width="13" height="13" rx="1.5"/><rect x="8.5" y="8.5" width="13" height="13" rx="1.5" fill="rgba(143,185,236,.35)"/></svg></button>
+<div id="layout-quick-menu" hidden><div class="layout-quick-title">Floating panel layouts</div><div id="layout-quick-slots"></div><button id="layout-quick-settings" type="button" title="Open preset settings" aria-label="Open preset settings">⚙</button><output id="layout-quick-status" aria-live="polite"></output></div>
 <button id="profile-button" type="button" aria-label="Open profile menu" title="Pat Powell">PP</button>
 <div id="profile-menu" hidden>
   <div class="profile-title">Pat Powell</div>
   <button class="profile-menu-item" id="profile-settings" type="button" aria-expanded="false">Settings</button>
 <div id="profile-settings-panel" hidden><div id="settings-shell">
 <nav class="settings-scopes" aria-label="Settings scope"><button class="settings-scope" data-settings-scope="Institutional">Institutional</button><button class="settings-scope" data-settings-scope="Departmental">Departmental</button><button class="settings-scope" data-settings-scope="Resident">Resident</button><button class="settings-scope" data-settings-scope="Chat">Chat</button><button class="settings-scope" data-settings-scope="User">User</button><button class="settings-scope" data-settings-scope="Device">Device</button><button class="settings-scope" data-settings-scope="Infrastructure">Infrastructure</button></nav>
-<section class="settings-detail" aria-live="polite"><h3 id="settings-scope-title">Institutional</h3><p class="settings-unavailable" id="settings-registry-status">Settings registry unavailable · no operational settings loaded.</p><div class="settings-row"><span>Inherited value</span><span>Unavailable</span></div><div class="settings-row"><span>Scoped override</span><span>Unavailable</span></div><div class="settings-row"><span>Effective value</span><span>Unavailable</span></div><div class="settings-row"><span>Authorization</span><span>Capability manifest unavailable</span></div><div class="settings-row"><span>Configuration history</span><span>Unavailable</span></div><div class="settings-local">Local appearance · this browser only</div><div id="browser-appearance" hidden><div class="controls"><label for="opacity">Panel opacity</label><output id="value" for="opacity">45%</output><input id="opacity" type="range" min="45" max="95" value="45"><button id="center-window" type="button">Center window</button><button id="snapshot-button" type="button">Snapshot</button><output id="snapshot-status" aria-live="polite"></output></div><section id="layout-presets"><h3>Floating panel layouts</h3><p>Save up to 10 layouts for this browser. A layout records panel positions, sizes, and open or minimized state. Applying a preset can show Chat, Engineering, and Infrastructure together.</p><div id="layout-presets-controls"><select id="layout-preset-slot" aria-label="Layout preset"></select><input id="layout-preset-name" type="text" maxlength="32" placeholder="Preset name (optional)" aria-label="Preset name"><button id="layout-preset-save" type="button">Save current</button><button id="layout-preset-apply" type="button">Apply</button><button id="layout-preset-clear" type="button">Clear</button></div><output id="layout-preset-status" aria-live="polite"></output></section></div></section></div></div>
+<section class="settings-detail" aria-live="polite"><h3 id="settings-scope-title">Institutional</h3><p class="settings-unavailable" id="settings-registry-status">Settings registry unavailable · no operational settings loaded.</p><div class="settings-row"><span>Inherited value</span><span>Unavailable</span></div><div class="settings-row"><span>Scoped override</span><span>Unavailable</span></div><div class="settings-row"><span>Effective value</span><span>Unavailable</span></div><div class="settings-row"><span>Authorization</span><span>Capability manifest unavailable</span></div><div class="settings-row"><span>Configuration history</span><span>Unavailable</span></div><div class="settings-local">Local appearance · this browser only</div><div id="browser-appearance" hidden><div class="controls"><label for="opacity">Engineering opacity</label><output id="value" for="opacity">45%</output><input id="opacity" type="range" min="45" max="95" value="45"><button id="center-window" type="button">Center window</button><button id="snapshot-button" type="button">Snapshot</button><output id="snapshot-status" aria-live="polite"></output></div><section id="layout-presets"><h3>Floating panel layouts</h3><p>Save up to 10 layouts for this browser. A layout records panel positions, sizes, and open or minimized state. Applying a preset can show Chat, Engineering, and Infrastructure together.</p><div id="layout-presets-controls"><select id="layout-preset-slot" aria-label="Layout preset"></select><input id="layout-preset-name" type="text" maxlength="32" placeholder="Preset name (optional)" aria-label="Preset name"><button id="layout-preset-save" type="button">Save current</button><button id="layout-preset-apply" type="button">Apply</button><button id="layout-preset-clear" type="button">Clear</button></div><output id="layout-preset-status" aria-live="polite"></output></section></div></section></div></div>
   <button class="profile-menu-item" id="profile-engineering" type="button">Engineering Foundry panel</button>
   <button class="profile-menu-item" id="profile-infrastructure" type="button">Infrastructure panel</button>
 </div>
 <section class="window min" id="win" aria-label="Engineering Foundry">
   <header id="drag">
     <b>⚒ Engineering Foundry</b>
-    <button id="minimize" aria-label="Restore panel">□</button>
+    <div class="window-actions"><div class="opacity-control"><button class="opacity-trigger" type="button" title="Engineering opacity" aria-label="Engineering opacity">◐</button><div class="opacity-popover"><label for="engineering-opacity">Engineering opacity <output id="engineering-opacity-value">45%</output></label><input id="engineering-opacity" type="range" min="45" max="95" value="45"></div></div><button id="minimize" aria-label="Restore panel">□</button></div>
   </header>
   <div class="content">
     <h2>Engineering status</h2>
@@ -170,7 +185,7 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
   <header class="infra-header">
     <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true" style="fill:none;stroke:#dcecff;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><path d="M12 3v7m0 4v7M3 12h7m4 0h7M5.6 5.6l4.9 4.9m3 3 4.9 4.9m0-12.8-4.9 4.9m-3 3-4.9 4.9"/></svg>
     <div><h1>Infrastructure</h1><p>R3 runtime observability · contract draft v0.1</p></div>
-    <div class="infra-actions"><button id="infrastructure-minimize" class="infra-minimize-icon" type="button" aria-label="Minimize Infrastructure" title="Minimize">−</button></div>
+    <div class="infra-actions"><div class="opacity-control"><button class="opacity-trigger" type="button" title="Infrastructure opacity" aria-label="Infrastructure opacity">◐</button><div class="opacity-popover"><label for="infrastructure-opacity">Infrastructure opacity <output id="infrastructure-opacity-value">83%</output></label><input id="infrastructure-opacity" type="range" min="45" max="95" value="83"></div></div><button id="infrastructure-minimize" class="infra-minimize-icon" type="button" aria-label="Minimize Infrastructure" title="Minimize">−</button></div>
   </header>
   <div class="infra-grid">
     <section class="infra-card">
@@ -217,7 +232,7 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
   </div>
 </section>
 <section id="chat-panel" aria-label="Chat" hidden><aside class="chat-sidebar"><div class="chat-head"><h1>Conversations</h1><button class="icon-button chat-sidebar-toggle" id="chat-sidebar-toggle" type="button" title="Collapse conversation rail" aria-label="Collapse conversation rail">‹</button><button class="icon-button" id="chat-new" disabled title="New conversation · unavailable" aria-label="New conversation">＋</button><button class="icon-button" id="chat-conference" disabled title="Conference room · planned" aria-label="New conference room">♧</button></div><input class="chat-search" type="search" placeholder="Search conversations" aria-label="Search conversations" disabled><div class="chat-status">Functional: navigation · Unavailable: chat service · Planned: persistent conversation actions</div><div class="chat-status" id="chat-service-status">Conversation service unavailable · no live history loaded</div><div class="chat-empty"><div><strong>No conversation data</strong>Persistent conversations, archive, reopen, rename, and search will appear when the authorized service connects.</div></div></aside>
-<section class="chat-main"><div class="chat-head" id="chat-drag"><h1>Chat</h1><button class="icon-button" id="chat-minimize" title="Minimize chat" aria-label="Minimize chat">−</button><button class="icon-button" disabled title="Conversation menu · planned" aria-label="Conversation menu">⋯</button><button class="icon-button" id="chat-close" title="Close chat" aria-label="Close chat">×</button></div><div class="chat-empty"><div><strong>No messages loaded</strong>Messages come from the durable conversation service. No sample conversation is shown.</div></div><div class="chat-status">Action availability comes from each resident's capability manifest.</div><div class="chat-toolbar" aria-label="Planned message actions"><button disabled title="Copy · planned" aria-label="Copy">▢</button><button disabled title="Edit · planned" aria-label="Edit">✎</button><button disabled title="Quote · planned" aria-label="Quote">❝</button><button disabled title="Branch · planned" aria-label="Branch">⑂</button><button disabled title="Generate image · unavailable" aria-label="Generate image">▧</button><button disabled title="Save reference · planned" aria-label="Save reference">☆</button><button disabled title="Work-related action · unavailable" aria-label="Work action">⌘</button><button disabled title="Message menu · planned" aria-label="Message menu">⋯</button></div><div class="chat-composer"><textarea aria-label="Message" placeholder="Chat unavailable until the conversation API connects" disabled></textarea><button disabled aria-label="Send message" title="Send unavailable">↑</button></div></section>
+<section class="chat-main"><div class="chat-head" id="chat-drag"><h1>Chat</h1><button class="icon-button" id="chat-minimize" title="Minimize chat" aria-label="Minimize chat">−</button><div class="opacity-control"><button class="icon-button opacity-trigger" type="button" title="Chat opacity" aria-label="Chat opacity">◐</button><div class="opacity-popover"><label for="chat-opacity">Chat opacity <output id="chat-opacity-value">86%</output></label><input id="chat-opacity" type="range" min="45" max="95" value="86"></div></div><button class="icon-button" disabled title="Conversation menu · planned" aria-label="Conversation menu">⋯</button><button class="icon-button" id="chat-close" title="Close chat" aria-label="Close chat">×</button></div><div class="chat-empty"><div><strong>No messages loaded</strong>Messages come from the durable conversation service. No sample conversation is shown.</div></div><div class="chat-status">Action availability comes from each resident's capability manifest.</div><div class="chat-toolbar" aria-label="Planned message actions"><button disabled title="Copy · planned" aria-label="Copy">▢</button><button disabled title="Edit · planned" aria-label="Edit">✎</button><button disabled title="Quote · planned" aria-label="Quote">❝</button><button disabled title="Branch · planned" aria-label="Branch">⑂</button><button disabled title="Generate image · unavailable" aria-label="Generate image">▧</button><button disabled title="Save reference · planned" aria-label="Save reference">☆</button><button disabled title="Work-related action · unavailable" aria-label="Work action">⌘</button><button disabled title="Message menu · planned" aria-label="Message menu">⋯</button></div><div class="chat-composer"><textarea aria-label="Message" placeholder="Chat unavailable until the conversation API connects" disabled></textarea><button disabled aria-label="Send message" title="Send unavailable">↑</button></div></section>
 <template id="conversation-row-template"><div><button class="conversation-open"></button><button class="icon-button" title="Conversation actions">⋯</button><menu class="conversation-actions" data-capability-manifest="conversation"><button>Rename</button><button>Archive</button><button>Delete</button><button>Reopen</button></menu></div></template><template id="message-row-template"><article><button class="icon-button" title="Message actions">⋯</button><menu class="message-actions" data-capability-manifest="resident"><button>Copy</button><button>Edit</button><button>Quote</button><button>Branch</button><button>Generate image</button><button>Save reference</button><button>Work-related action</button></menu></article></template></section>
 <button id="infrastructure-anchor" type="button" aria-label="Open Infrastructure panel" title="Infrastructure entrance" hidden>◉ Infrastructure</button>
 <script>
@@ -236,13 +251,17 @@ const infrastructureButton=document.getElementById('nav-infrastructure');
 const infrastructureMinimize=document.getElementById('infrastructure-minimize'),infrastructureAnchor=document.getElementById('infrastructure-anchor');
 const sideRail=document.getElementById('side-rail');
 const profileButton=document.getElementById('profile-button');
+const layoutQuickButton=document.getElementById('layout-quick-button');
+const layoutQuickMenu=document.getElementById('layout-quick-menu');
+const layoutQuickSlots=document.getElementById('layout-quick-slots');
+const layoutQuickStatus=document.getElementById('layout-quick-status');
 const profileMenu=document.getElementById('profile-menu');
 const infrastructureHeader=document.querySelector('.infra-header');
 const chatSidebar=document.querySelector('.chat-sidebar');
 const chatDragHandle=document.getElementById('chat-drag');
 function closeInfrastructure(){infrastructurePanel.hidden=true;infrastructureAnchor.hidden=true;}
 function closeChat(){chatPanel.hidden=true;}
-function openChat(){chatPanel.hidden=false;chatPanel.classList.remove('minimized');const button=document.getElementById('chat-minimize');button.textContent='−';button.title='Minimize chat';button.setAttribute('aria-label','Minimize chat');profileMenu.hidden=true;}
+function openChat(){chatPanel.hidden=false;chatPanel.classList.remove('minimized');const button=document.getElementById('chat-minimize');button.textContent='−';button.title='Minimize chat';button.setAttribute('aria-label','Minimize chat');profileMenu.hidden=true;layoutQuickMenu.hidden=true;}
 document.getElementById('nav-chat').addEventListener('click',openChat);document.getElementById('chat-close').addEventListener('click',closeChat);
 document.getElementById('chat-minimize').addEventListener('click',()=>{chatPanel.classList.toggle('minimized');const minimized=chatPanel.classList.contains('minimized');document.getElementById('chat-minimize').textContent=minimized?'□':'−';document.getElementById('chat-minimize').title=minimized?'Restore chat':'Minimize chat';document.getElementById('chat-minimize').setAttribute('aria-label',minimized?'Restore chat':'Minimize chat');});
 document.getElementById('chat-sidebar-toggle').addEventListener('click',()=>{chatPanel.classList.toggle('rail-collapsed');const collapsed=chatPanel.classList.contains('rail-collapsed');document.getElementById('chat-sidebar-toggle').textContent=collapsed?'›':'‹';document.getElementById('chat-sidebar-toggle').title=collapsed?'Expand conversation rail':'Collapse conversation rail';document.getElementById('chat-sidebar-toggle').setAttribute('aria-label',collapsed?'Expand conversation rail':'Collapse conversation rail');});
@@ -258,7 +277,8 @@ document.getElementById('nav-home').addEventListener('click',()=>{closeInfrastru
 document.getElementById('nav-engineering').addEventListener('click',()=>{
   if(win.classList.contains('min'))restorePanel(false);
 });
-profileButton.addEventListener('click',()=>{profileMenu.hidden=!profileMenu.hidden;});
+profileButton.addEventListener('click',()=>{layoutQuickMenu.hidden=true;profileMenu.hidden=!profileMenu.hidden;});
+layoutQuickButton.addEventListener('click',()=>{profileMenu.hidden=true;layoutQuickMenu.hidden=!layoutQuickMenu.hidden;layoutQuickButton.setAttribute('aria-expanded',String(!layoutQuickMenu.hidden));});
 document.getElementById('profile-infrastructure').addEventListener('click',openInfrastructure);
 document.getElementById('profile-engineering').addEventListener('click',()=>{
   profileMenu.hidden=true;
@@ -269,6 +289,7 @@ document.querySelectorAll('[data-settings-scope]').forEach(button=>button.addEve
 settingsRegistryAdapter.read().then(result=>{if(!result.available)document.getElementById('settings-registry-status').textContent=result.reason+' · no live values loaded.';});chatAdapter.listConversations().then(result=>{if(!result.available)document.getElementById('chat-service-status').textContent=result.reason+' · no live history loaded.';});
 document.addEventListener('pointerdown',event=>{
   if(!profileMenu.hidden&&!profileMenu.contains(event.target)&&event.target!==profileButton)profileMenu.hidden=true;
+  if(!layoutQuickMenu.hidden&&!layoutQuickMenu.contains(event.target)&&!layoutQuickButton.contains(event.target)){layoutQuickMenu.hidden=true;layoutQuickButton.setAttribute('aria-expanded','false');}
 });
 async function refreshInfrastructure(){
   const model=await infrastructureTelemetryAdapter.read();
@@ -279,6 +300,7 @@ async function refreshInfrastructure(){
 refreshInfrastructure();
 const win=document.getElementById('win');
 const slider=document.getElementById('opacity');
+const engineeringOpacitySlider=document.getElementById('engineering-opacity');const engineeringOpacityValue=document.getElementById('engineering-opacity-value');const chatOpacitySlider=document.getElementById('chat-opacity');const chatOpacityValue=document.getElementById('chat-opacity-value');const infrastructureOpacitySlider=document.getElementById('infrastructure-opacity');const infrastructureOpacityValue=document.getElementById('infrastructure-opacity-value');
 const value=document.getElementById('value');
 const minimize=document.getElementById('minimize');
 const centerButton=document.getElementById('center-window');
@@ -286,8 +308,10 @@ const refreshButton=document.getElementById('refresh-status');
 const snapshotButton=document.getElementById('snapshot-button');
 const snapshotStatus=document.getElementById('snapshot-status');
 const handle=document.getElementById('drag');
-slider.oninput=()=>{document.documentElement.style.setProperty('--panel-opacity',slider.value/100);value.textContent=slider.value+'%';localStorage.setItem('r3-panel-opacity',slider.value);};
-const savedOpacity=localStorage.getItem('r3-panel-opacity');if(savedOpacity&&Number(savedOpacity)>=45&&Number(savedOpacity)<=95)slider.value=savedOpacity;slider.oninput();
+function setEngineeringOpacity(raw){const n=Math.max(45,Math.min(95,Number(raw)||45));slider.value=String(n);engineeringOpacitySlider.value=String(n);document.documentElement.style.setProperty('--engineering-opacity',n/100);value.textContent=n+'%';engineeringOpacityValue.textContent=n+'%';localStorage.setItem('r3-panel-opacity',String(n));localStorage.setItem('r3-panel-opacity-engineering',String(n));}
+function setPanelOpacity(name,range,output,raw){const n=Math.max(45,Math.min(95,Number(raw)||45));range.value=String(n);output.textContent=n+'%';document.documentElement.style.setProperty('--'+name+'-opacity',n/100);localStorage.setItem('r3-panel-opacity-'+name,String(n));}
+slider.addEventListener('input',()=>setEngineeringOpacity(slider.value));engineeringOpacitySlider.addEventListener('input',()=>setEngineeringOpacity(engineeringOpacitySlider.value));const savedEngineeringOpacity=localStorage.getItem('r3-panel-opacity-engineering')||localStorage.getItem('r3-panel-opacity');setEngineeringOpacity(savedEngineeringOpacity&&Number(savedEngineeringOpacity)>=45&&Number(savedEngineeringOpacity)<=95?savedEngineeringOpacity:'45');
+const savedChatOpacity=localStorage.getItem('r3-panel-opacity-chat');setPanelOpacity('chat',chatOpacitySlider,chatOpacityValue,savedChatOpacity&&Number(savedChatOpacity)>=45&&Number(savedChatOpacity)<=95?savedChatOpacity:'86');const savedInfrastructureOpacity=localStorage.getItem('r3-panel-opacity-infrastructure');setPanelOpacity('infrastructure',infrastructureOpacitySlider,infrastructureOpacityValue,savedInfrastructureOpacity&&Number(savedInfrastructureOpacity)>=45&&Number(savedInfrastructureOpacity)<=95?savedInfrastructureOpacity:'83');chatOpacitySlider.addEventListener('input',()=>setPanelOpacity('chat',chatOpacitySlider,chatOpacityValue,chatOpacitySlider.value));infrastructureOpacitySlider.addEventListener('input',()=>setPanelOpacity('infrastructure',infrastructureOpacitySlider,infrastructureOpacityValue,infrastructureOpacitySlider.value));
 function clampPosition(x,y){
   const maxX=Math.max(0,innerWidth-win.offsetWidth);
   const maxY=Math.max(0,innerHeight-win.offsetHeight);
@@ -320,13 +344,17 @@ const presetSelect=document.getElementById('layout-preset-slot');
 const presetStatus=document.getElementById('layout-preset-status');
 const presetName=document.getElementById('layout-preset-name');
 function readPresets(){try{const value=JSON.parse(localStorage.getItem(presetStorageKey)||'{}');return value&&typeof value==='object'?value:{}}catch{return{}}}
-function refreshPresetOptions(){const saved=readPresets(),current=presetSelect.value;presetSelect.replaceChildren();for(let i=1;i<=10;i++){const option=document.createElement('option');option.value=String(i);option.textContent=saved[i]?(i+'. '+(saved[i].name||'Saved layout')):(i+'. Empty');presetSelect.appendChild(option)}if(current)presetSelect.value=current;}
+function refreshPresetOptions(){const saved=readPresets(),current=presetSelect.value;presetSelect.replaceChildren();for(let i=1;i<=10;i++){const option=document.createElement('option');option.value=String(i);option.textContent=saved[i]?(i+'. '+(saved[i].name||'Saved layout')):(i+'. Empty');presetSelect.appendChild(option)}if(current)presetSelect.value=current;refreshQuickPresets();}
+function refreshQuickPresets(){const saved=readPresets();layoutQuickSlots.replaceChildren();for(let i=1;i<=10;i++){const layout=saved[i],button=document.createElement('button');button.type='button';button.className='layout-quick-slot'+(layout?' available':'');button.disabled=!layout;button.title=layout?(i+'. '+(layout.name||'Saved layout')):(i+'. Empty preset slot');button.setAttribute('aria-label',layout?('Apply layout '+i+': '+(layout.name||'Saved layout')):('Preset '+i+' is empty'));const number=document.createElement('span');number.className='layout-quick-number';number.textContent=String(i);const name=document.createElement('span');name.className='layout-quick-name';name.textContent=layout?(layout.name||'Saved layout'):'Empty';button.append(number,name);if(layout)button.addEventListener('click',()=>applyPreset(i));layoutQuickSlots.appendChild(button);}}
 function normalizedRect(element){const r=element.getBoundingClientRect();return{x:r.left/innerWidth,y:r.top/innerHeight,width:r.width/innerWidth,height:r.height/innerHeight}}
 function captureLayout(){return{version:1,saved_at:new Date().toISOString(),panels:{engineering:{rect:normalizedRect(win),minimized:win.classList.contains('min')},chat:{rect:normalizedRect(chatPanel),visible:!chatPanel.hidden,minimized:chatPanel.classList.contains('minimized'),rail_collapsed:chatPanel.classList.contains('rail-collapsed')},infrastructure:{rect:normalizedRect(infrastructurePanel),visible:!infrastructurePanel.hidden,marker_visible:!infrastructureAnchor.hidden,marker_rect:normalizedRect(infrastructureAnchor)}}}}
 function applyRect(element,rect){if(!rect)return;element.style.left=Math.max(0,Math.min(1-rect.width,rect.x))*innerWidth+'px';element.style.top=Math.max(0,Math.min(1-rect.height,rect.y))*innerHeight+'px';element.style.width=Math.max(0.15,Math.min(1,rect.width))*innerWidth+'px';element.style.height=Math.max(0.15,Math.min(1,rect.height))*innerHeight+'px'}
+function applyPreset(slot){const layout=readPresets()[slot];if(!layout){layoutQuickStatus.textContent='Preset '+slot+' is empty.';presetStatus.textContent='This preset slot is empty.';return}const p=layout.panels||{};if(p.engineering){applyRect(win,p.engineering.rect);win.classList.toggle('min',Boolean(p.engineering.minimized));syncMinimizeButton();}if(p.chat){applyRect(chatPanel,p.chat.rect);chatPanel.hidden=!p.chat.visible;chatPanel.classList.toggle('minimized',Boolean(p.chat.minimized));chatPanel.classList.toggle('rail-collapsed',Boolean(p.chat.rail_collapsed));const b=document.getElementById('chat-minimize');b.textContent=p.chat.minimized?'□':'−';b.title=p.chat.minimized?'Restore chat':'Minimize chat';b.setAttribute('aria-label',b.title);const t=document.getElementById('chat-sidebar-toggle');t.textContent=p.chat.rail_collapsed?'›':'‹';t.title=p.chat.rail_collapsed?'Expand conversation rail':'Collapse conversation rail';t.setAttribute('aria-label',t.title);}if(p.infrastructure){applyRect(infrastructurePanel,p.infrastructure.rect);infrastructurePanel.hidden=!p.infrastructure.visible;infrastructureAnchor.hidden=!p.infrastructure.marker_visible;if(p.infrastructure.marker_rect){const r=p.infrastructure.marker_rect;infrastructureAnchor.style.left=Math.max(0,Math.min(1-r.width,r.x))*innerWidth+'px';infrastructureAnchor.style.top=Math.max(0,Math.min(1-r.height,r.y))*innerHeight+'px';}}presetStatus.textContent='Applied '+(layout.name||'layout '+slot)+'.';layoutQuickStatus.textContent='Applied '+(layout.name||'layout '+slot)+'.';layoutQuickMenu.hidden=true;layoutQuickButton.setAttribute('aria-expanded','false');}
+layoutQuickButton.setAttribute('aria-expanded','false');
 document.getElementById('layout-preset-save').addEventListener('click',()=>{const slot=Number(presetSelect.value),presets=readPresets();presets[slot]={name:presetName.value.trim()||'Layout '+slot,...captureLayout()};localStorage.setItem(presetStorageKey,JSON.stringify(presets));refreshPresetOptions();presetSelect.value=String(slot);presetStatus.textContent='Saved locally in this browser.';});
-document.getElementById('layout-preset-apply').addEventListener('click',()=>{const slot=Number(presetSelect.value),layout=readPresets()[slot];if(!layout){presetStatus.textContent='This preset slot is empty.';return}const p=layout.panels||{};if(p.engineering){applyRect(win,p.engineering.rect);win.classList.toggle('min',Boolean(p.engineering.minimized));syncMinimizeButton();}if(p.chat){applyRect(chatPanel,p.chat.rect);chatPanel.hidden=!p.chat.visible;chatPanel.classList.toggle('minimized',Boolean(p.chat.minimized));chatPanel.classList.toggle('rail-collapsed',Boolean(p.chat.rail_collapsed));const b=document.getElementById('chat-minimize');b.textContent=p.chat.minimized?'□':'−';b.title=p.chat.minimized?'Restore chat':'Minimize chat';b.setAttribute('aria-label',b.title);const t=document.getElementById('chat-sidebar-toggle');t.textContent=p.chat.rail_collapsed?'›':'‹';t.title=p.chat.rail_collapsed?'Expand conversation rail':'Collapse conversation rail';t.setAttribute('aria-label',t.title);}if(p.infrastructure){applyRect(infrastructurePanel,p.infrastructure.rect);infrastructurePanel.hidden=!p.infrastructure.visible;infrastructureAnchor.hidden=!p.infrastructure.marker_visible;if(p.infrastructure.marker_rect){const r=p.infrastructure.marker_rect;infrastructureAnchor.style.left=Math.max(0,Math.min(1-r.width,r.x))*innerWidth+'px';infrastructureAnchor.style.top=Math.max(0,Math.min(1-r.height,r.y))*innerHeight+'px';}}presetStatus.textContent='Applied '+(layout.name||'layout '+slot)+'.';});
+document.getElementById('layout-preset-apply').addEventListener('click',()=>applyPreset(Number(presetSelect.value)));
 document.getElementById('layout-preset-clear').addEventListener('click',()=>{const slot=Number(presetSelect.value),presets=readPresets();if(!presets[slot]){presetStatus.textContent='This preset slot is already empty.';return}delete presets[slot];localStorage.setItem(presetStorageKey,JSON.stringify(presets));refreshPresetOptions();presetSelect.value=String(slot);presetName.value='';presetStatus.textContent='Preset cleared from this browser.';});
+document.getElementById('layout-quick-settings').addEventListener('click',()=>{layoutQuickMenu.hidden=true;layoutQuickButton.setAttribute('aria-expanded','false');profileMenu.hidden=false;const settingsPanel=document.getElementById('profile-settings-panel');settingsPanel.hidden=false;document.getElementById('profile-settings').setAttribute('aria-expanded','true');document.querySelector('[data-settings-scope="User"]').click();requestAnimationFrame(()=>document.getElementById('layout-presets').scrollIntoView({block:'end',behavior:'smooth'}));});
 refreshPresetOptions();
 function syncMinimizeButton(){
   const minimized=win.classList.contains('min');
@@ -336,7 +364,7 @@ function syncMinimizeButton(){
 function restorePanel(centerIfNew){
   win.classList.remove('min');
   slider.value=expandedState?expandedState.opacity:'82';
-  slider.oninput();
+  setEngineeringOpacity(slider.value);
   if(expandedState&&!centerIfNew){clampPosition(expandedState.left,expandedState.top);}
   else{centerWindow();}
 }
@@ -346,7 +374,7 @@ minimize.addEventListener('click',e=>{
     expandedState={left:win.offsetLeft,top:win.offsetTop,opacity:slider.value};
     win.classList.add('min');
     slider.value='45';
-    slider.oninput();
+    setEngineeringOpacity(slider.value);
     placeMinimized();
   }else{
     restorePanel(false);
@@ -359,7 +387,7 @@ centerButton.addEventListener('click',()=>{
 });
 let drag=null;
 handle.addEventListener('pointerdown',e=>{
-  if(e.target.closest('button')||e.button!==0)return;
+  if(e.target.closest('button,.opacity-control,input')||e.button!==0)return;
   e.preventDefault();
   drag={id:e.pointerId,x:e.clientX,y:e.clientY,left:win.offsetLeft,top:win.offsetTop};
   handle.setPointerCapture(e.pointerId);
@@ -377,7 +405,7 @@ function endDrag(e){
 handle.addEventListener('pointerup',endDrag);
 handle.addEventListener('pointercancel',endDrag);
 handle.addEventListener('lostpointercapture',()=>{drag=null;});
-function attachPanelDrag(panel,header){let state=null;header.addEventListener('pointerdown',e=>{if(e.target.closest('button')||e.button!==0)return;e.preventDefault();const r=panel.getBoundingClientRect();state={id:e.pointerId,x:e.clientX,y:e.clientY,left:r.left,top:r.top};header.setPointerCapture(e.pointerId);});header.addEventListener('pointermove',e=>{if(!state||state.id!==e.pointerId)return;panel.style.left=Math.max(0,Math.min(innerWidth-panel.offsetWidth,state.left+e.clientX-state.x))+'px';panel.style.top=Math.max(0,Math.min(innerHeight-panel.offsetHeight,state.top+e.clientY-state.y))+'px';});const end=e=>{if(state&&state.id===e.pointerId){state=null;if(header.hasPointerCapture(e.pointerId))header.releasePointerCapture(e.pointerId);}};header.addEventListener('pointerup',end);header.addEventListener('pointercancel',end);header.addEventListener('lostpointercapture',()=>{state=null;});}
+function attachPanelDrag(panel,header){let state=null;header.addEventListener('pointerdown',e=>{if(e.target.closest('button,.opacity-control,input')||e.button!==0)return;e.preventDefault();const r=panel.getBoundingClientRect();state={id:e.pointerId,x:e.clientX,y:e.clientY,left:r.left,top:r.top};header.setPointerCapture(e.pointerId);});header.addEventListener('pointermove',e=>{if(!state||state.id!==e.pointerId)return;panel.style.left=Math.max(0,Math.min(innerWidth-panel.offsetWidth,state.left+e.clientX-state.x))+'px';panel.style.top=Math.max(0,Math.min(innerHeight-panel.offsetHeight,state.top+e.clientY-state.y))+'px';});const end=e=>{if(state&&state.id===e.pointerId){state=null;if(header.hasPointerCapture(e.pointerId))header.releasePointerCapture(e.pointerId);}};header.addEventListener('pointerup',end);header.addEventListener('pointercancel',end);header.addEventListener('lostpointercapture',()=>{state=null;});}
 attachPanelDrag(chatPanel,chatDragHandle);attachPanelDrag(infrastructurePanel,infrastructureHeader);
 window.addEventListener('resize',()=>{win.classList.contains('min')?placeMinimized():clampPosition(win.offsetLeft,win.offsetTop);if(!infrastructureAnchor.hidden)placeInfrastructureAnchor();[chatPanel,infrastructurePanel].forEach(panel=>{if(panel.hidden)return;const r=panel.getBoundingClientRect();panel.style.left=Math.max(0,Math.min(innerWidth-panel.offsetWidth,r.left))+'px';panel.style.top=Math.max(0,Math.min(innerHeight-panel.offsetHeight,r.top))+'px';});});
 
@@ -474,7 +502,7 @@ const background=new Image();
 background.onload=()=>{if(win.classList.contains('min'))placeMinimized();};
 background.onerror=()=>{};
 background.src='/api/v1/visual/background';
-slider.oninput();
+setEngineeringOpacity(slider.value);
 placeMinimized();
 refreshEngineeringStatus();
 </script>
