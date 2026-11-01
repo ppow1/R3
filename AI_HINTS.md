@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -11,6 +11,7 @@ Observability: N/A
 Dependencies: hints/README.md
 Authority: R3 engineering navigation, subordinate to approved charter
 Changed: 2026-10-31 UTC | R3-COMMS-001 | ChatGPT GPT-6 | Index mandatory Comms incident capture
+Changed: 2026-11-01 UTC | R3-Q2-DOC-001 | ChatGPT GPT-6 | Index Q2 watched-folder runbook
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Manual source inspection; automated validation pending
@@ -42,5 +43,6 @@ Start with [the hints index](hints/README.md). Keep this root file short; put de
 - [Engineering and current handoff](hints/engineering.md)
 - [Institutional architecture and durable state](hints/architecture.md)
 - [Deployment and command execution](hints/deployment.md)
+- [Q2 watched script queue: submit, dispatch, and retrieve results](hints/q2-script-queue.md)
 
 When asked to add material to AI_HINTS, update a focused `hints/` document and add or adjust a concise pointer here only if needed.
