@@ -218,17 +218,14 @@ async function refreshEngineeringStatus(){
   }
 }
 
+
 refreshButton.addEventListener('click',refreshEngineeringStatus);
 snapshotButton.addEventListener('click',async()=>{
   snapshotButton.disabled=true;
   snapshotStatus.textContent='Capturing…';
   try{
-    const response=await fetch('/api/v1/snapshot',{cache:'no-store'});
-    if(!response.ok)throw new Error('Snapshot API unavailable');
-    const snapshot=await response.json();
     const rect=win.getBoundingClientRect();
-    snapshot.browser={
-      captured_at:new Date().toISOString(),
+    const browser={
       viewport_css_px:{width:innerWidth,height:innerHeight},
       device_pixel_ratio:devicePixelRatio,
       panel:{
@@ -237,8 +234,15 @@ snapshotButton.addEventListener('click',async()=>{
         opacity:Number(slider.value)/100
       },
       entrance_anchor_image_fraction:engineeringEntrance,
-      background_intrinsic_px:{width:background.naturalWidth||null,height:background.naturalHeight||null}
+      background_intrinsic_px:{width:background.naturalWidth||1,height:background.naturalHeight||1}
     };
+    const response=await fetch('/api/v1/snapshot',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(browser)
+    });
+    if(!response.ok)throw new Error('Snapshot API unavailable');
+    const snapshot=await response.json();
     const blob=new Blob([JSON.stringify(snapshot,null,2)],{type:'application/json'});
     const url=URL.createObjectURL(blob);
     const link=document.createElement('a');
