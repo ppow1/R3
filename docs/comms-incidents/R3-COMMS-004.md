@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/comms-incidents/R3-COMMS-004.md
 Component: COMMS-INCIDENT
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-10-31 UTC (exact time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Record Camrui Comms command gateway internal failure during R3 deployment preflight
@@ -10,11 +10,11 @@ Execution Model: Comms 1.1 command task submit
 Observability: Tool error and verified grant status
 Dependencies: R3 deployment; Camrui command gateway
 Authority: Steward instruction to log Comms failures and punch list
-Changed: 2026-11-01 UTC | R3-P020 | ChatGPT GPT-6 | Correct grant-status evidence and record Q2 deployment script staging
+Changed: 2026-11-01 UTC | R3-P020 | ChatGPT GPT-6 | Record failed Q2 read-back after staging response
 Supersedes: None
 Contracts: hints/comms-failure-recovery.md; hints/file-provenance.md
 Tests: Pending reproduction and gateway diagnostics
-History/Predecessor: Git blob 45e89c32c1a9a3211af3582d1ecec2f17261b234
+History/Predecessor: Git blob d3b82ec4a8cbc7bebfdcd7be6bc2d5386f199699
 -->
 # R3-COMMS-004 — Camrui command task submission fails internally
 
@@ -54,3 +54,11 @@ History/Predecessor: Git blob 45e89c32c1a9a3211af3582d1ecec2f17261b234
 - A subsequent read-only Comms5 discovery call listed `command_task_submit` as IMPLEMENTED. My first four grant-status requests omitted the required `grant:` prefix and returned `INVALID_ARGUMENT`; this was a malformed-request error, not backend unavailability. Corrected reads with full IDs confirmed all four caller/executor grants active and IMPLEMENTED, including Windows grants valid through 2026-11-02 19:55 -05:00.
 - Using the verified Windows grant, a read-only Q2 check completed successfully. Then `Deploy-R3-Engineering-Panel.ps1` was staged in `A:\\AI\\Scripts\\Riverview\\Q2\\` (699 bytes; SHA-256 `E661B1A649429E0EF99FBE9DFCB42AA8C0004E5C80F37489AAE3EC4B0321A09A`). The script targets the existing deployer and commit above. It remains in Q2 pending the Steward's move into Queue; it has not executed.
 - The earlier SSH denial cause remains unverified; no live change is claimed. **Punch-list reference:** `R3-P020` — objective-level recovery; preserve the failed attempt and continue through the established Q2 → Queue → Results workflow.
+
+
+## 2026-11-01 — Q2 staging read-back mismatch
+
+- The Comms5 write task reported `Deploy-R3-Engineering-Panel.ps1` created under `A:\\AI\\Scripts\\Riverview\\Q2\\` with exit code 0.
+- A later read-only task could not open that exact path (`Get-Content` reported path not found). A separate directory listing found no matching file in Q2 or Queue. Root-level `Completed` and `Results` directories were also absent; their actual configured locations remain unverified.
+- This conflicts with the successful write response. Whether the file was moved, consumed, or the Comms task used a non-persistent drive view is unknown. No deployment script execution is established; no live-site change is claimed.
+- **Next action:** reconcile Q2 persistence/path through the user's established workflow before asking the Steward to move or run this script. Continue under `R3-P020`; do not mark deployment complete.
