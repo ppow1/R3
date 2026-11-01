@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/comms-incidents/R3-COMMS-004.md
 Component: COMMS-INCIDENT
-File Revision: 1.0.5
+File Revision: 1.0.6
 Created: 2026-10-31 UTC (exact time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Record Camrui Comms command gateway internal failure during R3 deployment preflight
@@ -10,11 +10,11 @@ Execution Model: Comms 1.1 command task submit
 Observability: Tool error and verified grant status
 Dependencies: R3 deployment; Camrui command gateway
 Authority: Steward instruction to log Comms failures and punch list
-Changed: 2026-11-01T06:40:00Z | R3-P020 | ChatGPT GPT-6 | Correct Q2 queue/readback finding and record failed deployment result
+Changed: 2026-11-01T06:42:00Z | R3-P020 | ChatGPT GPT-6 | Record verified Q2 read-only diagnostic staging
 Supersedes: None
 Contracts: hints/comms-failure-recovery.md; hints/file-provenance.md
 Tests: Pending reproduction and gateway diagnostics
-History/Predecessor: Git blob 8a66f72b5282bf45e7097d8b4998b98eb51c3ca7
+History/Predecessor: Git blob 6bc00913438245dfb41a81c4e58361201ee7c6f5
 -->
 # R3-COMMS-004 — Camrui command task submission fails internally
 
@@ -62,5 +62,5 @@ History/Predecessor: Git blob 8a66f72b5282bf45e7097d8b4998b98eb51c3ca7
 - Result timestamp: `2026-11-01T01:27:24.6186412-05:00`; target `a11282a6e217cadcafe9e630e6dcf6c6d9cae889`. It reported `Previous HEAD position was c8420b8 Use documented R3 Uvicorn process identity for safe deployment restart`, SSH exit code 1, and the deployer's failure exception. The queue wrapper's `EXIT_CODE` field was empty.
 - The installed deployer source contains an exit trap that attempts rollback to its recorded prior commit if activation fails. The Queue result does not expose the rollback outcome. **Inference:** the PowerShell catch may have surfaced only the exception message and omitted later remote-shell output; this has not been independently confirmed.
 - Current server HEAD, listener health, rollback state, and visual acceptance remain unverified. The current visual source changes are after the attempted target and were not part of that deployment.
-- Read-only status-check script staging was submitted as execution `8583c284-52cb-470e-ab4f-359c154682cf`; it remained `running` at last check. A follow-up placement check `081e233f-1bc2-4fe8-88a7-c100c9ff9bbd` was `queued`. No status-check result has been observed yet.
+- The read-only status-check script `Inspect-R3-Deployment-State.ps1` is staged in `A:\\AI\\Scripts\\Riverview\\Q2\\` (execution `8583c284-52cb-470e-ab4f-359c154682cf`, SHA-256 `4D4BE3C442E2AB89A87919389D6CAB4B5E24AA5390540DC91A36B5024F31C48D`). Placement check `081e233f-1bc2-4fe8-88a7-c100c9ff9bbd` confirmed it remains in Q2 and is absent from Queue/Completed/Results. It has not executed; its output is pending the Steward's move into Queue.
 - **Punch-list reference:** `R3-P020` — preserve attempt history and verify the deployment outcome before any retry.
