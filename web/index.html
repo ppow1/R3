@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: web/index.html
 Component: R3-ESTATE-HOME
-File Revision: 1.0.7
+File Revision: 1.0.8
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Present the R3 estate home with Engineering and Infrastructure observability panels
@@ -10,7 +10,7 @@ Execution Model: Browser client consuming same-origin read-only R3 APIs
 Observability: Engineering API state; Infrastructure telemetry adapter availability
 Dependencies: /api/v1/visual/background; /api/v1/health; /api/v1/engineering/branches; /api/v1/engineering/worktrees
 Authority: Steward visual placement references and approved R3 website direction
-Changed: 2026-11-01 UTC | R3-INFRA-001 | ChatGPT GPT-6 | Add understated navigation rail and Infrastructure observability scaffold
+Changed: 2026-11-01 UTC | R3-WEB-UI-002 | ChatGPT GPT-6 | Add minimized entrance markers and move display tools into profile settings
 Supersedes: R3-VISUAL-PROTOTYPE framing
 Contracts: docs/IMPLEMENTATION_HANDOFF.md; docs/architecture/ESTATE_SPATIAL_CANON.md; Infrastructure Observability Contract v0.1 (UI draft only)
 Tests: Not run; runtime telemetry adapter and visual acceptance pending
@@ -28,8 +28,7 @@ History/Predecessor: Git blob 5f681d1009aa1ad9b6a2645b149586cae5f60aea
 body{margin:0;background:#091522;color:#edf4fc;font:15px system-ui,sans-serif;overflow:hidden}
 #estate{position:fixed;inset:0;background:#152635 url('/api/v1/visual/background') center center/cover no-repeat}
 #estate:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(4,12,23,.3),transparent 70%);pointer-events:none}
-.controls{position:fixed;bottom:20px;left:auto;right:20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 16px;background:rgba(8,18,30,.85);border-radius:12px;z-index:20}
-input[type=range]{width:180px;accent-color:#8fb9ec}
+.controls{display:grid;grid-template-columns:1fr auto;gap:8px 10px;align-items:center;padding:10px;margin-top:6px;border-top:1px solid #c2d5ec33}.controls label{font-size:12px}.controls input[type=range]{grid-column:1/-1;width:100%;accent-color:#8fb9ec}.controls #snapshot-status{grid-column:1/-1;min-height:16px;font-size:11px}
 button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;border-radius:7px;padding:7px 12px}
 /* Quiet icon rail; expanded labels are opt-in. */
 #side-rail{position:fixed;z-index:30;left:14px;top:14px;bottom:14px;width:48px;display:flex;flex-direction:column;align-items:center;gap:7px;padding:8px 6px;background:rgba(8,18,30,.38);border:1px solid rgba(205,227,255,.18);border-radius:16px;backdrop-filter:blur(10px);transition:width .18s ease}
@@ -43,8 +42,8 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 #side-rail.expanded .rail-button{width:100%;justify-content:flex-start;padding:0 8px}
 #side-rail.expanded .rail-label{display:inline}
 #profile-button{position:fixed;z-index:35;left:20px;bottom:20px;width:34px;height:34px;padding:0;border-radius:50%;background:rgba(35,55,76,.62);border-color:rgba(205,227,255,.35);font-size:11px;font-weight:700}
-#profile-menu{position:fixed;z-index:36;left:14px;bottom:62px;width:206px;padding:8px;background:rgba(8,18,30,.82);border:1px solid rgba(205,227,255,.24);border-radius:13px;backdrop-filter:blur(12px);box-shadow:0 12px 32px #0006}
-#profile-menu[hidden],#infrastructure-panel[hidden]{display:none}
+#profile-menu{position:fixed;z-index:36;left:14px;bottom:62px;width:244px;padding:8px;background:rgba(8,18,30,.82);border:1px solid rgba(205,227,255,.24);border-radius:13px;backdrop-filter:blur(12px);box-shadow:0 12px 32px #0006}
+#profile-menu[hidden],#infrastructure-panel[hidden],#infrastructure-anchor[hidden],#profile-settings-panel[hidden]{display:none}
 .profile-title{padding:8px 10px 10px;color:#c8d9ea;font-size:12px;border-bottom:1px solid #c2d5ec33;margin-bottom:5px}
 .profile-menu-item{width:100%;display:block;text-align:left;padding:9px 10px;margin:2px 0;background:transparent;border-color:transparent;font-size:13px}
 .profile-menu-item:hover{background:rgba(37,65,91,.56)}
@@ -52,7 +51,7 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 .infra-header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
 .infra-header h1{font-size:20px;margin:0}
 .infra-header p{font-size:12px;color:#c0d0e2;margin:4px 0 0}
-.infra-header button{margin-left:auto}
+.infra-header .infra-actions{margin-left:auto;display:flex;gap:8px}.infra-header button{margin-left:0}
 .infra-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .infra-card{padding:14px;background:rgba(30,57,80,.46);border:1px solid rgba(205,227,255,.16);border-radius:13px;min-width:0}
 .infra-card h2{font-size:14px;margin:0 0 8px}
@@ -68,6 +67,7 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 .infra-history-list{margin:8px 0 0;padding:0;list-style:none}
 .infra-history-list li{padding:8px 0;border-top:1px solid #c2d5ec22;font-size:12px;color:#c8d9ea}
 @media(max-width:760px){#infrastructure-panel{inset:8px 8px 8px 62px;padding:14px}.infra-grid{grid-template-columns:1fr}.infra-history{grid-column:auto}}
+#infrastructure-anchor{position:fixed;z-index:18;display:flex;align-items:center;gap:7px;padding:8px 12px;background:rgba(8,18,30,.52);border:1px solid rgba(205,227,255,.4);border-radius:13px;backdrop-filter:blur(7px);font-size:13px;font-weight:650;white-space:nowrap;opacity:.8}
 .window{position:absolute;left:12%;top:19%;width:min(740px,76vw);height:min(430px,60vh);min-width:320px;min-height:180px;resize:both;overflow:auto;background:rgba(12,25,42,var(--panel-opacity));border:1px solid rgba(205,227,255,.55);border-radius:14px;box-shadow:0 18px 50px #0008;z-index:5}
 .window header{padding:15px 19px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #c2d5ec55;cursor:move;user-select:none;touch-action:none}
 .window header b{font-size:20px}
@@ -87,8 +87,7 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 .window.min header b{font-size:15px;white-space:nowrap}
 @media(max-width:650px){
  .window{left:4%;top:14%;width:92vw;height:56vh}
- .controls{left:auto;right:4%;bottom:12px}
-}
+ }
 </style>
 </head>
 <body>
@@ -104,7 +103,8 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 <button id="profile-button" type="button" aria-label="Open profile menu" title="Pat Powell">PP</button>
 <div id="profile-menu" hidden>
   <div class="profile-title">Pat Powell</div>
-  <button class="profile-menu-item" id="profile-settings" type="button">Settings</button>
+  <button class="profile-menu-item" id="profile-settings" type="button" aria-expanded="false">Settings</button>
+<div id="profile-settings-panel" hidden><div class="controls"><label for="opacity">Panel opacity</label><output id="value" for="opacity">45%</output><input id="opacity" type="range" min="45" max="95" value="45"><button id="center-window" type="button">Center window</button><button id="snapshot-button" type="button">Snapshot</button><output id="snapshot-status" aria-live="polite"></output></div></div>
   <button class="profile-menu-item" id="profile-engineering" type="button">Engineering Foundry panel</button>
   <button class="profile-menu-item" id="profile-infrastructure" type="button">Infrastructure panel</button>
 </div>
@@ -138,7 +138,7 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
   <header class="infra-header">
     <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true" style="fill:none;stroke:#dcecff;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><path d="M12 3v7m0 4v7M3 12h7m4 0h7M5.6 5.6l4.9 4.9m3 3 4.9 4.9m0-12.8-4.9 4.9m-3 3-4.9 4.9"/></svg>
     <div><h1>Infrastructure</h1><p>R3 runtime observability · contract draft v0.1</p></div>
-    <button id="infrastructure-close" type="button" aria-label="Close Infrastructure">Close</button>
+    <div class="infra-actions"><button id="infrastructure-minimize" type="button" aria-label="Minimize Infrastructure">Minimize</button><button id="infrastructure-close" type="button" aria-label="Close Infrastructure">Close</button></div>
   </header>
   <div class="infra-grid">
     <section class="infra-card">
@@ -184,14 +184,7 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
     </section>
   </div>
 </section>
-<div class="controls">
-  <label for="opacity">Panel opacity</label>
-  <input id="opacity" type="range" min="45" max="95" value="45">
-  <output id="value" for="opacity">45%</output>
-  <button id="center-window" type="button">Center window</button>
-  <button id="snapshot-button" type="button">Snapshot</button>
-  <output id="snapshot-status" aria-live="polite"></output>
-</div>
+<button id="infrastructure-anchor" type="button" aria-label="Open Infrastructure panel" title="Infrastructure entrance" hidden>◉ Infrastructure</button>
 <script>
 // Front-end adapter seam. It deliberately has no backend field names or inferred state values.
 // Reconcile the R3 runtime's state and scheduling contract before connecting a telemetry source.
@@ -203,13 +196,15 @@ const infrastructureTelemetryAdapter={
 const infrastructurePanel=document.getElementById('infrastructure-panel');
 const infrastructureButton=document.getElementById('nav-infrastructure');
 const infrastructureClose=document.getElementById('infrastructure-close');
+const infrastructureMinimize=document.getElementById('infrastructure-minimize'),infrastructureAnchor=document.getElementById('infrastructure-anchor');
 const sideRail=document.getElementById('side-rail');
 const profileButton=document.getElementById('profile-button');
 const profileMenu=document.getElementById('profile-menu');
-function closeInfrastructure(){infrastructurePanel.hidden=true;}
-function openInfrastructure(){infrastructurePanel.hidden=false;profileMenu.hidden=true;}
+function closeInfrastructure(){infrastructurePanel.hidden=true;infrastructureAnchor.hidden=true;}
+function minimizeInfrastructure(){infrastructurePanel.hidden=true;infrastructureAnchor.hidden=false;placeInfrastructureAnchor();}
+function openInfrastructure(){infrastructurePanel.hidden=false;infrastructureAnchor.hidden=true;profileMenu.hidden=true;}
 infrastructureButton.addEventListener('click',openInfrastructure);
-infrastructureClose.addEventListener('click',closeInfrastructure);
+infrastructureClose.addEventListener('click',closeInfrastructure);infrastructureMinimize.addEventListener('click',minimizeInfrastructure);infrastructureAnchor.addEventListener('click',openInfrastructure);
 document.getElementById('rail-toggle').addEventListener('click',()=>{
   const expanded=sideRail.classList.toggle('expanded');
   document.getElementById('rail-toggle').setAttribute('aria-label',expanded?'Collapse navigation':'Expand navigation');
@@ -225,10 +220,7 @@ document.getElementById('profile-engineering').addEventListener('click',()=>{
   profileMenu.hidden=true;
   if(win.classList.contains('min'))restorePanel(false);
 });
-document.getElementById('profile-settings').addEventListener('click',()=>{
-  profileMenu.hidden=true;
-  snapshotStatus.textContent='Settings panel is not yet connected';
-});
+document.getElementById('profile-settings').addEventListener('click',event=>{const panel=document.getElementById('profile-settings-panel');panel.hidden=!panel.hidden;event.currentTarget.setAttribute('aria-expanded',String(!panel.hidden));});
 document.addEventListener('pointerdown',event=>{
   if(!profileMenu.hidden&&!profileMenu.contains(event.target)&&event.target!==profileButton)profileMenu.hidden=true;
 });
@@ -256,15 +248,12 @@ function clampPosition(x,y){
   win.style.top=Math.max(0,Math.min(maxY,y))+'px';
 }
 function centerWindow(){clampPosition((innerWidth-win.offsetWidth)/2,(innerHeight-win.offsetHeight)/2);}
-const engineeringEntrance={x:.464,y:.328};
+// Steward's corrected placement from the supplied reference images; fractions track artwork.
+const engineeringEntrance={x:.31,y:.42};
 let expandedState=null;
-function entrancePosition(){
-  const imageWidth=background.naturalWidth||1452,imageHeight=background.naturalHeight||1024;
-  const scale=Math.max(innerWidth/imageWidth,innerHeight/imageHeight);
-  const drawnWidth=imageWidth*scale,drawnHeight=imageHeight*scale;
-  return {x:(innerWidth-drawnWidth)/2+engineeringEntrance.x*drawnWidth,
-          y:(innerHeight-drawnHeight)/2+engineeringEntrance.y*drawnHeight};
-}
+function imageFractionPosition(anchor){const imageWidth=background.naturalWidth||1536,imageHeight=background.naturalHeight||1024;const scale=Math.max(innerWidth/imageWidth,innerHeight/imageHeight),drawnWidth=imageWidth*scale,drawnHeight=imageHeight*scale;return{x:(innerWidth-drawnWidth)/2+anchor.x*drawnWidth,y:(innerHeight-drawnHeight)/2+anchor.y*drawnHeight};}
+function entrancePosition(){return imageFractionPosition(engineeringEntrance);}
+function placeInfrastructureAnchor(){const p=imageFractionPosition(engineeringEntrance);const x=p.x+120+infrastructureAnchor.offsetWidth/2+12;infrastructureAnchor.style.left=Math.max(8,Math.min(innerWidth-infrastructureAnchor.offsetWidth-8,x-infrastructureAnchor.offsetWidth/2))+'px';infrastructureAnchor.style.top=Math.max(8,Math.min(innerHeight-infrastructureAnchor.offsetHeight-8,p.y-infrastructureAnchor.offsetHeight/2))+'px';}
 function placeMinimized(){const p=entrancePosition();clampPosition(p.x-win.offsetWidth/2,p.y-win.offsetHeight/2);}
 function syncMinimizeButton(){
   const minimized=win.classList.contains('min');
@@ -315,7 +304,7 @@ function endDrag(e){
 handle.addEventListener('pointerup',endDrag);
 handle.addEventListener('pointercancel',endDrag);
 handle.addEventListener('lostpointercapture',()=>{drag=null;});
-window.addEventListener('resize',()=>win.classList.contains('min')?placeMinimized():clampPosition(win.offsetLeft,win.offsetTop));
+window.addEventListener('resize',()=>{win.classList.contains('min')?placeMinimized():clampPosition(win.offsetLeft,win.offsetTop);if(!infrastructureAnchor.hidden)placeInfrastructureAnchor();});
 
 async function getJson(path){
   const response=await fetch(path,{cache:'no-store'});
