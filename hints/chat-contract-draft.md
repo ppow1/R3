@@ -2,62 +2,67 @@
 R3 CONTROLLED DOCUMENT
 File: hints/chat-contract-draft.md
 Component: R3-CHAT-CONTRACT-DRAFT
-File Revision: 1.0.0
-Created: 2026-11-01 UTC (date precision)
+File Revision: 1.0.1
+Created: 2026-11-01 UTC
 Created By: ChatGPT GPT-6
-Purpose: Define a reviewable interaction contract for R3 chat across the website and authorized resident tools
+Purpose: Define reviewable R3 chat interaction requirements across the website and authorized residents
 Execution Model: Draft capability boundary; no implementation or live API implied
-Observability: Conversation and message lifecycle events must be auditable and queryable
-Dependencies: Approved R3 charter revision 2; R3-P002; R3-P005; R3 capability and authorization architecture
-Authority: Working draft only. Steward and runtime architecture review required before API adoption.
-Changed: 2026-11-01 UTC | R3-COMMS-CHAT-DRAFT-001 | ChatGPT GPT-6 | Establish initial chat interaction contract draft
-Supersedes: None; new draft
+Observability: Conversation, message, capability, and work-link lifecycle events require audit and history
+Dependencies: Approved R3 charter revision 2; R3-P002; R3-P005; existing Riverview database implementations pending backend qualification
+Authority: Working draft only. Backend qualification and Steward review required before API adoption.
+Changed: 2026-11-01 UTC | R3-CHAT-SETTINGS-UI-001 | ChatGPT GPT-6 | Add Steward's chat interaction and V2 responsiveness requirements
+Supersedes: Revision 1.0.0; clarify user-approved interaction direction
 Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; docs/PUNCH_LIST.md
 Tests: Not run; contract only
-History/Predecessor: N/A; new document
+History/Predecessor: Git blob 9ccfd0ad0efdcc848c98af7c3f9940a091398974
 -->
 # R3 chat interaction contract — draft
 
-**Status:** Review draft. This document defines expected behavior and shared concepts; it is not an approved backend API or a claim that chat services are implemented.
+**Status:** Review draft. It defines visual and capability requirements, not an approved API or a claim that chat is implemented.
 
-## Purpose
+## Experience
 
-R3 chat is a durable institutional capability. The website, Grace, authorized residents, and other clients use the same permission-checked service. The browser is a client, not the system of record. Conversation history and operational events must survive browser refreshes and service restarts according to the R3 persistence and recovery design.
+Preserve Riverview 2's responsive, low-latency interaction: quick navigation, incremental history display, and a composer that stays responsive while older messages load. Keep the estate's understated translucent visual language. Use compact icons, tooltips, and three-dot contextual menus rather than large labeled action buttons.
 
-## Shared concepts
+Provide conversation affordances for new, rename, search, archive, delete, reopen, and conference-room use. Add contextual menus at conversation and message level. Reserve message actions for copy, edit, quote, branch, generate image, save reference, and work-related actions. These affordances may be unavailable or planned until their capabilities are connected.
 
-The service should represent conversations, participants, messages, ordered lifecycle events, optional authorized attachments, and tool requests linked to their originating message and execution record. Conceptual message data includes identity, conversation, sender, content, service timestamp, and delivery or failure state. These are semantic requirements, not proposed wire-format names. Canonical schemas and identifiers must come from the runtime and database architecture.
+The interface shows no synthetic conversations, messages, residents, work orders, or results. Each feature is explicitly identified as functional, unavailable, or planned. The UI distinguishes an empty account from an unavailable service.
 
-## Client behavior
+## Shared institutional capability
 
-- List conversations the caller may access; open a conversation; fetch history in stable order; send a message; and receive new messages and status changes through an API-backed event or subscription hook.
-- Show sending, delivered, failed, and retryable states only when the service reports them. Preserve a message identity or idempotency token across retries to prevent duplicate sends.
-- Show participant identity and message time. Make missing, delayed, or stale service state visible.
-- Keep composition usable while history loads. Paginate older history without reordering rendered messages.
-- Render attachments only through safe, authorized capabilities. A UI control never grants access by itself.
+Chat is a durable institution-wide capability, not a browser-owned transcript. The website, Grace, and authorized residents use shared services under their own identities and permissions. Conversations persist across refresh and service restart according to the qualified R3 persistence architecture.
 
-## Resident and tool access
+The service represents conversations, participants, messages, ordered lifecycle events, authorized attachments, and work-resource links. Message and event identity, sender, service timestamp, ordering, delivery/failure state, and correlation with tool activity are runtime-owned concepts. This document does not impose wire-format names or schemas.
 
-- Grace and residents use the same conversation and capability service as the website, subject to their identities, permissions, and audit records.
-- Tool use is separate from sending text. A message may request an action, but the service resolves the capability, checks current authorization, and records the outcome. The interface displays pending, denied, executing, succeeded, and failed states only from authoritative service events.
-- Any required Steward approval uses the existing authorization flow; chat creates no alternate approval path.
-- Callers may only read or act in conversations and attachments permitted by the authorization service. An identifier alone does not grant access.
+## Capability-aware interaction
 
-## Freshness, failures, and audit
+- Conversation and message action menus are populated from the caller's resident-specific capability manifest. Do not ship one assumed toolbar as the operational menu for every resident.
+- Sending text does not authorize tool execution. A work-related action resolves through the registered capability, current authorization, audit, and execution-result services.
+- A tool request links to its source message and authoritative work record. Required Steward approval uses existing policy and approval services.
+- Conversations, attachments, and links are accessible only after authorization checks; an identifier does not grant access.
+- Resource links can target work orders, documents, reports, charts, and other institutional records. Resolve them through the resource registry and preserve their authorization boundaries.
 
-- The service reports connection and source freshness. Clients distinguish current data from stale cached history and unavailable service state.
-- Failed sends remain visible with a clear retry path. The client does not claim delivery before confirmation.
-- Durable event history preserves ordering, actor, timestamps, and correlation between messages, tool requests, authorization, and execution results.
-- No synthetic conversation, resident activity, delivery, or tool result is presented as live runtime data.
+## Reliability and history
 
-## Decisions required before API approval
+- Support persistent, searchable conversation history, stable ordering, and pagination without reordering messages already shown.
+- Preserve idempotency across retries. A client never labels a message delivered before service confirmation.
+- Show connection status, stale cached history, source freshness, send failures, and retry availability from service state.
+- Keep composition interactive during history loading and reconnect; V2 responsiveness is the performance reference to preserve.
+- Record actor, timestamp, message/conversation identity, authorization outcome, and tool-result correlation in the durable event history.
 
-1. Reconcile conversation, participant, message, event, attachment, and tool activity records with the R3 database and historian.
-2. Define identity, membership, visibility, retention, correction/deletion, and attachment access rules.
-3. Select authoritative send/history operations, the event/subscription mechanism, and freshness/reconnect semantics.
-4. Reconcile tool invocation and approval references with the capability registry, policy service, and execution records.
-5. Specify ordering, pagination, idempotency, and audit guarantees supported by the runtime.
+## Visual status
+
+The interface distinguishes:
+- **Functional:** verified against a connected runtime service.
+- **Unavailable:** intended capability exists but its service or authorization manifest is not connected or healthy.
+- **Planned:** interaction is reserved but no approved implementation is available.
+
+A visual placeholder is never presented as live operational data.
+
+## Backend reconciliation before API approval
+
+The backend team will inspect and qualify existing historical Riverview database implementations before choosing schemas or creating replacements. Reconcile identity, conversation membership, retention, edit/correction/deletion semantics, search, attachments, event ordering, idempotency, capability manifests, authorization, work-resource linking, and recovery with that review.
 
 ## First acceptance milestone
 
-Using a verified non-production runtime source, a Steward and one authorized resident exchange one durable message. Both clients observe the same sender, conversation, message ordering, and service timestamp after refresh; an unauthorized principal cannot read it. A placeholder event does not count as acceptance.
+Using a verified non-production source, a Steward and authorized resident exchange one durable message; both see the same sender, ordering, and service timestamp after refresh, while an unauthorized principal cannot read it. Then verify menu options differ according to actual resident capability manifests. No placeholder counts as acceptance.
