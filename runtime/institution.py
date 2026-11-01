@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/institution.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.0.1
+# File Revision: 1.0.2
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Durable resident scheduling, supervision, and observable state transitions.
@@ -24,6 +24,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable
+
+STATE_NUMBERS = {'READY': 100, 'RUNNING': 200, 'RECOVERING': 900}
 
 Work = Callable[[str], Awaitable[None]]
 
@@ -78,11 +80,15 @@ class Journal:
         last = self.db.execute(
             "SELECT id,at,resident,kind,detail FROM events ORDER BY id DESC LIMIT 30"
         ).fetchall()
+        residents = [dict(zip(("name","state","heartbeat","next_due","failures"), row))
+                     for row in rows]
+        for resident in residents:
+            resident["state_number"] = STATE_NUMBERS[resident["state"]]
         return {
-            "residents": [dict(zip(("name","state","heartbeat","next_due","failures"), row))
-                          for row in rows],
+            "residents": residents,
             "events": [dict(zip(("id","at","resident","kind","detail"), row))
                        for row in last],
+            "state_catalog": STATE_NUMBERS,
         }
 
 
