@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/institution.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.0.3
+# File Revision: 1.0.4
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Durable resident scheduling, supervision, and observable state transitions.
@@ -84,14 +84,6 @@ class Journal:
                      for row in rows]
         for resident in residents:
             resident["state_number"] = STATE_NUMBERS[resident["state"]]
-        events = [dict(zip(("id", "at", "resident", "kind", "detail"), row)) for row in last]
-        for event in events:
-            try:
-                parsed = json.loads(event["detail"])
-                if isinstance(parsed, dict) and "state_number" in parsed:
-                    event.update(parsed)
-            except (ValueError, TypeError):
-                pass
         events = [dict(zip(("id","at","resident","kind","detail"), row)) for row in last]
         for event in events:
             try:
@@ -122,7 +114,6 @@ class Institution:
         self.tick_seconds = tick_seconds
         self.residents: dict[str, Resident] = {}
         self.active: dict[str, asyncio.Task] = {}
-        self._timed_out: set[str] = set()
         self._timed_out: set[str] = set()
         self._stop = asyncio.Event()
         self._main_heartbeat = time.monotonic()
@@ -183,7 +174,6 @@ class Institution:
                     self._timed_out.discard(name)
                 elif (name not in self._timed_out and
                       time.monotonic() - getattr(task, "_r3_started", time.monotonic()) > self.watchdog_seconds):
-                    self._timed_out.add(name)
                     self._timed_out.add(name)
                     self.journal.transition(name, "RECOVERING", "WATCHDOG_TIMEOUT",
                                             next_due=time.time(), failure=True)
