@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/comms-incidents/R3-COMMS-004.md
 Component: COMMS-INCIDENT
-File Revision: 1.0.4
+File Revision: 1.0.5
 Created: 2026-10-31 UTC (exact time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Record Camrui Comms command gateway internal failure during R3 deployment preflight
@@ -10,11 +10,11 @@ Execution Model: Comms 1.1 command task submit
 Observability: Tool error and verified grant status
 Dependencies: R3 deployment; Camrui command gateway
 Authority: Steward instruction to log Comms failures and punch list
-Changed: 2026-11-01 UTC | R3-P020 | ChatGPT GPT-6 | Record failed Q2 read-back after staging response
+Changed: 2026-11-01T06:40:00Z | R3-P020 | ChatGPT GPT-6 | Correct Q2 queue/readback finding and record failed deployment result
 Supersedes: None
 Contracts: hints/comms-failure-recovery.md; hints/file-provenance.md
 Tests: Pending reproduction and gateway diagnostics
-History/Predecessor: Git blob d3b82ec4a8cbc7bebfdcd7be6bc2d5386f199699
+History/Predecessor: Git blob 8a66f72b5282bf45e7097d8b4998b98eb51c3ca7
 -->
 # R3-COMMS-004 — Camrui command task submission fails internally
 
@@ -56,9 +56,11 @@ History/Predecessor: Git blob d3b82ec4a8cbc7bebfdcd7be6bc2d5386f199699
 - The earlier SSH denial cause remains unverified; no live change is claimed. **Punch-list reference:** `R3-P020` — objective-level recovery; preserve the failed attempt and continue through the established Q2 → Queue → Results workflow.
 
 
-## 2026-11-01 — Q2 staging read-back mismatch
+## 2026-11-01 — Q2 queue result and failed deployment
 
-- The Comms5 write task reported `Deploy-R3-Engineering-Panel.ps1` created under `A:\\AI\\Scripts\\Riverview\\Q2\\` with exit code 0.
-- A later read-only task could not open that exact path (`Get-Content` reported path not found). A separate directory listing found no matching file in Q2 or Queue. Root-level `Completed` and `Results` directories were also absent; their actual configured locations remain unverified.
-- This conflicts with the successful write response. Whether the file was moved, consumed, or the Comms task used a non-persistent drive view is unknown. No deployment script execution is established; no live-site change is claimed.
-- **Next action:** reconcile Q2 persistence/path through the user's established workflow before asking the Steward to move or run this script. Continue under `R3-P020`; do not mark deployment complete.
+- The staged `Deploy-R3-Engineering-Panel.ps1` was subsequently found under `A:\\AI\\Scripts\\Riverview\\Queue\\Completed\\`, with its result at `A:\\AI\\Scripts\\Riverview\\Queue\\Results\\Deploy-R3-Engineering-Panel.ps1.txt`. The earlier Q2 read-back missed the nested Queue folders; the script did execute.
+- Result timestamp: `2026-11-01T01:27:24.6186412-05:00`; target `a11282a6e217cadcafe9e630e6dcf6c6d9cae889`. It reported `Previous HEAD position was c8420b8 Use documented R3 Uvicorn process identity for safe deployment restart`, SSH exit code 1, and the deployer's failure exception. The queue wrapper's `EXIT_CODE` field was empty.
+- The installed deployer source contains an exit trap that attempts rollback to its recorded prior commit if activation fails. The Queue result does not expose the rollback outcome. **Inference:** the PowerShell catch may have surfaced only the exception message and omitted later remote-shell output; this has not been independently confirmed.
+- Current server HEAD, listener health, rollback state, and visual acceptance remain unverified. The current visual source changes are after the attempted target and were not part of that deployment.
+- Read-only status-check script staging was submitted as execution `8583c284-52cb-470e-ab4f-359c154682cf`; it remained `running` at last check. A follow-up placement check `081e233f-1bc2-4fe8-88a7-c100c9ff9bbd` was `queued`. No status-check result has been observed yet.
+- **Punch-list reference:** `R3-P020` — preserve attempt history and verify the deployment outcome before any retry.
