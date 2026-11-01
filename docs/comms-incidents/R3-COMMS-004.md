@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/comms-incidents/R3-COMMS-004.md
 Component: COMMS-INCIDENT
-File Revision: 1.0.7
+File Revision: 1.0.8
 Created: 2026-10-31 UTC (exact time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Record Camrui Comms command gateway internal failure during R3 deployment preflight
@@ -10,11 +10,11 @@ Execution Model: Comms 1.1 command task submit
 Observability: Tool error and verified grant status
 Dependencies: R3 deployment; Camrui command gateway
 Authority: Steward instruction to log Comms failures and punch list
-Changed: 2026-11-01T15:01:47.636Z | R3-P020 | ChatGPT GPT-6 | Record deployment-state result and diagnostic shell error
+Changed: 2026-11-01T15:04:54.615Z | R3-P020 | ChatGPT GPT-6 | Record current deployment interruption and staged recovery
 Supersedes: None
 Contracts: hints/comms-failure-recovery.md; hints/file-provenance.md
 Tests: Pending reproduction and gateway diagnostics
-History/Predecessor: Git blob 2b7d3332275484b4d0a57b4ba453b18a11e9a212
+History/Predecessor: Git blob 35f4c33649cd8c0668816a8205e4b323ad43824f
 -->
 # R3-COMMS-004 — Camrui command task submission fails internally
 
@@ -64,3 +64,12 @@ History/Predecessor: Git blob 2b7d3332275484b4d0a57b4ba453b18a11e9a212
 - The earlier deploy task reported SSH exit 1, but the later read-only check confirms the server is now running at its target commit `a11282a6e217cadcafe9e630e6dcf6c6d9cae889` with HTTP health 200. This is inconsistent with the task's reported failure; the remote deployer's completion/rollback output remains unavailable. The current visual source changes are after the attempted target and were not part of that deployment.
 - The read-only status-check script `Inspect-R3-Deployment-State.ps1` later appeared in `Queue\\Completed` with output in `Queue\\Results`. It reported remote HEAD `a11282a6e217cadcafe9e630e6dcf6c6d9cae889` (detached), the expected `admin1` Uvicorn process listening on port 8303, and `HEALTH_HTTP=200`. It read the page title `Riverview 3 · Visual prototype`, confirming the requested current UI changes were not yet deployed. The diagnostic then hit a Bash syntax error in its marker-check loop and returned `SSH_EXIT=2`; checks after the title were not completed.
 - **Punch-list reference:** `R3-P020` — preserve attempt history and verify the deployment outcome before any retry.
+
+
+## 2026-11-01 — current-site deployment interruption and recovery staging
+
+- The Queue result for `Deploy-R3-Website-20261101.ps1` targeted `f5d689cf9ff307c2ae9c18edcc8a81ca44e4f6a6`. The existing deployer returned SSH exit 1 after Git reported `Previous HEAD position was a11282a`. Independent read-back showed remote HEAD at the target commit but `HEALTH_HTTP=000` (port 8303 unavailable).
+- That post-deploy read-back also returned `SSH_EXIT=2` because the PowerShell diagnostic joined Bash lines using a literal backslash-n; Bash received `exit 0\r` and rejected it. The remote HEAD and unavailable listener were observed before that syntax error.
+- Likely cause of the interrupted activation is PowerShell terminating the SSH pipeline on Git's normal detached-checkout message; this remains an inference pending the recovery run.
+- `Recover-Deploy-R3-Website-20261101.ps1` is now staged in `A:\\AI\\Scripts\\Riverview\\Q2\\` (SHA-256 `57E43D808EEF0D3CA9A33BB10A07D294EDC0928AFCE8FEA99C30CF83B3A115F1`; PowerShell parse result `PARSE=OK`). It temporarily merges the existing deployer's Git checkout diagnostics into stdout, invokes the same `Run.bat Deploy-R3` path, restores the original deployer file, and performs a post-deploy health/page-marker read-back. It has not run yet.
+- **Punch-list reference:** `R3-P020` — verify the current server recovery through the Q2 → Queue → Results workflow before further changes.
