@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.7
+# File Revision: 1.0.8
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Initial shared read-only institutional API
@@ -9,7 +9,7 @@
 # Observability: HTTP health endpoint; no deployed verification
 # Dependencies: FastAPI, Git checkout, local artwork folder
 # Authority: R3 engineering guidance; approved charter prevails
-# Changed: 2026-11-01 UTC | R3-SNAPSHOT-003 | ChatGPT GPT-6 | Include canonical UI anchor in shared snapshot API
+# Changed: 2026-11-01 UTC | R3-WEB-UI-002 | ChatGPT GPT-6 | Align snapshot anchor metadata with corrected minimized marker
 # Supersedes: None
 # Contracts: hints/file-provenance.md
 # Tests: Syntax checked during outage recovery
@@ -144,7 +144,7 @@ def _base_snapshot():
             "height_px": height,
         },
         "ui_contract": {
-            "engineering_entrance_image_fraction": {"x": 0.464, "y": 0.328},
+            "engineering_entrance_image_fraction": {"x": 0.31, "y": 0.42},
             "minimized_opacity": 0.45,
             "background_rendering": "cover",
         },
