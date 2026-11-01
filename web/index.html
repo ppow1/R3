@@ -249,11 +249,11 @@ function clampPosition(x,y){
 }
 function centerWindow(){clampPosition((innerWidth-win.offsetWidth)/2,(innerHeight-win.offsetHeight)/2);}
 // Steward's corrected placement from the supplied reference images; fractions track artwork.
-const engineeringEntrance={x:.31,y:.42},infrastructureEntrance={x:.45,y:.42};
+const engineeringEntrance={x:.31,y:.42};
 let expandedState=null;
 function imageFractionPosition(anchor){const imageWidth=background.naturalWidth||1536,imageHeight=background.naturalHeight||1024;const scale=Math.max(innerWidth/imageWidth,innerHeight/imageHeight),drawnWidth=imageWidth*scale,drawnHeight=imageHeight*scale;return{x:(innerWidth-drawnWidth)/2+anchor.x*drawnWidth,y:(innerHeight-drawnHeight)/2+anchor.y*drawnHeight};}
 function entrancePosition(){return imageFractionPosition(engineeringEntrance);}
-function placeInfrastructureAnchor(){const p=imageFractionPosition(infrastructureEntrance);infrastructureAnchor.style.left=Math.max(8,Math.min(innerWidth-infrastructureAnchor.offsetWidth-8,p.x-infrastructureAnchor.offsetWidth/2))+'px';infrastructureAnchor.style.top=Math.max(8,Math.min(innerHeight-infrastructureAnchor.offsetHeight-8,p.y-infrastructureAnchor.offsetHeight/2))+'px';}
+function placeInfrastructureAnchor(){const p=imageFractionPosition(engineeringEntrance);const x=p.x+120+infrastructureAnchor.offsetWidth/2+12;infrastructureAnchor.style.left=Math.max(8,Math.min(innerWidth-infrastructureAnchor.offsetWidth-8,x-infrastructureAnchor.offsetWidth/2))+'px';infrastructureAnchor.style.top=Math.max(8,Math.min(innerHeight-infrastructureAnchor.offsetHeight-8,p.y-infrastructureAnchor.offsetHeight/2))+'px';}
 function placeMinimized(){const p=entrancePosition();clampPosition(p.x-win.offsetWidth/2,p.y-win.offsetHeight/2);}
 function syncMinimizeButton(){
   const minimized=win.classList.contains('min');
