@@ -28,9 +28,10 @@ import hashlib
 import platform
 import sys
 import struct
+import math
 from datetime import datetime, timezone
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.responses import FileResponse, Response
 
 ROOT = Path(os.environ.get("R3_REPO", Path(__file__).resolve().parent)).resolve()
@@ -69,6 +70,8 @@ def worktrees():
                             "branch": fields.get("branch"), "locked": "locked" in block})
     return {"worktrees": entries, "activity_note": "A checked-out worktree is not proof of active execution"}
 
+LATEST_BROWSER_CAPTURE = None
+
 def artwork_files():
     if not ART.is_dir():
         return []
@@ -101,9 +104,8 @@ def visual_home():
     return FileResponse(page, media_type="text/html")
 
 
-@app.get("/api/v1/snapshot")
-def snapshot():
-    """Return a bounded, read-only diagnostic snapshot for the website and authorized clients."""
+
+def _base_snapshot():
     try:
         source_commit = git("rev-parse", "HEAD")
         source_branch = git("branch", "--show-current") or "detached"
@@ -152,6 +154,62 @@ def snapshot():
             "arbitrary_file_contents": "excluded",
         },
     }
+
+
+def _number(value, minimum, maximum):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and minimum <= value <= maximum
+
+
+def _validate_browser_capture(payload):
+    viewport = payload.get("viewport_css_px")
+    panel = payload.get("panel")
+    rect = panel.get("rect_css_px") if isinstance(panel, dict) else None
+    dpr = payload.get("device_pixel_ratio")
+    anchor = payload.get("entrance_anchor_image_fraction")
+    image_size = payload.get("background_intrinsic_px")
+    if not isinstance(viewport, dict) or not _number(viewport.get("width"), 1, 10000) or not _number(viewport.get("height"), 1, 10000):
+        raise HTTPException(422, "Invalid viewport dimensions")
+    if not _number(dpr, 0.1, 8) or not isinstance(panel, dict) or panel.get("state") not in {"minimized", "expanded"}:
+        raise HTTPException(422, "Invalid browser panel state")
+    if not isinstance(rect, dict) or any(not _number(rect.get(k), -1000, 12000) for k in ("x", "y", "width", "height")):
+        raise HTTPException(422, "Invalid panel rectangle")
+    if rect["width"] < 1 or rect["height"] < 1 or not _number(panel.get("opacity"), 0, 1):
+        raise HTTPException(422, "Invalid panel size or opacity")
+    if not isinstance(anchor, dict) or any(not _number(anchor.get(k), 0, 1) for k in ("x", "y")):
+        raise HTTPException(422, "Invalid image anchor")
+    if not isinstance(image_size, dict) or any(not _number(image_size.get(k), 1, 20000) for k in ("width", "height")):
+        raise HTTPException(422, "Invalid background dimensions")
+    return {
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "viewport_css_px": {"width": viewport["width"], "height": viewport["height"]},
+        "device_pixel_ratio": dpr,
+        "panel": {
+            "state": panel["state"],
+            "rect_css_px": {k: rect[k] for k in ("x", "y", "width", "height")},
+            "opacity": panel["opacity"],
+        },
+        "entrance_anchor_image_fraction": {"x": anchor["x"], "y": anchor["y"]},
+        "background_intrinsic_px": {"width": image_size["width"], "height": image_size["height"]},
+    }
+
+
+@app.get("/api/v1/snapshot")
+def snapshot():
+    """Return a bounded read-only snapshot, including the latest browser capture if available."""
+    result = _base_snapshot()
+    result["browser"] = LATEST_BROWSER_CAPTURE or {"status": "not captured"}
+    return result
+
+
+@app.post("/api/v1/snapshot")
+def capture_snapshot(browser: dict = Body(...)):
+    """Accept one bounded browser geometry capture and expose it through the snapshot API."""
+    global LATEST_BROWSER_CAPTURE
+    LATEST_BROWSER_CAPTURE = _validate_browser_capture(browser)
+    result = _base_snapshot()
+    result["browser"] = LATEST_BROWSER_CAPTURE
+    return result
+
 
 @app.get("/api/v1/visual/background")
 def visual_background():
