@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: README.md
 Component: README-MD
-File Revision: 1.0.0 (provenance baseline; earlier revisions not tracked)
+File Revision: 1.0.1
 Created: Unknown (legacy)
 Created By: Unknown (legacy)
 Purpose: R3 repository orientation
@@ -10,11 +10,11 @@ Execution Model: N/A
 Observability: N/A
 Dependencies: R3 repository
 Authority: Existing document authority unchanged; see body
-Changed: 2026-10-31 UTC | R3-PROVENANCE-001 | ChatGPT GPT-6 | Add provenance baseline
+Changed: 2026-11-01T06:38:48.481Z | R3-P012 | ChatGPT GPT-6 | Update source and runtime verification status
 Supersedes: None (see body for substantive charter revisions)
 Contracts: hints/file-provenance.md
 Tests: Not run (metadata-only)
-History/Predecessor: Git blob 92c1f2cf57093834e89dfa26b1e5dc6415c2e486
+History/Predecessor: Git blob 8303754b13de16a4ed23f8b61e7c9488ffefabb5
 -->
 # Riverview 3 (R3)
 
@@ -28,6 +28,6 @@ Read [AI_HINTS.md](AI_HINTS.md) before making changes and [docs/PROJECT_CHARTER.
 
 ## Status
 
-**Charter stage.** No Riverview 3 runtime is claimed to exist yet.
+**Source status:** R3 includes a read-only capability API and an API-backed estate/Engineering home. Runtime deployment and browser behavior are not yet verified; see [the implementation handoff](docs/IMPLEMENTATION_HANDOFF.md).
 
 Riverview 2 has a preservation package, but end-to-end recovery was not certified. R3 must not depend on that backup being restorable until independently verified.
