@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: web/index.html
 Component: R3-ESTATE-HOME
-File Revision: 1.0.9
+File Revision: 1.0.10
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Present the R3 estate home with Engineering and Infrastructure observability panels
@@ -10,7 +10,7 @@ Execution Model: Browser client consuming same-origin read-only R3 APIs
 Observability: Engineering API state; Infrastructure telemetry adapter availability
 Dependencies: /api/v1/visual/background; /api/v1/health; /api/v1/engineering/branches; /api/v1/engineering/worktrees
 Authority: Steward visual placement references and approved R3 website direction
-Changed: 2026-11-01 UTC | R3-CHAT-SETTINGS-UI-001 | ChatGPT GPT-6 | Add honest Chat and hierarchical Settings shells
+Changed: 2026-11-01 UTC | R3-PANEL-INTERACTION-002 | ChatGPT GPT-6 | Enable Infrastructure marker dragging and enlarge Engineering panel
 Supersedes: R3-VISUAL-PROTOTYPE framing
 Contracts: docs/IMPLEMENTATION_HANDOFF.md; docs/architecture/ESTATE_SPATIAL_CANON.md; hints/chat-contract-draft.md; hints/settings-contract-draft.md
 Tests: Not run; runtime telemetry adapter and visual acceptance pending
@@ -51,7 +51,7 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 .infra-header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
 .infra-header h1{font-size:20px;margin:0}
 .infra-header p{font-size:12px;color:#c0d0e2;margin:4px 0 0}
-.infra-header .infra-actions{margin-left:auto;display:flex;gap:8px}.infra-header button{margin-left:0}
+.infra-header .infra-actions{margin-left:auto;display:flex;gap:8px}.infra-header .infra-minimize-icon{margin:0 0 0 auto;width:38px;height:38px;padding:0;display:grid;place-items:center;border-radius:9px;font-size:20px;line-height:1}
 .infra-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .infra-card{padding:14px;background:rgba(30,57,80,.46);border:1px solid rgba(205,227,255,.16);border-radius:13px;min-width:0}
 .infra-card h2{font-size:14px;margin:0 0 8px}
@@ -67,8 +67,8 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 .infra-history-list{margin:8px 0 0;padding:0;list-style:none}
 .infra-history-list li{padding:8px 0;border-top:1px solid #c2d5ec22;font-size:12px;color:#c8d9ea}
 @media(max-width:760px){#infrastructure-panel{inset:8px 8px 8px 62px;padding:14px}.infra-grid{grid-template-columns:1fr}.infra-history{grid-column:auto}}
-#infrastructure-anchor{position:fixed;z-index:18;display:flex;align-items:center;gap:7px;padding:8px 12px;background:rgba(8,18,30,.52);border:1px solid rgba(205,227,255,.4);border-radius:13px;backdrop-filter:blur(7px);font-size:13px;font-weight:650;white-space:nowrap;opacity:.8}
-.window{position:absolute;left:12%;top:19%;width:min(740px,76vw);height:min(430px,60vh);min-width:320px;min-height:180px;resize:both;overflow:auto;background:rgba(12,25,42,var(--panel-opacity));border:1px solid rgba(205,227,255,.55);border-radius:14px;box-shadow:0 18px 50px #0008;z-index:5}
+#infrastructure-anchor{position:fixed;z-index:18;display:flex;align-items:center;gap:7px;padding:8px 12px;background:rgba(8,18,30,.52);border:1px solid rgba(205,227,255,.4);border-radius:13px;backdrop-filter:blur(7px);font-size:13px;font-weight:650;white-space:nowrap;opacity:.8;cursor:grab;touch-action:none;user-select:none}#infrastructure-anchor.dragging{cursor:grabbing;opacity:1}
+.window{position:absolute;left:8%;top:9%;width:min(1040px,86vw);height:min(760px,82vh);min-width:480px;min-height:480px;resize:both;overflow:auto;background:rgba(12,25,42,var(--panel-opacity));border:1px solid rgba(205,227,255,.55);border-radius:14px;box-shadow:0 18px 50px #0008;z-index:5}
 .window header{padding:15px 19px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #c2d5ec55;cursor:move;user-select:none;touch-action:none}
 .window header b{font-size:20px}
 .window header button{margin-left:auto}
@@ -86,7 +86,7 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 .window.min header{height:50px;padding:9px 12px}
 .window.min header b{font-size:15px;white-space:nowrap}
 @media(max-width:650px){
- .window{left:4%;top:14%;width:92vw;height:56vh}
+ .window{left:4%;top:7%;width:92vw;height:82vh;min-width:0;min-height:400px}
  }
 #browser-appearance[hidden]{display:none}#settings-shell{display:grid;grid-template-columns:135px minmax(0,1fr);gap:9px;padding:8px 2px}.settings-scopes{display:grid;gap:3px;align-content:start}.settings-scope{padding:7px 8px;text-align:left;font-size:12px;background:transparent;border-color:transparent}.settings-scope[aria-current=true]{background:#2b496633;border-color:#9dbce544}.settings-detail{min-width:0;padding:10px;border:1px solid #c2d5ec22;border-radius:10px;background:#10223844}.settings-detail h3{margin:0 0 5px;font-size:13px}.settings-detail p{margin:5px 0;font-size:11px;color:#c2d5ec}.settings-row{display:grid;grid-template-columns:1fr auto;gap:4px 8px;padding:7px 0;border-top:1px solid #c2d5ec22;font-size:11px}.settings-unavailable{color:#d6c79a}.settings-local{border-top:1px solid #c2d5ec33;margin-top:8px;padding-top:6px;font-size:11px}#chat-panel{position:fixed;z-index:17;inset:5vh 6vw 5vh 74px;display:grid;grid-template-columns:minmax(210px,260px) minmax(0,1fr);overflow:hidden;background:rgba(8,18,30,.86);border:1px solid rgba(205,227,255,.32);border-radius:18px;backdrop-filter:blur(14px);box-shadow:0 22px 56px #0009}#chat-panel[hidden]{display:none}.chat-sidebar,.chat-main{display:flex;flex-direction:column;min-width:0;padding:14px}.chat-sidebar{border-right:1px solid #c2d5ec22}.chat-head,.chat-toolbar{display:flex;align-items:center;gap:7px}.chat-head h1{font-size:17px;margin:0 auto 0 0}.icon-button{width:30px;height:30px;padding:0;display:grid;place-items:center;background:#23374c88;border-color:#c2d5ec33;color:#dcecff}.chat-search{width:100%;margin:10px 0;padding:8px;border-radius:9px;background:#08152288;color:#eaf4ff;border:1px solid #c2d5ec33}.chat-empty{display:grid;place-items:center;flex:1;text-align:center;padding:20px;color:#c6d6e6;font-size:13px}.chat-empty strong{display:block;margin-bottom:6px;color:#e5effb}.chat-status{font-size:11px;color:#d6c79a;margin:8px 0}.chat-toolbar{justify-content:center;gap:5px;flex-wrap:wrap;padding:9px 0;border-top:1px solid #c2d5ec22}.chat-toolbar button{width:30px;height:30px;padding:0;opacity:.46}.chat-composer{display:flex;gap:8px;align-items:end}.chat-composer textarea{flex:1;min-height:42px;max-height:120px;resize:vertical;border:1px solid #c2d5ec33;border-radius:11px;background:#091522aa;color:#eaf4ff;padding:10px}.chat-menu-template{display:none}@media(max-width:760px){#chat-panel{inset:8px;grid-template-columns:1fr}#chat-panel{grid-template-columns:minmax(115px,34%) minmax(0,1fr)}#chat-panel .chat-sidebar{display:flex;padding:8px}.chat-main{padding:8px}#settings-shell{grid-template-columns:100px minmax(0,1fr)}}
 </style>
@@ -142,7 +142,7 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
   <header class="infra-header">
     <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true" style="fill:none;stroke:#dcecff;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><path d="M12 3v7m0 4v7M3 12h7m4 0h7M5.6 5.6l4.9 4.9m3 3 4.9 4.9m0-12.8-4.9 4.9m-3 3-4.9 4.9"/></svg>
     <div><h1>Infrastructure</h1><p>R3 runtime observability · contract draft v0.1</p></div>
-    <div class="infra-actions"><button id="infrastructure-minimize" type="button" aria-label="Minimize Infrastructure">Minimize</button><button id="infrastructure-close" type="button" aria-label="Close Infrastructure">Close</button></div>
+    <div class="infra-actions"><button id="infrastructure-minimize" class="infra-minimize-icon" type="button" aria-label="Minimize Infrastructure" title="Minimize">−</button></div>
   </header>
   <div class="infra-grid">
     <section class="infra-card">
@@ -205,7 +205,6 @@ const chatPanel=document.getElementById('chat-panel');
 const chatAdapter={async listConversations(){return{available:false,reason:'R3 conversation API is not connected'};},async capabilityManifest(){return{available:false,reason:'Resident capability manifest is unavailable'};}};
 const settingsRegistryAdapter={async read(){return{available:false,reason:'R3 settings registry is not connected'};}};
 const infrastructureButton=document.getElementById('nav-infrastructure');
-const infrastructureClose=document.getElementById('infrastructure-close');
 const infrastructureMinimize=document.getElementById('infrastructure-minimize'),infrastructureAnchor=document.getElementById('infrastructure-anchor');
 const sideRail=document.getElementById('side-rail');
 const profileButton=document.getElementById('profile-button');
@@ -217,7 +216,7 @@ document.getElementById('nav-chat').addEventListener('click',openChat);document.
 function minimizeInfrastructure(){infrastructurePanel.hidden=true;infrastructureAnchor.hidden=false;placeInfrastructureAnchor();}
 function openInfrastructure(){closeChat();infrastructurePanel.hidden=false;infrastructureAnchor.hidden=true;profileMenu.hidden=true;}
 infrastructureButton.addEventListener('click',openInfrastructure);
-infrastructureClose.addEventListener('click',closeInfrastructure);infrastructureMinimize.addEventListener('click',minimizeInfrastructure);infrastructureAnchor.addEventListener('click',openInfrastructure);
+infrastructureMinimize.addEventListener('click',minimizeInfrastructure);
 document.getElementById('rail-toggle').addEventListener('click',()=>{
   const expanded=sideRail.classList.toggle('expanded');
   document.getElementById('rail-toggle').setAttribute('aria-label',expanded?'Collapse navigation':'Expand navigation');
@@ -264,13 +263,26 @@ function clampPosition(x,y){
   win.style.top=Math.max(0,Math.min(maxY,y))+'px';
 }
 function centerWindow(){clampPosition((innerWidth-win.offsetWidth)/2,(innerHeight-win.offsetHeight)/2);}
-// Steward's corrected placement from the supplied reference images; fractions track artwork.
-const engineeringEntrance={x:.31,y:.42};
+// Steward's lower-left Engineering entrance target from the supplied placement reference.
+const engineeringEntrance={x:.377,y:.653};
+const infrastructureAnchorStorageKey='r3-infrastructure-anchor-image-fraction';
+let infrastructureAnchorImageFraction=null;
+try{const saved=JSON.parse(localStorage.getItem(infrastructureAnchorStorageKey)||'null');if(saved&&Number.isFinite(saved.x)&&Number.isFinite(saved.y)&&saved.x>=0&&saved.x<=1&&saved.y>=0&&saved.y<=1)infrastructureAnchorImageFraction=saved;}catch{}
 let expandedState=null;
 function imageFractionPosition(anchor){const imageWidth=background.naturalWidth||1536,imageHeight=background.naturalHeight||1024;const scale=Math.max(innerWidth/imageWidth,innerHeight/imageHeight),drawnWidth=imageWidth*scale,drawnHeight=imageHeight*scale;return{x:(innerWidth-drawnWidth)/2+anchor.x*drawnWidth,y:(innerHeight-drawnHeight)/2+anchor.y*drawnHeight};}
 function entrancePosition(){return imageFractionPosition(engineeringEntrance);}
-function placeInfrastructureAnchor(){const p=imageFractionPosition(engineeringEntrance);const x=p.x+120+infrastructureAnchor.offsetWidth/2+12;infrastructureAnchor.style.left=Math.max(8,Math.min(innerWidth-infrastructureAnchor.offsetWidth-8,x-infrastructureAnchor.offsetWidth/2))+'px';infrastructureAnchor.style.top=Math.max(8,Math.min(innerHeight-infrastructureAnchor.offsetHeight-8,p.y-infrastructureAnchor.offsetHeight/2))+'px';}
+function imageFractionFromPoint(x,y){const iw=background.naturalWidth||1536,ih=background.naturalHeight||1024,scale=Math.max(innerWidth/iw,innerHeight/ih),dw=iw*scale,dh=ih*scale;return{x:Math.max(0,Math.min(1,(x-(innerWidth-dw)/2)/dw)),y:Math.max(0,Math.min(1,(y-(innerHeight-dh)/2)/dh))};}
+function infrastructureDefaultCenter(){const p=entrancePosition();return{x:p.x+120+infrastructureAnchor.offsetWidth/2+12,y:p.y};}
+function currentInfrastructureAnchorFraction(){if(infrastructureAnchorImageFraction)return infrastructureAnchorImageFraction;if(!infrastructureAnchor.hidden){const r=infrastructureAnchor.getBoundingClientRect();if(r.width&&r.height)return imageFractionFromPoint(r.left+r.width/2,r.top+r.height/2);}const p=infrastructureDefaultCenter();return imageFractionFromPoint(p.x,p.y);}
+function placeInfrastructureAnchor(){const p=infrastructureAnchorImageFraction?imageFractionPosition(infrastructureAnchorImageFraction):infrastructureDefaultCenter();const left=Math.max(8,Math.min(innerWidth-infrastructureAnchor.offsetWidth-8,p.x-infrastructureAnchor.offsetWidth/2));const top=Math.max(8,Math.min(innerHeight-infrastructureAnchor.offsetHeight-8,p.y-infrastructureAnchor.offsetHeight/2));infrastructureAnchor.style.left=left+'px';infrastructureAnchor.style.top=top+'px';}
 function placeMinimized(){const p=entrancePosition();clampPosition(p.x-win.offsetWidth/2,p.y-win.offsetHeight/2);}
+let infrastructureDrag=null,suppressInfrastructureClick=false;
+function clampInfrastructureAnchor(left,top){infrastructureAnchor.style.left=Math.max(8,Math.min(innerWidth-infrastructureAnchor.offsetWidth-8,left))+'px';infrastructureAnchor.style.top=Math.max(8,Math.min(innerHeight-infrastructureAnchor.offsetHeight-8,top))+'px';}
+infrastructureAnchor.addEventListener('pointerdown',e=>{if(e.button!==0)return;const r=infrastructureAnchor.getBoundingClientRect();infrastructureDrag={id:e.pointerId,startX:e.clientX,startY:e.clientY,left:r.left,top:r.top,moved:false};infrastructureAnchor.classList.add('dragging');infrastructureAnchor.setPointerCapture(e.pointerId);});
+infrastructureAnchor.addEventListener('pointermove',e=>{if(!infrastructureDrag||e.pointerId!==infrastructureDrag.id)return;const dx=e.clientX-infrastructureDrag.startX,dy=e.clientY-infrastructureDrag.startY;if(Math.hypot(dx,dy)>4)infrastructureDrag.moved=true;clampInfrastructureAnchor(infrastructureDrag.left+dx,infrastructureDrag.top+dy);});
+function finishInfrastructureDrag(e){if(!infrastructureDrag||e.pointerId!==infrastructureDrag.id)return;const moved=infrastructureDrag.moved;infrastructureDrag=null;infrastructureAnchor.classList.remove('dragging');if(moved){const r=infrastructureAnchor.getBoundingClientRect();infrastructureAnchorImageFraction=imageFractionFromPoint(r.left+r.width/2,r.top+r.height/2);try{localStorage.setItem(infrastructureAnchorStorageKey,JSON.stringify(infrastructureAnchorImageFraction));}catch{}suppressInfrastructureClick=true;}if(infrastructureAnchor.hasPointerCapture(e.pointerId))infrastructureAnchor.releasePointerCapture(e.pointerId);}
+infrastructureAnchor.addEventListener('pointerup',finishInfrastructureDrag);infrastructureAnchor.addEventListener('pointercancel',finishInfrastructureDrag);infrastructureAnchor.addEventListener('lostpointercapture',()=>{infrastructureDrag=null;infrastructureAnchor.classList.remove('dragging');});
+infrastructureAnchor.addEventListener('click',e=>{if(suppressInfrastructureClick){suppressInfrastructureClick=false;e.preventDefault();return;}openInfrastructure();});
 function syncMinimizeButton(){
   const minimized=win.classList.contains('min');
   minimize.textContent=minimized?'□':'−';
@@ -387,6 +399,7 @@ snapshotButton.addEventListener('click',async()=>{
         opacity:Number(slider.value)/100
       },
       entrance_anchor_image_fraction:engineeringEntrance,
+      infrastructure_anchor_image_fraction:currentInfrastructureAnchorFraction(),
       background_intrinsic_px:{width:background.naturalWidth||1,height:background.naturalHeight||1}
     };
     const response=await fetch('/api/v1/snapshot',{

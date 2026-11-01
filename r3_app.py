@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.8
+# File Revision: 1.0.9
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Initial shared read-only institutional API
@@ -9,7 +9,7 @@
 # Observability: HTTP health endpoint; no deployed verification
 # Dependencies: FastAPI, Git checkout, local artwork folder
 # Authority: R3 engineering guidance; approved charter prevails
-# Changed: 2026-11-01 UTC | R3-WEB-UI-002 | ChatGPT GPT-6 | Align snapshot anchor metadata with corrected minimized marker
+# Changed: 2026-11-01 UTC | R3-PANEL-INTERACTION-002 | ChatGPT GPT-6 | Align snapshot anchors and report dragged Infrastructure marker
 # Supersedes: None
 # Contracts: hints/file-provenance.md
 # Tests: Syntax checked during outage recovery
@@ -144,7 +144,7 @@ def _base_snapshot():
             "height_px": height,
         },
         "ui_contract": {
-            "engineering_entrance_image_fraction": {"x": 0.31, "y": 0.42},
+            "engineering_entrance_image_fraction": {"x": 0.377, "y": 0.653},
             "minimized_opacity": 0.45,
             "background_rendering": "cover",
         },
@@ -171,6 +171,7 @@ def _validate_browser_capture(payload):
     rect = panel.get("rect_css_px") if isinstance(panel, dict) else None
     dpr = payload.get("device_pixel_ratio")
     anchor = payload.get("entrance_anchor_image_fraction")
+    infrastructure_anchor = payload.get("infrastructure_anchor_image_fraction")
     image_size = payload.get("background_intrinsic_px")
     if not isinstance(viewport, dict) or not _number(viewport.get("width"), 1, 10000) or not _number(viewport.get("height"), 1, 10000):
         raise HTTPException(422, "Invalid viewport dimensions")
@@ -182,6 +183,8 @@ def _validate_browser_capture(payload):
         raise HTTPException(422, "Invalid panel size or opacity")
     if not isinstance(anchor, dict) or any(not _number(anchor.get(k), 0, 1) for k in ("x", "y")):
         raise HTTPException(422, "Invalid image anchor")
+    if infrastructure_anchor is not None and (not isinstance(infrastructure_anchor, dict) or any(not _number(infrastructure_anchor.get(k), 0, 1) for k in ("x", "y"))):
+        raise HTTPException(422, "Invalid Infrastructure anchor")
     if not isinstance(image_size, dict) or any(not _number(image_size.get(k), 1, 20000) for k in ("width", "height")):
         raise HTTPException(422, "Invalid background dimensions")
     return {
@@ -195,6 +198,7 @@ def _validate_browser_capture(payload):
         },
         "entrance_anchor_image_fraction": {"x": anchor["x"], "y": anchor["y"]},
         "background_intrinsic_px": {"width": image_size["width"], "height": image_size["height"]},
+        **({"infrastructure_anchor_image_fraction": {"x": infrastructure_anchor["x"], "y": infrastructure_anchor["y"]}} if infrastructure_anchor is not None else {}),
     }
 
 
