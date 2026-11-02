@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/resident_inference.py
 # Component: R3-RESIDENT-INFERENCE
-# File Revision: 1.1.0
+# File Revision: 1.1.1
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Reusable event-driven resident inference against an existing OpenAI-compatible endpoint.
@@ -13,8 +13,9 @@
 # Changed: 2026-11-02 UTC | R3-GRACE-004 | Durable tool-call continuation with fail-closed recovery
 # Supersedes: None
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; hints/engineering-test-policy.md
-# Tests: Permanent integration contracts pending; no synthetic production work.
-# History/Predecessor: Git blob 7f5fb28ecce95ad6283b5cf37c83fa9ee45ba3b1
+# Tests: tests/test_inference_http_errors.py (permanent transport diagnostic contract).
+# Changed: 2026-11-02 UTC | R3-GRACE-005 | Preserve safe upstream HTTP error codes without leaking request content.
+# History/Predecessor: Git blob b522510df9655189de7e8bcf52503535e3cc2995
 """Durable resident inbox and inference adapter; tool routing uses existing llama.cpp /tools adapter."""
 from __future__ import annotations
 
@@ -110,8 +111,24 @@ class InferenceEndpoint:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            return json.load(response)
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as exc:
+            # Error messages may echo sensitive prompts or tool results.
+            # Retain upstream error classification without persisting its body.
+            detail = ""
+            try:
+                data = json.loads(exc.read(65536))
+                error = data.get("error") if isinstance(data, dict) else None
+                if isinstance(error, dict):
+                    values = (error.get("type"), error.get("code"))
+                    safe = [str(v)[:80] for v in values
+                            if isinstance(v, (str, int)) and not isinstance(v, bool)]
+                    detail = " (" + ", ".join(safe) + ")" if safe else ""
+            except (ValueError, OSError, TypeError):
+                pass
+            raise RuntimeError(f"Inference HTTP {exc.code}{detail}") from None
 
 
 class ResidentInference:
