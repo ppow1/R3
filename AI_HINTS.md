@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.0.4
+File Revision: 1.0.5
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -29,6 +29,8 @@ When adding project knowledge, **store the substantive document in `hints/` and 
 Start with [the hints index](hints/README.md). Keep this root file short; put detailed guidance in `hints/` and link onward to authoritative documents.
 
 **Riverview Comms:** For every failed or blocked operation, follow [Comms failure recording and recovery](hints/comms-failure-recovery.md) and create/update a durable incident with a punch-list reference. Record preflight blocks even when no command was submitted.
+
+**MANDATORY HARD GATE:** Before any engineering change, read [no one-time tests or test-shaped production restrictions](hints/engineering-test-policy.md). Never introduce scenario-specific throwaway tests, artificial runtime limits, or temporary qualification checks as permanent deployment gates.
 
 ## Essential rules
 
