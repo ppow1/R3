@@ -103,3 +103,9 @@ Investigation documented. Baseline code reconciliation and foundational repairs 
 - Verified by Steward on Camrui isolated archive of commit 31650acddffd0ffbf446319ea4a054aa9aadd18f: 15/15 permanent tests passed in 1.754 seconds. tests/test_native_integration.py exercised actual loopback HTTP GET /v1/tools and POST /v1/tools/invoke (both 200), resident TOOL_INTENT/TOOL_RESULT, completion, and persistent SQLite audit with simulated inference.
 - Files: runtime/native_tools.py, runtime/tool_server.py, runtime/serve.py, runtime/configuration.py, tests/test_native_tools.py, tests/test_tool_server.py, tests/test_native_integration.py, docs/r3-native-tool-contract.md. Phase 2 code path VERIFIED in isolation; production live 80B and service deployment NOT verified.
 - Limits: only read-only r3.status is implemented. Write execution and server-side grants are not yet supported; legacy Comms5 live service remains untouched. Phase 3 entry: implement configurable local/LAN host execution, authorization and audit without importing R2 tool catalog; then reconcile and deploy safely.
+
+## Phase 3 local execution verification (2026-11-02)
+- Steward ran isolated archive of commit e610084c6f78cc560fb94fbd69a6cb32244d4e15 on Camrui. Python compileall passed; 17/17 permanent tests passed in 2.116 seconds.
+- Verified: configuration-defined shell-free local command execution, denial of unapproved arguments/write-classified catalog entries, SQLite execution audit, and previously tested native resident HTTP tool continuation.
+- Files: runtime/host_execution.py, runtime/tool_server.py, config/host-tools.json, tests/test_host_execution.py.
+- Phase 3 remains OPEN: LAN remote host access, host-specific authorization, and production Grace integration are not implemented or verified. Live Camrui checkout and user service unchanged. Next: implement LAN execution with independently controlled authorization and durable audit, then validate against real hosts.
