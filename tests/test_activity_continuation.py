@@ -1,0 +1,70 @@
+# R3 CONTROLLED SOURCE
+# File: tests/test_activity_continuation.py
+# Purpose: Permanent resident-neutral durable activity continuation regressions.
+from __future__ import annotations
+import asyncio
+import json
+import sqlite3
+import unittest
+from unittest.mock import Mock
+from runtime.resident_inference import Inbox, ResidentInference
+
+
+class ActivityContinuationTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+        self.inbox = Inbox(self.db)
+
+    def tearDown(self):
+        self.db.close()
+
+    def handler(self, answers, enabled=("RESIDENT_ACTIVITY",)):
+        endpoint = Mock()
+        endpoint.complete.side_effect = [
+            {"choices": [{"message": {"role": "assistant", "content": json.dumps(a)}}], "model": "test"}
+            for a in answers
+        ]
+        return ResidentInference(self.inbox, endpoint, system_prompt="Test resident",
+                                 continuation_event_types=enabled)
+
+    def test_continuation_is_durable_and_resumes_next_activation(self):
+        first = self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY", {"objective": "Investigate"})
+        handler = self.handler([
+            {"state": "continue", "next_step": "Review evidence", "evidence": "Initial observation"},
+            {"state": "complete", "evidence": "Reviewed"},
+        ])
+        asyncio.run(handler("TestResident"))
+        first_result = self.db.execute("SELECT status,result FROM resident_inbox WHERE id=?", (first,)).fetchone()
+        self.assertEqual(first_result[0], "COMPLETED")
+        second = json.loads(first_result[1])["continuation_event_id"]
+        payload, status = self.db.execute("SELECT payload,status FROM resident_inbox WHERE id=?", (second,)).fetchone()
+        self.assertEqual(status, "PENDING")
+        self.assertEqual(json.loads(payload)["objective"], {"objective": "Investigate"})
+        asyncio.run(handler("TestResident"))
+        self.assertEqual(self.db.execute("SELECT status FROM resident_inbox WHERE id=?", (second,)).fetchone()[0], "COMPLETED")
+        self.assertEqual(self.db.execute("SELECT count(*) FROM resident_inbox").fetchone()[0], 2)
+
+    def test_regular_event_keeps_ordinary_response(self):
+        event = self.inbox.enqueue("TestResident", "CONVERSATION", {"text": "hello"})
+        handler = self.handler([{"state": "continue", "next_step": "not activated"}])
+        asyncio.run(handler("TestResident"))
+        self.assertEqual(self.db.execute("SELECT status FROM resident_inbox WHERE id=?", (event,)).fetchone()[0], "COMPLETED")
+        self.assertEqual(self.db.execute("SELECT count(*) FROM resident_inbox").fetchone()[0], 1)
+
+    def test_invalid_decision_fails_without_new_event(self):
+        event = self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY", {"objective": "Check"})
+        handler = self.handler([{"state": "continue"}])
+        with self.assertRaisesRegex(RuntimeError, "next_step"):
+            asyncio.run(handler("TestResident"))
+        self.assertEqual(self.db.execute("SELECT status FROM resident_inbox WHERE id=?", (event,)).fetchone()[0], "FAILED")
+        self.assertEqual(self.db.execute("SELECT count(*) FROM resident_inbox").fetchone()[0], 1)
+
+    def test_blocked_is_not_reported_as_completed(self):
+        event = self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY", {"objective": "Check"})
+        handler = self.handler([{"state": "blocked", "evidence": "Need access"}])
+        asyncio.run(handler("TestResident"))
+        self.assertEqual(self.db.execute("SELECT status FROM resident_inbox WHERE id=?", (event,)).fetchone()[0], "FAILED")
+
+
+if __name__ == "__main__":
+    unittest.main()
