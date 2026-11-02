@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/resident_inference.py
 # Component: R3-RESIDENT-INFERENCE
-# File Revision: 1.1.1
+# File Revision: 1.2.0
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Reusable event-driven resident inference against an existing OpenAI-compatible endpoint.
@@ -55,6 +55,21 @@ class Inbox:
             cursor = self.db.execute(
                 "INSERT INTO resident_inbox(resident,event_type,payload,created_at,updated_at) VALUES (?,?,?,?,?)",
                 (resident, event_type, json.dumps(payload), now, now))
+        return int(cursor.lastrowid)
+
+    def continue_activity(self, event_id, resident, event_type, payload, result):
+        """Atomically close one activity turn and queue the next."""
+        now = time.time()
+        with self.db:
+            row = self.db.execute("SELECT status FROM resident_inbox WHERE id=?", (event_id,)).fetchone()
+            if row is None or row[0] != "PROCESSING":
+                raise RuntimeError("Activity continuation requires PROCESSING event")
+            cursor = self.db.execute(
+                "INSERT INTO resident_inbox(resident,event_type,payload,created_at,updated_at) VALUES (?,?,?,?,?)",
+                (resident, event_type, json.dumps(payload), now, now))
+            self.db.execute(
+                "UPDATE resident_inbox SET status='COMPLETED',result=?,updated_at=? WHERE id=?",
+                (json.dumps({**result, "continuation_event_id": cursor.lastrowid}), now, event_id))
         return int(cursor.lastrowid)
 
     def next(self, resident: str) -> tuple[int, str, dict] | None:
@@ -135,11 +150,13 @@ class ResidentInference:
     """Continue genuine events, preserving tool results and refusing uncertain replay."""
 
     def __init__(self, inbox: Inbox, endpoint: InferenceEndpoint, *,
-                 system_prompt: str, tools: LlamaTools | None = None):
+                 system_prompt: str, tools: LlamaTools | None = None,
+                 continuation_event_types: tuple[str, ...] = ()):
         self.inbox = inbox
         self.endpoint = endpoint
         self.system_prompt = system_prompt
         self.tools = tools
+        self.continuation_event_types = frozenset(continuation_event_types)
 
     async def __call__(self, resident: str) -> None:
         event = self.inbox.next(resident)
@@ -175,6 +192,27 @@ class ResidentInference:
                 calls = message.get("tool_calls") or []
                 self.inbox.record(event_id, "ASSISTANT", message)
                 messages.append(message)
+                if not calls and event_type in self.continuation_event_types:
+                    try:
+                        decision = json.loads(message.get("content") or "")
+                    except (ValueError, TypeError) as exc:
+                        raise RuntimeError("Activity requires structured decision") from exc
+                    if not isinstance(decision, dict) or decision.get("state") not in ("continue", "complete", "blocked"):
+                        raise RuntimeError("Invalid activity state")
+                    if decision["state"] == "continue":
+                        next_step = decision.get("next_step")
+                        if not isinstance(next_step, str) or not next_step.strip():
+                            raise RuntimeError("Continuing activity requires next_step")
+                        self.inbox.continue_activity(event_id, resident, event_type, {
+                            "objective": payload.get("objective", payload),
+                            "previous_event_id": event_id,
+                            "previous_result": decision,
+                            "next_step": next_step,
+                        }, {"decision": decision, "model": result.get("model")})
+                        return
+                    self.inbox.finish(event_id, "COMPLETED" if decision["state"] == "complete" else "FAILED",
+                                      {"decision": decision, "model": result.get("model")})
+                    return
                 if not calls:
                     self.inbox.finish(event_id, "COMPLETED", {
                         "message": message, "usage": result.get("usage"),
