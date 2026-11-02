@@ -37,7 +37,7 @@ import time
 
 from runtime.institution import Institution, Journal, Resident
 from runtime.native_tools import NativeTools
-from runtime.configuration import load_configuration
+from runtime.configuration import load_configuration, ConfigurationError
 from runtime.resident_inference import Inbox, InferenceEndpoint, ResidentInference
 
 
