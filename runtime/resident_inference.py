@@ -163,8 +163,19 @@ class ResidentInference:
         if event is None:
             return
         event_id, event_type, payload = event
+        continuity_contract = (
+            "\n\nResident activity continuity: an activity turn is not the objective itself. "
+            "Carry forward the original objective and prior evidence. "
+            "Use state=continue with a specific next_step when an authorized, meaningful "
+            "action remains; use state=blocked when an external dependency prevents progress; "
+            "use state=complete only when the assigned objective is satisfied, "
+            "not merely because a tool call or investigation ended. "
+            "Set objective_verified=true only when the objective's acceptance conditions "
+            "are supported by observed evidence; otherwise omit it or set false. "
+            "Never invent a next action or repeat an ineffective step."
+        ) if event_type in self.continuation_event_types else ""
         messages = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": self.system_prompt + continuity_contract},
             {"role": "user", "content": json.dumps({"event_type": event_type, "payload": payload})},
         ]
         try:
