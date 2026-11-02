@@ -1,7 +1,7 @@
 // R3 CONTROLLED SOURCE
 // File: web/resident-avatar.js
 // Component: R3-RESIDENT-AVATAR-WEB
-// File Revision: 1.0.0
+// File Revision: 1.0.1
 // Created: 2026-11-02T20:11:07.271Z
 // Created By: ChatGPT GPT-6
 // Purpose: Reusable, replaceable Three.js resident avatar client for the R3 website.
@@ -10,12 +10,13 @@
 // Dependencies: Three.js 0.180.0 via pinned jsDelivr import map; Gobkit OfficeLady GLB (CC0 1.0).
 // Authority: R3 Charter Revision 2; no authentication or backend command bridge is implied.
 // Changed: 2026-11-02T20:11:07.271Z | R3-AVATAR-001 | ChatGPT GPT-6 | Initial reusable browser avatar runtime.
+// Changed: 2026-11-02T20:12:36.477Z | R3-AVATAR-002 | ChatGPT GPT-6 | Handle renderer import failures and correct mobile panel CSS.
 // Supersedes: None
 // Contracts: hints/resident-avatar-system.md; docs/IMPLEMENTATION_HANDOFF.md
 // Tests: Not run; browser rendering and interaction acceptance pending.
 // History/Predecessor: New file.
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+let THREE;
+let GLTFLoader;
 
 const asset = Object.freeze({
   id: 'gobkit-office-lady-v1',
@@ -40,7 +41,7 @@ style.textContent = [
   '#r3-avatar-actions{display:flex;gap:5px;flex-wrap:wrap;padding:8px 10px;border-top:1px solid #c2d5ec22}',
   '#r3-avatar-actions button{font-size:10px;padding:5px 8px}',
   '#r3-avatar-actions button[aria-pressed="true"]{background:#335879;border-color:#a9c6e6}',
-  '@media(max-width:600px){#r3-avatar-panel{right:10px;bottom:10px;width:min(330px,calc(100vw - 70px));height:min(440px,calc(100vh - 20px))}'
+  '@media(max-width:600px){#r3-avatar-panel{right:10px;bottom:10px;width:min(330px,calc(100vw - 70px));height:min(440px,calc(100vh - 20px))}}'
 ].join('');
 document.head.append(style);
 
@@ -80,7 +81,18 @@ if (nav) {
     async load() {
       if (this.mixer) return this.status();
       if (this.loading) return this.loading;
-      this.state = 'loading'; this.report('Loading temporary GLB avatar…', 'loading');
+      this.state = 'loading'; this.report('Loading Three.js and temporary GLB avatar…', 'loading');
+      try {
+        if (!THREE || !GLTFLoader) {
+          const modules = await Promise.all([import('three'), import('three/addons/loaders/GLTFLoader.js')]);
+          THREE = modules[0];
+          GLTFLoader = modules[1].GLTFLoader;
+        }
+      } catch (error) {
+        this.state = 'error';
+        this.report('Avatar renderer unavailable: Three.js dependency could not load.', 'error');
+        throw error;
+      }
       this.loading = new Promise((resolve, reject) => {
         const loader = new GLTFLoader();
         loader.setCrossOrigin('anonymous');
