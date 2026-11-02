@@ -88,3 +88,7 @@ Investigation documented. Baseline code reconciliation and foundational repairs 
 - Steward executed isolated git-archive verification on Camrui: py_compile of runtime/configuration.py and runtime/serve.py PASS; all four tests/test_configuration.py regressions PASS; configuration loaded one resident (Grace) and nonempty prompt.
 - Verification limit: no running service startup test, no full regression suite, and no live deployment yet. Live service still uses legacy environment-based Comms5 adapter. New config explicitly selects tools.provider=none, so deploying it would remove existing configured tool access. Do not treat this as a production-ready MCP replacement.
 - Next roadmap priority: complete Phase 1 service integration and compatibility validation without silently changing live tool behavior; then Phase 2 R3-native tool contract. Do not expand configuration into a separate campaign.
+
+## Full permanent test suite verified (2026-11-02)
+- Steward executed isolated git archive at 6f6438676cbe2df930c838eeeca0e32ab2f57b67: 8 tests passed in 1.071s, including two-resident external-config service startup, configuration validation, inference error diagnostics, and supervisor no-elapsed-time-cancellation regression.
+- Live Camrui remains running older code with local uncommitted MCP adapter; deployment and live health verification remain outstanding. Configured provider 'none' is not equivalent to current Comms5-backed tool setup. Preserve live behavior until R3-native MCP is ready or explicit cutover approved.
