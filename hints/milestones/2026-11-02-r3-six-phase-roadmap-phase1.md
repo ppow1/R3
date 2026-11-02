@@ -46,6 +46,11 @@ Investigation documented. Baseline code reconciliation and foundational repairs 
 - Command ran `python3 -m unittest discover -s tests -p test_institution_supervision.py -v` under `set -eu` and reached `=== VERIFICATION COMPLETE ===`. This supports exit status zero for the SSH command, but Python unittest writes its result lines to stderr, which the Windows capture did not include. Exact tests-run count and `OK` output are not yet visible; re-run with stderr redirected to stdout and preserve output.
 - Do not mark Phase 1 implementation fully verified or deployed on this evidence alone.
 
+## Verified regression result (2026-11-02)
+- Steward supplied full isolated Camrui unittest output for archived commit 1b6e0af5dbb9ad8f2b3e080b4300b90f8fcdd180: `test_active_work_is_not_cancelled_by_elapsed_time ... ok`; `Ran 1 test in 0.253s`; `OK`; `=== VERIFICATION COMPLETE ===`.
+- Scope: permanent test verifies active resident is not cancelled during the test's elapsed waiting interval and the supervisor continues to report RUNNING with no watchdog failure. It does not prove production deployment, indefinite task behavior, or inference/tool correctness.
+- Phase 1 remains OPEN for deployed source reconciliation and HTTP 400/120-second inference transport repair.
+
 ## Checkpoint index
 - Earlier MCP milestone: hints/milestones/2026-11-02-grace-mcp-milestone.md
 - Phase 1 continuity checkpoint: this document
