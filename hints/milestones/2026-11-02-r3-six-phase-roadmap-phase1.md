@@ -114,3 +114,9 @@ Investigation documented. Baseline code reconciliation and foundational repairs 
 - Steward ran isolated archive at e28e38cce04d60f397167165a0662cf5bc227bf2 on Camrui: compileall passed; 20/20 permanent tests passed in 2.296 seconds.
 - runtime/host_execution.py supports fixed-command SSH transport with BatchMode=yes and StrictHostKeyChecking=yes; tests/test_lan_execution.py verifies command construction, unsafe alias/argument rejection and fail-closed unauthorized arguments. SSH execution in these tests was mocked, NOT a real LAN host connection.
 - Next Phase 3 evidence: verify actual Camrui SSH connectivity and command execution against known hosts, validate tool-server audit, and reconcile live deployment without overwriting uncommitted files. Phase 3 remains OPEN.
+
+## Phase 3 external host registry verification (2026-11-02)
+- Steward verified isolated archive at cf14f68fa3204dd6cd642d99abfe5b4e2e9c22c7 on Camrui: compileall passed, 23/23 permanent tests passed in 2.152 seconds.
+- External host registry controls address, user, port, SSH identity and known-hosts path. New permanent tests cover configured SSH argument construction, unknown-host rejection and malformed-profile rejection.
+- Operational discovery: Windows SSH alias octo1 authenticated to OctoMiner1 as root and executed hostname/whoami/uptime. Camrui -> OctoMiner1 at 192.168.1.160 reaches port 22 and recognizes host key but admin1 login failed; Camrui's correct remote identity and trust/credential setup are not verified. Do not equate Windows SSH success with Camrui SSH access.
+- Next: establish Camrui->OctoMiner1 credential using existing documented infrastructure, then execute real native tool invocation and verify audit; no live service changes. Phase 3 OPEN.
