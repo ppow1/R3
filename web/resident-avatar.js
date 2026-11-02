@@ -1,29 +1,44 @@
 // R3 CONTROLLED SOURCE
 // File: web/resident-avatar.js
 // Component: R3-RESIDENT-AVATAR-WEB
-// File Revision: 1.0.1
+// File Revision: 1.1.2
 // Created: 2026-11-02T20:11:07.271Z
 // Created By: ChatGPT GPT-6
 // Purpose: Reusable, replaceable Three.js resident avatar client for the R3 website.
 // Execution Model: Lazy browser module; loads a configured GLB and named animation clips.
 // Observability: UI load/error state, asset identity/license, supported clips, and active clip.
-// Dependencies: Three.js 0.180.0 via pinned jsDelivr import map; Gobkit OfficeLady GLB (CC0 1.0).
+// Dependencies: Three.js 0.180.0 via pinned jsDelivr import map; CodeLove Businesswoman 04 GLB and female Biped animation GLBs (MIT License).
 // Authority: R3 Charter Revision 2; no authentication or backend command bridge is implied.
 // Changed: 2026-11-02T20:11:07.271Z | R3-AVATAR-001 | ChatGPT GPT-6 | Initial reusable browser avatar runtime.
 // Changed: 2026-11-02T20:12:36.477Z | R3-AVATAR-002 | ChatGPT GPT-6 | Handle renderer import failures and correct mobile panel CSS.
-// Supersedes: None
+// Changed: 2026-11-02 UTC | R3-AVATAR-003 | ChatGPT GPT-6 | Replace mismatched low-poly Gobkit asset with rigged Businesswoman 04 and shared female Biped clips.
+// Changed: 2026-11-02 UTC | R3-AVATAR-004 | ChatGPT GPT-6 | Correct status metadata to expose the configured model URL.
+// Supersedes: web/resident-avatar.js revision 1.0.1, blob 47572f6a7d7d7d9deb65bdb8a65a1a2d4f8db315 (replaced mismatched Gobkit placeholder asset)
 // Contracts: hints/resident-avatar-system.md; docs/IMPLEMENTATION_HANDOFF.md
-// Tests: Not run; browser rendering and interaction acceptance pending.
-// History/Predecessor: New file.
+// Tests: Not run; persistent browser rendering and clip playback acceptance pending.
+// History/Predecessor: Revision 1.1.1, blob b1456accdd0f47a148ef9a498bd26262a7d30741.
 let THREE;
 let GLTFLoader;
+let MeshoptDecoder;
 
 const asset = Object.freeze({
-  id: 'gobkit-office-lady-v1',
+  id: 'codelove-businesswoman-04-v1',
   residentId: 'Grace',
-  url: 'https://gobkit.com/freebies/human001/OfficeLady.glb',
-  source: 'https://gobkit.itch.io/gobkit-free-character-pack-vol-1',
-  license: 'CC0 1.0'
+  modelUrl: 'https://models.codelove.in/models/business-female-04.glb',
+  source: 'https://models.codelove.in/models/business-female-04/',
+  license: 'MIT License'
+});
+const animationClips = Object.freeze({
+  'Idle': {url:'https://models.codelove.in/animations/f_idle_neutral_01.glb', loop:true},
+  'Look around': {url:'https://models.codelove.in/animations/f_idle_look_around_01.glb', loop:true},
+  'Talk': {url:'https://models.codelove.in/animations/f_gestic_talk_neutral_01.glb', loop:true},
+  'Thoughtful': {url:'https://models.codelove.in/animations/f_gestic_thoughtful_01.glb', loop:true},
+  'Wave': {url:'https://models.codelove.in/animations/f_wave_01.glb', loop:false},
+  'Cheer': {url:'https://models.codelove.in/animations/f_cheer_01.glb', loop:false},
+  'Clap': {url:'https://models.codelove.in/animations/f_claphands_01.glb', loop:false},
+  'Dance': {url:'https://models.codelove.in/animations/f_dancing_neutral.glb', loop:false},
+  'Walk': {url:'https://models.codelove.in/animations/f_walk_neutral_01.glb', loop:true},
+  'Run': {url:'https://models.codelove.in/animations/f_run_neutral_01.glb', loop:true}
 });
 const residents = new Map();
 
@@ -73,7 +88,7 @@ if (nav) {
     }
     status() {
       return Object.freeze({residentId: asset.residentId, state: this.state, assetId: asset.id,
-        assetUrl: asset.url, license: asset.license, animations: [...this.names], currentAnimation: this.current});
+        assetUrl: asset.modelUrl, license: asset.license, animations: [...this.names], loadedAnimations: [...(this.actions?.keys()||[])], currentAnimation: this.current});
     }
     report(message, state) {
       this.statusNode.textContent = message; this.statusNode.dataset.state = state;
@@ -84,9 +99,10 @@ if (nav) {
       this.state = 'loading'; this.report('Loading Three.js and temporary GLB avatar…', 'loading');
       try {
         if (!THREE || !GLTFLoader) {
-          const modules = await Promise.all([import('three'), import('three/addons/loaders/GLTFLoader.js')]);
+          const modules = await Promise.all([import('three'), import('three/addons/loaders/GLTFLoader.js'), import('three/addons/libs/meshopt_decoder.module.js')]);
           THREE = modules[0];
           GLTFLoader = modules[1].GLTFLoader;
+          MeshoptDecoder = modules[2].MeshoptDecoder;
         }
       } catch (error) {
         this.state = 'error';
@@ -94,11 +110,10 @@ if (nav) {
         throw error;
       }
       this.loading = new Promise((resolve, reject) => {
-        const loader = new GLTFLoader();
-        loader.setCrossOrigin('anonymous');
-        loader.load(asset.url, (gltf) => {
+        const loader = this.createLoader();
+        loader.load(asset.modelUrl, (gltf) => {
           try {
-            if (!gltf.scene || !gltf.animations?.length) throw new Error('GLB scene or named clips missing');
+            if (!gltf.scene) throw new Error('GLB scene missing');
             this.gltf = gltf; this.scene = new THREE.Scene();
             this.camera = new THREE.PerspectiveCamera(32, 1, .01, 100);
             this.renderer = new THREE.WebGLRenderer({alpha:true, antialias:true, powerPreference:'low-power'});
@@ -116,8 +131,9 @@ if (nav) {
             model.position.set(-center.x*scale, -box.min.y*scale, -center.z*scale);
             this.scene.add(model); this.camera.position.set(0,1.05,3.7); this.camera.lookAt(0,.82,0);
             this.mixer = new THREE.AnimationMixer(model);
-            this.actions = new Map(gltf.animations.map(clip => [clip.name,this.mixer.clipAction(clip)]));
-            this.names = gltf.animations.map(clip => clip.name);
+            this.actions = new Map();
+            this.loadingClips = new Map();
+            this.names = Object.keys(animationClips);
             const bounds = () => {
               const w=Math.max(1,this.stage.clientWidth), h=Math.max(1,this.stage.clientHeight);
               this.renderer.setSize(w,h,false); this.camera.aspect=w/h; this.camera.updateProjectionMatrix(); this.render();
@@ -139,16 +155,36 @@ if (nav) {
     }
     addControls() {
       this.controls.replaceChildren();
-      for (const name of ['Idle','Walk','Run','Special'].filter(n=>this.actions.has(n))) {
+      for (const name of ['Idle','Talk','Wave','Walk','Run'].filter(n=>this.names.includes(n))) {
         const button=document.createElement('button'); button.type='button'; button.textContent=name;
         button.setAttribute('aria-pressed','false'); button.addEventListener('click',()=>this.play(name).catch(()=>{}));
         this.controls.append(button);
       }
     }
+    createLoader() {
+      return new GLTFLoader().setCrossOrigin('anonymous').setMeshoptDecoder(MeshoptDecoder);
+    }
+    async loadAnimation(name) {
+      if(this.actions.has(name)) return this.actions.get(name);
+      if(this.loadingClips.has(name)) return this.loadingClips.get(name);
+      const definition=animationClips[name];
+      if(!definition) throw new Error('Animation not available: '+name);
+      const pending=this.createLoader().loadAsync(definition.url).then(gltf=>{
+        const clip=gltf.animations?.[0];
+        if(!clip) throw new Error('Animation clip missing: '+name);
+        const action=this.mixer.clipAction(clip);
+        this.actions.set(name,action);
+        this.loadingClips.delete(name);
+        return action;
+      }).catch(error=>{this.loadingClips.delete(name);throw error;});
+      this.loadingClips.set(name,pending);
+      return pending;
+    }
     async play(name, options={}) {
       if (!this.mixer) await this.load();
-      const action=this.actions.get(name); if(!action) throw new Error('Animation not available: '+name);
-      const loop=options.loop===undefined ? ['Idle','Walk','Run'].includes(name) : Boolean(options.loop);
+      const definition=animationClips[name]; if(!definition) throw new Error('Animation not available: '+name);
+      const action=await this.loadAnimation(name);
+      const loop=options.loop===undefined ? definition.loop : Boolean(options.loop);
       const fade=Number.isFinite(options.fadeSeconds)?Math.max(0,Math.min(2,options.fadeSeconds)):.22;
       const previous=this.active; action.reset(); action.setLoop(loop?THREE.LoopRepeat:THREE.LoopOnce,loop?Infinity:1);
       action.clampWhenFinished=!loop; action.play();
