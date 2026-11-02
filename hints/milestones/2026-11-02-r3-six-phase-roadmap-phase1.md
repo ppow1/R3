@@ -51,6 +51,12 @@ Investigation documented. Baseline code reconciliation and foundational repairs 
 - Scope: permanent test verifies active resident is not cancelled during the test's elapsed waiting interval and the supervisor continues to report RUNNING with no watchdog failure. It does not prove production deployment, indefinite task behavior, or inference/tool correctness.
 - Phase 1 remains OPEN for deployed source reconciliation and HTTP 400/120-second inference transport repair.
 
+## Inference diagnostics verification (2026-11-02)
+- Source commit b3af87da27790a9a20e23975fdd6079dab5ec80d updated runtime/resident_inference.py to retain upstream HTTP status and structured error type/code, without persisting raw body, request prompts, or tool outputs.
+- Permanent regression commit 5f20d6ebe1ba791a106c8b142364bb0ba4e93346 added tests/test_inference_http_errors.py.
+- Steward executed both tests in an isolated git-archive of 5f20d6ebe1ba791a106c8b142364bb0ba4e93346 on Camrui; observed HTTP test `Ran 1 test in 0.004s` `OK`, supervision test `Ran 1 test in 0.270s` `OK`, and `=== VERIFICATION COMPLETE ===`.
+- Both focused regressions PASS. Neither source repair is yet deployed; original HTTP 400 cause remains unknown and inference request timeout remains 120 seconds.
+
 ## Checkpoint index
 - Earlier MCP milestone: hints/milestones/2026-11-02-grace-mcp-milestone.md
 - Phase 1 continuity checkpoint: this document
