@@ -144,3 +144,10 @@ Investigation documented. Baseline code reconciliation and foundational repairs 
 - Qualification conclusion: persistent production event pickup, real 80B reasoning, native read-only tool invocation, audit and completion **PASS for this event**. Completion is software event completion, not independent proof of broader real-world objective completion.
 - Remaining Phase 5/6 gates: restart recovery with pending and interrupted work; uncertain tool-outcome fail-closed behavior without duplicate invocation; queued events; failure handling; sustained operation and truthful health/dashboard visibility. Do not claim these passed based on the single event.
 - Next action: qualify restart recovery safely with a durable PENDING event submitted while the institution service is stopped, then start the service and verify completion and exactly one tool audit. Separately verify interrupted tool-intent recovery with permanent tests before attempting any live interruption of an executing tool.
+
+
+## Production pending-event restart recovery — PASS (2026-11-02)
+- Steward stopped only `r3-institution.service`, leaving `r3-native-tools.service` running. Submitted durable `resident_inbox.id=4` (`RESTART_RECOVERY_CHECK`) using permanent `runtime.inbox_cli`; verified `PENDING` before institution restart.
+- Restarted institution service and observed event 4 `COMPLETED` via the live scheduler and Qwen3-Next-80B-A3B. Durable turns: `0 ASSISTANT`, `1 TOOL_INTENT`, `2 TOOL_RESULT`, `3 ASSISTANT`. Tool intent `r3.host.uptime`; production audit appended `(2, 'r3.host.uptime', 'OK')`, following event 3 audit `(1, 'r3.host.uptime', 'OK')`.
+- Final service state: institution active PID 3042258; native tools active PID 3032116. **Pending-event restart recovery PASS.**
+- Qualification scope: persistence and processing of a previously PENDING event across orderly institution stop/start. Not evidence of recovery from a process crash during an in-flight tool call, nor exactly-once execution under uncertain outcome; those require independent permanent regression and correlation tests. Camrui host uptime is not institution service uptime.
