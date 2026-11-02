@@ -83,6 +83,9 @@ def load_configuration(directory: str | Path):
         _text(inference.get("model"), f"{key}.inference.model")
         _positive(inference.get("timeout_seconds"), f"{key}.inference.timeout_seconds")
         _positive(entry.get("schedule_interval_seconds"), f"{key}.schedule_interval_seconds")
+        activity_types = entry.get("continuation_event_types", [])
+        if not isinstance(activity_types, list) or any(not isinstance(t, str) or not t.strip() for t in activity_types) or len(activity_types) != len(set(activity_types)):
+            raise ConfigurationError(f"{key}.continuation_event_types must be unique nonempty strings")
         tools = _object(entry.get("tools"), f"{key}.tools")
         if tools.get("provider") not in ("none", "r3-native"):
             raise ConfigurationError(f"{key}.tools.provider must be none or r3-native")
