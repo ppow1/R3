@@ -46,6 +46,7 @@ Start with [the hints index](hints/README.md). Keep this root file short; put de
 
 - [Mistakes log: reasoning failures and corrective lessons](hints/mistakes/README.md) — includes R3-MISTAKE-001, the unauthorized MCP read-only restriction during Grace autonomy integration.
 - [Engineering and current handoff](hints/engineering.md)
+- [Grace MCP autonomy milestone and Comms 3 architecture (2026-11-02)](hints/milestones/2026-11-02-grace-mcp-milestone.md) — verified Event 2 tool invocation, HTTP 400 continuation failure, R2 isolation, STDIO/LAN/external topology and follow-up investigations.
 - [Institutional architecture and durable state](hints/architecture.md)
 - [Deployment and command execution](hints/deployment.md)
 - [Q2 watched script queue: submit, dispatch, and retrieve results](hints/q2-script-queue.md)
