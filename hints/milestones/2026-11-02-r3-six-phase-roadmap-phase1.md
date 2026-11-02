@@ -109,3 +109,8 @@ Investigation documented. Baseline code reconciliation and foundational repairs 
 - Verified: configuration-defined shell-free local command execution, denial of unapproved arguments/write-classified catalog entries, SQLite execution audit, and previously tested native resident HTTP tool continuation.
 - Files: runtime/host_execution.py, runtime/tool_server.py, config/host-tools.json, tests/test_host_execution.py.
 - Phase 3 remains OPEN: LAN remote host access, host-specific authorization, and production Grace integration are not implemented or verified. Live Camrui checkout and user service unchanged. Next: implement LAN execution with independently controlled authorization and durable audit, then validate against real hosts.
+
+## Phase 3 LAN transport regression verification (2026-11-02)
+- Steward ran isolated archive at e28e38cce04d60f397167165a0662cf5bc227bf2 on Camrui: compileall passed; 20/20 permanent tests passed in 2.296 seconds.
+- runtime/host_execution.py supports fixed-command SSH transport with BatchMode=yes and StrictHostKeyChecking=yes; tests/test_lan_execution.py verifies command construction, unsafe alias/argument rejection and fail-closed unauthorized arguments. SSH execution in these tests was mocked, NOT a real LAN host connection.
+- Next Phase 3 evidence: verify actual Camrui SSH connectivity and command execution against known hosts, validate tool-server audit, and reconcile live deployment without overwriting uncommitted files. Phase 3 remains OPEN.
