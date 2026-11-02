@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/serve.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Start and monitor R3 institutional scheduler and supervisor.
@@ -13,7 +13,8 @@
 # Supersedes: None
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md
 # Tests: Initial service smoke test pending
-# History/Predecessor: New file
+# Changed: 2026-11-02 UTC | R3-GRACE-002 | Register configured inference resident
+# History/Predecessor: Git blob a6a740ea2a4042c652b39baf8e57f316f5891a93
 """R3 runtime infrastructure entrypoint.
 
 Starts the scheduler and supervisor without inventing resident activities.
@@ -30,7 +31,8 @@ import signal
 import tempfile
 import time
 
-from runtime.institution import Institution, Journal
+from runtime.institution import Institution, Journal, Resident
+from runtime.resident_inference import Inbox, InferenceEndpoint, ResidentInference
 
 
 def atomic_snapshot(path: Path, payload: dict) -> None:
@@ -52,6 +54,20 @@ async def serve(db: Path, health_file: Path, interval: float) -> None:
     db.parent.mkdir(parents=True, exist_ok=True)
     journal = Journal(db)
     institution = Institution(journal)
+    inbox = Inbox(journal.db)
+    endpoint_url = os.environ.get("R3_GRACE_INFERENCE_URL")
+    model_name = os.environ.get("R3_GRACE_MODEL")
+    grace_registered = bool(endpoint_url and model_name)
+    if grace_registered:
+        handler = ResidentInference(
+            inbox, InferenceEndpoint(endpoint_url, model_name),
+            system_prompt=(
+                "You are Grace, Riverview Director of Operations, accountable to the Steward. "
+                "Distinguish evidence from inference and never claim an action occurred without "
+                "a verified tool result."
+            ),
+        )
+        institution.add(Resident(name="Grace", work=handler))
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -70,7 +86,12 @@ async def serve(db: Path, health_file: Path, interval: float) -> None:
                 "pid": os.getpid(),
                 "observed_at": time.time(),
                 "registered_residents": len(institution.residents),
-                "resident_execution_connected": False,
+                "resident_execution_connected": grace_registered,
+                "resident_inference_connected": grace_registered,
+                "resident_tool_execution_connected": False,
+                "resident_inbox_pending": journal.db.execute(
+                    "SELECT count(*) FROM resident_inbox WHERE status IN ('PENDING','PROCESSING')"
+                ).fetchone()[0],
                 "database_backend": "sqlite-prototype",
             })
             atomic_snapshot(health_file, status)
