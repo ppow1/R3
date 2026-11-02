@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/host_execution.py
 # Component: R3-HOST-EXECUTION
-# File Revision: 1.1.0
+# File Revision: 1.2.0
 # Created: 2026-11-02 UTC
 # Purpose: Fixed local and LAN SSH command capabilities.
 # Contracts: docs/r3-native-tool-contract.md
@@ -21,7 +21,8 @@ class HostConfigurationError(ValueError):
 
 
 class HostExecutor:
-    def __init__(self, catalog: Path):
+    def __init__(self, catalog: Path, hosts: Path | None = None):
+        self.hosts = self._load_hosts(hosts) if hosts is not None else None
         raw = json.loads(catalog.read_text(encoding="utf-8"))
         if not isinstance(raw, dict) or not isinstance(raw.get("tools"), list):
             raise HostConfigurationError("Catalog must contain tools array")
@@ -37,6 +38,8 @@ class HostExecutor:
             if transport == "ssh":
                 if not isinstance(host, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", host):
                     raise HostConfigurationError("SSH host must be a fixed alias")
+                if self.hosts is not None and host not in self.hosts:
+                    raise HostConfigurationError("SSH host not registered")
             elif host is not None:
                 raise HostConfigurationError("Local tool cannot specify SSH host")
             if (not isinstance(name, str) or not name.startswith("r3.") or name in self.tools
@@ -54,6 +57,31 @@ class HostExecutor:
             self.tools[name] = {"argv": argv, "timeout": timeout, "transport": transport,
                                 "host": host, "description": item.get("description", name)}
 
+    @staticmethod
+    def _load_hosts(path):
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict) or not isinstance(raw.get("hosts"), dict):
+            raise HostConfigurationError("Host registry must contain hosts object")
+        result = {}
+        for alias, entry in raw["hosts"].items():
+            if not isinstance(alias, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", alias):
+                raise HostConfigurationError("Invalid host identifier")
+            if not isinstance(entry, dict):
+                raise HostConfigurationError("Invalid host profile")
+            hostname, user = entry.get("hostname"), entry.get("user")
+            port = entry.get("port", 22)
+            identity = entry.get("identity_file")
+            known_hosts = entry.get("known_hosts_file")
+            if (not isinstance(hostname, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]+", hostname)
+                or not isinstance(user, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", user)
+                or not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535
+                or not isinstance(identity, str) or not identity.startswith("/")
+                or not isinstance(known_hosts, str) or not known_hosts.startswith("/")):
+                raise HostConfigurationError("Invalid host connection settings")
+            result[alias] = {"hostname": hostname, "user": user, "port": port,
+                             "identity": identity, "known_hosts": known_hosts}
+        return result
+
     def discover(self):
         return [{"tool": name, "read_only": True, "definition": {
             "type": "function", "function": {
@@ -67,9 +95,17 @@ class HostExecutor:
         item = self.tools[name]
         argv = item["argv"]
         if item["transport"] == "ssh":
-            argv = ["/usr/bin/ssh", "-o", "BatchMode=yes",
-                    "-o", "StrictHostKeyChecking=yes",
-                    "-o", "ConnectTimeout=10", "--", item["host"], *argv]
+            options = ["/usr/bin/ssh", "-o", "BatchMode=yes",
+                       "-o", "StrictHostKeyChecking=yes",
+                       "-o", "ConnectTimeout=10"]
+            target = item["host"]
+            if self.hosts is not None:
+                profile = self.hosts[target]
+                options += ["-o", "IdentitiesOnly=yes",
+                            "-o", "UserKnownHostsFile=" + profile["known_hosts"],
+                            "-i", profile["identity"], "-p", str(profile["port"])]
+                target = profile["user"] + "@" + profile["hostname"]
+            argv = [*options, "--", target, *argv]
         result = subprocess.run(argv, shell=False, capture_output=True,
                                 text=True, timeout=item["timeout"], check=False)
         return {"returncode": result.returncode,
