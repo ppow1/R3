@@ -1,3 +1,12 @@
+## Configuration-first foundation requirement (Steward decision, 2026-11-02)
+- HARD GATE for all six phases: operationally adjustable settings belong in persistent external configuration, not hardcoded runtime source. Applies to every resident, not just Grace: identity, role, personality/system prompt, model and inference endpoint/parameters, tool provider/endpoints, scheduling/concurrency, transport timeouts, progress checks, recovery/backoff, and logging/retention.
+- Separate resident personality/prompt documents from technical configuration so Jessica can edit character definition without changing Python. Resident identity and durable state must be independent of model selection and process restarts. Runtime must be resident-neutral; adding residents must not require editing scheduler source.
+- Distinguish connection/read timeout and progress observation from total objective duration. Do not impose arbitrary elapsed-time ceilings on resident work. The current inference adapter's default timeout=120.0 and serve.py's embedded Grace system prompt are existing technical debt to externalize; do not misrepresent urllib socket timeout as necessarily a total objective timeout.
+- Validate settings at load, fail clearly for invalid configuration; never silently substitute source-code values. Credentials remain in protected secret storage, not plaintext settings. Protocol constants and genuine invariants may remain in code.
+- Keep the implementation minimal: inspect/reuse existing R3 configuration conventions, create general-purpose version-controlled settings/prompt files and permanent regression tests, and avoid one-off tests. Preserve existing live Camrui serve.py and mcp_tools.py edits; no blind overwrite or deployment. No new governance layer or separate settings service.
+- Proposed layout only, not yet implemented: config/runtime.json, config/inference.json, config/tools.json, config/residents/<resident>.json, config/residents/prompts/<resident>.md. Final paths and reload behavior require inspection of existing source.
+- Phase 1 cannot close until this requirement is implemented and verified; Phase 2 R3-native MCP must consume external configuration, not deepen dependency on Comms5.
+
 # R3 — Six-Phase Roadmap and Phase 1 Checkpoint
 Date: 2026-11-02 (date precision). Status: Phase 1 investigation complete; foundation repair outstanding.
 Repository: ppow1/R3. Working branch: engineering/institution-runtime-v1-20261101.
