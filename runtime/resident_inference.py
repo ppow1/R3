@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/resident_inference.py
 # Component: R3-RESIDENT-INFERENCE
-# File Revision: 1.2.0
+# File Revision: 1.3.0
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Reusable event-driven resident inference against an existing OpenAI-compatible endpoint.
@@ -11,11 +11,12 @@
 # Authority: R3 Charter Revision 2; does not alter model or MCP configuration.
 # Changed: 2026-11-02 UTC | R3-GRACE-001 | Initial reusable inference/inbox boundary.
 # Changed: 2026-11-02 UTC | R3-GRACE-004 | Durable tool-call continuation with fail-closed recovery
+# Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-005 | Atomically queue review on completion with explicit criteria.
 # Supersedes: None
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; hints/engineering-test-policy.md
 # Tests: tests/test_inference_http_errors.py (permanent transport diagnostic contract).
 # Changed: 2026-11-02 UTC | R3-GRACE-005 | Preserve safe upstream HTTP error codes without leaking request content.
-# History/Predecessor: Git blob b522510df9655189de7e8bcf52503535e3cc2995
+# History/Predecessor: Git blob f813e763eeb85ede8a931996a1fe719a6c7b6ed5
 """Durable resident inbox and inference adapter; tool routing uses existing llama.cpp /tools adapter."""
 from __future__ import annotations
 
@@ -27,11 +28,13 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from runtime.llama_tools import LlamaTools
+from runtime.verification import VerificationLedger
 
 
 class Inbox:
     def __init__(self, db: sqlite3.Connection):
         self.db = db
+        VerificationLedger(db)
         self.db.execute("""CREATE TABLE IF NOT EXISTS resident_inbox (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             resident TEXT NOT NULL,
@@ -98,10 +101,15 @@ class Inbox:
                 (event_id, event_id, kind, json.dumps(content)),
             )
 
-    def finish(self, event_id: int, status: str, result: dict) -> None:
+    def finish(self, event_id: int, status: str, result: dict, *, review: dict | None = None) -> None:
         if status not in ("COMPLETED", "FAILED"):
             raise ValueError("Invalid terminal inbox status")
         with self.db:
+            if review is not None:
+                if status != "COMPLETED":
+                    raise ValueError("Only completed activities may request review")
+                VerificationLedger(self.db).submit_review(
+                    event_id, review["assignment_id"], review["criteria"], review["evidence"])
             self.db.execute(
                 "UPDATE resident_inbox SET status=?,result=?,updated_at=? WHERE id=?",
                 (status, json.dumps(result), time.time(), event_id))
@@ -230,9 +238,20 @@ class ResidentInference:
                         and isinstance(decision.get("evidence"), (dict, list, str))
                         and bool(decision.get("evidence"))
                     )
+                    criteria = payload.get("acceptance_criteria")
+                    assignment_id = payload.get("assignment_id")
+                    review = None
+                    if (decision["state"] == "complete" and isinstance(assignment_id, str)
+                            and assignment_id.strip() and isinstance(criteria, list) and criteria):
+                        review = {
+                            "assignment_id": assignment_id,
+                            "criteria": criteria,
+                            "evidence": decision.get("evidence", {}),
+                        }
                     self.inbox.finish(event_id, "COMPLETED" if decision["state"] == "complete" else "FAILED",
                                       {"decision": decision, "model": result.get("model"),
-                                       "objective_status": "REPORTED_VERIFIED" if objective_verified else "UNVERIFIED"})
+                                       "objective_status": "REPORTED_VERIFIED" if objective_verified else "UNVERIFIED"},
+                                      review=review)
                     return
                 if not calls:
                     self.inbox.finish(event_id, "COMPLETED", {
