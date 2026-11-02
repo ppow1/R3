@@ -151,3 +151,10 @@ Investigation documented. Baseline code reconciliation and foundational repairs 
 - Restarted institution service and observed event 4 `COMPLETED` via the live scheduler and Qwen3-Next-80B-A3B. Durable turns: `0 ASSISTANT`, `1 TOOL_INTENT`, `2 TOOL_RESULT`, `3 ASSISTANT`. Tool intent `r3.host.uptime`; production audit appended `(2, 'r3.host.uptime', 'OK')`, following event 3 audit `(1, 'r3.host.uptime', 'OK')`.
 - Final service state: institution active PID 3042258; native tools active PID 3032116. **Pending-event restart recovery PASS.**
 - Qualification scope: persistence and processing of a previously PENDING event across orderly institution stop/start. Not evidence of recovery from a process crash during an in-flight tool call, nor exactly-once execution under uncertain outcome; those require independent permanent regression and correlation tests. Camrui host uptime is not institution service uptime.
+
+
+## Core autonomy focus: objective continuity (2026-11-02)
+- Source inspection confirms `runtime/institution.py` schedules only when the resident inbox has PENDING/PROCESSING work. `runtime/resident_inference.py` can make multiple tool calls within one event but marks that event COMPLETED whenever the model returns a final assistant message; there is no durable, explicitly modeled unfinished-objective continuation across independent scheduler activations.
+- This is the next **core autonomy** blocker, not an edge-case recovery exercise. Implement a resident-neutral durable objective-continuation contract within the existing journal/inbox and scheduler, with model-controlled progress/continuation, evidence, permanent regression tests, and no hardcoded number of cycles or elapsed objective ceiling. Preserve existing simple event behavior.
+- Do not infer that a model-generated text answer proves objective accomplishment. Separate reported progress from independently verified completion. Avoid building a second work-order engine or scripted demonstration loop.
+- Prioritize this work over additional speculative crash simulations. Retain fail-closed uncertain-tool-outcome behavior as an existing safety invariant, to be qualified later.
