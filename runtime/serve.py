@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/serve.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.0.3
+# File Revision: 1.1.0
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Start and monitor R3 institutional scheduler and supervisor.
@@ -16,7 +16,7 @@
 # Changed: 2026-11-02 UTC | R3-GRACE-002 | Register configured inference resident
 # Changed: 2026-11-02 UTC | R3-RUNTIME-004 | Schedule Grace only when durable inbox has pending work
 # Changed: 2026-11-02 UTC | R3-GRACE-005 | Wire configured existing llama.cpp tool endpoint without enabling by assumption
-# History/Predecessor: Git blob 8c0e187e652dfab7a2d65b5272858e27d6c494b0
+# Changed: 2026-11-02 UTC | R3-CONFIG-001 | Load generic residents and runtime settings from files.\n# History/Predecessor: Git blob 8c0e187e652dfab7a2d65b5272858e27d6c494b0
 """R3 runtime infrastructure entrypoint.
 
 Starts the scheduler and supervisor without inventing resident activities.
@@ -35,7 +35,7 @@ import time
 
 from runtime.institution import Institution, Journal, Resident
 from runtime.llama_tools import LlamaTools
-from runtime.mcp_tools import McpTools
+from runtime.configuration import load_configuration, ConfigurationError
 from runtime.resident_inference import Inbox, InferenceEndpoint, ResidentInference
 
 
@@ -54,37 +54,49 @@ def atomic_snapshot(path: Path, payload: dict) -> None:
             os.unlink(tmp)
 
 
-async def serve(db: Path, health_file: Path, interval: float) -> None:
+async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
+    configuration = load_configuration(config_dir)
+    settings = configuration["runtime"]
+    interval = settings["health_interval_seconds"]
     db.parent.mkdir(parents=True, exist_ok=True)
     journal = Journal(db)
-    institution = Institution(journal)
+    journal.db.execute("PRAGMA busy_timeout=" + str(int(settings["sqlite_busy_timeout_ms"])))
+    institution = Institution(journal, tick_seconds=settings["scheduler_tick_seconds"])
     inbox = Inbox(journal.db)
-    endpoint_url = os.environ.get("R3_GRACE_INFERENCE_URL")
-    model_name = os.environ.get("R3_GRACE_MODEL")
-    grace_registered = bool(endpoint_url and model_name)
-    tools_url = os.environ.get("R3_GRACE_TOOLS_URL")
-    mcp_url = os.environ.get("R3_GRACE_MCP_URL")
-    if mcp_url and tools_url:
-        raise RuntimeError("Configure either R3_GRACE_MCP_URL or R3_GRACE_TOOLS_URL, not both")
-    grace_tools = (McpTools(mcp_url, os.environ.get("R3_GRACE_MCP_BEARER_TOKEN"))
-                   if mcp_url else LlamaTools(tools_url) if tools_url else None)
-    if grace_registered:
+    registered = []
+    configured_tools = 0
+    for definition in configuration["residents"]:
+        resident = definition["settings"]
+        if not resident["enabled"]:
+            continue
+        inference = resident["inference"]
+        tool_settings = resident["tools"]
+        provider = tool_settings["provider"]
+        if provider == "none":
+            tools = None
+        elif provider == "r3-native":
+            # Fail closed until the R3-native MCP adapter is implemented in Phase 2.
+            raise ConfigurationError("R3-native MCP adapter not implemented yet")
+        else:
+            raise ConfigurationError("Unknown tool provider")
+        if tools is not None:
+            configured_tools += 1
         handler = ResidentInference(
-            inbox, InferenceEndpoint(endpoint_url, model_name),
-            tools=grace_tools,
-            system_prompt=(
-                "You are Grace, Riverview Director of Operations, accountable to the Steward. "
-                "Distinguish evidence from inference and never claim an action occurred without "
-                "a verified tool result."
-            ),
+            inbox,
+            InferenceEndpoint(inference["endpoint"], inference["model"],
+                              timeout=inference["timeout_seconds"]),
+            tools=tools,
+            system_prompt=definition["system_prompt"],
         )
         institution.add(Resident(
-            name="Grace", work=handler,
+            name=resident["name"], work=handler,
+            interval=resident["schedule_interval_seconds"],
             ready=lambda name: inbox.db.execute(
                 "SELECT EXISTS(SELECT 1 FROM resident_inbox WHERE resident=? AND status IN ('PENDING','PROCESSING'))",
                 (name,),
             ).fetchone()[0] == 1,
         ))
+        registered.append(resident["name"])
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -102,11 +114,11 @@ async def serve(db: Path, health_file: Path, interval: float) -> None:
                 "service": "r3-institution",
                 "pid": os.getpid(),
                 "observed_at": time.time(),
-                "registered_residents": len(institution.residents),
-                "resident_execution_connected": grace_registered,
-                "resident_inference_connected": grace_registered,
+                "registered_residents": len(registered),
+                "resident_execution_connected": bool(registered),
+                "resident_inference_connected": bool(registered),
                 "resident_tool_execution_connected": False,
-                "resident_tool_execution_configured": grace_tools is not None,
+                "resident_tool_execution_configured": bool(configured_tools),
                 "resident_inbox_pending": journal.db.execute(
                     "SELECT count(*) FROM resident_inbox WHERE status IN ('PENDING','PROCESSING')"
                 ).fetchone()[0],
@@ -123,11 +135,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", type=Path, required=True)
     parser.add_argument("--health-file", type=Path, required=True)
-    parser.add_argument("--interval", type=float, default=2.0)
+    parser.add_argument("--config-dir", type=Path, required=True)
     args = parser.parse_args()
-    if args.interval <= 0:
-        parser.error("--interval must be positive")
-    asyncio.run(serve(args.db, args.health_file, args.interval))
+    asyncio.run(serve(args.db, args.health_file, args.config_dir))
 
 
 if __name__ == "__main__":
