@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/tool_server.py
 # Component: R3-NATIVE-TOOL-SERVER
-# File Revision: 1.0.0
+# File Revision: 1.1.0
 # Created: 2026-11-02 UTC
 # Purpose: Independent read-only R3 tool router and durable audit.
 # Contracts: docs/r3-native-tool-contract.md
@@ -16,6 +16,7 @@ from pathlib import Path
 import sqlite3
 import threading
 import time
+from runtime.host_execution import HostExecutor
 
 STATUS = {"tool": "r3.status", "read_only": True, "definition": {
     "type": "function", "function": {"name": "r3.status",
@@ -24,7 +25,8 @@ STATUS = {"tool": "r3.status", "read_only": True, "definition": {
 
 
 class ToolRouter:
-    def __init__(self, database: Path):
+    def __init__(self, database: Path, executor: HostExecutor | None = None):
+        self.executor = executor
         database.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(database), check_same_thread=False)
         self.lock = threading.Lock()
@@ -32,12 +34,12 @@ class ToolRouter:
         self.db.commit()
 
     def discover(self):
-        return [STATUS]
+        return [STATUS] + (self.executor.discover() if self.executor else [])
 
     def invoke(self, payload):
         name = payload.get("tool") if isinstance(payload, dict) else None
         params = payload.get("params") if isinstance(payload, dict) else None
-        allowed = name == "r3.status" and params == {}
+        allowed = (name == "r3.status" and params == {}) or (self.executor is not None and name in self.executor.tools and params == {})
         with self.lock:
             self.db.execute("INSERT INTO tool_audit(at,tool,outcome) VALUES (?,?,?)",
                             (time.time(), name if isinstance(name, str) else "<invalid>",
@@ -45,7 +47,12 @@ class ToolRouter:
             self.db.commit()
         if not allowed:
             return 403, {"ok": False, "error": "Tool or arguments not authorized"}
-        return 200, {"ok": True, "result": {"service": "r3-tools", "healthy": True}}
+        if name == "r3.status":
+            return 200, {"ok": True, "result": {"service": "r3-tools", "healthy": True}}
+        try:
+            return 200, {"ok": True, "result": self.executor.invoke(name, params)}
+        except Exception:
+            return 500, {"ok": False, "error": "Host execution failed"}
 
 
 def handler_for(router):
@@ -84,10 +91,11 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--audit-db", type=Path, required=True)
+    parser.add_argument("--catalog", type=Path)
     args = parser.parse_args()
     if args.host not in ("127.0.0.1", "::1", "localhost"):
         parser.error("Initial native tool server is loopback-only")
-    ThreadingHTTPServer((args.host, args.port), handler_for(ToolRouter(args.audit_db))).serve_forever()
+    ThreadingHTTPServer((args.host, args.port), handler_for(ToolRouter(args.audit_db, HostExecutor(args.catalog) if args.catalog else None))).serve_forever()
 
 
 if __name__ == "__main__":
