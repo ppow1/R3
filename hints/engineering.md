@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/engineering.md
 Component: ENGINEERING
-File Revision: 1.0.0 (provenance baseline; prior revisions untracked)
+File Revision: 1.0.1 (provenance baseline; prior revisions untracked)
 Created: Unknown (legacy; initial commit can establish earliest publication)
 Created By: Unknown (legacy)
 Purpose: R3 engineering reference and continuation guidance
@@ -17,6 +17,8 @@ Tests: Not run (metadata-only change)
 History/Predecessor: Git blob 4b7c2eff5a7aba798c01743bde6e59d1a984a385
 -->
 # Engineering and continuation
+
+**Mandatory before coding or deployment:** [Steward hard gate — no one-time tests or test-shaped production restrictions](engineering-test-policy.md). Do not introduce temporary qualification tests, timing-sensitive transient assertions, or artificial production limits.
 
 - [Current implementation handoff](../docs/IMPLEMENTATION_HANDOFF.md) — verified state, decisions, next steps, R3-only branch/worktree coordination.
 - [Punch list](../docs/PUNCH_LIST.md) — requirements and acceptance work.
