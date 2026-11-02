@@ -39,7 +39,7 @@ class ActivityContinuationTests(unittest.TestCase):
         second = json.loads(first_result[1])["continuation_event_id"]
         payload, status = self.db.execute("SELECT payload,status FROM resident_inbox WHERE id=?", (second,)).fetchone()
         self.assertEqual(status, "PENDING")
-        self.assertEqual(json.loads(payload)["objective"], {"objective": "Investigate"})
+        self.assertEqual(json.loads(payload)["objective"], "Investigate")
         asyncio.run(handler("TestResident"))
         self.assertEqual(self.db.execute("SELECT status FROM resident_inbox WHERE id=?", (second,)).fetchone()[0], "COMPLETED")
         self.assertEqual(self.db.execute("SELECT count(*) FROM resident_inbox").fetchone()[0], 2)
