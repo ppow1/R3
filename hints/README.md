@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/README.md
 Component: README
-File Revision: 1.0.2 (provenance baseline; prior revisions untracked)
+File Revision: 1.0.3 (provenance baseline; prior revisions untracked)
 Created: Unknown (legacy; initial commit can establish earliest publication)
 Created By: Unknown (legacy)
 Purpose: R3 engineering reference and continuation guidance
@@ -10,6 +10,7 @@ Execution Model: N/A
 Observability: N/A
 Dependencies: R3 docs and hints index
 Authority: R3 engineering guidance; approved charter prevails
+Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Index resident avatar runtime notes
 Changed: 2026-11-01 UTC | R3-CHAT-SETTINGS-UI-001 | ChatGPT GPT-6 | Index chat and scoped settings review drafts
 Supersedes: None
 Contracts: hints/file-provenance.md
@@ -33,3 +34,4 @@ This directory is the first-level reference index for the root [AI_HINTS.md](../
 - [Engineering and continuation](engineering.md): workflow, branch/worktree discipline, and current handoff.
 - [Institutional architecture](architecture.md): charter and capability-first, durable institution principles.
 - [Deployment](deployment.md): Comms-first execution, Camrui bootstrap and verification.
+- [Resident avatar system](resident-avatar-system.md): shared browser runtime, animation API, asset provenance, and pending authorized backend bridge.
