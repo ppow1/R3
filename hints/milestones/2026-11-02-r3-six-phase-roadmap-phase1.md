@@ -36,6 +36,11 @@ Evidence: read-only SSH diagnostics returned by Steward from Camrui and GitHub s
 ## Phase 1 disposition and immediate next action
 Investigation documented. Baseline code reconciliation and foundational repairs remain OPEN: (a) preserve and reconcile Camrui modified/untracked adapter with GitHub; (b) replace fixed elapsed watchdog with progress-aware supervision without a work-duration cap; (c) capture HTTP error response bodies safely to diagnose 400. Do not claim Phase 1 implementation closure until changes are reviewed, committed and verified. Begin with a minimal source reconciliation and permanent tests, then proceed to Phase 2 contract. Do not deploy/restart or overwrite Camrui working source without explicit review and verification.
 
+## Foundation repair progress (2026-11-02)
+- GitHub code commit b4572cd1448d119eb00cd46c2d687168283070a8: runtime/institution.py revision 1.0.7 removes elapsed-work watchdog cancellation while retaining scheduler, supervisor, task-crash detection and shutdown cancellation. Not yet deployed or runtime-verified.
+- GitHub test commit 4f5bbeeeb721e84db2d769dd1883e1a95a8d5528: tests/test_institution_supervision.py adds permanent regression for an active long-running resident. Test not yet executed on Camrui.
+- No changes to deployed Camrui source, MCP adapter, service, or inference timeout. Pending: verify tests; preserve/reconcile deployed files; capture HTTP 400 body; examine and repair inference timeout behavior without an artificial overall work ceiling.
+
 ## Checkpoint index
 - Earlier MCP milestone: hints/milestones/2026-11-02-grace-mcp-milestone.md
 - Phase 1 continuity checkpoint: this document
