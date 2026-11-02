@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/verification.py
 # Component: R3-VERIFICATION-LEARNING
-# File Revision: 1.1.0
+# File Revision: 1.2.0
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Durable criterion-level independent review records and improvement candidates.
@@ -11,10 +11,11 @@
 # Authority: Steward verification and learning discussion; R3 charter revision 2.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-003 | Initial durable evidence and candidate records.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-004 | Add pending review requests.
+# Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-007 | Record independent per-criterion review decisions atomically.
 # Supersedes: None
 # Contracts: hints/verification-and-learning.md; hints/engineering-test-policy.md
 # Tests: tests/test_verification.py
-# History/Predecessor: Git blob b44eb005caa98af6efece2f950c4578daec397cd
+# History/Predecessor: Git blob e8c8e1cfefcf64b74053cbd6bdb2048f8a15b64f
 """Record evidence-based review findings and proposed improvements without applying changes."""
 from __future__ import annotations
 
@@ -77,6 +78,62 @@ class VerificationLedger:
                 "SELECT id FROM verification_requests WHERE source_event_id=?",
                 (source_event_id,)).fetchone()
         return int(row[0])
+
+    def pending_reviews(self) -> list[dict]:
+        """Return queued review inputs; caller must arrange an independent evaluator."""
+        rows = self.db.execute(
+            "SELECT id,source_event_id,assignment_id,criteria,evidence "
+            "FROM verification_requests WHERE status='PENDING' ORDER BY id").fetchall()
+        return [
+            {"id": row[0], "source_event_id": row[1], "assignment_id": row[2],
+             "criteria": json.loads(row[3]), "evidence": json.loads(row[4])}
+            for row in rows
+        ]
+
+    def decide_review(self, request_id: int, *, reviewer: str,
+                      implementation_revision: str, findings: list[dict]) -> str:
+        """Commit a complete independent assessment; never derive pass from executor claims."""
+        if not reviewer.strip() or not implementation_revision.strip():
+            raise ValueError("Reviewer and implementation revision required")
+        with self.db:
+            request = self.db.execute(
+                "SELECT assignment_id,criteria,status FROM verification_requests WHERE id=?",
+                (request_id,)).fetchone()
+            if request is None:
+                raise LookupError("Unknown review request")
+            if request[2] != "PENDING":
+                raise ValueError("Review already decided")
+            criteria = json.loads(request[1])
+            expected = {item["id"] for item in criteria}
+            received = [item.get("criterion_id") for item in findings]
+            if len(received) != len(expected) or set(received) != expected:
+                raise ValueError("Review must cover each criterion exactly once")
+            if any(item.get("result") not in RESULTS
+                   or not isinstance(item.get("reason"), str)
+                   or not item["reason"].strip()
+                   or item.get("evidence") is None for item in findings):
+                raise ValueError("Every finding needs result, reason and evidence")
+            results = {item["result"] for item in findings}
+            outcome = ("NEEDS_WORK" if "FAIL" in results else
+                       "INCONCLUSIVE" if "INSUFFICIENT_EVIDENCE" in results else
+                       "ACCEPTED")
+            review_id = "request:" + str(request_id)
+            now = time.time()
+            for item in findings:
+                criterion = next(x for x in criteria if x["id"] == item["criterion_id"])
+                self.db.execute(
+                    """INSERT INTO verification_findings
+                    (assignment_id,review_id,criterion_id,criterion_version,
+                     implementation_revision,result,reason,evidence,reviewer,at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (request[0], review_id, item["criterion_id"],
+                     str(criterion.get("version", "unspecified")),
+                     implementation_revision, item["result"], item["reason"],
+                     json.dumps(item["evidence"]), reviewer, now))
+            self.db.execute(
+                "UPDATE verification_requests SET status=? WHERE id=? AND status='PENDING'",
+                (outcome, request_id))
+        return outcome
 
     def record_finding(self, *, assignment_id: str, review_id: str,
                        criterion_id: str, criterion_version: str,
