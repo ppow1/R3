@@ -232,7 +232,7 @@ class ResidentInference:
                     )
                     self.inbox.finish(event_id, "COMPLETED" if decision["state"] == "complete" else "FAILED",
                                       {"decision": decision, "model": result.get("model"),
-                                       "objective_status": "VERIFIED" if objective_verified else "UNVERIFIED"})
+                                       "objective_status": "REPORTED_VERIFIED" if objective_verified else "UNVERIFIED"})
                     return
                 if not calls:
                     self.inbox.finish(event_id, "COMPLETED", {
