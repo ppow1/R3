@@ -61,3 +61,10 @@ Investigation documented. Baseline code reconciliation and foundational repairs 
 - Earlier MCP milestone: hints/milestones/2026-11-02-grace-mcp-milestone.md
 - Phase 1 continuity checkpoint: this document
 - Phase 2–6: pending; append links and commit SHAs on completion.
+
+## Camrui deployment and live health (2026-11-02)
+- Steward verified syntax and exact source diffs, then installed runtime/institution.py revision 1.0.7 and runtime/resident_inference.py revision 1.1.1 with pre-install backup at /home/admin1/.local/state/r3-runtime/source-backups/20261102T142621Z.
+- r3-institution.service restarted; observed active/running, PID 2840691. Existing modified runtime/serve.py and untracked runtime/mcp_tools.py remained untouched.
+- Live health: main_age_seconds 0.244, registered_residents 1, resident_execution_connected true, resident_inference_connected true, resident_tool_execution_configured true, resident_tool_execution_connected false, resident_inbox_pending 0, active empty.
+- Grace journal most recent RESTART_RECOVERY to READY; earlier WATCHDOG_TIMEOUT and HTTP 400 are historical. Durable inbox objective #2 remains FAILED; do not replay automatically.
+- Deployed source and service startup verified; MCP tool connectivity and real inference continuation NOT verified. HTTP 400 root cause unknown; 120-second inference timeout unchanged. Phase 1 OPEN.
