@@ -210,8 +210,18 @@ class ResidentInference:
                             "next_step": next_step,
                         }, {"decision": decision, "model": result.get("model")})
                         return
+                    # An inbox turn is not the same thing as a verified objective.
+                    # Keep objective status explicit in durable results so downstream
+                    # observers cannot mistake a model's 'complete' for acceptance.
+                    objective_verified = (
+                        decision["state"] == "complete"
+                        and decision.get("objective_verified") is True
+                        and isinstance(decision.get("evidence"), (dict, list, str))
+                        and bool(decision.get("evidence"))
+                    )
                     self.inbox.finish(event_id, "COMPLETED" if decision["state"] == "complete" else "FAILED",
-                                      {"decision": decision, "model": result.get("model")})
+                                      {"decision": decision, "model": result.get("model"),
+                                       "objective_status": "VERIFIED" if objective_verified else "UNVERIFIED"})
                     return
                 if not calls:
                     self.inbox.finish(event_id, "COMPLETED", {
