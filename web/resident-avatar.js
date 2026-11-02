@@ -1,7 +1,7 @@
 // R3 CONTROLLED SOURCE
 // File: web/resident-avatar.js
 // Component: R3-RESIDENT-AVATAR-WEB
-// File Revision: 1.1.0
+// File Revision: 1.1.1
 // Created: 2026-11-02T20:11:07.271Z
 // Created By: ChatGPT GPT-6
 // Purpose: Reusable, replaceable Three.js resident avatar client for the R3 website.
@@ -12,7 +12,7 @@
 // Changed: 2026-11-02T20:11:07.271Z | R3-AVATAR-001 | ChatGPT GPT-6 | Initial reusable browser avatar runtime.
 // Changed: 2026-11-02T20:12:36.477Z | R3-AVATAR-002 | ChatGPT GPT-6 | Handle renderer import failures and correct mobile panel CSS.
 // Changed: 2026-11-02 UTC | R3-AVATAR-003 | ChatGPT GPT-6 | Replace mismatched low-poly Gobkit asset with rigged Businesswoman 04 and shared female Biped clips.
-// Supersedes: None
+// Supersedes: web/resident-avatar.js revision 1.0.1, blob 47572f6a7d7d7d9deb65bdb8a65a1a2d4f8db315 (replaced mismatched Gobkit placeholder asset)
 // Contracts: hints/resident-avatar-system.md; docs/IMPLEMENTATION_HANDOFF.md
 // Tests: Not run; persistent browser rendering and clip playback acceptance pending.
 // History/Predecessor: New file.
