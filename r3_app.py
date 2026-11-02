@@ -10,7 +10,7 @@
 # Dependencies: FastAPI, Git checkout, local artwork folder
 # Authority: R3 engineering guidance; approved charter prevails
 # Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Serve the fixed resident avatar frontend module
-Changed: 2026-11-01 UTC | R3-PANEL-INTERACTION-002 | ChatGPT GPT-6 | Align snapshot anchors and report dragged Infrastructure marker
+# Changed: 2026-11-01 UTC | R3-PANEL-INTERACTION-002 | ChatGPT GPT-6 | Align snapshot anchors and report dragged Infrastructure marker
 # Supersedes: None
 # Contracts: hints/file-provenance.md
 # Tests: Not run for this source change; module route and browser verification pending
