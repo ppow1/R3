@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/serve.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.1.0
+# File Revision: 1.2.0
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Start and monitor R3 institutional scheduler and supervisor.
@@ -16,7 +16,9 @@
 # Changed: 2026-11-02 UTC | R3-GRACE-002 | Register configured inference resident
 # Changed: 2026-11-02 UTC | R3-RUNTIME-004 | Schedule Grace only when durable inbox has pending work
 # Changed: 2026-11-02 UTC | R3-GRACE-005 | Wire configured existing llama.cpp tool endpoint without enabling by assumption
-# Changed: 2026-11-02 UTC | R3-CONFIG-001 | Load generic residents and runtime settings from files.\n# History/Predecessor: Git blob 8c0e187e652dfab7a2d65b5272858e27d6c494b0
+# Changed: 2026-11-02 UTC | R3-CONFIG-001 | Load generic residents and runtime settings from files.
+# Changed: 2026-11-02 UTC | R3-TOOLS-001 | Wire configured native tool client.
+# History/Predecessor: Git blob 8c0e187e652dfab7a2d65b5272858e27d6c494b0
 """R3 runtime infrastructure entrypoint.
 
 Starts the scheduler and supervisor without inventing resident activities.
@@ -34,8 +36,8 @@ import tempfile
 import time
 
 from runtime.institution import Institution, Journal, Resident
-from runtime.llama_tools import LlamaTools
-from runtime.configuration import load_configuration, ConfigurationError
+from runtime.native_tools import NativeTools
+from runtime.configuration import load_configuration
 from runtime.resident_inference import Inbox, InferenceEndpoint, ResidentInference
 
 
@@ -75,8 +77,11 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
         if provider == "none":
             tools = None
         elif provider == "r3-native":
-            # Fail closed until the R3-native MCP adapter is implemented in Phase 2.
-            raise ConfigurationError("R3-native MCP adapter not implemented yet")
+            tools = NativeTools(
+                tool_settings["endpoint"],
+                timeout=tool_settings["timeout_seconds"],
+                allowed_tools=tuple(tool_settings["allowed_tools"]),
+            )
         else:
             raise ConfigurationError("Unknown tool provider")
         if tools is not None:
