@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/resident_inference.py
 # Component: R3-RESIDENT-INFERENCE
-# File Revision: 1.3.0
+# File Revision: 1.3.1
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Reusable event-driven resident inference against an existing OpenAI-compatible endpoint.
@@ -12,11 +12,12 @@
 # Changed: 2026-11-02 UTC | R3-GRACE-001 | Initial reusable inference/inbox boundary.
 # Changed: 2026-11-02 UTC | R3-GRACE-004 | Durable tool-call continuation with fail-closed recovery
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-005 | Atomically queue review on completion with explicit criteria.
+# Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-006 | Preserve assignment metadata across activity continuation.
 # Supersedes: None
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; hints/engineering-test-policy.md
 # Tests: tests/test_inference_http_errors.py (permanent transport diagnostic contract).
 # Changed: 2026-11-02 UTC | R3-GRACE-005 | Preserve safe upstream HTTP error codes without leaking request content.
-# History/Predecessor: Git blob f813e763eeb85ede8a931996a1fe719a6c7b6ed5
+# History/Predecessor: Git blob f890fef537d1463d3ccfca3e660028c03312e732
 """Durable resident inbox and inference adapter; tool routing uses existing llama.cpp /tools adapter."""
 from __future__ import annotations
 
@@ -223,6 +224,7 @@ class ResidentInference:
                         if not isinstance(next_step, str) or not next_step.strip():
                             raise RuntimeError("Continuing activity requires next_step")
                         self.inbox.continue_activity(event_id, resident, event_type, {
+                            **payload,
                             "objective": payload.get("objective", payload),
                             "previous_event_id": event_id,
                             "previous_result": decision,
