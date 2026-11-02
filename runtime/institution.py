@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/institution.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.0.5
+# File Revision: 1.0.6
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Durable resident scheduling, supervision, and observable state transitions.
@@ -13,7 +13,8 @@
 # Supersedes: None
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; hints/file-provenance.md
 # Tests: tests/test_institution_runtime.py (to be added)
-# History/Predecessor: Git blob 36b611109da0b335152030752fc70e4e8e1202b6
+# Changed: 2026-11-02 UTC | R3-RUNTIME-003 | Gate execution on durable pending work; prevent idle false completion
+# History/Predecessor: Git blob 512973ce171bca940a253defaf3f87b313169789
 """R3 institutional runtime foundation; no inference or external tool execution yet."""
 from __future__ import annotations
 
@@ -104,6 +105,7 @@ class Resident:
     name: str
     work: Work
     interval: float = 5.0
+    ready: Callable[[str], bool] | None = None
 
 
 class Institution:
@@ -155,7 +157,7 @@ class Institution:
                 row = self.journal.db.execute(
                     "SELECT state,next_due FROM residents WHERE name=?", (name,)
                 ).fetchone()
-                if row and row[1] <= time.time():
+                if row and row[1] <= time.time() and (resident.ready is None or resident.ready(name)):
                     task = asyncio.create_task(self._execute(resident), name=f"resident:{name}")
                     task._r3_started = time.monotonic()
                     self.active[name] = task
