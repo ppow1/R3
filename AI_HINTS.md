@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.0.5
+File Revision: 1.0.6
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -10,13 +10,14 @@ Execution Model: N/A
 Observability: N/A
 Dependencies: hints/README.md
 Authority: R3 engineering navigation, subordinate to approved charter
+Changed: 2026-11-02 UTC | R3-MISTAKE-001 | ChatGPT GPT-6 | Index mistakes log and MCP autonomy failure case
 Changed: 2026-10-31 UTC | R3-COMMS-001 | ChatGPT GPT-6 | Index mandatory Comms incident capture
 Changed: 2026-11-01 UTC | R3-Q2-DOC-001 | ChatGPT GPT-6 | Index Q2 watched-folder runbook
 Changed: 2026-11-01 UTC | R3-IMAGE-PUBLISH-001 | ChatGPT GPT-6 | Index verified image publishing policy
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Manual source inspection; automated validation pending
-History/Predecessor: Git blob 1df4be3a89f303e3715fe363092280860566a097
+History/Predecessor: Git blob 3471309641de45c32c58e484fc9b1045a5c3dff1
 -->
 # AI_HINTS.md — Riverview 3
 
@@ -43,6 +44,7 @@ Start with [the hints index](hints/README.md). Keep this root file short; put de
 
 ## First-level references
 
+- [Mistakes log: reasoning failures and corrective lessons](hints/mistakes/README.md) — includes R3-MISTAKE-001, the unauthorized MCP read-only restriction during Grace autonomy integration.
 - [Engineering and current handoff](hints/engineering.md)
 - [Institutional architecture and durable state](hints/architecture.md)
 - [Deployment and command execution](hints/deployment.md)
