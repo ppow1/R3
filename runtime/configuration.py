@@ -88,6 +88,10 @@ def load_configuration(directory: str | Path):
             raise ConfigurationError(f"{key}.tools.provider must be none or r3-native")
         if tools["provider"] == "r3-native":
             _url(tools.get("endpoint"), f"{key}.tools.endpoint")
+            _positive(tools.get("timeout_seconds"), f"{key}.tools.timeout_seconds")
+            allowed = tools.get("allowed_tools")
+            if not isinstance(allowed, list) or any(not isinstance(t, str) or not t for t in allowed) or len(allowed) != len(set(allowed)):
+                raise ConfigurationError(f"{key}.tools.allowed_tools must be a unique list of names")
         prompt_path = (root / _text(entry.get("system_prompt_file"), f"{key}.system_prompt_file")).resolve()
         if not prompt_path.is_relative_to(root):
             raise ConfigurationError("System prompt escapes config directory")
