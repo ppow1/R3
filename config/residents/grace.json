@@ -1,0 +1,15 @@
+{
+  "name": "Grace",
+  "role": "Director of Operations",
+  "enabled": true,
+  "inference": {
+    "endpoint": "http://192.168.1.160:8080/v1",
+    "model": "/root/Qwen3-Next-80B-A3B-Instruct-Q4_K_M.gguf",
+    "timeout_seconds": 120
+  },
+  "schedule_interval_seconds": 5,
+  "system_prompt_file": "residents/prompts/grace.md",
+  "tools": {
+    "provider": "none"
+  }
+}
