@@ -77,3 +77,8 @@ Investigation documented. Baseline code reconciliation and foundational repairs 
 - Live health: main_age_seconds 0.244, registered_residents 1, resident_execution_connected true, resident_inference_connected true, resident_tool_execution_configured true, resident_tool_execution_connected false, resident_inbox_pending 0, active empty.
 - Grace journal most recent RESTART_RECOVERY to READY; earlier WATCHDOG_TIMEOUT and HTTP 400 are historical. Durable inbox objective #2 remains FAILED; do not replay automatically.
 - Deployed source and service startup verified; MCP tool connectivity and real inference continuation NOT verified. HTTP 400 root cause unknown; 120-second inference timeout unchanged. Phase 1 OPEN.
+
+## External configuration foundation verified (2026-11-02)
+- Committed runtime/configuration.py, config/runtime.json, config/residents/grace.json, config/residents/prompts/grace.md, and tests/test_configuration.py on branch engineering/institution-runtime-v1-20261101, head 9ccb90a695747e9615ac6d41a9d865fa7a9c6ac3.
+- Steward verified in isolated Camrui git archive: four permanent configuration tests all passed (Ran 4 tests in 0.030s, OK). Loader smoke read reports one resident, Grace, and nonempty external prompt.
+- Scope: loader and files only; serve.py is NOT yet wired to configuration; no live deployment or service restart. Current tools provider in new Grace configuration is none, intentionally avoiding Comms5 as R3 dependency. Phase 1 remains OPEN.
