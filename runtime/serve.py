@@ -93,6 +93,7 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
             tools=tools,
             system_prompt=definition["system_prompt"],
             continuation_event_types=tuple(resident.get("continuation_event_types", [])),
+            continuation_event_types=tuple(resident.get("continuation_event_types", [])),
         )
         institution.add(Resident(
             name=resident["name"], work=handler,
