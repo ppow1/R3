@@ -39,20 +39,23 @@ class ToolRouter:
     def invoke(self, payload):
         name = payload.get("tool") if isinstance(payload, dict) else None
         params = payload.get("params") if isinstance(payload, dict) else None
-        allowed = (name == "r3.status" and params == {}) or (self.executor is not None and name in self.executor.tools and params == {})
+        allowed = (name == "r3.status" and params == {}) or (
+            self.executor is not None and name in self.executor.tools and params == {})
+        if not allowed:
+            code, outcome, result = 403, "DENIED", {"ok": False, "error": "Tool or arguments not authorized"}
+        elif name == "r3.status":
+            code, outcome, result = 200, "OK", {"ok": True, "result": {"service": "r3-tools", "healthy": True}}
+        else:
+            try:
+                output = self.executor.invoke(name, params)
+                code, outcome, result = 200, "OK", {"ok": True, "result": output}
+            except Exception:
+                code, outcome, result = 500, "FAILED", {"ok": False, "error": "Host execution failed"}
         with self.lock:
             self.db.execute("INSERT INTO tool_audit(at,tool,outcome) VALUES (?,?,?)",
-                            (time.time(), name if isinstance(name, str) else "<invalid>",
-                             "OK" if allowed else "DENIED"))
+                            (time.time(), name if isinstance(name, str) else "<invalid>", outcome))
             self.db.commit()
-        if not allowed:
-            return 403, {"ok": False, "error": "Tool or arguments not authorized"}
-        if name == "r3.status":
-            return 200, {"ok": True, "result": {"service": "r3-tools", "healthy": True}}
-        try:
-            return 200, {"ok": True, "result": self.executor.invoke(name, params)}
-        except Exception:
-            return 500, {"ok": False, "error": "Host execution failed"}
+        return code, result
 
 
 def handler_for(router):
