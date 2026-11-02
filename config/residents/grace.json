@@ -17,5 +17,8 @@
       "r3.status",
       "r3.host.uptime"
     ]
-  }
+  },
+  "continuation_event_types": [
+    "RESIDENT_ACTIVITY"
+  ]
 }
