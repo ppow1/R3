@@ -82,3 +82,9 @@ Investigation documented. Baseline code reconciliation and foundational repairs 
 - Committed runtime/configuration.py, config/runtime.json, config/residents/grace.json, config/residents/prompts/grace.md, and tests/test_configuration.py on branch engineering/institution-runtime-v1-20261101, head 9ccb90a695747e9615ac6d41a9d865fa7a9c6ac3.
 - Steward verified in isolated Camrui git archive: four permanent configuration tests all passed (Ran 4 tests in 0.030s, OK). Loader smoke read reports one resident, Grace, and nonempty external prompt.
 - Scope: loader and files only; serve.py is NOT yet wired to configuration; no live deployment or service restart. Current tools provider in new Grace configuration is none, intentionally avoiding Comms5 as R3 dependency. Phase 1 remains OPEN.
+
+## Generic resident configuration integration — isolated verification (2026-11-02)
+- Commit 5127acee5a4a66fbd8a7faa55de45f6f020cac45 wires runtime/serve.py to external config and generic resident registration.
+- Steward executed isolated git-archive verification on Camrui: py_compile of runtime/configuration.py and runtime/serve.py PASS; all four tests/test_configuration.py regressions PASS; configuration loaded one resident (Grace) and nonempty prompt.
+- Verification limit: no running service startup test, no full regression suite, and no live deployment yet. Live service still uses legacy environment-based Comms5 adapter. New config explicitly selects tools.provider=none, so deploying it would remove existing configured tool access. Do not treat this as a production-ready MCP replacement.
+- Next roadmap priority: complete Phase 1 service integration and compatibility validation without silently changing live tool behavior; then Phase 2 R3-native tool contract. Do not expand configuration into a separate campaign.
