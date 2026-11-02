@@ -41,6 +41,11 @@ Investigation documented. Baseline code reconciliation and foundational repairs 
 - GitHub test commit 4f5bbeeeb721e84db2d769dd1883e1a95a8d5528: tests/test_institution_supervision.py adds permanent regression for an active long-running resident. Test not yet executed on Camrui.
 - No changes to deployed Camrui source, MCP adapter, service, or inference timeout. Pending: verify tests; preserve/reconcile deployed files; capture HTTP 400 body; examine and repair inference timeout behavior without an artificial overall work ceiling.
 
+## Isolated verification evidence (2026-11-02)
+- Steward executed git fetch and git archive for branch head 1b6e0af5dbb9ad8f2b3e080b4300b90f8fcdd180 in a separate /tmp/r3-verify-* directory. No live checkout modification or service restart was reported.
+- Command ran `python3 -m unittest discover -s tests -p test_institution_supervision.py -v` under `set -eu` and reached `=== VERIFICATION COMPLETE ===`. This supports exit status zero for the SSH command, but Python unittest writes its result lines to stderr, which the Windows capture did not include. Exact tests-run count and `OK` output are not yet visible; re-run with stderr redirected to stdout and preserve output.
+- Do not mark Phase 1 implementation fully verified or deployed on this evidence alone.
+
 ## Checkpoint index
 - Earlier MCP milestone: hints/milestones/2026-11-02-grace-mcp-milestone.md
 - Phase 1 continuity checkpoint: this document
