@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.9
+# File Revision: 1.0.10
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Initial shared read-only institutional API
@@ -9,10 +9,11 @@
 # Observability: HTTP health endpoint; no deployed verification
 # Dependencies: FastAPI, Git checkout, local artwork folder
 # Authority: R3 engineering guidance; approved charter prevails
-# Changed: 2026-11-01 UTC | R3-PANEL-INTERACTION-002 | ChatGPT GPT-6 | Align snapshot anchors and report dragged Infrastructure marker
+# Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Serve the fixed resident avatar frontend module
+Changed: 2026-11-01 UTC | R3-PANEL-INTERACTION-002 | ChatGPT GPT-6 | Align snapshot anchors and report dragged Infrastructure marker
 # Supersedes: None
 # Contracts: hints/file-provenance.md
-# Tests: Syntax checked during outage recovery
+# Tests: Not run for this source change; module route and browser verification pending
 # History/Predecessor: Git blob b3195f5a0ea8bacc030b642bc3dbb76258a4e747
 
 """R3 first vertical slice: shared read-only capabilities, not UI-owned logic.
@@ -102,6 +103,15 @@ def visual_home():
     if not page.is_file():
         raise HTTPException(404, "Visual prototype not installed")
     return FileResponse(page, media_type="text/html")
+
+
+@app.get("/web/resident-avatar.js")
+def resident_avatar_module():
+    """Serve the fixed R3 website module; no request-controlled filesystem path."""
+    module = ROOT / "web" / "resident-avatar.js"
+    if not module.is_file():
+        raise HTTPException(404, "Resident avatar module unavailable")
+    return FileResponse(module, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
 
 
