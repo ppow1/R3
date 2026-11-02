@@ -35,6 +35,7 @@ import time
 
 from runtime.institution import Institution, Journal, Resident
 from runtime.llama_tools import LlamaTools
+from runtime.mcp_tools import McpTools
 from runtime.resident_inference import Inbox, InferenceEndpoint, ResidentInference
 
 
@@ -62,7 +63,11 @@ async def serve(db: Path, health_file: Path, interval: float) -> None:
     model_name = os.environ.get("R3_GRACE_MODEL")
     grace_registered = bool(endpoint_url and model_name)
     tools_url = os.environ.get("R3_GRACE_TOOLS_URL")
-    grace_tools = LlamaTools(tools_url) if tools_url else None
+    mcp_url = os.environ.get("R3_GRACE_MCP_URL")
+    if mcp_url and tools_url:
+        raise RuntimeError("Configure either R3_GRACE_MCP_URL or R3_GRACE_TOOLS_URL, not both")
+    grace_tools = (McpTools(mcp_url, os.environ.get("R3_GRACE_MCP_BEARER_TOKEN"))
+                   if mcp_url else LlamaTools(tools_url) if tools_url else None)
     if grace_registered:
         handler = ResidentInference(
             inbox, InferenceEndpoint(endpoint_url, model_name),
