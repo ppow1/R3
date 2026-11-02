@@ -92,3 +92,8 @@ Investigation documented. Baseline code reconciliation and foundational repairs 
 ## Full permanent test suite verified (2026-11-02)
 - Steward executed isolated git archive at 6f6438676cbe2df930c838eeeca0e32ab2f57b67: 8 tests passed in 1.071s, including two-resident external-config service startup, configuration validation, inference error diagnostics, and supervisor no-elapsed-time-cancellation regression.
 - Live Camrui remains running older code with local uncommitted MCP adapter; deployment and live health verification remain outstanding. Configured provider 'none' is not equivalent to current Comms5-backed tool setup. Preserve live behavior until R3-native MCP is ready or explicit cutover approved.
+
+## Phase 2 implementation verification (2026-11-02)
+- Steward verified isolated git archive at 630674ef3bcd195714e8ebc2a676efa9958e2d0f: python3 compileall -q runtime tests succeeded; 14/14 permanent tests passed in 1.087 seconds.
+- New R3-owned client runtime/native_tools.py, loopback tool server runtime/tool_server.py, native provider wiring in runtime/serve.py, validation in runtime/configuration.py; tests/test_native_tools.py and tests/test_tool_server.py cover discovery, read-only invocation, denial and durable audit.
+- The initial server only implements r3.status and does not yet provide host execution. No live Grace-to-R3-native invocation or deployment verified. Phase 2 remains OPEN pending integration evidence; Phase 3 will add local/LAN execution. Preserve live Camrui legacy MCP code and existing service until controlled cutover.
