@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/serve.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.0.1
+# File Revision: 1.0.2
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Start and monitor R3 institutional scheduler and supervisor.
@@ -14,7 +14,8 @@
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md
 # Tests: Initial service smoke test pending
 # Changed: 2026-11-02 UTC | R3-GRACE-002 | Register configured inference resident
-# History/Predecessor: Git blob a6a740ea2a4042c652b39baf8e57f316f5891a93
+# Changed: 2026-11-02 UTC | R3-RUNTIME-004 | Schedule Grace only when durable inbox has pending work
+# History/Predecessor: Git blob 8a8982562339d1b58c07cadb21a4a8dab8e0b905
 """R3 runtime infrastructure entrypoint.
 
 Starts the scheduler and supervisor without inventing resident activities.
@@ -67,7 +68,13 @@ async def serve(db: Path, health_file: Path, interval: float) -> None:
                 "a verified tool result."
             ),
         )
-        institution.add(Resident(name="Grace", work=handler))
+        institution.add(Resident(
+            name="Grace", work=handler,
+            ready=lambda name: inbox.db.execute(
+                "SELECT EXISTS(SELECT 1 FROM resident_inbox WHERE resident=? AND status IN ('PENDING','PROCESSING'))",
+                (name,),
+            ).fetchone()[0] == 1,
+        ))
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGINT, signal.SIGTERM):
         try:
