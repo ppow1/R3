@@ -1,7 +1,7 @@
 // R3 CONTROLLED SOURCE
 // File: web/resident-avatar.js
 // Component: R3-RESIDENT-AVATAR-WEB
-// File Revision: 1.1.1
+// File Revision: 1.1.2
 // Created: 2026-11-02T20:11:07.271Z
 // Created By: ChatGPT GPT-6
 // Purpose: Reusable, replaceable Three.js resident avatar client for the R3 website.
@@ -12,10 +12,11 @@
 // Changed: 2026-11-02T20:11:07.271Z | R3-AVATAR-001 | ChatGPT GPT-6 | Initial reusable browser avatar runtime.
 // Changed: 2026-11-02T20:12:36.477Z | R3-AVATAR-002 | ChatGPT GPT-6 | Handle renderer import failures and correct mobile panel CSS.
 // Changed: 2026-11-02 UTC | R3-AVATAR-003 | ChatGPT GPT-6 | Replace mismatched low-poly Gobkit asset with rigged Businesswoman 04 and shared female Biped clips.
+// Changed: 2026-11-02 UTC | R3-AVATAR-004 | ChatGPT GPT-6 | Correct status metadata to expose the configured model URL.
 // Supersedes: web/resident-avatar.js revision 1.0.1, blob 47572f6a7d7d7d9deb65bdb8a65a1a2d4f8db315 (replaced mismatched Gobkit placeholder asset)
 // Contracts: hints/resident-avatar-system.md; docs/IMPLEMENTATION_HANDOFF.md
 // Tests: Not run; persistent browser rendering and clip playback acceptance pending.
-// History/Predecessor: New file.
+// History/Predecessor: Revision 1.1.1, blob b1456accdd0f47a148ef9a498bd26262a7d30741.
 let THREE;
 let GLTFLoader;
 let MeshoptDecoder;
@@ -87,7 +88,7 @@ if (nav) {
     }
     status() {
       return Object.freeze({residentId: asset.residentId, state: this.state, assetId: asset.id,
-        assetUrl: asset.url, license: asset.license, animations: [...this.names], loadedAnimations: [...(this.actions?.keys()||[])], currentAnimation: this.current});
+        assetUrl: asset.modelUrl, license: asset.license, animations: [...this.names], loadedAnimations: [...(this.actions?.keys()||[])], currentAnimation: this.current});
     }
     report(message, state) {
       this.statusNode.textContent = message; this.statusNode.dataset.state = state;
