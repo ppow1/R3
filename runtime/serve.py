@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/serve.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.0.2
+# File Revision: 1.0.3
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Start and monitor R3 institutional scheduler and supervisor.
@@ -15,7 +15,8 @@
 # Tests: Initial service smoke test pending
 # Changed: 2026-11-02 UTC | R3-GRACE-002 | Register configured inference resident
 # Changed: 2026-11-02 UTC | R3-RUNTIME-004 | Schedule Grace only when durable inbox has pending work
-# History/Predecessor: Git blob 8a8982562339d1b58c07cadb21a4a8dab8e0b905
+# Changed: 2026-11-02 UTC | R3-GRACE-005 | Wire configured existing llama.cpp tool endpoint without enabling by assumption
+# History/Predecessor: Git blob 8c0e187e652dfab7a2d65b5272858e27d6c494b0
 """R3 runtime infrastructure entrypoint.
 
 Starts the scheduler and supervisor without inventing resident activities.
@@ -33,6 +34,7 @@ import tempfile
 import time
 
 from runtime.institution import Institution, Journal, Resident
+from runtime.llama_tools import LlamaTools
 from runtime.resident_inference import Inbox, InferenceEndpoint, ResidentInference
 
 
@@ -59,9 +61,12 @@ async def serve(db: Path, health_file: Path, interval: float) -> None:
     endpoint_url = os.environ.get("R3_GRACE_INFERENCE_URL")
     model_name = os.environ.get("R3_GRACE_MODEL")
     grace_registered = bool(endpoint_url and model_name)
+    tools_url = os.environ.get("R3_GRACE_TOOLS_URL")
+    grace_tools = LlamaTools(tools_url) if tools_url else None
     if grace_registered:
         handler = ResidentInference(
             inbox, InferenceEndpoint(endpoint_url, model_name),
+            tools=grace_tools,
             system_prompt=(
                 "You are Grace, Riverview Director of Operations, accountable to the Steward. "
                 "Distinguish evidence from inference and never claim an action occurred without "
@@ -96,6 +101,7 @@ async def serve(db: Path, health_file: Path, interval: float) -> None:
                 "resident_execution_connected": grace_registered,
                 "resident_inference_connected": grace_registered,
                 "resident_tool_execution_connected": False,
+                "resident_tool_execution_configured": grace_tools is not None,
                 "resident_inbox_pending": journal.db.execute(
                     "SELECT count(*) FROM resident_inbox WHERE status IN ('PENDING','PROCESSING')"
                 ).fetchone()[0],
