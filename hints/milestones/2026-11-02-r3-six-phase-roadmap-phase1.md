@@ -120,3 +120,9 @@ Investigation documented. Baseline code reconciliation and foundational repairs 
 - External host registry controls address, user, port, SSH identity and known-hosts path. New permanent tests cover configured SSH argument construction, unknown-host rejection and malformed-profile rejection.
 - Operational discovery: Windows SSH alias octo1 authenticated to OctoMiner1 as root and executed hostname/whoami/uptime. Camrui -> OctoMiner1 at 192.168.1.160 reaches port 22 and recognizes host key but admin1 login failed; Camrui's correct remote identity and trust/credential setup are not verified. Do not equate Windows SSH success with Camrui SSH access.
 - Next: establish Camrui->OctoMiner1 credential using existing documented infrastructure, then execute real native tool invocation and verify audit; no live service changes. Phase 3 OPEN.
+
+## Phase 3 real LAN invocation evidence (2026-11-02)
+- Camrui authenticated to OctoMiner1 as root using existing /home/admin1/.ssh/octominer1_nopass, strict host-key verification, and returned uptime with SSH exit 0.
+- R3 isolated archive from branch at checkpoint 20759e0: native ToolRouter discovered r3.host.uptime, HostExecutor invoked OctoMiner1 via configured SSH registry, HTTP-style router code 200, subprocess returncode 0, uptime stdout, empty stderr; SQLite audit row ('r3.host.uptime','OK'). All Python qualification assertions passed and printed QUALIFICATION PASSED.
+- Important qualification caveat: outer shell script exited abnormally because malformed here-document closing delimiter caused Python NameError: name 'PY' is not defined after assertions. The real execution and audit were demonstrated, but clean process exit is NOT verified. Repeat using corrected command if clean-exit evidence is required.
+- Phase 3 still OPEN pending live resident-to-host execution and safe service integration. No live Grace service modifications.
