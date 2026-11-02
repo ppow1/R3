@@ -1,0 +1,8 @@
+{
+  "scheduler_tick_seconds": 0.25,
+  "health_interval_seconds": 2,
+  "sqlite_busy_timeout_ms": 5000,
+  "residents": {
+    "grace": "residents/grace.json"
+  }
+}
