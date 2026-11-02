@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/README.md
 Component: README
-File Revision: 1.0.4 (provenance baseline; prior revisions untracked)
+File Revision: 1.0.5 (provenance baseline; prior revisions untracked)
 Created: Unknown (legacy; initial commit can establish earliest publication)
 Created By: Unknown (legacy)
 Purpose: R3 engineering reference and continuation guidance
@@ -31,6 +31,8 @@ This directory is the first-level reference index for the root [AI_HINTS.md](../
 - Keep verified implementation state separate from requirements and plans.
 
 ## Starting references
+
+- **Mandatory engineering hard gate:** [No one-time tests or test-shaped production restrictions](engineering-test-policy.md).
 
 - [Engineering and continuation](engineering.md): workflow, branch/worktree discipline, and current handoff.
 - [Institutional architecture](architecture.md): charter and capability-first, durable institution principles.
