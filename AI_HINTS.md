@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.0.6
+File Revision: 1.0.7
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -10,6 +10,7 @@ Execution Model: N/A
 Observability: N/A
 Dependencies: hints/README.md
 Authority: R3 engineering navigation, subordinate to approved charter
+Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Index resident avatar implementation notes
 Changed: 2026-11-02 UTC | R3-MISTAKE-001 | ChatGPT GPT-6 | Index mistakes log and MCP autonomy failure case
 Changed: 2026-10-31 UTC | R3-COMMS-001 | ChatGPT GPT-6 | Index mandatory Comms incident capture
 Changed: 2026-11-01 UTC | R3-Q2-DOC-001 | ChatGPT GPT-6 | Index Q2 watched-folder runbook
