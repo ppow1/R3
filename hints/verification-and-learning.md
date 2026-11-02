@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/verification-and-learning.md
 Component: R3-VERIFICATION-LEARNING
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-02 UTC (date known; exact time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Define the proposed lightweight verification, nonconvergence escalation, and continuous-improvement contract.
@@ -11,10 +11,11 @@ Observability: Future durable criterion reviews, correction lineage, and learnin
 Dependencies: R3 resident inbox and institution journal; future institutional knowledge base.
 Authority: Steward discussion 2026-11-02; implementation subject to review.
 Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-001 | ChatGPT GPT-6 | Record verification and continuous improvement requirements.
+Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-002 | ChatGPT GPT-6 | Separate learning candidates from authorized changes.
 Supersedes: None
 Contracts: hints/engineering-test-policy.md; docs/PROJECT_CHARTER_REVISION_2_REVIEW.md
 Tests: N/A — documentation-only proposal; permanent general-purpose regressions required when implemented.
-History/Predecessor: New document.
+History/Predecessor: Git blob fc383fe1d13734f7d14e0d89283c57d3fbdc94dd (revision 1.0.0).
 -->
 # Verification, nonconvergence, and institutional learning
 
@@ -44,7 +45,15 @@ Record both **task-level remediation** and **process-level learning**. Determine
 
 Example: if Engineering's first result failed because a proposal omitted a necessary precision or tolerance, correct the current assignment and record the omission as a candidate lesson. After sufficient evidence, improve the relevant proposal/acceptance-criteria guidance or reusable boilerplate so future work orders specify the required tolerance. Do **not** automatically rewrite institutional templates based on one potentially mistaken review.
 
-A lightweight knowledge record should identify: source assignment/review, affected criterion(s), observed failure, causal hypothesis and confidence, correction/outcome, reusable recommendation, validation status, and any resulting template/guidance revision. Keep the original record and revision lineage. Promote supported lessons to validated guidance; allow later correction or supersession. This cycle should be shared across residents and institutional operations, not hardcoded to Grace or Engineering.
+A lightweight knowledge record should identify: source assignment/review, affected criterion(s), observed failure, causal hypothesis and confidence, correction/outcome, reusable recommendation, and validation status. Keep the original record and revision lineage. This cycle should be shared across residents and institutional operations, not hardcoded to Grace or Engineering.
+
+### Candidate improvement pool — not automatic adoption
+
+Every supported lesson or improvement suggestion may be **submitted as a candidate**, not applied as a change. The pool accepts proposals from verification, Engineering, residents, institutional operations, and the Steward. Candidate records include evidence, expected benefit, scope, risks/tradeoffs, confidence, related/duplicate proposals, and disposition.
+
+The lifecycle is **observation → candidate → evaluation → authorized change → measured outcome**. Evaluation may consolidate, prioritize, defer, reject, or recommend candidates. A candidate's existence, recurrence, or apparent correctness never grants authority to alter templates, acceptance criteria, prompts, runtime behavior, or institutional policy. Only the applicable authorized decision permits implementation, followed by verification of impact. Preserve rejected and deferred records with reasons; avoid repeatedly reopening them without new evidence.
+
+Example: a vague work-order tolerance produces a verification rejection. Record a proposal to improve future acceptance-criteria boilerplate in the candidate pool. Do not automatically modify that boilerplate. Evaluate whether the change generalizes, and implement only if authorized.
 
 ## Implementation boundary
 
