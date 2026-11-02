@@ -71,7 +71,7 @@ class ResidentContinuityTests(unittest.TestCase):
         worker = ResidentInference(self.inbox, endpoint, system_prompt="Resident",
                                    continuation_event_types=("RESIDENT_ACTIVITY",))
         asyncio.run(worker("Grace"))
-        self.assertEqual(self.result(event_id)[1]["objective_status"], "VERIFIED")
+        self.assertEqual(self.result(event_id)[1]["objective_status"], "REPORTED_VERIFIED")
 
 
 if __name__ == "__main__":
