@@ -95,10 +95,13 @@ def main():
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--audit-db", type=Path, required=True)
     parser.add_argument("--catalog", type=Path)
+    parser.add_argument("--hosts", type=Path)
     args = parser.parse_args()
+    if args.hosts and not args.catalog:
+        parser.error("--hosts requires --catalog")
     if args.host not in ("127.0.0.1", "::1", "localhost"):
         parser.error("Initial native tool server is loopback-only")
-    ThreadingHTTPServer((args.host, args.port), handler_for(ToolRouter(args.audit_db, HostExecutor(args.catalog) if args.catalog else None))).serve_forever()
+    ThreadingHTTPServer((args.host, args.port), handler_for(ToolRouter(args.audit_db, HostExecutor(args.catalog, args.hosts) if args.catalog else None))).serve_forever()
 
 
 if __name__ == "__main__":
