@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/institution.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.0.6
+# File Revision: 1.0.7
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Durable resident scheduling, supervision, and observable state transitions.
@@ -12,10 +12,11 @@
 # Changed: 2026-11-01 UTC | R3-RUNTIME-001 | Initial isolated runtime prototype; record task start for watchdog
 # Supersedes: None
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; hints/file-provenance.md
-# Tests: tests/test_institution_runtime.py (to be added)
+# Tests: tests/test_institution_supervision.py (permanent regression)
 # Changed: 2026-11-02 UTC | R3-RUNTIME-003 | Gate execution on durable pending work; prevent idle false completion
-# History/Predecessor: Git blob 512973ce171bca940a253defaf3f87b313169789
-"""R3 institutional runtime foundation; no inference or external tool execution yet."""
+# Changed: 2026-11-02 UTC | R3-RUNTIME-007 | Remove elapsed-work cancellation; retain crash and loop supervision.
+# History/Predecessor: Git blob 3509a6762be59170c761e86c416d44230a9b6c19
+"""R3 institutional scheduler and supervisor; resident work has no elapsed-time ceiling."""
 from __future__ import annotations
 
 import asyncio
@@ -109,14 +110,11 @@ class Resident:
 
 
 class Institution:
-    def __init__(self, journal: Journal, *, watchdog_seconds: float = 30.0,
-                 tick_seconds: float = 0.25):
+    def __init__(self, journal: Journal, *, tick_seconds: float = 0.25):
         self.journal = journal
-        self.watchdog_seconds = watchdog_seconds
         self.tick_seconds = tick_seconds
         self.residents: dict[str, Resident] = {}
         self.active: dict[str, asyncio.Task] = {}
-        self._timed_out: set[str] = set()
         self._stop = asyncio.Event()
         self._main_heartbeat = time.monotonic()
         self._supervisor_heartbeat = time.monotonic()
@@ -135,9 +133,8 @@ class Institution:
         try:
             await resident.work(name)
         except asyncio.CancelledError:
-            if name not in self._timed_out:
-                self.journal.transition(name, "READY", "INTERRUPTED",
-                                            next_due=time.time())
+            self.journal.transition(name, "READY", "INTERRUPTED",
+                                        next_due=time.time())
             raise
         except Exception as exc:
             self.journal.transition(name, "RECOVERING", "FAILED",
@@ -159,7 +156,6 @@ class Institution:
                 ).fetchone()
                 if row and row[1] <= time.time() and (resident.ready is None or resident.ready(name)):
                     task = asyncio.create_task(self._execute(resident), name=f"resident:{name}")
-                    task._r3_started = time.monotonic()
                     self.active[name] = task
             await asyncio.sleep(self.tick_seconds)
 
@@ -173,13 +169,6 @@ class Institution:
                                                 repr(task.exception())[:500],
                                                 next_due=time.time(), failure=True)
                     self.active.pop(name, None)
-                    self._timed_out.discard(name)
-                elif (name not in self._timed_out and
-                      time.monotonic() - getattr(task, "_r3_started", time.monotonic()) > self.watchdog_seconds):
-                    self._timed_out.add(name)
-                    self.journal.transition(name, "RECOVERING", "WATCHDOG_TIMEOUT",
-                                            next_due=time.time()+self.residents[name].interval, failure=True)
-                    task.cancel()
             await asyncio.sleep(self.tick_seconds)
 
     async def run(self) -> None:
