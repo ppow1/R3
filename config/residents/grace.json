@@ -10,6 +10,12 @@
   "schedule_interval_seconds": 5,
   "system_prompt_file": "residents/prompts/grace.md",
   "tools": {
-    "provider": "none"
+    "provider": "r3-native",
+    "endpoint": "http://127.0.0.1:8765",
+    "timeout_seconds": 15,
+    "allowed_tools": [
+      "r3.status",
+      "r3.host.uptime"
+    ]
   }
 }
