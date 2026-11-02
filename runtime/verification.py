@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/verification.py
 # Component: R3-VERIFICATION-LEARNING
-# File Revision: 1.0.0
+# File Revision: 1.1.0
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Durable criterion-level independent review records and improvement candidates.
@@ -10,10 +10,11 @@
 # Dependencies: Python 3.12 standard library; caller-owned SQLite connection.
 # Authority: Steward verification and learning discussion; R3 charter revision 2.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-003 | Initial durable evidence and candidate records.
+# Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-004 | Add pending review requests.
 # Supersedes: None
 # Contracts: hints/verification-and-learning.md; hints/engineering-test-policy.md
 # Tests: tests/test_verification.py
-# History/Predecessor: New file.
+# History/Predecessor: Git blob b44eb005caa98af6efece2f950c4578daec397cd
 """Record evidence-based review findings and proposed improvements without applying changes."""
 from __future__ import annotations
 
@@ -36,6 +37,15 @@ class VerificationLedger:
             evidence TEXT NOT NULL, reviewer TEXT NOT NULL, at REAL NOT NULL,
             UNIQUE(review_id, criterion_id)
         )""")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS verification_requests (
+            id INTEGER PRIMARY KEY,
+            source_event_id INTEGER NOT NULL UNIQUE,
+            assignment_id TEXT NOT NULL,
+            criteria TEXT NOT NULL,
+            evidence TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            created_at REAL NOT NULL
+        )""")
         self.db.execute("""CREATE TABLE IF NOT EXISTS improvement_candidates (
             id INTEGER PRIMARY KEY, source_finding_id INTEGER,
             summary TEXT NOT NULL, hypothesis TEXT NOT NULL,
@@ -45,6 +55,28 @@ class VerificationLedger:
             created_at REAL NOT NULL, updated_at REAL NOT NULL,
             FOREIGN KEY(source_finding_id) REFERENCES verification_findings(id)
         )""")
+
+    def submit_review(self, source_event_id: int, assignment_id: str,
+                      criteria: list, evidence: object) -> int:
+        """Persist an independent review request without granting acceptance."""
+        if not assignment_id or not criteria:
+            raise ValueError("Review requires assignment and acceptance criteria")
+        ids = [item.get("id") for item in criteria if isinstance(item, dict)]
+        if len(ids) != len(criteria) or any(not isinstance(i, str) or not i for i in ids):
+            raise ValueError("Each criterion needs an identifier")
+        if len(ids) != len(set(ids)):
+            raise ValueError("Duplicate criterion")
+        with self.db:
+            self.db.execute(
+                "INSERT OR IGNORE INTO verification_requests "
+                "(source_event_id,assignment_id,criteria,evidence,created_at) "
+                "VALUES (?,?,?,?,?)",
+                (source_event_id, assignment_id, json.dumps(criteria),
+                 json.dumps(evidence), time.time()))
+            row = self.db.execute(
+                "SELECT id FROM verification_requests WHERE source_event_id=?",
+                (source_event_id,)).fetchone()
+        return int(row[0])
 
     def record_finding(self, *, assignment_id: str, review_id: str,
                        criterion_id: str, criterion_version: str,
