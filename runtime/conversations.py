@@ -219,6 +219,12 @@ class ConversationStore:
         ).fetchone()
         if current is None:
             raise RuntimeError("Conversation message is missing")
+        self.db.execute(
+            "UPDATE r3_conversation_messages SET delivery_status='PROCESSING' "
+            "WHERE message_id=? AND delivery_status='QUEUED'",
+            (current_message_id,),
+        )
+        self.db.commit()
         rows = self.db.execute(
             "SELECT sender_type,content FROM r3_conversation_messages "
             "WHERE conversation_id=? AND sequence<? AND delivery_status='DELIVERED' ORDER BY sequence",
