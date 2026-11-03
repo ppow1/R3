@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/verification.py
 # Component: R3-VERIFICATION-LEARNING
-# File Revision: 1.3.0
+# File Revision: 1.3.1
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Durable criterion-level independent review records and improvement candidates.
@@ -13,6 +13,7 @@
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-004 | Add pending review requests.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-007 | Record independent per-criterion review decisions atomically.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-008 | Independent review adapter with explicit evaluator and fail-closed behavior.
+# Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-010 | Prevent reviewer acceptance without independently sourced observations.
 # Supersedes: None
 # Contracts: hints/verification-and-learning.md; hints/engineering-test-policy.md
 # Tests: tests/test_verification.py
@@ -239,6 +240,18 @@ class IndependentReviewWorker:
                 if origin and origin[0] == self.reviewer:
                     raise ValueError("Executor cannot independently review its own work")
             assessment = self.evaluator(request)
+            # A completion claim is not independent evidence. Reviewers must
+            # supply separately observed evidence before a PASS can be recorded.
+            if isinstance(assessment, dict):
+                findings = assessment.get("findings")
+                if isinstance(findings, list):
+                    for finding in findings:
+                        if not isinstance(finding, dict):
+                            raise ValueError("Invalid reviewer finding")
+                        if finding.get("result") == "PASS":
+                            observation = finding.get("evidence")
+                            if not isinstance(observation, dict) or not observation.get("independent_observation"):
+                                raise ValueError("PASS requires independently observed evidence")
             if not isinstance(assessment, dict):
                 raise ValueError("Evaluator must return a structured assessment")
             outcome = self.ledger.decide_review(
