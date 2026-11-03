@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/verification.py
 # Component: R3-VERIFICATION-LEARNING
-# File Revision: 1.3.3
+# File Revision: 1.3.4
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Durable criterion-level independent review records and improvement candidates.
@@ -16,10 +16,11 @@
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-010 | Prevent reviewer acceptance without independently sourced observations.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-011 | Respect outer SQLite transaction during review submission.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-013 | Authoritative assignment verification status query.
+# Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-014 | Durable idempotent review feedback events for manager correction.
 # Supersedes: None
 # Contracts: hints/verification-and-learning.md; hints/engineering-test-policy.md
 # Tests: tests/test_verification.py
-# History/Predecessor: Git blob 3fc9cb46864a526b216d83a95cd1f1785a03aea5
+# History/Predecessor: Git blob 68c2ea1c600b573e6762421f2d55a719af4fc44a
 """Record evidence-based review findings and proposed improvements without applying changes."""
 from __future__ import annotations
 
@@ -167,6 +168,61 @@ class VerificationLedger:
                 "UPDATE verification_requests SET status=? WHERE id=? AND status='PENDING'",
                 (outcome, request_id))
         return outcome
+
+    def queue_review_feedback(self, request_id: int, *, manager: str) -> int | None:
+        """Deliver failed/inconclusive review to a manager once, durably.
+
+        A pending or accepted review produces no correction event. The manager
+        must decide what action to take; this method does not self-certify work.
+        """
+        if not isinstance(manager, str) or not manager.strip():
+            raise ValueError("Manager identity required")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS verification_feedback_delivery (
+            request_id INTEGER PRIMARY KEY,
+            event_id INTEGER NOT NULL UNIQUE,
+            FOREIGN KEY(request_id) REFERENCES verification_requests(id)
+        )""")
+        with self.db:
+            request = self.db.execute(
+                "SELECT assignment_id,source_event_id,criteria,status "
+                "FROM verification_requests WHERE id=?", (request_id,)
+            ).fetchone()
+            if request is None:
+                raise LookupError("Unknown review request")
+            if request[3] not in ("NEEDS_WORK", "INCONCLUSIVE"):
+                return None
+            prior = self.db.execute(
+                "SELECT event_id FROM verification_feedback_delivery WHERE request_id=?",
+                (request_id,)
+            ).fetchone()
+            if prior:
+                return int(prior[0])
+            if not self.db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='resident_inbox'"
+            ).fetchone():
+                raise RuntimeError("Resident inbox unavailable")
+            findings = self.history(request[0])
+            review_id = "request:" + str(request_id)
+            relevant = [f for f in findings if f["review_id"] == review_id]
+            if not relevant:
+                raise RuntimeError("Review findings unavailable")
+            payload = {
+                "assignment_id": request[0],
+                "source_event_id": request[1],
+                "review_request_id": request_id,
+                "review_outcome": request[3],
+                "acceptance_criteria": json.loads(request[2]),
+                "findings": relevant,
+            }
+            now = time.time()
+            cursor = self.db.execute(
+                "INSERT INTO resident_inbox "
+                "(resident,event_type,payload,created_at,updated_at) VALUES (?,?,?,?,?)",
+                (manager, "REVIEW_FEEDBACK", json.dumps(payload), now, now))
+            self.db.execute(
+                "INSERT INTO verification_feedback_delivery(request_id,event_id) VALUES (?,?)",
+                (request_id, cursor.lastrowid))
+            return int(cursor.lastrowid)
 
     def record_finding(self, *, assignment_id: str, review_id: str,
                        criterion_id: str, criterion_version: str,
