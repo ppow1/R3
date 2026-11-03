@@ -179,8 +179,20 @@ class ConversationHttpTests(unittest.TestCase):
                 self.assertEqual("QUEUED", sent["delivery_status"])
                 status, loaded = request("GET", f"/v1/conversations/{conversation_id}/messages?after=0&limit=20")
                 self.assertEqual(200, status)
+                message_id = loaded["messages"][0]["message_id"]
                 self.assertEqual("Hello Grace", loaded["messages"][0]["content"])
                 self.assertEqual("STEWARD", loaded["messages"][0]["sender_type"])
+
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=3)
+                server = create_server(database, token_file, {"Grace"}, {"Grace": ["r3.status"]}, port=port)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                status, reloaded = request("GET", f"/v1/conversations/{conversation_id}/messages?after=0&limit=20")
+                self.assertEqual(200, status)
+                self.assertEqual(message_id, reloaded["messages"][0]["message_id"])
+                self.assertEqual("Hello Grace", reloaded["messages"][0]["content"])
                 with self.assertRaises(urllib.error.HTTPError) as denied:
                     request("GET", f"/v1/conversations/{conversation_id}/messages?after=0", use_auth=False)
                 self.assertEqual(401, denied.exception.code)
