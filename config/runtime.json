@@ -4,5 +4,6 @@
   "sqlite_busy_timeout_ms": 5000,
   "residents": {
     "grace": "residents/grace.json"
-  }
+  },
+  "independent_reviewer": "residents/reviewer.json"
 }

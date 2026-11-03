@@ -1,12 +1,14 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/configuration.py
 # Component: R3-CONFIGURATION
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-02 UTC
 # Purpose: Validate externally defined runtime and resident settings.
 # Dependencies: Python standard library only.
 # Contracts: hints/milestones/2026-11-02-r3-six-phase-roadmap-phase1.md
 # Tests: tests/test_configuration.py
+# Changed: 2026-11-03T01:37:00.460Z | R3-VERIFY-WIRING-001 | Codex | Validate the configured independent reviewer, tools and manager.
+# History/Predecessor: Git blob 19f74fab25172be933f32579edbb13b51fd7ce31
 """Small, strict JSON configuration loader; no implicit runtime defaults."""
 from __future__ import annotations
 
@@ -104,4 +106,39 @@ def load_configuration(directory: str | Path):
             raise ConfigurationError(f"Cannot read prompt {prompt_path}: {exc}") from exc
         _text(prompt, f"{key}.system_prompt")
         definitions.append({"settings": entry, "system_prompt": prompt})
-    return {"runtime": runtime, "residents": definitions}
+    reviewer_relative = _text(runtime.get("independent_reviewer"), "independent_reviewer")
+    reviewer_path = (root / reviewer_relative).resolve()
+    if not reviewer_path.is_relative_to(root):
+        raise ConfigurationError("Reviewer configuration escapes config directory")
+    reviewer = _read_json(reviewer_path)
+    reviewer_name = _text(reviewer.get("name"), "reviewer.name")
+    if reviewer_name in names:
+        raise ConfigurationError("Reviewer identity must be distinct from residents")
+    manager = _text(reviewer.get("manager"), "reviewer.manager")
+    if manager not in names:
+        raise ConfigurationError("Reviewer manager must name a configured resident")
+    enabled = reviewer.get("enabled")
+    if not isinstance(enabled, bool) or not enabled:
+        raise ConfigurationError("Independent reviewer must be enabled")
+    inference = _object(reviewer.get("inference"), "reviewer.inference")
+    _url(inference.get("endpoint"), "reviewer.inference.endpoint")
+    _text(inference.get("model"), "reviewer.inference.model")
+    _positive(inference.get("timeout_seconds"), "reviewer.inference.timeout_seconds")
+    tools = _object(reviewer.get("tools"), "reviewer.tools")
+    if tools.get("provider") != "r3-native":
+        raise ConfigurationError("reviewer.tools.provider must be r3-native")
+    _url(tools.get("endpoint"), "reviewer.tools.endpoint")
+    _positive(tools.get("timeout_seconds"), "reviewer.tools.timeout_seconds")
+    allowed = tools.get("allowed_tools")
+    if not isinstance(allowed, list) or any(not isinstance(t, str) or not t for t in allowed) or len(allowed) != len(set(allowed)):
+        raise ConfigurationError("reviewer.tools.allowed_tools must be a unique list of names")
+    prompt_path = (root / _text(reviewer.get("system_prompt_file"), "reviewer.system_prompt_file")).resolve()
+    if not prompt_path.is_relative_to(root):
+        raise ConfigurationError("Reviewer system prompt escapes config directory")
+    try:
+        reviewer_prompt = prompt_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise ConfigurationError(f"Cannot read reviewer prompt {prompt_path}: {exc}") from exc
+    _text(reviewer_prompt, "reviewer.system_prompt")
+    return {"runtime": runtime, "residents": definitions,
+            "reviewer": {"settings": reviewer, "system_prompt": reviewer_prompt}}

@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/serve.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.2.1
+# File Revision: 1.2.2
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Start and monitor R3 institutional scheduler and supervisor.
@@ -19,6 +19,7 @@
 # Changed: 2026-11-02 UTC | R3-GRACE-005 | Wire configured existing llama.cpp tool endpoint without enabling by assumption
 # Changed: 2026-11-02 UTC | R3-CONFIG-001 | Load generic residents and runtime settings from files.
 # Changed: 2026-11-02 UTC | R3-TOOLS-001 | Wire configured native tool client.
+# Changed: 2026-11-03T01:37:00.460Z | R3-VERIFY-WIRING-001 | Codex | Run configured independent reviews and report live tool connectivity.
 # History/Predecessor: Git blob 36e1c915ef1ed9ec48b41a1bb73e667f54c02ec6
 """R3 runtime infrastructure entrypoint.
 
@@ -33,13 +34,17 @@ import json
 import os
 from pathlib import Path
 import signal
+import sqlite3
 import tempfile
+import threading
 import time
 
 from runtime.institution import Institution, Journal, Resident
 from runtime.native_tools import NativeTools
 from runtime.configuration import load_configuration, ConfigurationError
 from runtime.resident_inference import Inbox, InferenceEndpoint, ResidentInference
+from runtime.verification import IndependentReviewWorker, VerificationLedger
+from runtime.independent_reviewer import IndependentReviewer
 
 
 def atomic_snapshot(path: Path, payload: dict) -> None:
@@ -68,6 +73,7 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
     inbox = Inbox(journal.db)
     registered = []
     configured_tools = 0
+    tool_clients = []
     for definition in configuration["residents"]:
         resident = definition["settings"]
         if not resident["enabled"]:
@@ -87,6 +93,7 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
             raise ConfigurationError("Unknown tool provider")
         if tools is not None:
             configured_tools += 1
+            tool_clients.append(tools)
         handler = ResidentInference(
             inbox,
             InferenceEndpoint(inference["endpoint"], inference["model"],
@@ -104,6 +111,26 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
             ).fetchone()[0] == 1,
         ))
         registered.append(resident["name"])
+    reviewer_config = configuration["reviewer"]
+    reviewer_settings = reviewer_config["settings"]
+    if reviewer_settings["name"] in registered:
+        raise ConfigurationError("Independent reviewer must have a distinct identity from every resident")
+    if reviewer_settings["manager"] not in registered:
+        raise ConfigurationError("Reviewer manager must be a registered resident")
+    reviewer_tools = NativeTools(
+        reviewer_settings["tools"]["endpoint"],
+        timeout=reviewer_settings["tools"]["timeout_seconds"],
+        allowed_tools=tuple(reviewer_settings["tools"]["allowed_tools"]),
+    )
+    reviewer_endpoint = InferenceEndpoint(
+        reviewer_settings["inference"]["endpoint"],
+        reviewer_settings["inference"]["model"],
+        timeout=reviewer_settings["inference"]["timeout_seconds"],
+    )
+    evaluator = IndependentReviewer(
+        reviewer_endpoint, reviewer_tools, reviewer_config["system_prompt"])
+    VerificationLedger(journal.db)
+    reviewer_state = {"connected": False, "last_error": None}
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -111,11 +138,46 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
         except NotImplementedError:
             pass
     runtime_task = asyncio.create_task(institution.run(), name="r3-institution")
+    verification_stop = threading.Event()
+    def verification_loop() -> None:
+        # Own the reviewer connection in this dedicated thread. The scheduler keeps
+        # its own SQLite connection and never shares a connection across threads.
+        review_db = sqlite3.connect(str(db), timeout=settings["sqlite_busy_timeout_ms"] / 1000)
+        review_db.execute("PRAGMA busy_timeout=" + str(int(settings["sqlite_busy_timeout_ms"])))
+        try:
+            reviewer_worker = IndependentReviewWorker(
+                VerificationLedger(review_db), reviewer_settings["name"], evaluator,
+                manager=reviewer_settings["manager"])
+            while not verification_stop.is_set():
+                try:
+                    evaluator.probe()
+                    reviewer_state["connected"] = True
+                    reviewer_state["last_error"] = None
+                except Exception as exc:
+                    reviewer_state["connected"] = False
+                    reviewer_state["last_error"] = type(exc).__name__
+                if reviewer_state["connected"]:
+                    try:
+                        reviewer_worker.process_pending()
+                    except Exception as exc:
+                        # Keep the durable request pending; the next cycle retries it.
+                        reviewer_state["last_error"] = type(exc).__name__
+                verification_stop.wait(interval)
+        finally:
+            review_db.close()
+    verification_task = asyncio.create_task(
+        asyncio.to_thread(verification_loop), name="r3-independent-reviewer")
     try:
         while not institution._stop.is_set():
             if runtime_task.done():
                 await runtime_task
                 raise RuntimeError("Institution runtime exited unexpectedly")
+            tool_probes = await asyncio.gather(
+                *(asyncio.to_thread(client.discover) for client in tool_clients),
+                return_exceptions=True,
+            )
+            tool_connected = bool(tool_probes) and all(
+                not isinstance(result, BaseException) for result in tool_probes)
             status = institution.health()
             status.update({
                 "service": "r3-institution",
@@ -124,7 +186,7 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
                 "registered_residents": len(registered),
                 "resident_execution_connected": bool(registered),
                 "resident_inference_connected": bool(registered),
-                "resident_tool_execution_connected": False,
+                "resident_tool_execution_connected": tool_connected,
                 "resident_tool_execution_configured": bool(configured_tools),
                 "resident_inbox_pending": journal.db.execute(
                     "SELECT count(*) FROM resident_inbox WHERE status IN ('PENDING','PROCESSING')"
@@ -133,13 +195,16 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
                 "verification_accepted": journal.db.execute("SELECT count(*) FROM verification_requests WHERE status=?",( "ACCEPTED",)).fetchone()[0],
                 "verification_needs_work": journal.db.execute("SELECT count(*) FROM verification_requests WHERE status=?",( "NEEDS_WORK",)).fetchone()[0],
                 "verification_inconclusive": journal.db.execute("SELECT count(*) FROM verification_requests WHERE status=?",( "INCONCLUSIVE",)).fetchone()[0],
-                "independent_reviewer_connected": False,
+                "independent_reviewer_connected": reviewer_state["connected"],
+                "independent_reviewer_last_error": reviewer_state["last_error"],
                 "database_backend": "sqlite-prototype",
             })
             atomic_snapshot(health_file, status)
             await asyncio.sleep(interval)
     finally:
         await institution.stop()
+        verification_stop.set()
+        await asyncio.gather(verification_task, return_exceptions=True)
         await runtime_task
 
 
