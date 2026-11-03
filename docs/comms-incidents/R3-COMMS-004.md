@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/comms-incidents/R3-COMMS-004.md
 Component: COMMS-INCIDENT
-File Revision: 1.0.9
+File Revision: 1.1.0
 Created: 2026-10-31 UTC (exact time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Record Camrui Comms command gateway internal failure during R3 deployment preflight
@@ -14,7 +14,7 @@ Changed: 2026-11-01T15:06:03.086Z | R3-P020 | ChatGPT GPT-6 | Record successful 
 Supersedes: None
 Contracts: hints/comms-failure-recovery.md; hints/file-provenance.md
 Tests: Pending reproduction and gateway diagnostics
-History/Predecessor: Git blob 14aa05d460ac91dfd45386ee8ffa9eddcdf22017
+History/Predecessor: Git blob c8c6da17f674b2165a679f032aeea82181591dad
 -->
 # R3-COMMS-004 — Camrui command task submission fails internally
 
@@ -82,3 +82,18 @@ History/Predecessor: Git blob 14aa05d460ac91dfd45386ee8ffa9eddcdf22017
 - Independent read-back confirmed remote HEAD `f5d689cf9ff307c2ae9c18edcc8a81ca44e4f6a6`, health HTTP 200, title `Riverview 3`, old prototype/demo labels absent, top bar absent, Engineering status UI present, and target marker code present. The read-back shell returned exit 2 after these checks because its final `exit 0` line retained a carriage return; the deployer's own activation and health checks completed successfully.
 - The recovery was temporary; the installed deployment script was restored. Browser visual acceptance remains pending.
 - **Punch-list reference:** `R3-P020` — preserve this successful outcome and finish visual acceptance against the Steward's screenshot.
+
+
+## 2026-11-03 — Grace reviewer runtime preflight and gateway recovery
+
+**Objective:** deploy the configured independent-reviewer wiring to the institutional runtime on Camrui and observe the existing pending review.
+
+**Discovery:** caller grant `grant:6422d222eca74cb3b328bf3a80384a59` and executor grant `grant:8327c8d7a74b4bf78e5529e53057fe69` were read and returned active for standard Camrui tasks. The Windows Q2 caller and executor grants were also active. Comms5 contract info returned `riverview-comms-contract:5.0`; a read-only transport probe returned `available`, healthy dashboard projection, 215.95 ms, correlation `r3-reviewer-deploy-transport-20261103`. `comms5_describe_operation` for `comms5_command_task_submit` returned `RIV-COMMS5-0004` / `operation is unknown`. This does not establish whether task dispatch itself is unavailable.
+
+**Camrui attempt:** read-only preflight submitted with standard privilege and idempotency `r3-reviewer-camrui-preflight-20261103-a`, execution `35bb5c90-9d27-448c-a8f3-078e5e304b12`, command SHA-256 `08e5c935bd4d2b1a6543bb73e5b5e6e8cfd067885d6ec6cb749f27450f70848b`. The gateway returned `status=failed`, exit 2, stdout `{"status":"denied","reason":"bounded_request_or_state_invalid"}`; no shell output was produced. The command was not verified as executed on Camrui. Do not classify this as a grant denial or a successful preflight.
+
+**Q2 staging:** the first PowerShell staging task completed with a script-author error: `Int64.ToString('D4')` formatting failed, then the blank target path could not be written. It returned exit 0 despite those PowerShell errors because the staging wrapper did not make errors terminating. No Q2 file path was produced. The wrapper was corrected to format a typed Int64 with `-f` and use terminating errors. It successfully wrote the read-only preflight as `A:\\AI\\Scripts\\Riverview\\Q2\\4039.ps1`; expected result: `A:\\AI\\Scripts\\Riverview\\Queue\\Results\\4039.ps1.txt`. This records Q2 submission only; it does not show watcher execution.
+
+**Current status at 2026-11-03T01:44:08.378Z:** a read-only Windows task to read the matching result file, execution `c5cd45ce-919f-4e1e-97b1-cfaacfe4c8a4`, remains `running` with no stdout/stderr and no exit code. The deployment preflight output and pending-review database state are not yet available. No Camrui source deployment, service restart, or verification outcome is claimed. Avoid duplicate submissions while this result task remains unresolved.
+
+**Recovery state:** `RECOVERY_IN_PROGRESS`. Grants, transport, operation description, and the existing Q2 route were checked; the actual Linux task command was denied, while Q2 staging succeeded. Continue polling the original result task. After its result is read, resolve the deployment method, deploy only the verified branch SHA, and independently observe runtime health and the original review request. **Status remains OPEN.**
