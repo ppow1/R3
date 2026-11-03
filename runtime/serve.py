@@ -48,6 +48,7 @@ from runtime.resident_inference import Inbox, InferenceEndpoint, ResidentInferen
 from runtime.verification import IndependentReviewWorker, VerificationLedger
 from runtime.independent_reviewer import IndependentReviewer
 from runtime.assignment_intake import create_server as create_assignment_intake_server
+from runtime.conversations import ConversationStore, create_server as create_conversation_server
 
 
 def atomic_snapshot(path: Path, payload: dict) -> None:
@@ -67,7 +68,9 @@ def atomic_snapshot(path: Path, payload: dict) -> None:
 
 async def serve(db: Path, health_file: Path, config_dir: Path,
                assignment_intake_port: int | None = None,
-               assignment_intake_token_file: Path | None = None) -> None:
+               assignment_intake_token_file: Path | None = None,
+               conversation_port: int | None = None,
+               conversation_token_file: Path | None = None) -> None:
     configuration = load_configuration(config_dir)
     settings = configuration["runtime"]
     interval = settings["health_interval_seconds"]
@@ -76,6 +79,7 @@ async def serve(db: Path, health_file: Path, config_dir: Path,
     journal.db.execute("PRAGMA busy_timeout=" + str(int(settings["sqlite_busy_timeout_ms"])))
     institution = Institution(journal, tick_seconds=settings["scheduler_tick_seconds"])
     inbox = Inbox(journal.db)
+    conversation_store = ConversationStore(journal.db)
     registered = []
     inference_clients = []
     configured_tools = 0
@@ -110,6 +114,7 @@ async def serve(db: Path, health_file: Path, config_dir: Path,
             tools=tools,
             system_prompt=definition["system_prompt"],
             continuation_event_types=tuple(resident.get("continuation_event_types", [])),
+            conversation_store=conversation_store,
         )
         institution.add(Resident(
             name=resident["name"], work=handler,
@@ -165,6 +170,22 @@ async def serve(db: Path, health_file: Path, config_dir: Path,
         intake_thread = threading.Thread(
             target=intake_server.serve_forever, name="r3-assignment-intake", daemon=True)
         intake_thread.start()
+
+    conversation_server = None
+    conversation_thread = None
+    if (conversation_port is None) != (conversation_token_file is None):
+        raise ConfigurationError("Conversation API requires both port and token file")
+    if conversation_port is not None:
+        resident_actions = {
+            definition["settings"]["name"]: list(definition["settings"]["tools"]["allowed_tools"])
+            for definition in configuration["residents"]
+            if definition["settings"]["enabled"]
+        }
+        conversation_server = create_conversation_server(
+            db, conversation_token_file, set(registered), resident_actions, port=conversation_port)
+        conversation_thread = threading.Thread(
+            target=conversation_server.serve_forever, name="r3-conversation-api", daemon=True)
+        conversation_thread.start()
 
     runtime_task = asyncio.create_task(institution.run(), name="r3-institution")
     verification_stop = threading.Event()
@@ -249,6 +270,8 @@ async def serve(db: Path, health_file: Path, config_dir: Path,
                 "independent_reviewer_last_error": reviewer_state["last_error"],
                 "assignment_intake_enabled": intake_server is not None,
                 "assignment_intake_connected": bool(intake_thread and intake_thread.is_alive()),
+                "conversation_api_enabled": conversation_server is not None,
+                "conversation_api_connected": bool(conversation_thread and conversation_thread.is_alive()),
                 "database_backend": "sqlite-prototype",
             })
             atomic_snapshot(health_file, status)
@@ -259,6 +282,11 @@ async def serve(db: Path, health_file: Path, config_dir: Path,
             intake_server.server_close()
             if intake_thread is not None:
                 intake_thread.join(timeout=5)
+        if conversation_server is not None:
+            await asyncio.to_thread(conversation_server.shutdown)
+            conversation_server.server_close()
+            if conversation_thread is not None:
+                conversation_thread.join(timeout=5)
         await institution.stop()
         if verification_task is not None:
             verification_stop.set()
@@ -273,9 +301,12 @@ def main() -> None:
     parser.add_argument("--config-dir", type=Path, required=True)
     parser.add_argument("--assignment-intake-port", type=int)
     parser.add_argument("--assignment-intake-token-file", type=Path)
+    parser.add_argument("--conversation-port", type=int)
+    parser.add_argument("--conversation-token-file", type=Path)
     args = parser.parse_args()
     asyncio.run(serve(args.db, args.health_file, args.config_dir,
-                     args.assignment_intake_port, args.assignment_intake_token_file))
+                     args.assignment_intake_port, args.assignment_intake_token_file,
+                     args.conversation_port, args.conversation_token_file))
 
 
 if __name__ == "__main__":
