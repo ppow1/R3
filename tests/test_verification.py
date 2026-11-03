@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_verification.py
 # Component: R3-VERIFICATION-LEARNING-REGRESSION
-# File Revision: 1.3.1
+# File Revision: 1.3.2
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanent regression for criterion identity and non-automatic learning changes.
@@ -14,10 +14,11 @@
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-007 | Test independent criterion review decisions and incomplete evidence.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-008 | Verify independent worker, self-review exclusion, and failure recovery.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-010 | Require separately sourced reviewer observations for acceptance.
+# Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-011 | Regression for caller-owned transaction rollback.
 # Supersedes: None
 # Contracts: hints/verification-and-learning.md
 # Tests: This file.
-# History/Predecessor: Git blob 143d495af14eeb6ce8565e136d3755183ed04b30
+# History/Predecessor: Git blob d1c54f6385b930364902b8a0d1ee2269053211e0
 import sqlite3
 import unittest
 
@@ -74,6 +75,21 @@ class VerificationLedgerTests(unittest.TestCase):
         self.assertEqual(self.db.execute(
             "SELECT status FROM verification_requests WHERE id=?", (first,)).fetchone()[0],
             "PENDING")
+
+    def test_review_submission_respects_caller_transaction_rollback(self):
+        self.db.commit()
+        self.db.execute("BEGIN")
+        self.db.execute("CREATE TABLE IF NOT EXISTS transaction_marker (id INTEGER)")
+        self.db.execute("INSERT INTO transaction_marker VALUES (1)")
+        self.ledger.submit_review(101, "assignment", [{"id": "A"}], {})
+        self.assertTrue(self.db.in_transaction)
+        self.db.rollback()
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM verification_requests WHERE source_event_id=101"
+        ).fetchone()[0], 0)
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM transaction_marker"
+        ).fetchone()[0], 0)
 
     def test_completion_queues_review_without_acceptance(self):
         from runtime.resident_inference import Inbox
