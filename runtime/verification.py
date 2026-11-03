@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/verification.py
 # Component: R3-VERIFICATION-LEARNING
-# File Revision: 1.2.0
+# File Revision: 1.3.0
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Durable criterion-level independent review records and improvement candidates.
@@ -12,10 +12,11 @@
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-003 | Initial durable evidence and candidate records.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-004 | Add pending review requests.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-007 | Record independent per-criterion review decisions atomically.
+# Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-008 | Independent review adapter with explicit evaluator and fail-closed behavior.
 # Supersedes: None
 # Contracts: hints/verification-and-learning.md; hints/engineering-test-policy.md
 # Tests: tests/test_verification.py
-# History/Predecessor: Git blob e8c8e1cfefcf64b74053cbd6bdb2048f8a15b64f
+# History/Predecessor: Git blob 2c6678453ddbae6b9d07e5dc26adc27c5fca7e31
 """Record evidence-based review findings and proposed improvements without applying changes."""
 from __future__ import annotations
 
@@ -215,3 +216,34 @@ class VerificationLedger:
         keys = ("id","source_finding_id","summary","hypothesis","evidence",
                 "expected_benefit","risks","status","decision_reason","authorized_by")
         return {**dict(zip(keys,row)), "evidence": json.loads(row[4])}
+
+class IndependentReviewWorker:
+    """Invoke an independent evaluator; retain pending work when evaluation fails."""
+
+    def __init__(self, ledger: VerificationLedger, reviewer: str, evaluator):
+        if not isinstance(reviewer, str) or not reviewer.strip():
+            raise ValueError("Reviewer identity required")
+        self.ledger = ledger
+        self.reviewer = reviewer
+        self.evaluator = evaluator
+
+    def process_pending(self) -> list[dict]:
+        outcomes = []
+        for request in self.ledger.pending_reviews():
+            if self.ledger.db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='resident_inbox'"
+            ).fetchone():
+                origin = self.ledger.db.execute(
+                    "SELECT resident FROM resident_inbox WHERE id=?",
+                    (request["source_event_id"],)).fetchone()
+                if origin and origin[0] == self.reviewer:
+                    raise ValueError("Executor cannot independently review its own work")
+            assessment = self.evaluator(request)
+            if not isinstance(assessment, dict):
+                raise ValueError("Evaluator must return a structured assessment")
+            outcome = self.ledger.decide_review(
+                request["id"], reviewer=self.reviewer,
+                implementation_revision=assessment["implementation_revision"],
+                findings=assessment["findings"])
+            outcomes.append({"request_id": request["id"], "outcome": outcome})
+        return outcomes
