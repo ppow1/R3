@@ -2,21 +2,22 @@
 R3 CONTROLLED DOCUMENT
 File: web/index.html
 Component: R3-ESTATE-HOME
-File Revision: 1.0.16
+File Revision: 1.0.17
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Present the R3 estate home with Engineering and Infrastructure observability panels
-Execution Model: Browser client consuming same-origin read-only R3 APIs
+Execution Model: Browser client consuming same-origin R3 APIs with capability-gated configuration writes
 Observability: Engineering API state; Infrastructure telemetry adapter availability
 Dependencies: /api/v1/visual/background; /api/v1/health; /api/v1/engineering/branches; /api/v1/engineering/worktrees
 Authority: Steward visual placement references and approved R3 website direction
-Changed: 2026-11-02 UTC | R3-SETTINGS-DYNAMIC-REGISTRY-001 | ChatGPT GPT-6 | Render settings scopes and rows from read-only registry adapter
+Changed: 2026-11-02 UTC | R3-SETTINGS-DYNAMIC-REGISTRY-001 | ChatGPT GPT-6 | Render settings scopes and rows from registry adapter
 Changed: 2026-11-02 UTC | R3-SETTINGS-REGISTRY-ROBUSTNESS-001 | ChatGPT GPT-6 | Ignore incomplete scope and setting entries in adapter responses
 Changed: 2026-11-02 UTC | R3-SETTINGS-READ-WRITE-MODE-001 | ChatGPT GPT-6 | Add explicit read/write mode and guarded save path
+Changed: 2026-11-02 UTC | R3-SETTINGS-DUAL-MODE-CAPABILITY-001 | ChatGPT GPT-6 | Resolve provider write capabilities and remove read-only wording
 Supersedes: R3-VISUAL-PROTOTYPE framing
 Contracts: docs/IMPLEMENTATION_HANDOFF.md; docs/architecture/ESTATE_SPATIAL_CANON.md; hints/chat-contract-draft.md; hints/settings-contract-draft.md
 Tests: Not run; runtime telemetry adapter and visual acceptance pending
-History/Predecessor: Git blob 756aea8ce86adeacda10c85e0ceb0083bae69877
+History/Predecessor: Git blob 3085bcec89508cfe60decf67b7505aa9d4387fbe
 -->
 <!doctype html>
 <html lang="en">
@@ -257,7 +258,8 @@ const settingsConfigurationAdapter={
     try{
       const result=await provider.read();
       if(!result||typeof result!=='object')return{available:false,reason:'Settings adapter returned no registry model'};
-      return result;
+      const capabilities=typeof provider.capabilities==='function'?await provider.capabilities():null;
+      return capabilities&&typeof capabilities==='object'?{...result,capabilities:{...(result.capabilities||{}),...capabilities}}:result;
     }catch(error){return{available:false,reason:'Settings registry could not be read'};}
   },
   async write(change){
@@ -405,7 +407,7 @@ async function refreshSettingsRegistry(){
  settingsStatus.textContent='Refreshing settings registry…';settingsStatus.classList.remove('settings-ready');
  settingsRegistryModel=await settingsConfigurationAdapter.read();
  const available=settingsRegistryModel&&settingsRegistryModel.available===true;
- settingsStatus.textContent=available?(settingsRegistryModel.revision?'Registry available · revision '+settingsText(settingsRegistryModel.revision):'Registry available · read-only values'):(settingsRegistryModel&&settingsRegistryModel.reason||'Settings registry unavailable')+' · no live values loaded.';
+ settingsStatus.textContent=available?(settingsRegistryModel.revision?'Registry available · revision '+settingsText(settingsRegistryModel.revision):'Registry available · values loaded'):(settingsRegistryModel&&settingsRegistryModel.reason||'Settings registry unavailable')+' · no live values loaded.';
  settingsStatus.classList.toggle('settings-ready',Boolean(available));
  const scopes=currentSettingsScopes();
  if(!scopes.some(scope=>String(scope.id||scope.key||scope.label||'')===activeSettingsScope))activeSettingsScope=String(scopes[0]&&(scopes[0].id||scopes[0].key||scopes[0].label)||'institutional');
