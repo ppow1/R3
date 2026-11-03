@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/verification.py
 # Component: R3-VERIFICATION-LEARNING
-# File Revision: 1.3.2
+# File Revision: 1.3.3
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Durable criterion-level independent review records and improvement candidates.
@@ -15,10 +15,11 @@
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-008 | Independent review adapter with explicit evaluator and fail-closed behavior.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-010 | Prevent reviewer acceptance without independently sourced observations.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-011 | Respect outer SQLite transaction during review submission.
+# Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-013 | Authoritative assignment verification status query.
 # Supersedes: None
 # Contracts: hints/verification-and-learning.md; hints/engineering-test-policy.md
 # Tests: tests/test_verification.py
-# History/Predecessor: Git blob 2c6678453ddbae6b9d07e5dc26adc27c5fca7e31
+# History/Predecessor: Git blob 3fc9cb46864a526b216d83a95cd1f1785a03aea5
 """Record evidence-based review findings and proposed improvements without applying changes."""
 from __future__ import annotations
 
@@ -103,6 +104,24 @@ class VerificationLedger:
              "criteria": json.loads(row[3]), "evidence": json.loads(row[4])}
             for row in rows
         ]
+
+    def assignment_review_status(self, assignment_id: str) -> dict:
+        """Return durable review state; executor claims never imply acceptance."""
+        if not isinstance(assignment_id, str) or not assignment_id.strip():
+            raise ValueError("Assignment identifier required")
+        rows = self.db.execute(
+            "SELECT id,source_event_id,status,created_at FROM verification_requests "
+            "WHERE assignment_id=? ORDER BY id", (assignment_id,)
+        ).fetchall()
+        latest = rows[-1] if rows else None
+        return {
+            "assignment_id": assignment_id,
+            "verification_status": latest[2] if latest else "NOT_REQUESTED",
+            "latest_request_id": latest[0] if latest else None,
+            "latest_source_event_id": latest[1] if latest else None,
+            "review_count": len(rows),
+            "pending_review_count": sum(row[2] == "PENDING" for row in rows),
+        }
 
     def decide_review(self, request_id: int, *, reviewer: str,
                       implementation_revision: str, findings: list[dict]) -> str:
