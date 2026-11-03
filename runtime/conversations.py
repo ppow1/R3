@@ -108,8 +108,25 @@ class ConversationStore:
             (conversation_id, resident, title, "OPEN", now, now)
         )
 
+    def _reconcile(self, conversation_id: str):
+        rows = self.db.execute(
+            "SELECT m.inbox_event_id,i.status,i.result,i.resident FROM r3_conversation_messages m "
+            "JOIN resident_inbox i ON i.id=m.inbox_event_id "
+            "WHERE m.conversation_id=? AND m.sender_type='STEWARD' AND m.inbox_event_id IS NOT NULL",
+            (conversation_id,),
+        ).fetchall()
+        for event_id, status, encoded, resident in rows:
+            if status == "FAILED":
+                self.fail_event(event_id, "resident_inference_failed")
+            elif status == "COMPLETED":
+                result = json.loads(encoded) if encoded else {}
+                message = result.get("message") if isinstance(result, dict) else None
+                content = message.get("content") if isinstance(message, dict) else ""
+                self.complete_event(event_id, resident, str(content or ""))
+
     def messages(self, principal: str, conversation_id: str, *, after: int, limit: int):
         self._owned(conversation_id, principal)
+        self._reconcile(conversation_id)
         rows = self.db.execute(
             "SELECT message_id,conversation_id,sequence,sender_type,sender_id,content,"
             "created_at,delivery_status,client_message_id,error_code "
@@ -131,11 +148,13 @@ class ConversationStore:
         if row[3] != "OPEN":
             raise ConversationError(409, "conversation_not_open")
         prior = self.db.execute(
-            "SELECT message_id,sequence,delivery_status,inbox_event_id "
+            "SELECT message_id,sequence,delivery_status,inbox_event_id,content "
             "FROM r3_conversation_messages WHERE conversation_id=? AND sender_id=? AND client_message_id=?",
             (conversation_id, principal, client_message_id),
         ).fetchone()
         if prior:
+            if prior[4] != content:
+                raise ConversationError(409, "idempotency_key_conflict")
             return {
                 "message_id": prior[0], "sequence": prior[1],
                 "delivery_status": prior[2], "event_id": prior[3], "duplicate": True,
@@ -172,11 +191,13 @@ class ConversationStore:
         except sqlite3.IntegrityError:
             self.db.rollback()
             prior = self.db.execute(
-                "SELECT message_id,sequence,delivery_status,inbox_event_id "
+                "SELECT message_id,sequence,delivery_status,inbox_event_id,content "
                 "FROM r3_conversation_messages WHERE conversation_id=? AND sender_id=? AND client_message_id=?",
                 (conversation_id, principal, client_message_id),
             ).fetchone()
             if prior:
+                if prior[4] != content:
+                    raise ConversationError(409, "idempotency_key_conflict")
                 return {
                     "message_id": prior[0], "sequence": prior[1],
                     "delivery_status": prior[2], "event_id": prior[3], "duplicate": True,
@@ -191,6 +212,7 @@ class ConversationStore:
         }
 
     def prompt_history(self, conversation_id: str, current_message_id: str):
+        self._reconcile(conversation_id)
         current = self.db.execute(
             "SELECT sequence FROM r3_conversation_messages WHERE message_id=? AND conversation_id=?",
             (current_message_id, conversation_id),
