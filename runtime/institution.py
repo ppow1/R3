@@ -15,6 +15,7 @@
 # Tests: tests/test_institution_supervision.py (permanent regression)
 # Changed: 2026-11-02 UTC | R3-RUNTIME-003 | Gate execution on durable pending work; prevent idle false completion
 # Changed: 2026-11-02 UTC | R3-RUNTIME-007 | Remove elapsed-work cancellation; retain crash and loop supervision.
+# Changed: 2026-11-03 UTC | R3-RUNTIME-009 | Drain active resident work on graceful shutdown.
 # History/Predecessor: Git blob 3509a6762be59170c761e86c416d44230a9b6c19
 """R3 institutional scheduler and supervisor; resident work has no elapsed-time ceiling."""
 from __future__ import annotations
@@ -116,6 +117,7 @@ class Institution:
         self.residents: dict[str, Resident] = {}
         self.active: dict[str, asyncio.Task] = {}
         self._stop = asyncio.Event()
+        self._loop_tasks: tuple[asyncio.Task, ...] = ()
         self._main_heartbeat = time.monotonic()
         self._supervisor_heartbeat = time.monotonic()
 
@@ -181,15 +183,19 @@ class Institution:
                 self.journal.transition(name, "READY", "RESTART_RECOVERY",
                                         next_due=time.time())
         async with asyncio.TaskGroup() as group:
-            group.create_task(self.main_loop(), name="r3-main")
-            group.create_task(self.supervisory_loop(), name="r3-supervisor")
+            self._loop_tasks = (
+                group.create_task(self.main_loop(), name="r3-main"),
+                group.create_task(self.supervisory_loop(), name="r3-supervisor"),
+            )
 
     async def stop(self) -> None:
+        """Stop new scheduling and drain already admitted work without cancellation."""
         self._stop.set()
-        for task in self.active.values():
-            task.cancel()
-        if self.active:
-            await asyncio.gather(*self.active.values(), return_exceptions=True)
+        if self._loop_tasks:
+            await asyncio.gather(*self._loop_tasks, return_exceptions=True)
+        active = tuple(self.active.values())
+        if active:
+            await asyncio.gather(*active, return_exceptions=True)
 
     def health(self) -> dict:
         return {
