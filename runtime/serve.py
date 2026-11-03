@@ -73,6 +73,7 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
     institution = Institution(journal, tick_seconds=settings["scheduler_tick_seconds"])
     inbox = Inbox(journal.db)
     registered = []
+    inference_clients = []
     configured_tools = 0
     tool_clients = []
     for definition in configuration["residents"]:
@@ -95,10 +96,13 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
         if tools is not None:
             configured_tools += 1
             tool_clients.append(tools)
+        inference_endpoint = InferenceEndpoint(
+            inference["endpoint"], inference["model"],
+            timeout=inference["timeout_seconds"])
+        inference_clients.append((resident["name"], inference_endpoint))
         handler = ResidentInference(
             inbox,
-            InferenceEndpoint(inference["endpoint"], inference["model"],
-                              timeout=inference["timeout_seconds"]),
+            inference_endpoint,
             tools=tools,
             system_prompt=definition["system_prompt"],
             continuation_event_types=tuple(resident.get("continuation_event_types", [])),
@@ -184,6 +188,23 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
             )
             tool_connected = bool(tool_probes) and all(
                 not isinstance(result, BaseException) for result in tool_probes)
+            inference_probes = await asyncio.gather(
+                *(asyncio.to_thread(endpoint.probe) for _, endpoint in inference_clients),
+                return_exceptions=True,
+            )
+            inference_status = {
+                name: {
+                    "connected": not isinstance(result, BaseException),
+                    "last_error": type(result).__name__ if isinstance(result, BaseException) else None,
+                }
+                for (name, _), result in zip(inference_clients, inference_probes)
+            }
+            inference_connected = bool(inference_probes) and all(
+                not isinstance(result, BaseException) for result in inference_probes)
+            inference_errors = [
+                type(result).__name__ for result in inference_probes
+                if isinstance(result, BaseException)
+            ]
             status = institution.health()
             status.update({
                 "service": "r3-institution",
@@ -191,7 +212,9 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
                 "observed_at": time.time(),
                 "registered_residents": len(registered),
                 "resident_execution_connected": bool(registered),
-                "resident_inference_connected": bool(registered),
+                "resident_inference_connected": inference_connected,
+                "resident_inference_status": inference_status,
+                "resident_inference_last_error": inference_errors[0] if inference_errors else None,
                 "resident_tool_execution_connected": tool_connected,
                 "resident_tool_execution_configured": bool(configured_tools),
                 "resident_inbox_pending": journal.db.execute(
