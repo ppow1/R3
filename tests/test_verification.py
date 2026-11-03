@@ -175,6 +175,52 @@ class VerificationLedgerTests(unittest.TestCase):
         self.assertEqual(outcome, "INCONCLUSIVE")
         self.assertEqual(self.ledger.pending_reviews(), [])
 
+    def test_worker_marks_review_processing_until_assessment_is_recorded(self):
+        request_id = self.ledger.submit_review(401, "assignment", [{"id": "A"}], {})
+
+        def evaluate(request):
+            self.assertEqual(request["id"], request_id)
+            status, started_at = self.db.execute(
+                "SELECT status,processing_started_at FROM verification_requests WHERE id=?",
+                (request_id,),
+            ).fetchone()
+            self.assertEqual(status, "PROCESSING")
+            self.assertIsNotNone(started_at)
+            return {"implementation_revision": "rev1", "findings": [
+                {"criterion_id": "A", "result": "PASS",
+                 "reason": "independently observed",
+                 "evidence": {"independent_observation": {"tool": "status"}}},
+            ]}
+
+        worker = IndependentReviewWorker(self.ledger, "auditor", evaluate)
+        self.assertEqual(worker.process_pending(),
+                         [{"request_id": request_id, "outcome": "ACCEPTED"}])
+        self.assertEqual(self.ledger.processing_review_count(), 0)
+
+    def test_interrupted_review_is_retryable_after_worker_restart(self):
+        request_id = self.ledger.submit_review(402, "assignment", [{"id": "A"}], {})
+        self.db.execute(
+            "UPDATE verification_requests SET status='PROCESSING' WHERE id=?", (request_id,)
+        )
+        self.db.commit()
+
+        worker = IndependentReviewWorker(
+            self.ledger, "auditor",
+            lambda request: {"implementation_revision": "rev1", "findings": [
+                {"criterion_id": "A", "result": "INSUFFICIENT_EVIDENCE",
+                 "reason": "No independent observation", "evidence": {}},
+            ]},
+        )
+
+        self.assertEqual(self.ledger.processing_review_count(), 0)
+        self.assertEqual(
+            self.db.execute("SELECT last_error FROM verification_requests WHERE id=?",
+                            (request_id,)).fetchone()[0],
+            "InterruptedByRestart",
+        )
+        self.assertEqual([item["id"] for item in self.ledger.pending_reviews()], [request_id])
+        self.assertEqual(worker.process_pending()[0]["outcome"], "INCONCLUSIVE")
+
     def test_worker_records_independent_review(self):
         request = self.ledger.submit_review(41, "assignment",
                                             [{"id": "A"}], {"reported": "done"})
@@ -266,6 +312,11 @@ class VerificationLedgerTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             IndependentReviewWorker(self.ledger, "auditor", fail).process_pending()
         self.assertEqual(len(self.ledger.pending_reviews()), 1)
+        self.assertEqual(self.ledger.processing_review_count(), 0)
+        self.assertEqual(
+            self.db.execute("SELECT last_error FROM verification_requests").fetchone()[0],
+            "RuntimeError",
+        )
         self.assertEqual(self.ledger.history("assignment"), [])
 
     def test_executor_cannot_review_own_activity(self):

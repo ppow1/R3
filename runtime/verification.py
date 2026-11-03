@@ -52,8 +52,15 @@ class VerificationLedger:
             criteria TEXT NOT NULL,
             evidence TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'PENDING',
-            created_at REAL NOT NULL
+            created_at REAL NOT NULL,
+            processing_started_at REAL,
+            last_error TEXT
         )""")
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(verification_requests)")}
+        if "processing_started_at" not in columns:
+            self.db.execute("ALTER TABLE verification_requests ADD COLUMN processing_started_at REAL")
+        if "last_error" not in columns:
+            self.db.execute("ALTER TABLE verification_requests ADD COLUMN last_error TEXT")
         self.db.execute("""CREATE TABLE IF NOT EXISTS improvement_candidates (
             id INTEGER PRIMARY KEY, source_finding_id INTEGER,
             summary TEXT NOT NULL, hypothesis TEXT NOT NULL,
@@ -113,6 +120,36 @@ class VerificationLedger:
             for row in rows
         ]
 
+    def claim_review(self, request_id: int) -> bool:
+        """Durably expose that an evaluator is currently processing one request."""
+        with self.db:
+            cursor = self.db.execute(
+                "UPDATE verification_requests SET status='PROCESSING',processing_started_at=?,last_error=NULL "
+                "WHERE id=? AND status='PENDING'", (time.time(), request_id))
+        return cursor.rowcount == 1
+
+    def release_review(self, request_id: int, error_type: str) -> None:
+        """Return an undecided failed evaluation to the retryable queue with its error class."""
+        if not isinstance(error_type, str) or not error_type.strip():
+            raise ValueError("Review error type required")
+        with self.db:
+            self.db.execute(
+                "UPDATE verification_requests SET status='PENDING',processing_started_at=NULL,last_error=? "
+                "WHERE id=? AND status='PROCESSING'", (error_type, request_id))
+
+    def recover_interrupted_reviews(self) -> int:
+        """Make evaluations interrupted by a service restart retryable."""
+        with self.db:
+            cursor = self.db.execute(
+                "UPDATE verification_requests SET status='PENDING',processing_started_at=NULL,"
+                "last_error=COALESCE(last_error,'InterruptedByRestart') WHERE status='PROCESSING'")
+        return cursor.rowcount
+
+    def processing_review_count(self) -> int:
+        return int(self.db.execute(
+            "SELECT count(*) FROM verification_requests WHERE status='PROCESSING'"
+        ).fetchone()[0])
+
     def assignment_review_status(self, assignment_id: str) -> dict:
         """Return durable review state; executor claims never imply acceptance."""
         if not isinstance(assignment_id, str) or not assignment_id.strip():
@@ -142,7 +179,7 @@ class VerificationLedger:
                 (request_id,)).fetchone()
             if request is None:
                 raise LookupError("Unknown review request")
-            if request[2] != "PENDING":
+            if request[2] not in ("PENDING", "PROCESSING"):
                 raise ValueError("Review already decided")
             criteria = json.loads(request[1])
             expected = {item["id"] for item in criteria}
@@ -172,7 +209,8 @@ class VerificationLedger:
                      implementation_revision, item["result"], item["reason"],
                      json.dumps(item["evidence"]), reviewer, now))
             self.db.execute(
-                "UPDATE verification_requests SET status=? WHERE id=? AND status='PENDING'",
+                "UPDATE verification_requests SET status=?,processing_started_at=NULL,last_error=NULL "
+                "WHERE id=? AND status IN ('PENDING','PROCESSING')",
                 (outcome, request_id))
         return outcome
 
@@ -344,6 +382,7 @@ class IndependentReviewWorker:
         if manager is not None and (not isinstance(manager, str) or not manager.strip()):
             raise ValueError("Manager identity must be nonempty")
         self.manager = manager
+        self.ledger.recover_interrupted_reviews()
 
     def process_pending(self) -> list[dict]:
         outcomes = []
@@ -361,28 +400,37 @@ class IndependentReviewWorker:
                     (request["source_event_id"],)).fetchone()
                 if origin and origin[0] == self.reviewer:
                     raise ValueError("Executor cannot independently review its own work")
-            assessment = self.evaluator(request)
-            # A completion claim is not independent evidence. Reviewers must
-            # supply separately observed evidence before a PASS can be recorded.
-            if isinstance(assessment, dict):
-                findings = assessment.get("findings")
-                if isinstance(findings, list):
-                    for finding in findings:
-                        if not isinstance(finding, dict):
-                            raise ValueError("Invalid reviewer finding")
-                        if finding.get("result") == "PASS":
-                            observation = finding.get("evidence")
-                            if not isinstance(observation, dict) or not observation.get("independent_observation"):
-                                raise ValueError("PASS requires independently observed evidence")
-            if not isinstance(assessment, dict):
-                raise ValueError("Evaluator must return a structured assessment")
-            outcome = self.ledger.decide_review(
-                request["id"], reviewer=self.reviewer,
-                implementation_revision=assessment["implementation_revision"],
-                findings=assessment["findings"])
-            feedback_event_id = (self.ledger.queue_review_feedback(request["id"], manager=self.manager)
-                                 if self.manager is not None and outcome in ("NEEDS_WORK", "INCONCLUSIVE")
-                                 else None)
-            outcomes.append({"request_id": request["id"], "outcome": outcome,
-                             **({"feedback_event_id": feedback_event_id} if feedback_event_id is not None else {})})
+            if not self.ledger.claim_review(request["id"]):
+                continue
+            try:
+                assessment = self.evaluator(request)
+                # A completion claim is not independent evidence. Reviewers must
+                # supply separately observed evidence before a PASS can be recorded.
+                if isinstance(assessment, dict):
+                    findings = assessment.get("findings")
+                    if isinstance(findings, list):
+                        for finding in findings:
+                            if not isinstance(finding, dict):
+                                raise ValueError("Invalid reviewer finding")
+                            if finding.get("result") == "PASS":
+                                observation = finding.get("evidence")
+                                if not isinstance(observation, dict) or not observation.get("independent_observation"):
+                                    raise ValueError("PASS requires independently observed evidence")
+                if not isinstance(assessment, dict):
+                    raise ValueError("Evaluator must return a structured assessment")
+                outcome = self.ledger.decide_review(
+                    request["id"], reviewer=self.reviewer,
+                    implementation_revision=assessment["implementation_revision"],
+                    findings=assessment["findings"])
+                feedback_event_id = (
+                    self.ledger.queue_review_feedback(request["id"], manager=self.manager)
+                    if self.manager is not None and outcome in ("NEEDS_WORK", "INCONCLUSIVE")
+                    else None
+                )
+                outcomes.append({"request_id": request["id"], "outcome": outcome,
+                                 **({"feedback_event_id": feedback_event_id}
+                                    if feedback_event_id is not None else {})})
+            except Exception as exc:
+                self.ledger.release_review(request["id"], type(exc).__name__)
+                raise
         return outcomes

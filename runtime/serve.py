@@ -263,6 +263,15 @@ async def serve(db: Path, health_file: Path, config_dir: Path,
                     "SELECT count(*) FROM resident_inbox WHERE status IN ('PENDING','PROCESSING')"
                 ).fetchone()[0],
                 "verification_pending": journal.db.execute("SELECT count(*) FROM verification_requests WHERE status=?",( "PENDING",)).fetchone()[0],
+                "verification_processing": journal.db.execute("SELECT count(*) FROM verification_requests WHERE status=?",( "PROCESSING",)).fetchone()[0],
+                "verification_processing_requests": [
+                    {"request_id": row[0], "source_event_id": row[1],
+                     "started_at": row[2]}
+                    for row in journal.db.execute(
+                        "SELECT id,source_event_id,processing_started_at "
+                        "FROM verification_requests WHERE status='PROCESSING' ORDER BY id"
+                    )
+                ],
                 "verification_accepted": journal.db.execute("SELECT count(*) FROM verification_requests WHERE status=?",( "ACCEPTED",)).fetchone()[0],
                 "verification_needs_work": journal.db.execute("SELECT count(*) FROM verification_requests WHERE status=?",( "NEEDS_WORK",)).fetchone()[0],
                 "verification_inconclusive": journal.db.execute("SELECT count(*) FROM verification_requests WHERE status=?",( "INCONCLUSIVE",)).fetchone()[0],
