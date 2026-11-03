@@ -286,6 +286,9 @@ async def serve(db: Path, health_file: Path, config_dir: Path,
             atomic_snapshot(health_file, status)
             await asyncio.sleep(interval)
     finally:
+        institution._stop.set()
+        if verification_task is not None:
+            verification_stop.set()
         if intake_server is not None:
             await asyncio.to_thread(intake_server.shutdown)
             intake_server.server_close()
@@ -296,9 +299,6 @@ async def serve(db: Path, health_file: Path, config_dir: Path,
             conversation_server.server_close()
             if conversation_thread is not None:
                 conversation_thread.join(timeout=5)
-        institution._stop.set()
-        if verification_task is not None:
-            verification_stop.set()
         await runtime_task
         await institution.stop()
         if verification_task is not None:
