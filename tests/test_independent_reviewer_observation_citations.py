@@ -112,4 +112,3 @@ class IndependentReviewerObservationCitationTests(unittest.TestCase):
         self.assertIn("do not omit it when the journal directly supports the finding", prompt)
 
 
-if (c=u.structuredContent||{}).commit_sha===undefined) throw new Error("bad");
