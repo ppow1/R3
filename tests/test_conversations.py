@@ -79,11 +79,14 @@ class ConversationInferenceIntegrationTests(unittest.TestCase):
         import asyncio
 
         class FakeEndpoint:
+            def __init__(self):
+                self.calls = []
+
             def complete(self, messages, tools=None):
-                self.asserted_roles = [message["role"] for message in messages]
+                self.calls.append(list(messages))
                 return {
                     "model": "mock-resident",
-                    "choices": [{"message": {"role": "assistant", "content": "Hello, Steward."}}],
+                    "choices": [{"message": {"role": "assistant", "content": f"Reply {len(self.calls)}"}}],
                 }
 
         with tempfile.TemporaryDirectory() as directory:
@@ -100,15 +103,23 @@ class ConversationInferenceIntegrationTests(unittest.TestCase):
                     inbox, endpoint, system_prompt="Grace system prompt",
                     conversation_store=store)
                 asyncio.run(handler("Grace"))
-                self.assertIn("user", endpoint.asserted_roles)
-                self.assertIn("system", endpoint.asserted_roles)
+                self.assertEqual(
+                    ["system", "user"], [m["role"] for m in endpoint.calls[0]])
                 result = store.messages(
                     "steward-1", conversation["conversation_id"], after=0, limit=20)
                 self.assertEqual(
-                    ["Hello Grace", "Hello, Steward."],
+                    ["Hello Grace", "Reply 1"],
                     [message["content"] for message in result["messages"]])
                 self.assertEqual("DELIVERED", result["messages"][0]["delivery_status"])
                 self.assertEqual("RESIDENT", result["messages"][1]["sender_type"])
+
+                store.send_message(
+                    "steward-1", conversation["conversation_id"], "Follow up", "chat-2")
+                asyncio.run(handler("Grace"))
+                self.assertEqual(
+                    ["system", "user", "assistant", "user"],
+                    [m["role"] for m in endpoint.calls[1]])
+                self.assertEqual("Reply 1", endpoint.calls[1][2]["content"])
                 db.close()
 
                 reopened = sqlite3.connect(str(path), timeout=10)
@@ -116,7 +127,7 @@ class ConversationInferenceIntegrationTests(unittest.TestCase):
                     reloaded = ConversationStore(reopened).messages(
                         "steward-1", conversation["conversation_id"], after=0, limit=20)
                     self.assertEqual([1, 2], [m["sequence"] for m in reloaded["messages"]])
-                    self.assertEqual("Hello, Steward.", reloaded["messages"][1]["content"])
+                    self.assertEqual("Reply 1", reloaded["messages"][1]["content"])
                 finally:
                     reopened.close()
             finally:
