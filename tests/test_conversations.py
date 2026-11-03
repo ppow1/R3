@@ -12,7 +12,7 @@ import unittest
 import urllib.error
 import urllib.request
 
-from runtime.conversations import ConversationStore, create_server
+from runtime.conversations import ConversationError, ConversationStore, create_server
 from runtime.resident_inference import Inbox, ResidentInference
 
 
@@ -31,7 +31,7 @@ class ConversationStoreTests(unittest.TestCase):
         conversation = self.store.create_conversation("steward-1", "Grace", "Operations")
         self.assertEqual(1, len(self.store.list_conversations("steward-1", "Grace")))
         self.assertEqual([], self.store.list_conversations("steward-2", "Grace"))
-        with self.assertRaises(Exception):
+        with self.assertRaises(ConversationError):
             self.store.messages("steward-2", conversation["conversation_id"], after=0, limit=20)
 
         first = self.store.send_message(
@@ -51,7 +51,7 @@ class ConversationStoreTests(unittest.TestCase):
         duplicate = self.store.send_message("steward-1", conversation_id, "Status?", "retry-1")
         self.assertTrue(duplicate["duplicate"])
         self.assertEqual(sent["event_id"], duplicate["event_id"])
-        with self.assertRaises(Exception):
+        with self.assertRaises(ConversationError):
             self.store.send_message("steward-1", conversation_id, "Different", "retry-1")
         self.store.complete_event(sent["event_id"], "Grace", "Healthy")
         self.db.close()
