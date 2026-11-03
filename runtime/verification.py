@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/verification.py
 # Component: R3-VERIFICATION-LEARNING
-# File Revision: 1.3.1
+# File Revision: 1.3.2
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Durable criterion-level independent review records and improvement candidates.
@@ -14,6 +14,7 @@
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-007 | Record independent per-criterion review decisions atomically.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-008 | Independent review adapter with explicit evaluator and fail-closed behavior.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-010 | Prevent reviewer acceptance without independently sourced observations.
+# Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-011 | Respect outer SQLite transaction during review submission.
 # Supersedes: None
 # Contracts: hints/verification-and-learning.md; hints/engineering-test-policy.md
 # Tests: tests/test_verification.py
@@ -69,7 +70,12 @@ class VerificationLedger:
             raise ValueError("Each criterion needs an identifier")
         if len(ids) != len(set(ids)):
             raise ValueError("Duplicate criterion")
-        with self.db:
+        # Do not commit a caller-owned transaction: Inbox.finish must commit
+        # the review request and the terminal inbox transition together.
+        owns_transaction = not self.db.in_transaction
+        if owns_transaction:
+            self.db.execute("BEGIN")
+        try:
             self.db.execute(
                 "INSERT OR IGNORE INTO verification_requests "
                 "(source_event_id,assignment_id,criteria,evidence,created_at) "
@@ -79,6 +85,12 @@ class VerificationLedger:
             row = self.db.execute(
                 "SELECT id FROM verification_requests WHERE source_event_id=?",
                 (source_event_id,)).fetchone()
+            if owns_transaction:
+                self.db.commit()
+        except BaseException:
+            if owns_transaction:
+                self.db.rollback()
+            raise
         return int(row[0])
 
     def pending_reviews(self) -> list[dict]:
