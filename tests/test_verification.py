@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_verification.py
 # Component: R3-VERIFICATION-LEARNING-REGRESSION
-# File Revision: 1.3.2
+# File Revision: 1.3.3
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanent regression for criterion identity and non-automatic learning changes.
@@ -15,10 +15,11 @@
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-008 | Verify independent worker, self-review exclusion, and failure recovery.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-010 | Require separately sourced reviewer observations for acceptance.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-011 | Regression for caller-owned transaction rollback.
+# Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-012 | Ensure transaction marker table exists before rollback assertion.
 # Supersedes: None
 # Contracts: hints/verification-and-learning.md
 # Tests: This file.
-# History/Predecessor: Git blob d1c54f6385b930364902b8a0d1ee2269053211e0
+# History/Predecessor: Git blob bfdd45df32c92b56b6cd0d32aa9f850ae5f5f87d
 import sqlite3
 import unittest
 
@@ -77,9 +78,9 @@ class VerificationLedgerTests(unittest.TestCase):
             "PENDING")
 
     def test_review_submission_respects_caller_transaction_rollback(self):
+        self.db.execute("CREATE TABLE IF NOT EXISTS transaction_marker (id INTEGER)")
         self.db.commit()
         self.db.execute("BEGIN")
-        self.db.execute("CREATE TABLE IF NOT EXISTS transaction_marker (id INTEGER)")
         self.db.execute("INSERT INTO transaction_marker VALUES (1)")
         self.ledger.submit_review(101, "assignment", [{"id": "A"}], {})
         self.assertTrue(self.db.in_transaction)
