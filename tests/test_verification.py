@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_verification.py
 # Component: R3-VERIFICATION-LEARNING-REGRESSION
-# File Revision: 1.3.3
+# File Revision: 1.3.4
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanent regression for criterion identity and non-automatic learning changes.
@@ -16,10 +16,11 @@
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-010 | Require separately sourced reviewer observations for acceptance.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-011 | Regression for caller-owned transaction rollback.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-012 | Ensure transaction marker table exists before rollback assertion.
+# Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-013 | Permanent regression for authoritative assignment review status.
 # Supersedes: None
 # Contracts: hints/verification-and-learning.md
 # Tests: This file.
-# History/Predecessor: Git blob bfdd45df32c92b56b6cd0d32aa9f850ae5f5f87d
+# History/Predecessor: Git blob da4e2d3e2bd9d53283d28e1c5fc6dd1e4b9bff7e
 import sqlite3
 import unittest
 
@@ -67,6 +68,34 @@ class VerificationLedgerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.ledger.evaluate_candidate(candidate, disposition="IMPLEMENTED",
                                            reason="Apply change", actor="reviewer")
+
+    def test_assignment_status_is_derived_from_review_decisions(self):
+        initial = self.ledger.assignment_review_status("work")
+        self.assertEqual(initial["verification_status"], "NOT_REQUESTED")
+        self.assertEqual(initial["review_count"], 0)
+        request = self.ledger.submit_review(100, "work", [{"id": "A"}], {"claim": "done"})
+        pending = self.ledger.assignment_review_status("work")
+        self.assertEqual(pending["verification_status"], "PENDING")
+        self.assertEqual(pending["pending_review_count"], 1)
+        self.ledger.decide_review(
+            request, reviewer="auditor", implementation_revision="rev1",
+            findings=[{"criterion_id": "A", "result": "FAIL",
+                       "reason": "Result did not meet criterion",
+                       "evidence": {"observation": "not satisfied"}}])
+        rejected = self.ledger.assignment_review_status("work")
+        self.assertEqual(rejected["verification_status"], "NEEDS_WORK")
+        self.assertEqual(rejected["pending_review_count"], 0)
+        second = self.ledger.submit_review(101, "work", [{"id": "A"}], {"claim": "corrected"})
+        self.assertEqual(self.ledger.assignment_review_status("work")["verification_status"], "PENDING")
+        self.ledger.decide_review(
+            second, reviewer="auditor", implementation_revision="rev2",
+            findings=[{"criterion_id": "A", "result": "PASS",
+                       "reason": "Observed corrected result",
+                       "evidence": {"independent_observation": {"result": "satisfied"}}}])
+        accepted = self.ledger.assignment_review_status("work")
+        self.assertEqual(accepted["verification_status"], "ACCEPTED")
+        self.assertEqual(accepted["review_count"], 2)
+        self.assertEqual(accepted["latest_source_event_id"], 101)
 
     def test_review_request_is_pending_and_idempotent(self):
         criteria = [{"id": "A", "description": "Required outcome"}]
