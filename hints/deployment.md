@@ -19,6 +19,10 @@ History/Predecessor: Git blob 7e4420fa5c55aadeb4f96283919de0706c478ff3
 -->
 # Deployment and operations
 
+Graceful runtime shutdown closes assignment and conversation write admission and drains active residents and reviewers. The user service drop-in must set `TimeoutStopSec=infinity`; verify the effective value with `systemctl --user show r3-institution.service -p TimeoutStopUSec`. A finite stop timeout can terminate the process before active work reaches its durable completion point.
+
+For the first rollout from a runtime without an admission gate, an idle health snapshot is insufficient. Close new work at an existing upstream admission point before stopping the old process, then verify already-admitted work is drained or durably queued. If no such upstream gate is available, do not restart the old service during active work.
+
 - [Current implementation handoff](../docs/IMPLEMENTATION_HANDOFF.md) — Camrui target, manual bootstrap and pending work.
 - [R3 capability API](../r3_app.py) — current source; verify deployed behavior separately.
 - [Q2 Windows script queue](q2-script-queue.md) — write PowerShell scripts into Q2, let the watcher dispatch them, and read Queue/Results.

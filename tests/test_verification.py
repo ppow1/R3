@@ -24,8 +24,10 @@
 # Tests: This file.
 # History/Predecessor: Git blob 37315a802a29d04f6961a7c8590b919633715399
 import sqlite3
+import threading
 import unittest
 
+from runtime.admission import AdmissionGate
 from runtime.verification import VerificationLedger, IndependentReviewWorker
 
 
@@ -220,6 +222,60 @@ class VerificationLedgerTests(unittest.TestCase):
         )
         self.assertEqual([item["id"] for item in self.ledger.pending_reviews()], [request_id])
         self.assertEqual(worker.process_pending()[0]["outcome"], "INCONCLUSIVE")
+
+    def test_shutdown_closes_future_review_claims_but_preserves_active_result(self):
+        db = sqlite3.connect(":memory:", check_same_thread=False)
+        ledger = VerificationLedger(db)
+        first = ledger.submit_review(51, "assignment-first", [{"id": "A"}], {})
+        second = ledger.submit_review(52, "assignment-second", [{"id": "A"}], {})
+        evaluating = threading.Event()
+        release = threading.Event()
+        release_timed_out = threading.Event()
+        evaluations = []
+
+        def evaluator(request):
+            evaluations.append(request["id"])
+            if request["id"] == first:
+                evaluating.set()
+                if not release.wait(timeout=2):
+                    release_timed_out.set()
+            return {
+                "implementation_revision": "rev1",
+                "findings": [{
+                    "criterion_id": "A", "result": "PASS",
+                    "reason": "independently observed",
+                    "evidence": {"independent_observation": {"tool": "status", "result": "healthy"}},
+                }],
+            }
+
+        gate = AdmissionGate()
+        worker = IndependentReviewWorker(ledger, "auditor", evaluator)
+        outcomes = []
+        runner = threading.Thread(
+            target=lambda: outcomes.extend(worker.process_pending(admission_gate=gate))
+        )
+        try:
+            runner.start()
+            self.assertTrue(evaluating.wait(timeout=2))
+            gate.close()
+            release.set()
+            runner.join(timeout=2)
+            self.assertFalse(runner.is_alive())
+            self.assertFalse(release_timed_out.is_set())
+            self.assertEqual([first], evaluations)
+            self.assertEqual([{"request_id": first, "outcome": "ACCEPTED"}], outcomes)
+            statuses = {
+                row[0]: row[1] for row in db.execute(
+                    "SELECT id,status FROM verification_requests"
+                )
+            }
+            self.assertEqual("ACCEPTED", statuses[first])
+            self.assertEqual("PENDING", statuses[second])
+        finally:
+            release.set()
+            if runner.is_alive():
+                runner.join(timeout=2)
+            db.close()
 
     def test_worker_records_independent_review(self):
         request = self.ledger.submit_review(41, "assignment",

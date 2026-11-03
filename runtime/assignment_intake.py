@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/assignment_intake.py
 # Component: R3-STEWARD-ASSIGNMENT-INTAKE
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-03 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6 via GitHub API
 # Purpose: Authenticated loopback API for durable resident assignment submission and status.
@@ -10,6 +10,7 @@
 # Dependencies: Python standard library; runtime.resident_inference; runtime.verification.
 # Authority: Steward-approved R3 charter; loopback-only and bearer-token protected.
 # Changed: 2026-11-03 UTC | R3-ASSIGNMENT-INTAKE-001 | ChatGPT GPT-6 | Add opt-in durable assignment API.
+# Changed: 2026-11-03 UTC | R3-SHUTDOWN-ADMISSION-001 | Gate assignment writes before runtime shutdown.
 # Supersedes: None
 # Contracts: docs/r3-assignment-intake-contract.md; hints/engineering-test-policy.md
 # Tests: tests/test_assignment_intake.py
@@ -29,6 +30,7 @@ import stat
 import time
 from urllib.parse import unquote
 
+from runtime.admission import AdmissionGate
 from runtime.resident_inference import Inbox
 from runtime.verification import VerificationLedger
 
@@ -216,7 +218,7 @@ class AssignmentIntake:
 
 def create_server(database: Path, token_file: Path, residents: set[str],
                   continuation_residents: set[str], *, host: str = "127.0.0.1",
-                  port: int):
+                  port: int, admission_gate: AdmissionGate | None = None):
     if host != "127.0.0.1":
         raise ValueError("Assignment intake must bind to 127.0.0.1")
     if isinstance(port, bool) or not isinstance(port, int) or not 0 <= port <= 65535:
@@ -227,6 +229,7 @@ def create_server(database: Path, token_file: Path, residents: set[str],
         raise ValueError("Assignment intake token file must not be group- or world-accessible")
     token = token_path.read_text(encoding="utf-8").strip()
     app = AssignmentIntake(database, token, residents, continuation_residents)
+    gate = admission_gate or AdmissionGate()
 
     class Handler(BaseHTTPRequestHandler):
         def _respond(self, code, payload):
@@ -255,7 +258,11 @@ def create_server(database: Path, token_file: Path, residents: set[str],
                     self._respond(413, {"error": "Invalid request size"})
                     return
                 payload = json.loads(self.rfile.read(size))
-                result = app.submit(payload, self.headers.get("Idempotency-Key"))
+                with gate.enter() as admitted:
+                    if not admitted:
+                        self._respond(503, {"error": "service_shutting_down"})
+                        return
+                    result = app.submit(payload, self.headers.get("Idempotency-Key"))
                 self._respond(200 if result["status"] == "DUPLICATE" else 202, result)
             except IntakeError as exc:
                 self._respond(exc.status, {"error": str(exc)})
