@@ -296,11 +296,13 @@ async def serve(db: Path, health_file: Path, config_dir: Path,
             conversation_server.server_close()
             if conversation_thread is not None:
                 conversation_thread.join(timeout=5)
-        await institution.stop()
+        institution._stop.set()
         if verification_task is not None:
             verification_stop.set()
-            await asyncio.gather(verification_task, return_exceptions=True)
         await runtime_task
+        await institution.stop()
+        if verification_task is not None:
+            await asyncio.gather(verification_task, return_exceptions=True)
 
 
 def main() -> None:
