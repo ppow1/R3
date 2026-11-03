@@ -25,6 +25,48 @@ from runtime.resident_inference import Inbox
 
 
 class IndependentReviewerLineageTests(unittest.TestCase):
+    def test_compact_continuation_keeps_durable_actions_and_drops_duplicate_envelope(self):
+        item = {
+            "event": {
+                "id": 8, "resident": "Grace", "event_type": "REVIEW_FEEDBACK",
+                "payload": {
+                    "assignment_id": "work-1",
+                    "objective": "Original objective",
+                    "acceptance_criteria": [{"id": "a"}],
+                    "review_request_id": 3,
+                    "previous_event_id": 7,
+                    "previous_result": {"decision": {"state": "continue", "evidence": ["copied"]}},
+                    "next_step": "Repeat the read-only observation",
+                },
+                "status": "COMPLETED",
+                "result": {
+                    "continuation_event_id": 9,
+                    "decision": {"state": "continue", "next_step": "Repeat the read-only observation",
+                                 "evidence": ["already represented by TOOL_RESULT"]},
+                },
+            },
+            "turns": [
+                {"sequence": 0, "kind": "ASSISTANT",
+                 "content": {"tool_calls": [{"function": {"name": "r3.status"}}]}},
+                {"sequence": 1, "kind": "TOOL_INTENT",
+                 "content": {"tool": "r3.status", "params": {}}},
+                {"sequence": 2, "kind": "TOOL_RESULT",
+                 "content": {"role": "tool", "content": '{"healthy": true}'}},
+                {"sequence": 3, "kind": "ASSISTANT",
+                 "content": {"content": "continue"}},
+            ],
+        }
+
+        compact = IndependentReviewer._compact_lineage_event(item, source_event_id=99)
+
+        self.assertNotIn("previous_result", compact["event"]["payload"])
+        self.assertNotIn("objective", compact["event"]["payload"])
+        self.assertEqual(compact["event"]["payload"]["review_request_id"], 3)
+        self.assertEqual(compact["event"]["result"]["decision"],
+                         {"state": "continue", "next_step": "Repeat the read-only observation"})
+        self.assertEqual([turn["kind"] for turn in compact["turns"]],
+                         ["TOOL_INTENT", "TOOL_RESULT"])
+
     def test_observation_includes_evidence_across_feedback_lineage(self):
         with tempfile.TemporaryDirectory() as directory:
             db_path = Path(directory) / "institution.db"
