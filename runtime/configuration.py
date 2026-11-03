@@ -1,14 +1,15 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/configuration.py
 # Component: R3-CONFIGURATION
-# File Revision: 1.0.1
+# File Revision: 1.0.2
 # Created: 2026-11-02 UTC
 # Purpose: Validate externally defined runtime and resident settings.
 # Dependencies: Python standard library only.
 # Contracts: hints/milestones/2026-11-02-r3-six-phase-roadmap-phase1.md
 # Tests: tests/test_configuration.py
 # Changed: 2026-11-03T01:37:00.460Z | R3-VERIFY-WIRING-001 | Codex | Validate the configured independent reviewer, tools and manager.
-# History/Predecessor: Git blob 19f74fab25172be933f32579edbb13b51fd7ce31
+# Changed: 2026-11-03T01:39:59.849Z | R3-VERIFY-WIRING-002 | Codex | Preserve loading of resident configurations without an optional reviewer.
+# History/Predecessor: Git blob b42c627df1ad343e27a6f1779fe5c4fab6cde1c7
 """Small, strict JSON configuration loader; no implicit runtime defaults."""
 from __future__ import annotations
 
@@ -106,6 +107,8 @@ def load_configuration(directory: str | Path):
             raise ConfigurationError(f"Cannot read prompt {prompt_path}: {exc}") from exc
         _text(prompt, f"{key}.system_prompt")
         definitions.append({"settings": entry, "system_prompt": prompt})
+    if runtime.get("independent_reviewer") is None:
+        return {"runtime": runtime, "residents": definitions, "reviewer": None}
     reviewer_relative = _text(runtime.get("independent_reviewer"), "independent_reviewer")
     reviewer_path = (root / reviewer_relative).resolve()
     if not reviewer_path.is_relative_to(root):
