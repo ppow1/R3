@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/resident_inference.py
 # Component: R3-RESIDENT-INFERENCE
-# File Revision: 1.3.1
+# File Revision: 1.3.2
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Reusable event-driven resident inference against an existing OpenAI-compatible endpoint.
@@ -13,7 +13,8 @@
 # Changed: 2026-11-02 UTC | R3-GRACE-004 | Durable tool-call continuation with fail-closed recovery
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-005 | Atomically queue review on completion with explicit criteria.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-006 | Preserve assignment metadata across activity continuation.
-# Supersedes: None
+# Changed: 2026-11-03 UTC | R3-GRACE-RECOVERY-001 | Persist ineffective continuation signal and request alternative method.
+# Supersedes: revision 1.3.1
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; hints/engineering-test-policy.md
 # Tests: tests/test_inference_http_errors.py (permanent transport diagnostic contract).
 # Changed: 2026-11-02 UTC | R3-GRACE-005 | Preserve safe upstream HTTP error codes without leaking request content.
@@ -221,6 +222,14 @@ class ResidentInference:
             "are supported by observed evidence; otherwise omit it or set false. "
             "Never invent a next action or repeat an ineffective step."
         ) if event_type in self.continuation_event_types else ""
+        if event_type in self.continuation_event_types and payload.get("recovery_required"):
+            continuity_contract += (
+                "\nRecovery required: the previous continuation repeated an ineffective "
+                "step without new evidence. Reassess the objective, inspect prior "
+                "results, and select a materially different authorized method. "
+                "Do not claim completion without verified acceptance evidence. "
+                "If no authorized alternative exists, report the actual dependency."
+            )
         if event_type == "CONVERSATION_MESSAGE":
             if self.conversation_store is None:
                 raise RuntimeError("Conversation storage is not configured")
@@ -268,12 +277,21 @@ class ResidentInference:
                         next_step = decision.get("next_step")
                         if not isinstance(next_step, str) or not next_step.strip():
                             raise RuntimeError("Continuing activity requires next_step")
+                        previous_step = payload.get("next_step")
+                        previous_decision = payload.get("previous_result")
+                        repeated_without_evidence = (
+                            isinstance(previous_step, str)
+                            and previous_step.strip().casefold() == next_step.strip().casefold()
+                            and isinstance(previous_decision, dict)
+                            and previous_decision.get("evidence") == decision.get("evidence")
+                        )
                         self.inbox.continue_activity(event_id, resident, event_type, {
                             **payload,
                             "objective": payload.get("objective", payload),
                             "previous_event_id": event_id,
                             "previous_result": decision,
                             "next_step": next_step,
+                            "recovery_required": repeated_without_evidence,
                         }, {"decision": decision, "model": result.get("model")})
                         return
                     # An inbox turn is not the same thing as a verified objective.
