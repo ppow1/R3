@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: web/index.html
 Component: R3-ESTATE-HOME
-File Revision: 1.0.15
+File Revision: 1.0.16
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Present the R3 estate home with Engineering and Infrastructure observability panels
@@ -12,10 +12,11 @@ Dependencies: /api/v1/visual/background; /api/v1/health; /api/v1/engineering/bra
 Authority: Steward visual placement references and approved R3 website direction
 Changed: 2026-11-02 UTC | R3-SETTINGS-DYNAMIC-REGISTRY-001 | ChatGPT GPT-6 | Render settings scopes and rows from read-only registry adapter
 Changed: 2026-11-02 UTC | R3-SETTINGS-REGISTRY-ROBUSTNESS-001 | ChatGPT GPT-6 | Ignore incomplete scope and setting entries in adapter responses
+Changed: 2026-11-02 UTC | R3-SETTINGS-READ-WRITE-MODE-001 | ChatGPT GPT-6 | Add explicit read/write mode and guarded save path
 Supersedes: R3-VISUAL-PROTOTYPE framing
 Contracts: docs/IMPLEMENTATION_HANDOFF.md; docs/architecture/ESTATE_SPATIAL_CANON.md; hints/chat-contract-draft.md; hints/settings-contract-draft.md
 Tests: Not run; runtime telemetry adapter and visual acceptance pending
-History/Predecessor: Git blob b6c8cadeca255eb56d7535a750aad557b9f6f747
+History/Predecessor: Git blob 756aea8ce86adeacda10c85e0ceb0083bae69877
 -->
 <!doctype html>
 <html lang="en">
@@ -131,7 +132,7 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 .opacity-popover label{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#eaf4ff}.opacity-popover input[type=range]{width:100%;margin:8px 0 0;accent-color:#8fb9ec}
 #infrastructure-panel{background:rgba(8,18,30,var(--infrastructure-opacity,.83))}.window.min .opacity-control{display:none}#chat-panel{background:rgba(8,18,30,var(--chat-opacity,.86))}.window{background:rgba(12,25,42,var(--engineering-opacity,.45))}
 .window header .window-actions{display:flex;align-items:center;gap:6px;margin-left:auto}.window header .window-actions>button{margin-left:0}.infra-header .infra-actions .opacity-control{margin-left:auto}.infra-header .infra-actions .infra-minimize-icon{margin-left:0}#chat-panel .chat-main>.chat-head #chat-minimize,#chat-panel .chat-main>.chat-head #chat-close{margin-left:0}
-.settings-heading{display:flex;align-items:center;gap:8px}.settings-heading h3{flex:1}.settings-refresh{width:30px;height:30px;padding:0;border-radius:8px}.settings-search-label{display:block;margin:8px 0 4px;font-size:11px;color:#c2d5ec}.settings-search{width:100%;padding:7px 9px;border-radius:8px;background:#08152288;color:#eaf4ff;border:1px solid #c2d5ec33;font:inherit;font-size:12px}.settings-entry-list{display:grid;gap:7px;margin-top:8px;max-height:38vh;overflow:auto}.settings-entry{padding:9px;border:1px solid #c2d5ec22;border-radius:9px;background:#10223844}.settings-entry-heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.settings-entry-heading strong{font-size:12px}.settings-entry-heading code{font-size:10px;color:#b9cde2;overflow-wrap:anywhere}.settings-description,.settings-empty{margin:5px 0;color:#c2d5ec;font-size:11px}.settings-ready{color:#a9d6b5}.settings-more{font-size:11px}</style>
+.settings-heading{display:flex;align-items:center;gap:8px}.settings-heading h3{flex:1}.settings-refresh{width:30px;height:30px;padding:0;border-radius:8px}.settings-search-label{display:block;margin:8px 0 4px;font-size:11px;color:#c2d5ec}.settings-search{width:100%;padding:7px 9px;border-radius:8px;background:#08152288;color:#eaf4ff;border:1px solid #c2d5ec33;font:inherit;font-size:12px}.settings-entry-list{display:grid;gap:7px;margin-top:8px;max-height:38vh;overflow:auto}.settings-entry{padding:9px;border:1px solid #c2d5ec22;border-radius:9px;background:#10223844}.settings-entry-heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.settings-entry-heading strong{font-size:12px}.settings-entry-heading code{font-size:10px;color:#b9cde2;overflow-wrap:anywhere}.settings-description,.settings-empty{margin:5px 0;color:#c2d5ec;font-size:11px}.settings-ready{color:#a9d6b5}.settings-more{font-size:11px}.settings-mode-toggle{font-size:10px;padding:6px 8px;white-space:nowrap}.settings-mode-toggle[aria-pressed=true]{border-color:#d2b775;color:#f2dfad;background:#4d402533}.settings-mode-status{font-size:10px!important;color:#d6c79a!important}.settings-editor{display:grid;gap:7px;margin-top:8px;padding-top:8px;border-top:1px solid #c2d5ec22}.settings-editor label{display:grid;gap:5px;font-size:11px;color:#c2d5ec}.settings-editor input,.settings-editor select,.settings-editor textarea{width:100%;padding:7px;border:1px solid #c2d5ec44;border-radius:7px;background:#091522;color:#eaf4ff;font:inherit}.settings-editor input[type=checkbox]{width:auto}.settings-save{justify-self:start;font-size:11px}.settings-save:disabled{opacity:.45;cursor:not-allowed}</style>
 </head>
 <body>
 <div id="estate" role="img" aria-label="Riverview 3 estate"></div>
@@ -152,7 +153,7 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
   <button class="profile-menu-item" id="profile-settings" type="button" aria-expanded="false">Settings</button>
 <div id="profile-settings-panel" hidden><div id="settings-shell">
 <nav class="settings-scopes" id="settings-scopes" aria-label="Settings scope"></nav>
-<section class="settings-detail" aria-live="polite"><div class="settings-heading"><h3 id="settings-scope-title">Settings</h3><button class="settings-refresh" id="settings-refresh" type="button" title="Refresh settings from the active read-only adapter" aria-label="Refresh settings">↻</button></div><p class="settings-unavailable" id="settings-registry-status" role="status">Settings registry unavailable · no operational values loaded.</p><label class="settings-search-label" for="settings-search">Find a setting</label><input class="settings-search" id="settings-search" type="search" placeholder="Search settings" autocomplete="off"><div class="settings-entry-list" id="settings-entry-list"></div><div class="settings-local">Local appearance · this browser only</div><div id="browser-appearance" hidden><div class="controls"><label for="opacity">Engineering opacity</label><output id="value" for="opacity">45%</output><input id="opacity" type="range" min="45" max="95" value="45"><button id="center-window" type="button">Center window</button><button id="snapshot-button" type="button">Snapshot</button><output id="snapshot-status" aria-live="polite"></output></div><section id="layout-presets"><h3>Floating panel layouts</h3><p>Save up to 10 layouts for this browser. A layout records panel positions, sizes, and open or minimized state. Applying a preset can show Chat, Engineering, and Infrastructure together.</p><div id="layout-presets-controls"><select id="layout-preset-slot" aria-label="Layout preset"></select><input id="layout-preset-name" type="text" maxlength="32" placeholder="Preset name (optional)" aria-label="Preset name"><button id="layout-preset-save" type="button">Save current</button><button id="layout-preset-apply" type="button">Apply</button><button id="layout-preset-clear" type="button">Clear</button></div><output id="layout-preset-status" aria-live="polite"></output></section></div></section></div></div>
+<section class="settings-detail" aria-live="polite"><div class="settings-heading"><h3 id="settings-scope-title">Settings</h3><button class="settings-mode-toggle" id="settings-mode-toggle" type="button" aria-pressed="false" title="Switch between viewing and editing settings">Read mode</button><button class="settings-refresh" id="settings-refresh" type="button" title="Refresh settings from the configuration adapter" aria-label="Refresh settings">↻</button></div><p class="settings-unavailable" id="settings-registry-status" role="status">Settings registry unavailable · no operational values loaded.</p><p class="settings-mode-status" id="settings-mode-status" role="status">Write mode is off.</p><label class="settings-search-label" for="settings-search">Find a setting</label><input class="settings-search" id="settings-search" type="search" placeholder="Search settings" autocomplete="off"><div class="settings-entry-list" id="settings-entry-list"></div><div class="settings-local">Local appearance · this browser only</div><div id="browser-appearance" hidden><div class="controls"><label for="opacity">Engineering opacity</label><output id="value" for="opacity">45%</output><input id="opacity" type="range" min="45" max="95" value="45"><button id="center-window" type="button">Center window</button><button id="snapshot-button" type="button">Snapshot</button><output id="snapshot-status" aria-live="polite"></output></div><section id="layout-presets"><h3>Floating panel layouts</h3><p>Save up to 10 layouts for this browser. A layout records panel positions, sizes, and open or minimized state. Applying a preset can show Chat, Engineering, and Infrastructure together.</p><div id="layout-presets-controls"><select id="layout-preset-slot" aria-label="Layout preset"></select><input id="layout-preset-name" type="text" maxlength="32" placeholder="Preset name (optional)" aria-label="Preset name"><button id="layout-preset-save" type="button">Save current</button><button id="layout-preset-apply" type="button">Apply</button><button id="layout-preset-clear" type="button">Clear</button></div><output id="layout-preset-status" aria-live="polite"></output></section></div></section></div></div>
   <button class="profile-menu-item" id="profile-engineering" type="button">Engineering Foundry panel</button>
   <button class="profile-menu-item" id="profile-infrastructure" type="button">Infrastructure panel</button>
 </div>
@@ -247,8 +248,9 @@ const infrastructureTelemetryAdapter={
 const infrastructurePanel=document.getElementById('infrastructure-panel');
 const chatPanel=document.getElementById('chat-panel');
 const chatAdapter={async listConversations(){return{available:false,reason:'R3 conversation API is not connected'};},async capabilityManifest(){return{available:false,reason:'Resident capability manifest is unavailable'};}};
-// Read-only presentation seam. The returned projection is UI data, not a backend API/schema.
-const settingsRegistryAdapter={
+// Bidirectional UI adapter. Its projection and change request are presentation contracts,
+// not the backend API/schema; the runtime must authorize and validate every write.
+const settingsConfigurationAdapter={
   async read(){
     const provider=window.r3SettingsAdapter;
     if(!provider||typeof provider.read!=='function')return{available:false,reason:'R3 settings registry adapter is not connected'};
@@ -257,6 +259,15 @@ const settingsRegistryAdapter={
       if(!result||typeof result!=='object')return{available:false,reason:'Settings adapter returned no registry model'};
       return result;
     }catch(error){return{available:false,reason:'Settings registry could not be read'};}
+  },
+  async write(change){
+    const provider=window.r3SettingsAdapter;
+    if(!provider||typeof provider.write!=='function')return{success:false,reason:'Authorized configuration writes are unavailable'};
+    try{
+      const capabilities=typeof provider.capabilities==='function'?await provider.capabilities():null;
+      if(!capabilities||capabilities.write!==true)return{success:false,reason:'Authorized configuration writes are unavailable'};
+      return await provider.write(change);
+    }catch(error){return{success:false,reason:'Configuration change could not be saved'};}
   }
 };
 const infrastructureButton=document.getElementById('nav-infrastructure');
@@ -297,9 +308,9 @@ document.getElementById('profile-engineering').addEventListener('click',()=>{
   if(win.classList.contains('min'))restorePanel(false);
 });
 document.getElementById('profile-settings').addEventListener('click',event=>{const panel=document.getElementById('profile-settings-panel');panel.hidden=!panel.hidden;event.currentTarget.setAttribute('aria-expanded',String(!panel.hidden));});
-const settingsScopesRoot=document.getElementById('settings-scopes'),settingsEntryList=document.getElementById('settings-entry-list'),settingsSearch=document.getElementById('settings-search'),settingsStatus=document.getElementById('settings-registry-status'),settingsTitle=document.getElementById('settings-scope-title'),browserAppearance=document.getElementById('browser-appearance');
+const settingsScopesRoot=document.getElementById('settings-scopes'),settingsEntryList=document.getElementById('settings-entry-list'),settingsSearch=document.getElementById('settings-search'),settingsStatus=document.getElementById('settings-registry-status'),settingsModeStatus=document.getElementById('settings-mode-status'),settingsModeToggle=document.getElementById('settings-mode-toggle'),settingsTitle=document.getElementById('settings-scope-title'),browserAppearance=document.getElementById('browser-appearance');
 const fallbackSettingsScopes=[{id:'institutional',label:'Institutional'},{id:'departmental',label:'Departmental'},{id:'resident',label:'Resident'},{id:'chat',label:'Chat'},{id:'user',label:'User'},{id:'device',label:'Device'},{id:'infrastructure',label:'Infrastructure'}];
-let settingsRegistryModel={available:false},activeSettingsScope='institutional',settingsVisibleCount=50;
+let settingsRegistryModel={available:false},activeSettingsScope='institutional',settingsVisibleCount=50,settingsMode='read';
 function settingsText(value,missing='Not provided'){
  if(value===undefined)return missing;
  if(value===null)return 'Unavailable';
@@ -340,7 +351,7 @@ function renderSettingsEntries(){
  browserAppearance.hidden=String(scope&&scope.id||activeSettingsScope).toLowerCase()!=='user';
  settingsEntryList.replaceChildren();
  if(!settingsRegistryModel||settingsRegistryModel.available!==true){
-  const empty=document.createElement('p');empty.className='settings-empty';empty.textContent='No live settings loaded for this scope.';settingsEntryList.appendChild(empty);return;
+  const empty=document.createElement('p');empty.className='settings-empty';empty.textContent=settingsMode==='write'?'Write mode selected; no settings are loaded and saving is unavailable.':'No live settings loaded for this scope.';settingsEntryList.appendChild(empty);return;
  }
  const allEntries=Array.isArray(scope&&scope.settings)?scope.settings:(Array.isArray(scope&&scope.entries)?scope.entries:[]);
  const query=settingsSearch.value.trim().toLowerCase();
@@ -362,6 +373,29 @@ function renderSettingsEntries(){
   appendSettingsField(card,'Authorization',entry.authorization);
   appendSettingsField(card,'Configuration history',entry.history);
   appendSettingsField(card,'Availability',entry.availability);
+  if(settingsMode==='write'){
+   const editor=document.createElement('div');editor.className='settings-editor';
+   const inputLabel=document.createElement('label');inputLabel.textContent='Proposed value';
+   const currentValue=entry.effective_value,allowed=Array.isArray(entry.allowed_values)?entry.allowed_values:null;
+   let input;
+   if(allowed&&allowed.length){input=document.createElement('select');for(const item of allowed){const option=document.createElement('option');option.value=String(item);option.textContent=String(item);input.appendChild(option);}input.value=String(currentValue??'');}
+   else if(typeof currentValue==='boolean'||String(entry.type||'').toLowerCase()==='boolean'){input=document.createElement('input');input.type='checkbox';input.checked=Boolean(currentValue);}
+   else if(typeof currentValue==='number'||['number','integer'].includes(String(entry.type||'').toLowerCase())){input=document.createElement('input');input.type='number';if(Number.isFinite(entry.minimum))input.min=String(entry.minimum);if(Number.isFinite(entry.maximum))input.max=String(entry.maximum);if(Number.isFinite(entry.step))input.step=String(entry.step);input.value=String(currentValue??'');}
+   else if(typeof currentValue==='string'||String(entry.type||'').toLowerCase()==='string'){input=document.createElement('input');input.type='text';input.value=String(currentValue??'');}
+   else{input=document.createElement('textarea');input.value=settingsText(currentValue,'');input.disabled=true;input.title='This setting type is not editable through the current form.';}
+   inputLabel.appendChild(input);editor.appendChild(inputLabel);
+   const save=document.createElement('button');save.type='button';save.className='settings-save';save.textContent='Save change';
+   const writeEnabled=settingsRegistryModel.capabilities&&settingsRegistryModel.capabilities.write===true&&entry.write_authorized===true&&entry.writable===true;
+   save.disabled=!writeEnabled||input.disabled;
+   save.addEventListener('click',async()=>{
+    const proposed=input.type==='checkbox'?input.checked:(input.value);
+    save.disabled=true;settingsModeStatus.textContent='Submitting change for backend validation…';
+    const result=await settingsConfigurationAdapter.write({scope_id:activeSettingsScope,setting_key:String(entry.key||entry.id||''),value:proposed,revision:settingsRegistryModel.revision});
+    if(result&&result.success===true){settingsModeStatus.textContent='Change accepted by the configuration service.';await refreshSettingsRegistry();}
+    else{settingsModeStatus.textContent=(result&&result.reason)||'Configuration change was not accepted.';save.disabled=!writeEnabled;}
+   });
+   editor.appendChild(save);card.appendChild(editor);
+  }
   settingsEntryList.appendChild(card);
  }
  if(!matches.length){const empty=document.createElement('p');empty.className='settings-empty';empty.textContent=query?'No settings match this search.':'No settings are registered for this scope.';settingsEntryList.appendChild(empty);}
@@ -369,7 +403,7 @@ function renderSettingsEntries(){
 }
 async function refreshSettingsRegistry(){
  settingsStatus.textContent='Refreshing settings registry…';settingsStatus.classList.remove('settings-ready');
- settingsRegistryModel=await settingsRegistryAdapter.read();
+ settingsRegistryModel=await settingsConfigurationAdapter.read();
  const available=settingsRegistryModel&&settingsRegistryModel.available===true;
  settingsStatus.textContent=available?(settingsRegistryModel.revision?'Registry available · revision '+settingsText(settingsRegistryModel.revision):'Registry available · read-only values'):(settingsRegistryModel&&settingsRegistryModel.reason||'Settings registry unavailable')+' · no live values loaded.';
  settingsStatus.classList.toggle('settings-ready',Boolean(available));
@@ -378,6 +412,7 @@ async function refreshSettingsRegistry(){
  renderSettingsScopes();renderSettingsEntries();
 }
 settingsSearch.addEventListener('input',()=>{settingsVisibleCount=50;renderSettingsEntries();});
+settingsModeToggle.addEventListener('click',()=>{settingsMode=settingsMode==='read'?'write':'read';const writing=settingsMode==='write';settingsModeToggle.textContent=writing?'Write mode':'Read mode';settingsModeToggle.setAttribute('aria-pressed',String(writing));settingsModeStatus.textContent=writing?(settingsRegistryModel.capabilities&&settingsRegistryModel.capabilities.write===true?'Write mode selected · each change still requires entry-level authorization.':'Write mode selected · saving is unavailable until an authorized write service is connected.'):'Write mode is off.';renderSettingsEntries();});
 document.getElementById('settings-refresh').addEventListener('click',refreshSettingsRegistry);
 document.getElementById('profile-settings').addEventListener('click',event=>{const panel=document.getElementById('profile-settings-panel');if(!panel.hidden)refreshSettingsRegistry();});
 renderSettingsScopes();renderSettingsEntries();chatAdapter.listConversations().then(result=>{if(!result.available)document.getElementById('chat-service-status').textContent=result.reason+' · no live history loaded.';});
