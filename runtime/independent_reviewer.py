@@ -45,6 +45,53 @@ class IndependentReviewer:
             if response.status < 200 or response.status >= 300:
                 raise RuntimeError("Reviewer inference endpoint unavailable")
 
+    @staticmethod
+    def _compact_lineage_event(item: dict, *, source_event_id: int) -> dict:
+        """Remove repeated continuation envelopes while retaining direct journal evidence."""
+        event = item["event"]
+        payload = dict(event["payload"])
+        result = event["result"]
+        decision = result.get("decision") if isinstance(result, dict) else None
+        state = decision.get("state") if isinstance(decision, dict) else None
+        event_id = event.get("id")
+        preserve_detail = (
+            event_id == source_event_id
+            or payload.get("previous_event_id") is None
+            or state in ("complete", "blocked")
+        )
+
+        if not preserve_detail:
+            # These fields are already present in the assignment root or the original
+            # review-feedback event. Continuation payloads copy them forward verbatim.
+            for key in ("objective", "acceptance_criteria", "source_payload",
+                        "findings", "previous_result"):
+                payload.pop(key, None)
+            if isinstance(result, dict) and isinstance(decision, dict) and state == "continue":
+                result = {
+                    **({"continuation_event_id": result["continuation_event_id"]}
+                       if "continuation_event_id" in result else {}),
+                    "decision": {
+                        "state": "continue",
+                        **({"next_step": decision["next_step"]}
+                           if isinstance(decision.get("next_step"), str) else {}),
+                    },
+                }
+
+        turns = []
+        for turn in item["turns"]:
+            content = turn.get("content")
+            if turn.get("kind") == "ASSISTANT":
+                if isinstance(content, dict) and content.get("tool_calls"):
+                    # TOOL_INTENT rows below are the durable, normalized record of calls.
+                    continue
+                if not preserve_detail and state == "continue":
+                    # The continuation decision is retained in event.result above.
+                    continue
+            turns.append(turn)
+
+        compact_event = {**event, "payload": payload, "result": result}
+        return {"event": compact_event, "turns": turns}
+
     def _observe_journal(self, request: dict) -> dict:
         source_event_id = request.get("source_event_id")
         if isinstance(source_event_id, bool) or not isinstance(source_event_id, int):
@@ -103,11 +150,15 @@ class IndependentReviewer:
             if source_event_id not in events:
                 raise LookupError("Review source event is unavailable")
             primary = events[source_event_id]
+            lineage = [
+                self._compact_lineage_event(events[event_id], source_event_id=source_event_id)
+                for event_id in sorted(events)
+            ]
             return {
                 "event": primary["event"],
                 "turns": primary["turns"],
                 "lineage_event_ids": sorted(events),
-                "lineage": [events[event_id] for event_id in sorted(events)],
+                "lineage": lineage,
             }
         finally:
             connection.close()
