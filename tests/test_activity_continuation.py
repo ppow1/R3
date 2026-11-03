@@ -44,6 +44,25 @@ class ActivityContinuationTests(unittest.TestCase):
         self.assertEqual(self.db.execute("SELECT status FROM resident_inbox WHERE id=?", (second,)).fetchone()[0], "COMPLETED")
         self.assertEqual(self.db.execute("SELECT count(*) FROM resident_inbox").fetchone()[0], 2)
 
+    def test_repeated_ineffective_continuation_requests_recovery(self):
+        event = self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY", {"objective": "Resolve incident"})
+        handler = self.handler([
+            {"state": "continue", "next_step": "Inspect status", "evidence": "No change"},
+            {"state": "continue", "next_step": " inspect STATUS ", "evidence": "No change"},
+            {"state": "continue", "next_step": "Use alternate authorized interface", "evidence": "New route"},
+        ])
+        asyncio.run(handler("TestResident"))
+        asyncio.run(handler("TestResident"))
+        second = self.db.execute("SELECT payload FROM resident_inbox WHERE id=?", (event + 2,)).fetchone()
+        self.assertIsNotNone(second)
+        self.assertTrue(json.loads(second[0])["recovery_required"])
+        asyncio.run(handler("TestResident"))
+        third = self.db.execute("SELECT payload FROM resident_inbox WHERE id=?", (event + 3,)).fetchone()
+        self.assertIsNotNone(third)
+        self.assertFalse(json.loads(third[0])["recovery_required"])
+        sent = handler.endpoint.complete.call_args_list[2].args[0]
+        self.assertIn("Recovery required", sent[0]["content"])
+
     def test_regular_event_keeps_ordinary_response(self):
         event = self.inbox.enqueue("TestResident", "CONVERSATION", {"text": "hello"})
         handler = self.handler([{"state": "continue", "next_step": "not activated"}])
