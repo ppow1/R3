@@ -139,13 +139,6 @@ paths:
           $ref: '#/components/responses/NotFound'
     post:
       summary: Persist a Steward message and enqueue it for the resident scheduler
-      parameters:
-        - name: X-R3-Principal
-          in: header
-          required: true
-          schema:
-            type: string
-          description: Trusted website-backend assertion of the authenticated Steward identity.
       requestBody:
         required: true
         content:
@@ -262,7 +255,7 @@ components:
           description: Unix epoch timestamp in seconds from the R3 service clock.
         delivery_status:
           type: string
-          enum: [QUEUED, DELIVERED, FAILED]
+          enum: [QUEUED, PROCESSING, DELIVERED, FAILED]
         client_message_id:
           type: [string, 'null']
         error_code:
@@ -278,7 +271,7 @@ components:
           type: integer
         delivery_status:
           type: string
-          enum: [QUEUED, DELIVERED, FAILED]
+          enum: [QUEUED, PROCESSING, DELIVERED, FAILED]
         event_id:
           type: integer
         duplicate:
