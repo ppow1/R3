@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/serve.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.2.0
+# File Revision: 1.2.1
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Start and monitor R3 institutional scheduler and supervisor.
@@ -10,6 +10,7 @@
 # Dependencies: Python 3.12 stdlib; runtime/institution.py.
 # Authority: R3 Charter Revision 2; does not modify R2 or start inference.
 # Changed: 2026-11-01 UTC | R3-RUNTIME-002 | First executable service entrypoint
+# Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-009 | Expose independent verification backlog.
 # Supersedes: None
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md
 # Tests: Initial service smoke test pending
@@ -18,7 +19,7 @@
 # Changed: 2026-11-02 UTC | R3-GRACE-005 | Wire configured existing llama.cpp tool endpoint without enabling by assumption
 # Changed: 2026-11-02 UTC | R3-CONFIG-001 | Load generic residents and runtime settings from files.
 # Changed: 2026-11-02 UTC | R3-TOOLS-001 | Wire configured native tool client.
-# History/Predecessor: Git blob 8c0e187e652dfab7a2d65b5272858e27d6c494b0
+# History/Predecessor: Git blob 36e1c915ef1ed9ec48b41a1bb73e667f54c02ec6
 """R3 runtime infrastructure entrypoint.
 
 Starts the scheduler and supervisor without inventing resident activities.
@@ -128,6 +129,11 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
                 "resident_inbox_pending": journal.db.execute(
                     "SELECT count(*) FROM resident_inbox WHERE status IN ('PENDING','PROCESSING')"
                 ).fetchone()[0],
+                "verification_pending": journal.db.execute("SELECT count(*) FROM verification_requests WHERE status=?",( "PENDING",)).fetchone()[0],
+                "verification_accepted": journal.db.execute("SELECT count(*) FROM verification_requests WHERE status=?",( "ACCEPTED",)).fetchone()[0],
+                "verification_needs_work": journal.db.execute("SELECT count(*) FROM verification_requests WHERE status=?",( "NEEDS_WORK",)).fetchone()[0],
+                "verification_inconclusive": journal.db.execute("SELECT count(*) FROM verification_requests WHERE status=?",( "INCONCLUSIVE",)).fetchone()[0],
+                "independent_reviewer_connected": False,
                 "database_backend": "sqlite-prototype",
             })
             atomic_snapshot(health_file, status)
