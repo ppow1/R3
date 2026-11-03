@@ -13,6 +13,7 @@ import urllib.error
 import urllib.request
 
 from runtime.conversations import ConversationStore, create_server
+from runtime.resident_inference import Inbox, ResidentInference
 
 
 class ConversationStoreTests(unittest.TestCase):
@@ -71,6 +72,58 @@ class ConversationStoreTests(unittest.TestCase):
         self.assertEqual(1, len(result["messages"]))
         self.assertEqual("FAILED", result["messages"][0]["delivery_status"])
         self.assertEqual("InferenceUnavailable", result["messages"][0]["error_code"])
+
+
+class ConversationInferenceIntegrationTests(unittest.TestCase):
+    def test_scheduler_inference_persists_resident_reply_for_reload(self):
+        import asyncio
+
+        class FakeEndpoint:
+            def complete(self, messages, tools=None):
+                self.asserted_roles = [message["role"] for message in messages]
+                return {
+                    "model": "mock-resident",
+                    "choices": [{"message": {"role": "assistant", "content": "Hello, Steward."}}],
+                }
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "institution.db"
+            db = sqlite3.connect(str(path), timeout=10)
+            try:
+                inbox = Inbox(db)
+                store = ConversationStore(db)
+                conversation = store.create_conversation("steward-1", "Grace", "")
+                sent = store.send_message(
+                    "steward-1", conversation["conversation_id"], "Hello Grace", "chat-1")
+                endpoint = FakeEndpoint()
+                handler = ResidentInference(
+                    inbox, endpoint, system_prompt="Grace system prompt",
+                    conversation_store=store)
+                asyncio.run(handler("Grace"))
+                self.assertIn("user", endpoint.asserted_roles)
+                self.assertIn("system", endpoint.asserted_roles)
+                result = store.messages(
+                    "steward-1", conversation["conversation_id"], after=0, limit=20)
+                self.assertEqual(
+                    ["Hello Grace", "Hello, Steward."],
+                    [message["content"] for message in result["messages"]])
+                self.assertEqual("DELIVERED", result["messages"][0]["delivery_status"])
+                self.assertEqual("RESIDENT", result["messages"][1]["sender_type"])
+                db.close()
+
+                reopened = sqlite3.connect(str(path), timeout=10)
+                try:
+                    reloaded = ConversationStore(reopened).messages(
+                        "steward-1", conversation["conversation_id"], after=0, limit=20)
+                    self.assertEqual([1, 2], [m["sequence"] for m in reloaded["messages"]])
+                    self.assertEqual("Hello, Steward.", reloaded["messages"][1]["content"])
+                finally:
+                    reopened.close()
+            finally:
+                try:
+                    db.close()
+                except sqlite3.Error:
+                    pass
 
 
 class ConversationHttpTests(unittest.TestCase):
