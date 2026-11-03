@@ -48,7 +48,9 @@ Send body:
 {"content":"Hello Grace","client_message_id":"stable-client-retry-id"}
 ```
 
-A new message returns HTTP 202 with `message_id`, `sequence`, `delivery_status: "QUEUED"`, `event_id`, and `duplicate: false`. Retry with the same client message ID and same content returns HTTP 200 and the original receipt. Reusing the ID with different content returns 409. Read the messages endpoint to observe the Steward message's eventual `PROCESSING`, `DELIVERED`, or `FAILED` state and Grace's response as the next sequence entry. Message and conversation timestamps are Unix epoch seconds from the R3 service clock.
+A new message returns HTTP 202 with `message_id`, `sequence`, `delivery_status: "QUEUED"`, `event_id`, and `duplicate: false`. Retry with the same client message ID and same content returns HTTP 200 and the original receipt. Reusing the ID with different content returns 409. Read the messages endpoint to observe the Steward message's eventual `PROCESSING`, `DELIVERED`, or `FAILED` state and Grace's response as the next sequence entry. The API enforces the documented 100,000-character content limit and accepts HTTP JSON request bodies up to 1,200,512 bytes, including JSON-escaped Unicode.
+
+The `after` parameter is an exclusive sequence cursor for discovering later messages. It does not report changes to earlier records. To refresh a message's `delivery_status`, reload a range that includes that message sequence (for example, reload from `after=0` for a conversation that fits in one page, or refetch the relevant page/window). Do not advance the cursor alone and assume it reports status updates for messages already returned. Message and conversation timestamps are Unix epoch seconds from the R3 service clock.
 
 ## Persistence verification
 

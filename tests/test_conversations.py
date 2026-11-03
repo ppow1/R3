@@ -177,6 +177,19 @@ class ConversationHttpTests(unittest.TestCase):
                     {"content": "Hello Grace", "client_message_id": "browser-1"})
                 self.assertEqual(202, status)
                 self.assertEqual("QUEUED", sent["delivery_status"])
+
+                maximum_content = "😀" * 100_000
+                status, maximum_sent = request(
+                    "POST", f"/v1/conversations/{conversation_id}/messages",
+                    {"content": maximum_content, "client_message_id": "browser-max"})
+                self.assertEqual(202, status)
+                self.assertEqual(2, maximum_sent["sequence"])
+                over_limit_content = "😀" * 100_001
+                with self.assertRaises(urllib.error.HTTPError) as over_limit:
+                    request(
+                        "POST", f"/v1/conversations/{conversation_id}/messages",
+                        {"content": over_limit_content, "client_message_id": "browser-over"})
+                self.assertEqual(400, over_limit.exception.code)
                 status, loaded = request("GET", f"/v1/conversations/{conversation_id}/messages?after=0&limit=20")
                 self.assertEqual(200, status)
                 message_id = loaded["messages"][0]["message_id"]
@@ -193,6 +206,9 @@ class ConversationHttpTests(unittest.TestCase):
                 self.assertEqual(200, status)
                 self.assertEqual(message_id, reloaded["messages"][0]["message_id"])
                 self.assertEqual("Hello Grace", reloaded["messages"][0]["content"])
+                self.assertEqual(2, len(reloaded["messages"]))
+                self.assertEqual(maximum_sent["message_id"], reloaded["messages"][1]["message_id"])
+                self.assertEqual(100_000, len(reloaded["messages"][1]["content"]))
                 with self.assertRaises(urllib.error.HTTPError) as denied:
                     request("GET", f"/v1/conversations/{conversation_id}/messages?after=0", use_auth=False)
                 self.assertEqual(401, denied.exception.code)

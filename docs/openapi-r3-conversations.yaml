@@ -107,6 +107,10 @@ paths:
       parameters:
         - name: after
           in: query
+          description: >
+            Exclusive sequence cursor. This returns later messages only and does not
+            report changes to earlier message records. Re-read the relevant sequence
+            range to refresh delivery_status values.
           schema:
             type: integer
             minimum: 0
@@ -141,6 +145,9 @@ paths:
       summary: Persist a Steward message and enqueue it for the resident scheduler
       requestBody:
         required: true
+        description: >
+          The HTTP JSON request is limited to 1,200,512 bytes, accommodating the
+          documented 100,000-character content limit when Unicode is JSON-escaped.
         content:
           application/json:
             schema:

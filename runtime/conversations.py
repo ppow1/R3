@@ -23,6 +23,11 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from runtime.resident_inference import Inbox
 
+# A JSON-escaped Unicode code point can occupy up to 12 bytes (a surrogate pair).
+# Keep the HTTP body ceiling large enough for the 100,000-character API contract.
+MAX_MESSAGE_CHARACTERS = 100_000
+MAX_REQUEST_BODY_BYTES = MAX_MESSAGE_CHARACTERS * 12 + 512
+
 
 class ConversationError(Exception):
     def __init__(self, status: int, code: str):
@@ -324,7 +329,7 @@ def create_server(database: Path, token_file: Path, residents: set[str],
         def _body(self):
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if length < 1 or length > 65536:
+                if length < 1 or length > MAX_REQUEST_BODY_BYTES:
                     raise ValueError
                 value = json.loads(self.rfile.read(length))
             except (ValueError, json.JSONDecodeError):
@@ -394,7 +399,7 @@ def create_server(database: Path, token_file: Path, residents: set[str],
                     if len(parts) == 4 and parts[0:2] == ["v1", "conversations"] and parts[3] == "messages":
                         content = body.get("content")
                         client_id = body.get("client_message_id")
-                        if not isinstance(content, str) or not content.strip() or len(content) > 100000:
+                        if not isinstance(content, str) or not content.strip() or len(content) > MAX_MESSAGE_CHARACTERS:
                             raise ConversationError(400, "invalid_content")
                         if not isinstance(client_id, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,160}", client_id):
                             raise ConversationError(400, "client_message_id_required")
