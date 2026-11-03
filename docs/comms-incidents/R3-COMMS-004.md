@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/comms-incidents/R3-COMMS-004.md
 Component: COMMS-INCIDENT
-File Revision: 1.0.9
+File Revision: 1.0.10
 Created: 2026-10-31 UTC (exact time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Record Camrui Comms command gateway internal failure during R3 deployment preflight
@@ -11,10 +11,11 @@ Observability: Tool error and verified grant status
 Dependencies: R3 deployment; Camrui command gateway
 Authority: Steward instruction to log Comms failures and punch list
 Changed: 2026-11-01T15:06:03.086Z | R3-P020 | ChatGPT GPT-6 | Record successful queued deployment and remaining visual acceptance
+Changed: 2026-11-03T14:43:01.924637Z | R3-COMMS-005 | ChatGPT GPT-6 | Append Camrui git-preflight bounded-command denial during avatar work
 Supersedes: None
 Contracts: hints/comms-failure-recovery.md; hints/file-provenance.md
 Tests: Pending reproduction and gateway diagnostics
-History/Predecessor: Git blob 14aa05d460ac91dfd45386ee8ffa9eddcdf22017
+History/Predecessor: Git blob c8c6da17f674b2165a679f032aeea82181591dad at commit 431eaecebef6660d06fd46a0cfda9a6fe1c2ac1a
 -->
 # R3-COMMS-004 — Camrui command task submission fails internally
 
@@ -82,3 +83,17 @@ History/Predecessor: Git blob 14aa05d460ac91dfd45386ee8ffa9eddcdf22017
 - Independent read-back confirmed remote HEAD `f5d689cf9ff307c2ae9c18edcc8a81ca44e4f6a6`, health HTTP 200, title `Riverview 3`, old prototype/demo labels absent, top bar absent, Engineering status UI present, and target marker code present. The read-back shell returned exit 2 after these checks because its final `exit 0` line retained a carriage return; the deployer's own activation and health checks completed successfully.
 - The recovery was temporary; the installed deployment script was restored. Browser visual acceptance remains pending.
 - **Punch-list reference:** `R3-P020` — preserve this successful outcome and finish visual acceptance against the Steward's screenshot.
+
+
+## 2026-11-03 — avatar worktree preflight rejected by command gateway
+
+- **Objective:** create a separate worktree at the Steward-confirmed base commit `431eaecebef6660d06fd46a0cfda9a6fe1c2ac1a` for the avatar animation import test, preserving uncommitted Settings work in `/home/admin1/R3`.
+- **Authority preflight:** `comms5_get_delegation_grant_status` confirmed active grant `grant:8327c8d7a74b4bf78e5529e53057fe69`, principal `service:command-gateway`, action `comms5.command.execute.task.camrui.standard`, scope `host:camrui`, expiry `2026-11-03T16:53:07.201352-05:00`. The Comms command-task caller authenticated as `steward:camrui` with active caller grant `grant:6422d222eca74cb3b328bf3a80384a59`.
+- **Attempt 1:** read-only preflight command `cd /home/admin1/R3 && git status --short --branch && git rev-parse HEAD && git branch --show-current && git status --short -- web/resident-avatar.js web/animations && git worktree list`. Submitted to Camrui with standard privilege. Result: denied, exit 2, stdout `{"status":"denied","reason":"bounded_request_or_state_invalid"}`, execution ID `00ae283f-c947-444f-9025-8f3747dd913f`, audit event `b60f21bd-6d22-444b-8f0d-7c4af5e27397`; no shell command output.
+- **Attempt 2:** read-only `git -C /home/admin1/R3 rev-parse HEAD`. Result: same denial, exit 2, execution ID `1cfa4b03-216e-4f5d-9fa7-34ad8f192a9c`, audit event `b987f035-f30b-46b1-b703-0b8a3746254b`.
+- **Transport diagnostic:** fixed read-only `hostname` operation completed and returned `admin1-Default-string`, exit 0, execution ID `c7871938-1241-45d3-a1fc-acd994d309c6`, audit event `8140d59e-0734-49ec-bfcd-2258105138fb`. This confirms host command transport works for that probe; it does not establish that Git commands or the repository path are accessible through the bounded gateway.
+- **Impact:** no repository command was accepted; no worktree was created; no avatar or Settings file was modified; no import test was run.
+- **Hypothesis:** the gateway's bounded-command policy rejects these Git requests. Root cause is unverified; do not treat the grant as missing or expired.
+- **Recovery needed:** use a supported, authorized path that can create the requested worktree from the exact base commit, then perform the one-clip skeletal import check before expanding the animation list.
+- **Punch-list reference:** [R3-P020](../PUNCH_LIST.md) — preserve the failed attempt and continue through an authorized recovery path.
+
