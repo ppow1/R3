@@ -126,8 +126,10 @@ class ConversationInferenceIntegrationTests(unittest.TestCase):
                 try:
                     reloaded = ConversationStore(reopened).messages(
                         "steward-1", conversation["conversation_id"], after=0, limit=20)
-                    self.assertEqual([1, 2], [m["sequence"] for m in reloaded["messages"]])
-                    self.assertEqual("Reply 1", reloaded["messages"][1]["content"])
+                    self.assertEqual([1, 2, 3, 4], [m["sequence"] for m in reloaded["messages"]])
+                    self.assertEqual(
+                        ["Hello Grace", "Reply 1", "Follow up", "Reply 2"],
+                        [m["content"] for m in reloaded["messages"]])
                 finally:
                     reopened.close()
             finally:
