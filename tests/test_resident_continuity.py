@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_resident_continuity.py
 # Component: R3-RESIDENT-CONTINUITY-REGRESSION
-# File Revision: 1.0.1
+# File Revision: 1.0.2
 # Created: Unknown (existing file)
 # Created By: Unknown (existing file)
 # Purpose: Permanent resident-neutral regression for durable activity/objective distinction.
@@ -10,9 +10,10 @@
 # Dependencies: runtime/resident_inference.py
 # Authority: R3 charter revision 2
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-006 | Verify assignment continuity through review submission.
+# Changed: 2026-11-03T02:24:59.876Z | R3-VERIFY-FEEDBACK-LOOP-001 | Codex | Verify review feedback resumes the assignment and queues a new review.
 # Supersedes: None
 # Tests: This file
-# History/Predecessor: Git blob eed458b2ddbfbd8d535402db593c94550f23eae2
+# History/Predecessor: Git blob 944dce6ff5075fdc75f80d048bb461dced0cf2af
 # Contracts: hints/engineering-test-policy.md
 from __future__ import annotations
 
@@ -107,6 +108,54 @@ class ResidentContinuityTests(unittest.TestCase):
         self.assertEqual(row[2], "PENDING")
         self.assertEqual(self.db.execute(
             "SELECT COUNT(*) FROM verification_requests").fetchone()[0], 1)
+
+    def test_review_feedback_continues_correction_and_requests_new_review(self):
+        criteria = [{"id": "availability", "description": "Service is available"}]
+        feedback = {
+            "assignment_id": "work-review-1",
+            "objective": "Restore the service and verify availability",
+            "source_event_id": 14,
+            "source_event_type": "RESIDENT_ACTIVITY",
+            "source_payload": {"objective": "Restore the service and verify availability"},
+            "prior_result": {"decision": {"state": "complete", "evidence": {}}},
+            "review_request_id": 1,
+            "review_outcome": "NEEDS_WORK",
+            "acceptance_criteria": criteria,
+            "findings": [{"criterion_id": "availability", "result": "FAIL",
+                          "reason": "No independent availability evidence",
+                          "evidence": {"independent_observation": False}}],
+        }
+        endpoint = FakeEndpoint([
+            {"state": "continue", "next_step": "Run the authorized availability probe",
+             "evidence": {"review": "availability criterion failed"}},
+            {"state": "complete", "objective_verified": True,
+             "evidence": {"availability": "observed healthy"}},
+        ])
+        first = self.inbox.enqueue("Grace", "REVIEW_FEEDBACK", feedback)
+        worker = ResidentInference(
+            self.inbox, endpoint, system_prompt="Resident",
+            continuation_event_types=("RESIDENT_ACTIVITY", "REVIEW_FEEDBACK"),
+        )
+        asyncio.run(worker("Grace"))
+        first_status, first_result = self.result(first)
+        self.assertEqual(first_status, "COMPLETED")
+        second = first_result["continuation_event_id"]
+        payload = json.loads(self.db.execute(
+            "SELECT payload FROM resident_inbox WHERE id=?", (second,)
+        ).fetchone()[0])
+        self.assertEqual(payload["objective"], feedback["objective"])
+        self.assertEqual(payload["acceptance_criteria"], criteria)
+        self.assertEqual(payload["findings"], feedback["findings"])
+        self.assertEqual(payload["review_request_id"], 1)
+        asyncio.run(worker("Grace"))
+        self.assertEqual(self.result(second)[1]["objective_status"], "REPORTED_VERIFIED")
+        row = self.db.execute(
+            "SELECT assignment_id,criteria,status FROM verification_requests WHERE source_event_id=?",
+            (second,),
+        ).fetchone()
+        self.assertEqual(row[0], "work-review-1")
+        self.assertEqual(json.loads(row[1]), criteria)
+        self.assertEqual(row[2], "PENDING")
 
     def test_verified_completion_requires_explicit_flag_and_evidence(self):
         endpoint = FakeEndpoint([{"state": "complete", "objective_verified": True,

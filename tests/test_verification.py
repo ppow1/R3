@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_verification.py
 # Component: R3-VERIFICATION-LEARNING-REGRESSION
-# File Revision: 1.3.5
+# File Revision: 1.3.6
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanent regression for criterion identity and non-automatic learning changes.
@@ -18,10 +18,11 @@
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-012 | Ensure transaction marker table exists before rollback assertion.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-013 | Permanent regression for authoritative assignment review status.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-015 | Test manager feedback dispatch after failed review.
+# Changed: 2026-11-03T02:24:59.876Z | R3-VERIFY-FEEDBACK-LOOP-001 | Codex | Test source context and recovery of undelivered review feedback.
 # Supersedes: None
 # Contracts: hints/verification-and-learning.md
 # Tests: This file.
-# History/Predecessor: Git blob 3b6ceab3503aea4664ad3a5853b447c75f8989a1
+# History/Predecessor: Git blob 37315a802a29d04f6961a7c8590b919633715399
 import sqlite3
 import unittest
 
@@ -204,8 +205,15 @@ class VerificationLedgerTests(unittest.TestCase):
     def test_failed_review_dispatches_manager_feedback(self):
         from runtime.resident_inference import Inbox
         inbox = Inbox(self.db)
-        source = inbox.enqueue("worker", "RESIDENT_ACTIVITY", {"objective": "work"})
-        request = self.ledger.submit_review(source, "assignment", [{"id": "A"}], {})
+        criteria = [{"id": "A", "description": "Observed outcome"}]
+        source = inbox.enqueue("worker", "RESIDENT_ACTIVITY", {
+            "objective": "Restore the service",
+            "assignment_id": "assignment",
+            "acceptance_criteria": criteria,
+        })
+        inbox.next("worker")
+        inbox.finish(source, "COMPLETED", {"decision": {"state": "complete"}})
+        request = self.ledger.submit_review(source, "assignment", criteria, {})
         worker = IndependentReviewWorker(
             self.ledger, "auditor",
             lambda _: {"implementation_revision": "rev1",
@@ -219,7 +227,37 @@ class VerificationLedgerTests(unittest.TestCase):
         self.assertEqual(event[0], outcomes[0]["feedback_event_id"])
         self.assertEqual(event[1], "REVIEW_FEEDBACK")
         self.assertEqual(event[2]["assignment_id"], "assignment")
+        self.assertEqual(event[2]["objective"], "Restore the service")
+        self.assertEqual(event[2]["source_payload"]["acceptance_criteria"], criteria)
+        self.assertEqual(event[2]["prior_result"], {"decision": {"state": "complete"}})
+        self.assertEqual(event[2]["findings"][0]["criterion_id"], "A")
         self.assertEqual(worker.process_pending(), [])
+
+    def test_worker_recovers_durable_review_with_missing_feedback_delivery(self):
+        from runtime.resident_inference import Inbox
+        inbox = Inbox(self.db)
+        criteria = [{"id": "A", "description": "Observed outcome"}]
+        source = inbox.enqueue("worker", "RESIDENT_ACTIVITY", {
+            "objective": "Restore the service",
+            "assignment_id": "assignment",
+            "acceptance_criteria": criteria,
+        })
+        request = self.ledger.submit_review(source, "assignment", criteria, {})
+        self.ledger.decide_review(
+            request, reviewer="auditor", implementation_revision="rev1",
+            findings=[{"criterion_id": "A", "result": "FAIL",
+                       "reason": "Observed outcome is missing",
+                       "evidence": {"observed": False}}])
+        worker = IndependentReviewWorker(
+            self.ledger, "auditor", lambda _: self.fail("No pending review should be evaluated"),
+            manager="Grace")
+        self.assertEqual(worker.process_pending(), [])
+        feedback = inbox.next("Grace")
+        self.assertIsNotNone(feedback)
+        self.assertEqual(feedback[1], "REVIEW_FEEDBACK")
+        self.assertEqual(feedback[2]["objective"], "Restore the service")
+        self.assertEqual(feedback[2]["review_request_id"], request)
+        self.assertEqual(self.ledger.undelivered_review_feedback(), [])
 
     def test_worker_failure_does_not_lose_pending_request(self):
         self.ledger.submit_review(42, "assignment", [{"id": "A"}], {})

@@ -19,6 +19,7 @@
     ]
   },
   "continuation_event_types": [
-    "RESIDENT_ACTIVITY"
+    "RESIDENT_ACTIVITY",
+    "REVIEW_FEEDBACK"
   ]
 }

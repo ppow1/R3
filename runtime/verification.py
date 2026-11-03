@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/verification.py
 # Component: R3-VERIFICATION-LEARNING
-# File Revision: 1.3.5
+# File Revision: 1.3.6
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Durable criterion-level independent review records and improvement candidates.
@@ -18,10 +18,11 @@
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-013 | Authoritative assignment verification status query.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-014 | Durable idempotent review feedback events for manager correction.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-015 | Optional manager feedback dispatch after independent review.
+# Changed: 2026-11-03T02:24:35.359Z | R3-VERIFY-FEEDBACK-LOOP-001 | Codex | Recover undelivered review feedback and include source objective context.
 # Supersedes: None
 # Contracts: hints/verification-and-learning.md; hints/engineering-test-policy.md
 # Tests: tests/test_verification.py
-# History/Predecessor: Git blob 16e4cd5a1ceb7a57fae631b47e3e3338c5ce24b8
+# History/Predecessor: Git blob 79691e0c4bd0e63e6ae0b58c8503b3a6c86ec33a
 """Record evidence-based review findings and proposed improvements without applying changes."""
 from __future__ import annotations
 
@@ -61,6 +62,11 @@ class VerificationLedger:
             decision_reason TEXT, authorized_by TEXT,
             created_at REAL NOT NULL, updated_at REAL NOT NULL,
             FOREIGN KEY(source_finding_id) REFERENCES verification_findings(id)
+        )""")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS verification_feedback_delivery (
+            request_id INTEGER PRIMARY KEY,
+            event_id INTEGER NOT NULL UNIQUE,
+            FOREIGN KEY(request_id) REFERENCES verification_requests(id)
         )""")
 
     def submit_review(self, source_event_id: int, assignment_id: str,
@@ -170,19 +176,24 @@ class VerificationLedger:
                 (outcome, request_id))
         return outcome
 
+    def undelivered_review_feedback(self) -> list[int]:
+        """Find decided negative reviews whose durable manager event is missing."""
+        rows = self.db.execute(
+            """SELECT r.id FROM verification_requests r
+               LEFT JOIN verification_feedback_delivery d ON d.request_id=r.id
+               WHERE r.status IN ('NEEDS_WORK','INCONCLUSIVE') AND d.request_id IS NULL
+               ORDER BY r.id"""
+        ).fetchall()
+        return [int(row[0]) for row in rows]
+
     def queue_review_feedback(self, request_id: int, *, manager: str) -> int | None:
-        """Deliver failed/inconclusive review to a manager once, durably.
+        """Deliver failed/inconclusive review and source context to a manager once.
 
         A pending or accepted review produces no correction event. The manager
         must decide what action to take; this method does not self-certify work.
         """
         if not isinstance(manager, str) or not manager.strip():
             raise ValueError("Manager identity required")
-        self.db.execute("""CREATE TABLE IF NOT EXISTS verification_feedback_delivery (
-            request_id INTEGER PRIMARY KEY,
-            event_id INTEGER NOT NULL UNIQUE,
-            FOREIGN KEY(request_id) REFERENCES verification_requests(id)
-        )""")
         with self.db:
             request = self.db.execute(
                 "SELECT assignment_id,source_event_id,criteria,status "
@@ -202,6 +213,17 @@ class VerificationLedger:
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='resident_inbox'"
             ).fetchone():
                 raise RuntimeError("Resident inbox unavailable")
+            source = self.db.execute(
+                "SELECT event_type,payload,result FROM resident_inbox WHERE id=?",
+                (request[1],)
+            ).fetchone()
+            if source is None:
+                raise RuntimeError("Review source event unavailable for correction")
+            source_payload = json.loads(source[1])
+            criteria = json.loads(request[2])
+            if (source_payload.get("assignment_id") != request[0]
+                    or source_payload.get("acceptance_criteria") != criteria):
+                raise ValueError("Review feedback source does not match its assignment and criteria")
             findings = self.history(request[0])
             review_id = "request:" + str(request_id)
             relevant = [f for f in findings if f["review_id"] == review_id]
@@ -209,10 +231,14 @@ class VerificationLedger:
                 raise RuntimeError("Review findings unavailable")
             payload = {
                 "assignment_id": request[0],
+                "objective": source_payload.get("objective", source_payload),
                 "source_event_id": request[1],
+                "source_event_type": source[0],
+                "source_payload": source_payload,
+                "prior_result": json.loads(source[2]) if source[2] else None,
                 "review_request_id": request_id,
                 "review_outcome": request[3],
-                "acceptance_criteria": json.loads(request[2]),
+                "acceptance_criteria": criteria,
                 "findings": relevant,
             }
             now = time.time()
@@ -321,6 +347,11 @@ class IndependentReviewWorker:
 
     def process_pending(self) -> list[dict]:
         outcomes = []
+        # Review decisions and feedback delivery are separate durable writes.
+        # Recover the crash window before evaluating any new requests.
+        if self.manager is not None:
+            for request_id in self.ledger.undelivered_review_feedback():
+                self.ledger.queue_review_feedback(request_id, manager=self.manager)
         for request in self.ledger.pending_reviews():
             if self.ledger.db.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='resident_inbox'"
