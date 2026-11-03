@@ -51,7 +51,7 @@ class IndependentReviewerLineageTests(unittest.TestCase):
                 {"sequence": 1, "kind": "TOOL_INTENT",
                  "content": {"tool": "r3.status", "params": {}}},
                 {"sequence": 2, "kind": "TOOL_RESULT",
-                 "content": {"role": "tool", "content": "{\\"healthy\\": true}"}},
+                 "content": {"role": "tool", "content": '{"healthy": true}'}},
                 {"sequence": 3, "kind": "ASSISTANT",
                  "content": {"content": "continue"}},
             ],
