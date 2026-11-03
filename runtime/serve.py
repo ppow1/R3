@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/serve.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.2.3
+# File Revision: 1.2.4
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Start and monitor R3 institutional scheduler and supervisor.
@@ -20,7 +20,8 @@
 # Changed: 2026-11-02 UTC | R3-CONFIG-001 | Load generic residents and runtime settings from files.
 # Changed: 2026-11-02 UTC | R3-TOOLS-001 | Wire configured native tool client.
 # Changed: 2026-11-03T02:00:13.409Z | R3-VERIFY-WIRING-003 | Codex | Supply a read-only journal observation for criterion-level review.
-# History/Predecessor: Git blob 2870155def1f0a6b217dd24d6acec8ee027cc242
+# Changed: 2026-11-03T02:27:54.002Z | R3-REVIEWER-OPTIONAL-001 | Codex | Run the reviewer worker only when an optional reviewer is configured.
+# History/Predecessor: Git blob dc5a16dd64b4865298e746cdbcf00a6afbb4f513
 """R3 runtime infrastructure entrypoint.
 
 Starts the scheduler and supervisor without inventing resident activities.
@@ -112,23 +113,26 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
         ))
         registered.append(resident["name"])
     reviewer_config = configuration["reviewer"]
-    reviewer_settings = reviewer_config["settings"]
-    if reviewer_settings["name"] in registered:
-        raise ConfigurationError("Independent reviewer must have a distinct identity from every resident")
-    if reviewer_settings["manager"] not in registered:
-        raise ConfigurationError("Reviewer manager must be a registered resident")
-    reviewer_tools = NativeTools(
-        reviewer_settings["tools"]["endpoint"],
-        timeout=reviewer_settings["tools"]["timeout_seconds"],
-        allowed_tools=tuple(reviewer_settings["tools"]["allowed_tools"]),
-    )
-    reviewer_endpoint = InferenceEndpoint(
-        reviewer_settings["inference"]["endpoint"],
-        reviewer_settings["inference"]["model"],
-        timeout=reviewer_settings["inference"]["timeout_seconds"],
-    )
-    evaluator = IndependentReviewer(
-        reviewer_endpoint, reviewer_tools, reviewer_config["system_prompt"], journal_path=db)
+    reviewer_settings = None
+    evaluator = None
+    if reviewer_config is not None:
+        reviewer_settings = reviewer_config["settings"]
+        if reviewer_settings["name"] in registered:
+            raise ConfigurationError("Independent reviewer must have a distinct identity from every resident")
+        if reviewer_settings["manager"] not in registered:
+            raise ConfigurationError("Reviewer manager must be a registered resident")
+        reviewer_tools = NativeTools(
+            reviewer_settings["tools"]["endpoint"],
+            timeout=reviewer_settings["tools"]["timeout_seconds"],
+            allowed_tools=tuple(reviewer_settings["tools"]["allowed_tools"]),
+        )
+        reviewer_endpoint = InferenceEndpoint(
+            reviewer_settings["inference"]["endpoint"],
+            reviewer_settings["inference"]["model"],
+            timeout=reviewer_settings["inference"]["timeout_seconds"],
+        )
+        evaluator = IndependentReviewer(
+            reviewer_endpoint, reviewer_tools, reviewer_config["system_prompt"], journal_path=db)
     VerificationLedger(journal.db)
     reviewer_state = {"connected": False, "last_error": None}
     loop = asyncio.get_running_loop()
@@ -165,8 +169,10 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
                 verification_stop.wait(interval)
         finally:
             review_db.close()
-    verification_task = asyncio.create_task(
-        asyncio.to_thread(verification_loop), name="r3-independent-reviewer")
+    verification_task = None
+    if reviewer_settings is not None:
+        verification_task = asyncio.create_task(
+            asyncio.to_thread(verification_loop), name="r3-independent-reviewer")
     try:
         while not institution._stop.is_set():
             if runtime_task.done():
@@ -203,8 +209,9 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
             await asyncio.sleep(interval)
     finally:
         await institution.stop()
-        verification_stop.set()
-        await asyncio.gather(verification_task, return_exceptions=True)
+        if verification_task is not None:
+            verification_stop.set()
+            await asyncio.gather(verification_task, return_exceptions=True)
         await runtime_task
 
 
