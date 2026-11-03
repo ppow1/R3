@@ -30,6 +30,7 @@ class HttpErrorTests(unittest.TestCase):
         endpoint = InferenceEndpoint("http://127.0.0.1:8080/v1", "model", timeout=3)
         response = MagicMock()
         response.status = 200
+        response.read.return_value = json.dumps({"data": [{"id": "model"}]}).encode()
         response.__enter__.return_value = response
         with patch("runtime.resident_inference.urllib.request.urlopen",
                    return_value=response) as open_url:
@@ -38,6 +39,37 @@ class HttpErrorTests(unittest.TestCase):
         self.assertEqual(request.full_url, "http://127.0.0.1:8080/v1/models")
         self.assertEqual(request.get_method(), "GET")
         self.assertEqual(open_url.call_args.kwargs["timeout"], 3)
+
+    def test_inference_probe_accepts_model_name_in_supported_models_shape(self):
+        endpoint = InferenceEndpoint("http://127.0.0.1:8080/v1", "configured-model")
+        response = MagicMock()
+        response.status = 200
+        response.read.return_value = json.dumps({
+            "models": [{"name": "other-name", "aliases": ["configured-model"]}]
+        }).encode()
+        response.__enter__.return_value = response
+        with patch("runtime.resident_inference.urllib.request.urlopen", return_value=response):
+            endpoint.probe()
+
+    def test_inference_probe_rejects_unadvertised_configured_model(self):
+        endpoint = InferenceEndpoint("http://127.0.0.1:8080/v1", "configured-model")
+        response = MagicMock()
+        response.status = 200
+        response.read.return_value = json.dumps({"data": [{"id": "different-model"}]}).encode()
+        response.__enter__.return_value = response
+        with patch("runtime.resident_inference.urllib.request.urlopen", return_value=response):
+            with self.assertRaisesRegex(RuntimeError, "Configured inference model unavailable"):
+                endpoint.probe()
+
+    def test_inference_probe_rejects_invalid_model_list(self):
+        endpoint = InferenceEndpoint("http://127.0.0.1:8080/v1", "configured-model")
+        response = MagicMock()
+        response.status = 200
+        response.read.return_value = b"not-json"
+        response.__enter__.return_value = response
+        with patch("runtime.resident_inference.urllib.request.urlopen", return_value=response):
+            with self.assertRaisesRegex(RuntimeError, "Invalid inference model list"):
+                endpoint.probe()
 
     def test_inference_probe_reports_http_status_without_reading_body(self):
         endpoint = InferenceEndpoint("http://127.0.0.1:8080/v1", "model")
