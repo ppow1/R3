@@ -1,0 +1,310 @@
+openapi: 3.1.0
+info:
+  title: R3 Durable Resident Conversation API
+  version: 1.0.0
+  description: |
+    Loopback-only service API for durable conversations. It is intended for a trusted
+    website backend proxy. The browser must call the website's same-origin proxy and
+    must never receive this service's bearer credential.
+servers:
+  - url: http://127.0.0.1:8770
+    description: Camrui loopback listener; not directly reachable by the browser
+security:
+  - serviceBearer: []
+paths:
+  /v1/residents/{resident}/conversations:
+    parameters:
+      - $ref: '#/components/parameters/Resident'
+      - $ref: '#/components/parameters/Principal'
+    get:
+      summary: List conversations owned by the authenticated website principal
+      responses:
+        '200':
+          description: Authorized resident conversations
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [conversations]
+                properties:
+                  conversations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Conversation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      summary: Create a durable conversation for the authorized principal
+      parameters:
+        - $ref: '#/components/parameters/Principal'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  maxLength: 200
+                  default: ''
+      responses:
+        '201':
+          description: Conversation created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [conversation]
+                properties:
+                  conversation:
+                    $ref: '#/components/schemas/Conversation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/residents/{resident}/capabilities:
+    parameters:
+      - $ref: '#/components/parameters/Resident'
+      - $ref: '#/components/parameters/Principal'
+    get:
+      summary: Read available text-message action and configured resident tools
+      responses:
+        '200':
+          description: Resident capability view
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [resident, message_actions, resident_tools]
+                properties:
+                  resident:
+                    type: string
+                  message_actions:
+                    type: array
+                    items:
+                      type: string
+                    example: [send_text]
+                  resident_tools:
+                    type: array
+                    description: Configured tool names; not automatically executable message actions.
+                    items:
+                      type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/conversations/{conversation_id}/messages:
+    parameters:
+      - $ref: '#/components/parameters/Conversation'
+      - $ref: '#/components/parameters/Principal'
+    get:
+      summary: Read conversation messages in stable sequence order
+      parameters:
+        - name: after
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+      responses:
+        '200':
+          description: Ordered message page; poll again to observe asynchronous delivery and Grace's response
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [messages, next_after]
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Message'
+                  next_after:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      summary: Persist a Steward message and enqueue it for the resident scheduler
+      parameters:
+        - name: X-R3-Principal
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Trusted website-backend assertion of the authenticated Steward identity.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content, client_message_id]
+              properties:
+                content:
+                  type: string
+                  minLength: 1
+                  maxLength: 100000
+                client_message_id:
+                  type: string
+                  minLength: 1
+                  maxLength: 160
+                  description: Stable retry key within this conversation and principal.
+      responses:
+        '202':
+          description: Message durably queued for resident inference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendReceipt'
+        '200':
+          description: Idempotent retry of an already accepted message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendReceipt'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Conversation is not open or retry key conflicts with different content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  securitySchemes:
+    serviceBearer:
+      type: http
+      scheme: bearer
+      description: Server-to-server credential stored only on Camrui and website backend.
+  parameters:
+    Resident:
+      name: resident
+      in: path
+      required: true
+      schema:
+        type: string
+    Conversation:
+      name: conversation_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Principal:
+      name: X-R3-Principal
+      in: header
+      required: true
+      schema:
+        type: string
+        maxLength: 160
+      description: Trusted website-backend identity assertion; never a browser-supplied identity.
+  schemas:
+    Conversation:
+      type: object
+      required: [conversation_id, resident, title, state, created_at, updated_at]
+      properties:
+        conversation_id:
+          type: string
+          format: uuid
+        resident:
+          type: string
+        title:
+          type: string
+        state:
+          type: string
+          enum: [OPEN]
+        created_at:
+          type: number
+          description: Unix epoch timestamp in seconds from the R3 service clock.
+        updated_at:
+          type: number
+          description: Unix epoch timestamp in seconds from the R3 service clock.
+    Message:
+      type: object
+      required: [message_id, conversation_id, sequence, sender_type, sender_id, content, created_at, delivery_status]
+      properties:
+        message_id:
+          type: string
+          format: uuid
+        conversation_id:
+          type: string
+          format: uuid
+        sequence:
+          type: integer
+          minimum: 1
+        sender_type:
+          type: string
+          enum: [STEWARD, RESIDENT]
+        sender_id:
+          type: string
+        content:
+          type: string
+        created_at:
+          type: number
+          description: Unix epoch timestamp in seconds from the R3 service clock.
+        delivery_status:
+          type: string
+          enum: [QUEUED, DELIVERED, FAILED]
+        client_message_id:
+          type: [string, 'null']
+        error_code:
+          type: [string, 'null']
+    SendReceipt:
+      type: object
+      required: [message_id, sequence, delivery_status, event_id, duplicate]
+      properties:
+        message_id:
+          type: string
+          format: uuid
+        sequence:
+          type: integer
+        delivery_status:
+          type: string
+          enum: [QUEUED, DELIVERED, FAILED]
+        event_id:
+          type: integer
+        duplicate:
+          type: boolean
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+  responses:
+    Unauthorized:
+      description: Missing or invalid server credential or trusted principal assertion
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resident, conversation, or route not found or not owned by principal
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BadRequest:
+      description: Invalid request body or parameter
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
