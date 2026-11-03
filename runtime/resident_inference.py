@@ -129,7 +129,7 @@ class InferenceEndpoint:
             raise ValueError("Model name is required")
 
     def probe(self) -> None:
-        """Check model-server reachability without disclosing or retaining response content."""
+        """Confirm the configured model is advertised without retaining response content."""
         request = urllib.request.Request(
             self.url.rstrip("/") + "/models",
             method="GET",
@@ -138,8 +138,31 @@ class InferenceEndpoint:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 if response.status < 200 or response.status >= 300:
                     raise RuntimeError("Inference endpoint unavailable")
+                try:
+                    payload = json.load(response)
+                except (ValueError, TypeError):
+                    raise RuntimeError("Invalid inference model list") from None
         except urllib.error.HTTPError as exc:
             raise RuntimeError(f"Inference HTTP {exc.code}") from None
+        if not isinstance(payload, dict):
+            raise RuntimeError("Invalid inference model list")
+        advertised = set()
+        for key in ("data", "models"):
+            entries = payload.get(key)
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                for field in ("id", "model", "name"):
+                    value = entry.get(field)
+                    if isinstance(value, str):
+                        advertised.add(value)
+                aliases = entry.get("aliases")
+                if isinstance(aliases, list):
+                    advertised.update(value for value in aliases if isinstance(value, str))
+        if self.model not in advertised:
+            raise RuntimeError("Configured inference model unavailable")
 
     def complete(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
         request = urllib.request.Request(
