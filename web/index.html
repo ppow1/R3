@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: web/index.html
 Component: R3-ESTATE-HOME
-File Revision: 1.0.13
+File Revision: 1.0.14
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Present the R3 estate home with Engineering and Infrastructure observability panels
@@ -10,11 +10,11 @@ Execution Model: Browser client consuming same-origin read-only R3 APIs
 Observability: Engineering API state; Infrastructure telemetry adapter availability
 Dependencies: /api/v1/visual/background; /api/v1/health; /api/v1/engineering/branches; /api/v1/engineering/worktrees
 Authority: Steward visual placement references and approved R3 website direction
-Changed: 2026-11-01 UTC | R3-THREE-PANE-LAUNCHER-ICON-001 | ChatGPT GPT-6 | Use layered three-pane icon for quick layout launcher
+Changed: 2026-11-02 UTC | R3-SETTINGS-DYNAMIC-REGISTRY-001 | ChatGPT GPT-6 | Render settings scopes and rows from read-only registry adapter
 Supersedes: R3-VISUAL-PROTOTYPE framing
 Contracts: docs/IMPLEMENTATION_HANDOFF.md; docs/architecture/ESTATE_SPATIAL_CANON.md; hints/chat-contract-draft.md; hints/settings-contract-draft.md
 Tests: Not run; runtime telemetry adapter and visual acceptance pending
-History/Predecessor: Git blob 5f681d1009aa1ad9b6a2645b149586cae5f60aea
+History/Predecessor: Git blob 1f2c21058540a2995a5ab5ac2728a14cd658997e
 -->
 <!doctype html>
 <html lang="en">
@@ -130,7 +130,7 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 .opacity-popover label{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#eaf4ff}.opacity-popover input[type=range]{width:100%;margin:8px 0 0;accent-color:#8fb9ec}
 #infrastructure-panel{background:rgba(8,18,30,var(--infrastructure-opacity,.83))}.window.min .opacity-control{display:none}#chat-panel{background:rgba(8,18,30,var(--chat-opacity,.86))}.window{background:rgba(12,25,42,var(--engineering-opacity,.45))}
 .window header .window-actions{display:flex;align-items:center;gap:6px;margin-left:auto}.window header .window-actions>button{margin-left:0}.infra-header .infra-actions .opacity-control{margin-left:auto}.infra-header .infra-actions .infra-minimize-icon{margin-left:0}#chat-panel .chat-main>.chat-head #chat-minimize,#chat-panel .chat-main>.chat-head #chat-close{margin-left:0}
-</style>
+.settings-heading{display:flex;align-items:center;gap:8px}.settings-heading h3{flex:1}.settings-refresh{width:30px;height:30px;padding:0;border-radius:8px}.settings-search-label{display:block;margin:8px 0 4px;font-size:11px;color:#c2d5ec}.settings-search{width:100%;padding:7px 9px;border-radius:8px;background:#08152288;color:#eaf4ff;border:1px solid #c2d5ec33;font:inherit;font-size:12px}.settings-entry-list{display:grid;gap:7px;margin-top:8px;max-height:38vh;overflow:auto}.settings-entry{padding:9px;border:1px solid #c2d5ec22;border-radius:9px;background:#10223844}.settings-entry-heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.settings-entry-heading strong{font-size:12px}.settings-entry-heading code{font-size:10px;color:#b9cde2;overflow-wrap:anywhere}.settings-description,.settings-empty{margin:5px 0;color:#c2d5ec;font-size:11px}.settings-ready{color:#a9d6b5}.settings-more{font-size:11px}</style>
 </head>
 <body>
 <div id="estate" role="img" aria-label="Riverview 3 estate"></div>
@@ -150,8 +150,8 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
   <div class="profile-title">Pat Powell</div>
   <button class="profile-menu-item" id="profile-settings" type="button" aria-expanded="false">Settings</button>
 <div id="profile-settings-panel" hidden><div id="settings-shell">
-<nav class="settings-scopes" aria-label="Settings scope"><button class="settings-scope" data-settings-scope="Institutional">Institutional</button><button class="settings-scope" data-settings-scope="Departmental">Departmental</button><button class="settings-scope" data-settings-scope="Resident">Resident</button><button class="settings-scope" data-settings-scope="Chat">Chat</button><button class="settings-scope" data-settings-scope="User">User</button><button class="settings-scope" data-settings-scope="Device">Device</button><button class="settings-scope" data-settings-scope="Infrastructure">Infrastructure</button></nav>
-<section class="settings-detail" aria-live="polite"><h3 id="settings-scope-title">Institutional</h3><p class="settings-unavailable" id="settings-registry-status">Settings registry unavailable · no operational settings loaded.</p><div class="settings-row"><span>Inherited value</span><span>Unavailable</span></div><div class="settings-row"><span>Scoped override</span><span>Unavailable</span></div><div class="settings-row"><span>Effective value</span><span>Unavailable</span></div><div class="settings-row"><span>Authorization</span><span>Capability manifest unavailable</span></div><div class="settings-row"><span>Configuration history</span><span>Unavailable</span></div><div class="settings-local">Local appearance · this browser only</div><div id="browser-appearance" hidden><div class="controls"><label for="opacity">Engineering opacity</label><output id="value" for="opacity">45%</output><input id="opacity" type="range" min="45" max="95" value="45"><button id="center-window" type="button">Center window</button><button id="snapshot-button" type="button">Snapshot</button><output id="snapshot-status" aria-live="polite"></output></div><section id="layout-presets"><h3>Floating panel layouts</h3><p>Save up to 10 layouts for this browser. A layout records panel positions, sizes, and open or minimized state. Applying a preset can show Chat, Engineering, and Infrastructure together.</p><div id="layout-presets-controls"><select id="layout-preset-slot" aria-label="Layout preset"></select><input id="layout-preset-name" type="text" maxlength="32" placeholder="Preset name (optional)" aria-label="Preset name"><button id="layout-preset-save" type="button">Save current</button><button id="layout-preset-apply" type="button">Apply</button><button id="layout-preset-clear" type="button">Clear</button></div><output id="layout-preset-status" aria-live="polite"></output></section></div></section></div></div>
+<nav class="settings-scopes" id="settings-scopes" aria-label="Settings scope"></nav>
+<section class="settings-detail" aria-live="polite"><div class="settings-heading"><h3 id="settings-scope-title">Settings</h3><button class="settings-refresh" id="settings-refresh" type="button" title="Refresh settings from the active read-only adapter" aria-label="Refresh settings">↻</button></div><p class="settings-unavailable" id="settings-registry-status" role="status">Settings registry unavailable · no operational values loaded.</p><label class="settings-search-label" for="settings-search">Find a setting</label><input class="settings-search" id="settings-search" type="search" placeholder="Search settings" autocomplete="off"><div class="settings-entry-list" id="settings-entry-list"></div><div class="settings-local">Local appearance · this browser only</div><div id="browser-appearance" hidden><div class="controls"><label for="opacity">Engineering opacity</label><output id="value" for="opacity">45%</output><input id="opacity" type="range" min="45" max="95" value="45"><button id="center-window" type="button">Center window</button><button id="snapshot-button" type="button">Snapshot</button><output id="snapshot-status" aria-live="polite"></output></div><section id="layout-presets"><h3>Floating panel layouts</h3><p>Save up to 10 layouts for this browser. A layout records panel positions, sizes, and open or minimized state. Applying a preset can show Chat, Engineering, and Infrastructure together.</p><div id="layout-presets-controls"><select id="layout-preset-slot" aria-label="Layout preset"></select><input id="layout-preset-name" type="text" maxlength="32" placeholder="Preset name (optional)" aria-label="Preset name"><button id="layout-preset-save" type="button">Save current</button><button id="layout-preset-apply" type="button">Apply</button><button id="layout-preset-clear" type="button">Clear</button></div><output id="layout-preset-status" aria-live="polite"></output></section></div></section></div></div>
   <button class="profile-menu-item" id="profile-engineering" type="button">Engineering Foundry panel</button>
   <button class="profile-menu-item" id="profile-infrastructure" type="button">Infrastructure panel</button>
 </div>
@@ -246,7 +246,18 @@ const infrastructureTelemetryAdapter={
 const infrastructurePanel=document.getElementById('infrastructure-panel');
 const chatPanel=document.getElementById('chat-panel');
 const chatAdapter={async listConversations(){return{available:false,reason:'R3 conversation API is not connected'};},async capabilityManifest(){return{available:false,reason:'Resident capability manifest is unavailable'};}};
-const settingsRegistryAdapter={async read(){return{available:false,reason:'R3 settings registry is not connected'};}};
+// Read-only presentation seam. The returned projection is UI data, not a backend API/schema.
+const settingsRegistryAdapter={
+  async read(){
+    const provider=window.r3SettingsAdapter;
+    if(!provider||typeof provider.read!=='function')return{available:false,reason:'R3 settings registry adapter is not connected'};
+    try{
+      const result=await provider.read();
+      if(!result||typeof result!=='object')return{available:false,reason:'Settings adapter returned no registry model'};
+      return result;
+    }catch(error){return{available:false,reason:'Settings registry could not be read'};}
+  }
+};
 const infrastructureButton=document.getElementById('nav-infrastructure');
 const infrastructureMinimize=document.getElementById('infrastructure-minimize'),infrastructureAnchor=document.getElementById('infrastructure-anchor');
 const sideRail=document.getElementById('side-rail');
@@ -285,8 +296,90 @@ document.getElementById('profile-engineering').addEventListener('click',()=>{
   if(win.classList.contains('min'))restorePanel(false);
 });
 document.getElementById('profile-settings').addEventListener('click',event=>{const panel=document.getElementById('profile-settings-panel');panel.hidden=!panel.hidden;event.currentTarget.setAttribute('aria-expanded',String(!panel.hidden));});
-document.querySelectorAll('[data-settings-scope]').forEach(button=>button.addEventListener('click',()=>{document.getElementById('settings-scope-title').textContent=button.dataset.settingsScope;document.querySelectorAll('[data-settings-scope]').forEach(item=>item.setAttribute('aria-current',String(item===button)));document.getElementById('browser-appearance').hidden=button.dataset.settingsScope!=='User';}));document.querySelector('[data-settings-scope="Institutional"]').setAttribute('aria-current','true');
-settingsRegistryAdapter.read().then(result=>{if(!result.available)document.getElementById('settings-registry-status').textContent=result.reason+' · no live values loaded.';});chatAdapter.listConversations().then(result=>{if(!result.available)document.getElementById('chat-service-status').textContent=result.reason+' · no live history loaded.';});
+const settingsScopesRoot=document.getElementById('settings-scopes'),settingsEntryList=document.getElementById('settings-entry-list'),settingsSearch=document.getElementById('settings-search'),settingsStatus=document.getElementById('settings-registry-status'),settingsTitle=document.getElementById('settings-scope-title'),browserAppearance=document.getElementById('browser-appearance');
+const fallbackSettingsScopes=[{id:'institutional',label:'Institutional'},{id:'departmental',label:'Departmental'},{id:'resident',label:'Resident'},{id:'chat',label:'Chat'},{id:'user',label:'User'},{id:'device',label:'Device'},{id:'infrastructure',label:'Infrastructure'}];
+let settingsRegistryModel={available:false},activeSettingsScope='institutional',settingsVisibleCount=50;
+function settingsText(value,missing='Not provided'){
+ if(value===undefined)return missing;
+ if(value===null)return 'Unavailable';
+ if(typeof value==='string')return value;
+ if(typeof value==='boolean'||typeof value==='number')return String(value);
+ try{return JSON.stringify(value);}catch{return '[value]';}
+}
+function appendSettingsField(card,label,value){
+ const row=document.createElement('div');row.className='settings-row';
+ const name=document.createElement('span');name.textContent=label;
+ const content=document.createElement('span');content.textContent=settingsText(value);
+ row.append(name,content);card.appendChild(row);
+}
+function currentSettingsScopes(){
+ const scopes=settingsRegistryModel&&Array.isArray(settingsRegistryModel.scopes)?settingsRegistryModel.scopes:[];
+ return scopes.length?scopes:fallbackSettingsScopes;
+}
+function renderSettingsScopes(){
+ settingsScopesRoot.replaceChildren();
+ for(const scope of currentSettingsScopes()){
+  if(!scope||typeof scope!=='object')continue;
+  const id=String(scope.id||scope.key||scope.label||'').trim(),label=String(scope.label||scope.name||id).trim();
+  if(!id||!label)continue;
+  const button=document.createElement('button');button.type='button';button.className='settings-scope';button.dataset.settingsScope=id;button.textContent=label;
+  button.setAttribute('aria-current',String(id===activeSettingsScope));
+  button.addEventListener('click',()=>{activeSettingsScope=id;settingsVisibleCount=50;renderSettingsScopes();renderSettingsEntries();});
+  settingsScopesRoot.appendChild(button);
+ }
+ if(!settingsScopesRoot.querySelector('[aria-current="true"]')){
+  const first=settingsScopesRoot.querySelector('[data-settings-scope]');
+  if(first){activeSettingsScope=first.dataset.settingsScope;first.setAttribute('aria-current','true');}
+ }
+}
+function renderSettingsEntries(){
+ const scope=currentSettingsScopes().find(item=>String(item.id||item.key||item.label||'')===activeSettingsScope);
+ const label=scope&&String(scope.label||scope.name||activeSettingsScope)||'Settings';
+ settingsTitle.textContent=label;
+ browserAppearance.hidden=String(scope&&scope.id||activeSettingsScope).toLowerCase()!=='user';
+ settingsEntryList.replaceChildren();
+ if(!settingsRegistryModel||settingsRegistryModel.available!==true){
+  const empty=document.createElement('p');empty.className='settings-empty';empty.textContent='No live settings loaded for this scope.';settingsEntryList.appendChild(empty);return;
+ }
+ const allEntries=Array.isArray(scope&&scope.settings)?scope.settings:(Array.isArray(scope&&scope.entries)?scope.entries:[]);
+ const query=settingsSearch.value.trim().toLowerCase();
+ const matches=allEntries.filter(entry=>[entry.key,entry.id,entry.label,entry.type,entry.description].some(value=>String(value||'').toLowerCase().includes(query)));
+ const shown=matches.slice(0,settingsVisibleCount);
+ for(const entry of shown){
+  if(!entry||typeof entry!=='object')continue;
+  const card=document.createElement('article');card.className='settings-entry';
+  const heading=document.createElement('div');heading.className='settings-entry-heading';
+  const name=document.createElement('strong');name.textContent=String(entry.label||entry.key||entry.id||'Setting');
+  const key=document.createElement('code');key.textContent=String(entry.key||entry.id||'');
+  heading.append(name,key);card.appendChild(heading);
+  if(entry.description){const description=document.createElement('p');description.className='settings-description';description.textContent=String(entry.description);card.appendChild(description);}
+  appendSettingsField(card,'Type',entry.type);
+  appendSettingsField(card,'Source scope',entry.source_scope);
+  appendSettingsField(card,'Inherited value',entry.inherited_value);
+  appendSettingsField(card,'Scoped override',entry.override_value);
+  appendSettingsField(card,'Effective value',entry.effective_value);
+  appendSettingsField(card,'Authorization',entry.authorization);
+  appendSettingsField(card,'Configuration history',entry.history);
+  appendSettingsField(card,'Availability',entry.availability);
+  settingsEntryList.appendChild(card);
+ }
+ if(!matches.length){const empty=document.createElement('p');empty.className='settings-empty';empty.textContent=query?'No settings match this search.':'No settings are registered for this scope.';settingsEntryList.appendChild(empty);}
+ if(matches.length>shown.length){const more=document.createElement('button');more.type='button';more.className='settings-more';more.textContent='Show more settings';more.addEventListener('click',()=>{settingsVisibleCount+=50;renderSettingsEntries();});settingsEntryList.appendChild(more);}
+}
+async function refreshSettingsRegistry(){
+ settingsStatus.textContent='Refreshing settings registry…';settingsStatus.classList.remove('settings-ready');
+ settingsRegistryModel=await settingsRegistryAdapter.read();
+ const available=settingsRegistryModel&&settingsRegistryModel.available===true;
+ settingsStatus.textContent=available?(settingsRegistryModel.revision?'Registry available · revision '+settingsText(settingsRegistryModel.revision):'Registry available · read-only values'):(settingsRegistryModel&&settingsRegistryModel.reason||'Settings registry unavailable')+' · no live values loaded.';
+ settingsStatus.classList.toggle('settings-ready',Boolean(available));
+ const scopes=currentSettingsScopes();
+ if(!scopes.some(scope=>String(scope.id||scope.key||scope.label||'')===activeSettingsScope))activeSettingsScope=String(scopes[0]&&(scopes[0].id||scopes[0].key||scopes[0].label)||'institutional');
+ renderSettingsScopes();renderSettingsEntries();
+}
+settingsSearch.addEventListener('input',()=>{settingsVisibleCount=50;renderSettingsEntries();});
+document.getElementById('settings-refresh').addEventListener('click',refreshSettingsRegistry);
+document.getElementById('profile-settings').addEventListener('click',event=>{const panel=document.getElementById('profile-settings-panel');if(!panel.hidden)refreshSettingsRegistry();});
+renderSettingsScopes();renderSettingsEntries();chatAdapter.listConversations().then(result=>{if(!result.available)document.getElementById('chat-service-status').textContent=result.reason+' · no live history loaded.';});
 document.addEventListener('pointerdown',event=>{
   if(!profileMenu.hidden&&!profileMenu.contains(event.target)&&event.target!==profileButton)profileMenu.hidden=true;
   if(!layoutQuickMenu.hidden&&!layoutQuickMenu.contains(event.target)&&!layoutQuickButton.contains(event.target)){layoutQuickMenu.hidden=true;layoutQuickButton.setAttribute('aria-expanded','false');}
