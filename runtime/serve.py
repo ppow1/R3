@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/serve.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.2.2
+# File Revision: 1.2.3
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Start and monitor R3 institutional scheduler and supervisor.
@@ -19,8 +19,8 @@
 # Changed: 2026-11-02 UTC | R3-GRACE-005 | Wire configured existing llama.cpp tool endpoint without enabling by assumption
 # Changed: 2026-11-02 UTC | R3-CONFIG-001 | Load generic residents and runtime settings from files.
 # Changed: 2026-11-02 UTC | R3-TOOLS-001 | Wire configured native tool client.
-# Changed: 2026-11-03T01:37:00.460Z | R3-VERIFY-WIRING-001 | Codex | Run configured independent reviews and report live tool connectivity.
-# History/Predecessor: Git blob 36e1c915ef1ed9ec48b41a1bb73e667f54c02ec6
+# Changed: 2026-11-03T02:00:13.409Z | R3-VERIFY-WIRING-003 | Codex | Supply a read-only journal observation for criterion-level review.
+# History/Predecessor: Git blob 2870155def1f0a6b217dd24d6acec8ee027cc242
 """R3 runtime infrastructure entrypoint.
 
 Starts the scheduler and supervisor without inventing resident activities.
@@ -128,7 +128,7 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
         timeout=reviewer_settings["inference"]["timeout_seconds"],
     )
     evaluator = IndependentReviewer(
-        reviewer_endpoint, reviewer_tools, reviewer_config["system_prompt"])
+        reviewer_endpoint, reviewer_tools, reviewer_config["system_prompt"], journal_path=db)
     VerificationLedger(journal.db)
     reviewer_state = {"connected": False, "last_error": None}
     loop = asyncio.get_running_loop()

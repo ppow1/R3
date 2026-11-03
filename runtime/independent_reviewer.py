@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/independent_reviewer.py
 # Component: R3-INDEPENDENT-REVIEWER
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-03T01:37:00.460Z
 # Created By: Codex
 # Purpose: Evaluate durable assignments using independent read-only tool observations.
@@ -10,28 +10,32 @@
 # Dependencies: runtime.resident_inference.InferenceEndpoint; runtime.native_tools.NativeTools.
 # Authority: Steward verification policy; only configured read-only tools may be invoked.
 # Changed: 2026-11-03T01:37:00.460Z | R3-VERIFY-WIRING-001 | Codex | Add independent evidence gathering evaluator.
+# Changed: 2026-11-03T02:00:13.409Z | R3-VERIFY-WIRING-003 | Codex | Read durable source event and turn history using a separate read-only SQLite connection.
 # Supersedes: None
 # Contracts: runtime/verification.py; hints/verification-and-learning.md
 # Tests: Existing permanent verification contracts; no new test added.
-# History/Predecessor: New file.
+# History/Predecessor: Git blob 1ff6ec18a094a4951c962c638bc3ad0aef1f76e9.
 """Independent criterion evaluator that withholds executor-provided evidence."""
 from __future__ import annotations
 
 import json
+import sqlite3
 import time
 import urllib.request
+from pathlib import Path
 
 from runtime.native_tools import NativeTools
 from runtime.resident_inference import InferenceEndpoint
 
 
 class IndependentReviewer:
-    def __init__(self, endpoint: InferenceEndpoint, tools: NativeTools, system_prompt: str):
+    def __init__(self, endpoint: InferenceEndpoint, tools: NativeTools, system_prompt: str, *, journal_path: str | Path):
         if not system_prompt.strip():
             raise ValueError("Reviewer system prompt required")
         self.endpoint = endpoint
         self.tools = tools
         self.system_prompt = system_prompt
+        self.journal_path = Path(journal_path).resolve()
 
     def probe(self) -> None:
         self.tools.discover()
@@ -40,21 +44,71 @@ class IndependentReviewer:
             if response.status < 200 or response.status >= 300:
                 raise RuntimeError("Reviewer inference endpoint unavailable")
 
+    def _observe_journal(self, request: dict) -> dict:
+        source_event_id = request.get("source_event_id")
+        if isinstance(source_event_id, bool) or not isinstance(source_event_id, int):
+            raise ValueError("Review request has no source event identifier")
+        uri = self.journal_path.as_uri() + "?mode=ro"
+        connection = sqlite3.connect(uri, uri=True, timeout=self.endpoint.timeout)
+        try:
+            event = connection.execute(
+                "SELECT id,resident,event_type,payload,status,result "
+                "FROM resident_inbox WHERE id=?", (source_event_id,)
+            ).fetchone()
+            if event is None:
+                raise LookupError("Review source event is unavailable")
+            payload = json.loads(event[3])
+            if payload.get("assignment_id") != request.get("assignment_id"):
+                raise ValueError("Review assignment does not match the durable source event")
+            if payload.get("acceptance_criteria") != request.get("criteria"):
+                raise ValueError("Review criteria do not match the durable source event")
+            turns = connection.execute(
+                "SELECT seq,kind,content FROM resident_turns WHERE event_id=? ORDER BY seq",
+                (source_event_id,),
+            ).fetchall()
+            return {
+                "event": {
+                    "id": event[0], "resident": event[1], "event_type": event[2],
+                    "payload": payload, "status": event[4],
+                    "result": json.loads(event[5]) if event[5] else None,
+                },
+                "turns": [
+                    {"sequence": row[0], "kind": row[1], "content": json.loads(row[2])}
+                    for row in turns
+                ],
+            }
+        finally:
+            connection.close()
+
     def __call__(self, request: dict) -> dict:
         criteria = request.get("criteria")
         if not isinstance(criteria, list) or not criteria:
             raise ValueError("Review request has no acceptance criteria")
+        journal = self._observe_journal(request)
         descriptors = self.tools.discover()
         by_name = {item["tool"]: item for item in descriptors}
         definitions = [item["definition"] for item in descriptors]
+        journal_id = "journal-event-" + str(request["source_event_id"])
+        observations = {
+            journal_id: {
+                "source": "read-only-r3-journal",
+                "observed_at": time.time(),
+                "result": journal,
+            }
+        }
         messages = [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": json.dumps({
                 "assignment_id": request["assignment_id"],
                 "acceptance_criteria": criteria,
+                "journal_observation_id": journal_id,
+                "journal_observation": journal,
+                "available_tools": [
+                    {"tool": item["tool"], "read_only": item["read_only"]}
+                    for item in descriptors
+                ],
             }, ensure_ascii=False)},
         ]
-        observations = {}
         next_observation = 1
         while True:
             response = self.endpoint.complete(messages, definitions)
