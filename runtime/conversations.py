@@ -56,7 +56,7 @@ class ConversationStore:
             created_at REAL NOT NULL,
             delivery_status TEXT NOT NULL,
             client_message_id TEXT,
-            inbox_event_id INTEGER UNIQUE,
+            inbox_event_id INTEGER,
             error_code TEXT,
             UNIQUE(conversation_id, sequence),
             UNIQUE(conversation_id, sender_id, client_message_id)
@@ -320,7 +320,7 @@ def create_server(database: Path, token_file: Path, residents: set[str],
                             raise ConversationError(404, "resident_not_found")
                         self._reply(200, {"conversations": store.list_conversations(principal, resident)})
                         return
-                    if len(parts) == 5 and parts[:2] == ["v1", "residents"] and parts[3:] == ["capabilities", "messages"]:
+                    if len(parts) == 4 and parts[:2] == ["v1", "residents"] and parts[3] == "capabilities":
                         resident = parts[2]
                         if resident not in residents:
                             raise ConversationError(404, "resident_not_found")
