@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_verification.py
 # Component: R3-VERIFICATION-LEARNING-REGRESSION
-# File Revision: 1.2.0
+# File Revision: 1.3.0
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanent regression for criterion identity and non-automatic learning changes.
@@ -12,14 +12,15 @@
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-003 | Initial general-purpose contract tests.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-005 | Cover idempotent review submission and completion integration.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-007 | Test independent criterion review decisions and incomplete evidence.
+# Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-008 | Verify independent worker, self-review exclusion, and failure recovery.
 # Supersedes: None
 # Contracts: hints/verification-and-learning.md
 # Tests: This file.
-# History/Predecessor: Git blob 6321d08d6a041326ab3b7b346c6db1157b3f9500
+# History/Predecessor: Git blob 143d495af14eeb6ce8565e136d3755183ed04b30
 import sqlite3
 import unittest
 
-from runtime.verification import VerificationLedger
+from runtime.verification import VerificationLedger, IndependentReviewWorker
 
 
 class VerificationLedgerTests(unittest.TestCase):
@@ -124,6 +125,39 @@ class VerificationLedgerTests(unittest.TestCase):
                        "reason": "No independent observation", "evidence": {}}])
         self.assertEqual(outcome, "INCONCLUSIVE")
         self.assertEqual(self.ledger.pending_reviews(), [])
+
+    def test_worker_records_independent_review(self):
+        request = self.ledger.submit_review(41, "assignment",
+                                            [{"id": "A"}], {"reported": "done"})
+        worker = IndependentReviewWorker(
+            self.ledger, "auditor",
+            lambda item: {"implementation_revision": "rev1",
+                          "findings": [{"criterion_id": "A", "result": "PASS",
+                                        "reason": "independently observed",
+                                        "evidence": {"observation": "confirmed"}}]})
+        self.assertEqual(worker.process_pending(),
+                         [{"request_id": request, "outcome": "ACCEPTED"}])
+        self.assertEqual(self.ledger.pending_reviews(), [])
+        self.assertEqual(self.ledger.history("assignment")[0]["reviewer"], "auditor")
+
+    def test_worker_failure_does_not_lose_pending_request(self):
+        self.ledger.submit_review(42, "assignment", [{"id": "A"}], {})
+        def fail(_request):
+            raise RuntimeError("Reviewer unavailable")
+        with self.assertRaises(RuntimeError):
+            IndependentReviewWorker(self.ledger, "auditor", fail).process_pending()
+        self.assertEqual(len(self.ledger.pending_reviews()), 1)
+        self.assertEqual(self.ledger.history("assignment"), [])
+
+    def test_executor_cannot_review_own_activity(self):
+        from runtime.resident_inference import Inbox
+        inbox = Inbox(self.db)
+        event = inbox.enqueue("Grace", "RESIDENT_ACTIVITY", {"objective": "work"})
+        self.ledger.submit_review(event, "assignment", [{"id": "A"}], {})
+        with self.assertRaises(ValueError):
+            IndependentReviewWorker(
+                self.ledger, "Grace", lambda request: {}).process_pending()
+        self.assertEqual(len(self.ledger.pending_reviews()), 1)
 
     def test_finding_is_not_self_certified_acceptance(self):
         self.finding("r1", "A", "INSUFFICIENT_EVIDENCE", "executor assertion only", "i1")
