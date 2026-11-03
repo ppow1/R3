@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_verification.py
 # Component: R3-VERIFICATION-LEARNING-REGRESSION
-# File Revision: 1.3.0
+# File Revision: 1.3.1
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanent regression for criterion identity and non-automatic learning changes.
@@ -13,6 +13,7 @@
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-005 | Cover idempotent review submission and completion integration.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-007 | Test independent criterion review decisions and incomplete evidence.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-008 | Verify independent worker, self-review exclusion, and failure recovery.
+# Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-010 | Require separately sourced reviewer observations for acceptance.
 # Supersedes: None
 # Contracts: hints/verification-and-learning.md
 # Tests: This file.
@@ -134,11 +135,24 @@ class VerificationLedgerTests(unittest.TestCase):
             lambda item: {"implementation_revision": "rev1",
                           "findings": [{"criterion_id": "A", "result": "PASS",
                                         "reason": "independently observed",
-                                        "evidence": {"observation": "confirmed"}}]})
+                                        "evidence": {"independent_observation": {"tool": "status", "result": "healthy"}}}]})
         self.assertEqual(worker.process_pending(),
                          [{"request_id": request, "outcome": "ACCEPTED"}])
         self.assertEqual(self.ledger.pending_reviews(), [])
         self.assertEqual(self.ledger.history("assignment")[0]["reviewer"], "auditor")
+
+    def test_worker_rejects_executor_claim_as_only_pass_evidence(self):
+        self.ledger.submit_review(43, "assignment", [{"id": "A"}],
+                                  {"executor_claim": "done"})
+        worker = IndependentReviewWorker(
+            self.ledger, "auditor",
+            lambda request: {"implementation_revision": "rev1",
+                             "findings": [{"criterion_id": "A", "result": "PASS",
+                                           "reason": "executor says done",
+                                           "evidence": {"executor_claim": "done"}}]})
+        with self.assertRaises(ValueError):
+            worker.process_pending()
+        self.assertEqual(len(self.ledger.pending_reviews()), 1)
 
     def test_worker_failure_does_not_lose_pending_request(self):
         self.ledger.submit_review(42, "assignment", [{"id": "A"}], {})
