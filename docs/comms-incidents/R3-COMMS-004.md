@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/comms-incidents/R3-COMMS-004.md
 Component: COMMS-INCIDENT
-File Revision: 1.1.0
+File Revision: 1.1.1
 Created: 2026-10-31 UTC (exact time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Record Camrui Comms command gateway internal failure during R3 deployment preflight
@@ -11,10 +11,11 @@ Observability: Tool error and verified grant status
 Dependencies: R3 deployment; Camrui command gateway
 Authority: Steward instruction to log Comms failures and punch list
 Changed: 2026-11-01T15:06:03.086Z | R3-P020 | ChatGPT GPT-6 | Record successful queued deployment and remaining visual acceptance
+# Changed: 2026-11-03T01:47:48.880Z | R3-COMMS-005/006 | Codex | Record reviewer preflight denials and Q2 wrapper failures.
 Supersedes: None
 Contracts: hints/comms-failure-recovery.md; hints/file-provenance.md
 Tests: Pending reproduction and gateway diagnostics
-History/Predecessor: Git blob c8c6da17f674b2165a679f032aeea82181591dad
+History/Predecessor: Git blob 77e1bba81b79ddd21c744b4dd4166ba70e48524e
 -->
 # R3-COMMS-004 — Camrui command task submission fails internally
 
@@ -97,3 +98,10 @@ History/Predecessor: Git blob c8c6da17f674b2165a679f032aeea82181591dad
 **Current status at 2026-11-03T01:44:08.378Z:** a read-only Windows task to read the matching result file, execution `c5cd45ce-919f-4e1e-97b1-cfaacfe4c8a4`, remains `running` with no stdout/stderr and no exit code. The deployment preflight output and pending-review database state are not yet available. No Camrui source deployment, service restart, or verification outcome is claimed. Avoid duplicate submissions while this result task remains unresolved.
 
 **Recovery state:** `RECOVERY_IN_PROGRESS`. Grants, transport, operation description, and the existing Q2 route were checked; the actual Linux task command was denied, while Q2 staging succeeded. Continue polling the original result task. After its result is read, resolve the deployment method, deploy only the verified branch SHA, and independently observe runtime health and the original review request. **Status remains OPEN.**
+
+
+**Additional recovery evidence at 2026-11-03T01:47:48.880Z:** the minimal Camrui command `hostname` completed successfully (execution `8851dd68-a506-4745-8d9a-4786a1909e08`, exit 0, output `admin1-Default-string`). The bounded `git -C /home/admin1/R3 rev-parse HEAD` query was denied with `bounded_request_or_state_invalid` (execution `886d3de2-ab3f-43a5-8612-2f538b6c0c77`, exit 2). This narrows the result to command-shape or state policy; the exact rule is unknown.
+
+The corrected Q2 wrapper `4040.ps1` reached the SSH command, but Bash reported its Python here-document was not terminated (`wanted PY`); PowerShell treated stderr as a native-command failure and the result contained no SSH exit code. No preflight outcome was established. A corrected wrapper `4041.ps1` was staged to Q2 after adding a final newline, capturing native stderr, and replacing the heredoc with a one-line Python query. Its first result-read attempt completed as `Q2_RESULT_NOT_READY`; a second read task (`9567f0c2-b773-4f35-967d-7d6916bbdaa1`) remains `running` with no output or exit code at this update. Do not duplicate it.
+
+**Current classification:** `RECOVERY_IN_PROGRESS`, not yet `OBJECTIVE_BLOCKED`; Q2 dispatch is still being polled and direct authorized Camrui command execution works for at least the minimal hostname operation. No deployment or reviewer outcome is claimed.
