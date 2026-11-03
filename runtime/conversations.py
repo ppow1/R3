@@ -364,6 +364,8 @@ def create_server(database: Path, token_file: Path, residents: set[str],
                 self._reply(exc.status, {"error": exc.code})
             except (ValueError, TypeError):
                 self._reply(400, {"error": "invalid_query"})
+            except sqlite3.Error:
+                self._reply(503, {"error": "conversation_store_unavailable"})
 
         def do_POST(self):
             principal = self._identity()
@@ -374,7 +376,7 @@ def create_server(database: Path, token_file: Path, residents: set[str],
                 body = self._body()
                 db, store = self._store()
                 try:
-                    if len(parts) == 3 and parts[:2] == ["v1", "residents"]:
+                    if len(parts) == 4 and parts[:2] == ["v1", "residents"] and parts[3] == "conversations":
                         resident = parts[2]
                         if resident not in residents:
                             raise ConversationError(404, "resident_not_found")
