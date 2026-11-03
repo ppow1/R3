@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_assignment_intake.py
 # Component: R3-ASSIGNMENT-INTAKE-REGRESSION
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-03 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6 via GitHub API
 # Purpose: Permanent contract coverage for authenticated durable assignment intake.
@@ -10,6 +10,7 @@
 # Dependencies: Python standard library; runtime.assignment_intake.
 # Authority: hints/engineering-test-policy.md; no production scheduler test events.
 # Changed: 2026-11-03 UTC | R3-ASSIGNMENT-INTAKE-001 | ChatGPT GPT-6 | Add reusable assignment intake contracts.
+# Changed: 2026-11-03 UTC | R3-SHUTDOWN-ADMISSION-001 | Verify closed intake rejects durable assignments.
 # Supersedes: None
 # Contracts: docs/r3-assignment-intake-contract.md
 # Tests: python3 -m unittest discover -s tests
@@ -25,6 +26,7 @@ import unittest
 import urllib.error
 import urllib.request
 
+from runtime.admission import AdmissionGate
 from runtime.assignment_intake import create_server
 
 
@@ -37,8 +39,10 @@ class AssignmentIntakeTests(unittest.TestCase):
         self.token = "test-only-token-value-with-more-than-32-characters"
         self.token_file.write_text(self.token, encoding="utf-8")
         os.chmod(self.token_file, 0o600)
+        self.admission_gate = AdmissionGate()
         self.server = create_server(
-            self.database, self.token_file, {"Grace", "Helen"}, {"Grace"}, port=0)
+            self.database, self.token_file, {"Grace", "Helen"}, {"Grace"}, port=0,
+            admission_gate=self.admission_gate)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base_url = f"http://127.0.0.1:{self.server.server_port}"
@@ -78,6 +82,14 @@ class AssignmentIntakeTests(unittest.TestCase):
                 return response.status, json.load(response)
         except urllib.error.HTTPError as response:
             return response.code, json.load(response)
+
+    def test_shutdown_admission_rejects_new_assignment_without_queueing(self):
+        self.admission_gate.close()
+        code, response = self.request(
+            "POST", "/v1/assignments", payload=self.assignment(),
+            idempotency_key="assignment-after-shutdown", token=self.token)
+        self.assertEqual(503, code)
+        self.assertEqual("service_shutting_down", response["error"])
 
     def test_authenticated_assignment_is_durable_and_status_is_readable(self):
         code, submitted = self.request(

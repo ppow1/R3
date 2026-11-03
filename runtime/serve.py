@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/serve.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.2.5
+# File Revision: 1.3.0
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Start and monitor R3 institutional scheduler and supervisor.
@@ -10,6 +10,7 @@
 # Dependencies: Python 3.12 stdlib; runtime/institution.py.
 # Authority: R3 Charter Revision 2; does not modify R2 or start inference.
 # Changed: 2026-11-01 UTC | R3-RUNTIME-002 | First executable service entrypoint
+# Changed: 2026-11-03 UTC | R3-SHUTDOWN-ADMISSION-001 | Close ingress and reviewer claims before shutdown awaits.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-009 | Expose independent verification backlog.
 # Supersedes: None
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md
@@ -41,6 +42,7 @@ import tempfile
 import threading
 import time
 
+from runtime.admission import AdmissionGate
 from runtime.institution import Institution, Journal, Resident
 from runtime.native_tools import NativeTools
 from runtime.configuration import load_configuration, ConfigurationError
@@ -148,10 +150,18 @@ async def serve(db: Path, health_file: Path, config_dir: Path,
             reviewer_endpoint, reviewer_tools, reviewer_config["system_prompt"], journal_path=db)
     VerificationLedger(journal.db)
     reviewer_state = {"connected": False, "last_error": None}
+    admission_gate = AdmissionGate()
+    verification_stop = threading.Event()
+
+    def close_admission() -> None:
+        admission_gate.close()
+        institution._stop.set()
+        verification_stop.set()
+
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGINT, signal.SIGTERM):
         try:
-            loop.add_signal_handler(signum, institution._stop.set)
+            loop.add_signal_handler(signum, close_admission)
         except NotImplementedError:
             pass
     intake_server = None
@@ -166,7 +176,8 @@ async def serve(db: Path, health_file: Path, config_dir: Path,
         }
         intake_server = create_assignment_intake_server(
             db, assignment_intake_token_file, set(registered), continuing,
-            host="127.0.0.1", port=assignment_intake_port)
+            host="127.0.0.1", port=assignment_intake_port,
+            admission_gate=admission_gate)
         intake_thread = threading.Thread(
             target=intake_server.serve_forever, name="r3-assignment-intake", daemon=True)
         intake_thread.start()
@@ -182,13 +193,13 @@ async def serve(db: Path, health_file: Path, config_dir: Path,
             if definition["settings"]["enabled"]
         }
         conversation_server = create_conversation_server(
-            db, conversation_token_file, set(registered), resident_actions, port=conversation_port)
+            db, conversation_token_file, set(registered), resident_actions,
+            port=conversation_port, admission_gate=admission_gate)
         conversation_thread = threading.Thread(
             target=conversation_server.serve_forever, name="r3-conversation-api", daemon=True)
         conversation_thread.start()
 
     runtime_task = asyncio.create_task(institution.run(), name="r3-institution")
-    verification_stop = threading.Event()
     def verification_loop() -> None:
         # Own the reviewer connection in this dedicated thread. The scheduler keeps
         # its own SQLite connection and never shares a connection across threads.
@@ -208,7 +219,7 @@ async def serve(db: Path, health_file: Path, config_dir: Path,
                     reviewer_state["last_error"] = type(exc).__name__
                 if reviewer_state["connected"]:
                     try:
-                        reviewer_worker.process_pending()
+                        reviewer_worker.process_pending(admission_gate=admission_gate)
                     except Exception as exc:
                         # Keep the durable request pending; the next cycle retries it.
                         reviewer_state["last_error"] = type(exc).__name__
@@ -286,9 +297,7 @@ async def serve(db: Path, health_file: Path, config_dir: Path,
             atomic_snapshot(health_file, status)
             await asyncio.sleep(interval)
     finally:
-        institution._stop.set()
-        if verification_task is not None:
-            verification_stop.set()
+        close_admission()
         if intake_server is not None:
             await asyncio.to_thread(intake_server.shutdown)
             intake_server.server_close()

@@ -12,6 +12,7 @@ import unittest
 import urllib.error
 import urllib.request
 
+from runtime.admission import AdmissionGate
 from runtime.conversations import ConversationError, ConversationStore, create_server
 from runtime.resident_inference import Inbox, ResidentInference
 
@@ -140,6 +141,49 @@ class ConversationInferenceIntegrationTests(unittest.TestCase):
 
 
 class ConversationHttpTests(unittest.TestCase):
+    def test_shutdown_admission_rejects_conversation_mutations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            token_file = root / "conversation.token"
+            token_file.write_text("test-secret-with-at-least-thirty-two-characters", encoding="utf-8")
+            os.chmod(token_file, 0o600)
+            probe = socket.socket()
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+            probe.close()
+            gate = AdmissionGate()
+            gate.close()
+            server = create_server(
+                root / "institution.db", token_file, {"Grace"}, {"Grace": ["r3.status"]},
+                port=port, admission_gate=gate)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                req = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/v1/residents/Grace/conversations",
+                    data=json.dumps({"title": "Rejected"}).encode("utf-8"),
+                    headers={
+                        "Authorization": "Bearer test-secret-with-at-least-thirty-two-characters",
+                        "X-R3-Principal": "steward-1",
+                        "Content-Type": "application/json",
+                    },
+                    method="POST",
+                )
+                with self.assertRaises(urllib.error.HTTPError) as rejected:
+                    urllib.request.urlopen(req, timeout=3)
+                self.assertEqual(503, rejected.exception.code)
+                with sqlite3.connect(root / "institution.db") as check_db:
+                    self.assertEqual(
+                        0,
+                        check_db.execute(
+                            "SELECT count(*) FROM r3_conversations"
+                        ).fetchone()[0],
+                    )
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=3)
+
     def test_authenticated_create_send_and_reload(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

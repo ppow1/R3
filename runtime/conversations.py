@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/conversations.py
 # Component: R3-DURABLE-CONVERSATIONS
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Purpose: Durable resident conversations backed by the institutional SQLite database.
 # Execution Model: Loopback HTTP ingress plus the existing resident scheduler.
 # Authority: Website backend authenticates Steward; this service validates its trusted
@@ -21,6 +21,7 @@ import time
 import uuid
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from runtime.admission import AdmissionGate
 from runtime.resident_inference import Inbox
 
 # A JSON-escaped Unicode code point can occupy up to 12 bytes (a surrogate pair).
@@ -289,7 +290,8 @@ class ConversationStore:
 
 
 def create_server(database: Path, token_file: Path, residents: set[str],
-                  resident_actions: dict[str, list[str]], *, port: int):
+                  resident_actions: dict[str, list[str]], *, port: int,
+                  admission_gate: AdmissionGate | None = None):
     """Build a localhost-only API; principal is asserted by the trusted website backend."""
     token_path = Path(token_file)
     metadata = token_path.stat()
@@ -299,6 +301,7 @@ def create_server(database: Path, token_file: Path, residents: set[str],
     if len(token) < 32:
         raise ValueError("Conversation token must contain at least 32 characters")
     database = Path(database)
+    gate = admission_gate or AdmissionGate()
 
     class Handler(BaseHTTPRequestHandler):
         def _reply(self, code, value):
@@ -394,7 +397,11 @@ def create_server(database: Path, token_file: Path, residents: set[str],
                         title = body.get("title", "")
                         if not isinstance(title, str) or len(title) > 200:
                             raise ConversationError(400, "invalid_title")
-                        self._reply(201, {"conversation": store.create_conversation(principal, resident, title)})
+                        with gate.enter() as admitted:
+                            if not admitted:
+                                raise ConversationError(503, "service_shutting_down")
+                            created = store.create_conversation(principal, resident, title)
+                        self._reply(201, {"conversation": created})
                         return
                     if len(parts) == 4 and parts[0:2] == ["v1", "conversations"] and parts[3] == "messages":
                         content = body.get("content")
@@ -403,7 +410,10 @@ def create_server(database: Path, token_file: Path, residents: set[str],
                             raise ConversationError(400, "invalid_content")
                         if not isinstance(client_id, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,160}", client_id):
                             raise ConversationError(400, "client_message_id_required")
-                        result = store.send_message(principal, parts[2], content, client_id)
+                        with gate.enter() as admitted:
+                            if not admitted:
+                                raise ConversationError(503, "service_shutting_down")
+                            result = store.send_message(principal, parts[2], content, client_id)
                         self._reply(200 if result["duplicate"] else 202, result)
                         return
                     raise ConversationError(404, "route_not_found")
