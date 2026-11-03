@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/serve.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.2.4
+# File Revision: 1.2.5
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Start and monitor R3 institutional scheduler and supervisor.
@@ -21,6 +21,7 @@
 # Changed: 2026-11-02 UTC | R3-TOOLS-001 | Wire configured native tool client.
 # Changed: 2026-11-03T02:00:13.409Z | R3-VERIFY-WIRING-003 | Codex | Supply a read-only journal observation for criterion-level review.
 # Changed: 2026-11-03T02:27:54.002Z | R3-REVIEWER-OPTIONAL-001 | Codex | Run the reviewer worker only when an optional reviewer is configured.
+# Changed: 2026-11-03 UTC | R3-ASSIGNMENT-INTAKE-001 | ChatGPT GPT-6 | Add opt-in authenticated loopback assignment intake and health state.
 # History/Predecessor: Git blob dc5a16dd64b4865298e746cdbcf00a6afbb4f513
 """R3 runtime infrastructure entrypoint.
 
