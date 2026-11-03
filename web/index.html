@@ -333,7 +333,7 @@ function renderSettingsScopes(){
  }
 }
 function renderSettingsEntries(){
- const scope=currentSettingsScopes().find(item=>String(item.id||item.key||item.label||'')===activeSettingsScope);
+ const scope=currentSettingsScopes().find(item=>item&&String(item.id||item.key||item.label||'')===activeSettingsScope);
  const label=scope&&String(scope.label||scope.name||activeSettingsScope)||'Settings';
  settingsTitle.textContent=label;
  browserAppearance.hidden=String(scope&&scope.id||activeSettingsScope).toLowerCase()!=='user';
@@ -343,7 +343,7 @@ function renderSettingsEntries(){
  }
  const allEntries=Array.isArray(scope&&scope.settings)?scope.settings:(Array.isArray(scope&&scope.entries)?scope.entries:[]);
  const query=settingsSearch.value.trim().toLowerCase();
- const matches=allEntries.filter(entry=>[entry.key,entry.id,entry.label,entry.type,entry.description].some(value=>String(value||'').toLowerCase().includes(query)));
+ const matches=allEntries.filter(entry=>entry&&[entry.key,entry.id,entry.label,entry.type,entry.description].some(value=>String(value||'').toLowerCase().includes(query)));
  const shown=matches.slice(0,settingsVisibleCount);
  for(const entry of shown){
   if(!entry||typeof entry!=='object')continue;
