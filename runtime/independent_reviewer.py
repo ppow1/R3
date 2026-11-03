@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/independent_reviewer.py
 # Component: R3-INDEPENDENT-REVIEWER
-# File Revision: 1.0.1
+# File Revision: 1.0.2
 # Created: 2026-11-03T01:37:00.460Z
 # Created By: Codex
 # Purpose: Evaluate durable assignments using independent read-only tool observations.
@@ -11,10 +11,11 @@
 # Authority: Steward verification policy; only configured read-only tools may be invoked.
 # Changed: 2026-11-03T01:37:00.460Z | R3-VERIFY-WIRING-001 | Codex | Add independent evidence gathering evaluator.
 # Changed: 2026-11-03T02:00:13.409Z | R3-VERIFY-WIRING-003 | Codex | Read durable source event and turn history using a separate read-only SQLite connection.
+# Changed: 2026-11-03 UTC | R3-REVIEW-LINEAGE-001 | Codex | Include linked prior and continuation events in independent journal observations.
 # Supersedes: None
 # Contracts: runtime/verification.py; hints/verification-and-learning.md
 # Tests: Existing permanent verification contracts; no new test added.
-# History/Predecessor: Git blob 1ff6ec18a094a4951c962c638bc3ad0aef1f76e9.
+# History/Predecessor: Git blob 1ceae4c7d417b5fa7b7ee0e751fdabd207c5969e.
 """Independent criterion evaluator that withholds executor-provided evidence."""
 from __future__ import annotations
 
@@ -51,31 +52,62 @@ class IndependentReviewer:
         uri = self.journal_path.as_uri() + "?mode=ro"
         connection = sqlite3.connect(uri, uri=True, timeout=self.endpoint.timeout)
         try:
-            event = connection.execute(
-                "SELECT id,resident,event_type,payload,status,result "
-                "FROM resident_inbox WHERE id=?", (source_event_id,)
-            ).fetchone()
-            if event is None:
+            pending = [source_event_id]
+            events = {}
+            while pending:
+                event_id = pending.pop()
+                if event_id in events:
+                    continue
+                row = connection.execute(
+                    "SELECT id,resident,event_type,payload,status,result "
+                    "FROM resident_inbox WHERE id=?", (event_id,)
+                ).fetchone()
+                if row is None:
+                    raise LookupError("A linked assignment event is unavailable")
+                payload = json.loads(row[3])
+                if payload.get("assignment_id") != request.get("assignment_id"):
+                    raise ValueError("Assignment lineage contains another assignment")
+                if payload.get("acceptance_criteria") != request.get("criteria"):
+                    raise ValueError("Assignment lineage criteria changed")
+                turns = connection.execute(
+                    "SELECT seq,kind,content FROM resident_turns WHERE event_id=? ORDER BY seq",
+                    (event_id,),
+                ).fetchall()
+                events[event_id] = {
+                    "event": {
+                        "id": row[0], "resident": row[1], "event_type": row[2],
+                        "payload": payload, "status": row[4],
+                        "result": json.loads(row[5]) if row[5] else None,
+                    },
+                    "turns": [
+                        {"sequence": item[0], "kind": item[1], "content": json.loads(item[2])}
+                        for item in turns
+                    ],
+                }
+
+                links = []
+                for key in ("source_event_id", "previous_event_id"):
+                    if key in payload:
+                        linked_id = payload[key]
+                        if isinstance(linked_id, bool) or not isinstance(linked_id, int):
+                            raise ValueError("Assignment lineage contains an invalid event link")
+                        links.append(linked_id)
+                result = events[event_id]["event"]["result"]
+                if isinstance(result, dict) and "continuation_event_id" in result:
+                    linked_id = result["continuation_event_id"]
+                    if isinstance(linked_id, bool) or not isinstance(linked_id, int):
+                        raise ValueError("Assignment continuation contains an invalid event link")
+                    links.append(linked_id)
+                pending.extend(link for link in links if link not in events)
+
+            if source_event_id not in events:
                 raise LookupError("Review source event is unavailable")
-            payload = json.loads(event[3])
-            if payload.get("assignment_id") != request.get("assignment_id"):
-                raise ValueError("Review assignment does not match the durable source event")
-            if payload.get("acceptance_criteria") != request.get("criteria"):
-                raise ValueError("Review criteria do not match the durable source event")
-            turns = connection.execute(
-                "SELECT seq,kind,content FROM resident_turns WHERE event_id=? ORDER BY seq",
-                (source_event_id,),
-            ).fetchall()
+            primary = events[source_event_id]
             return {
-                "event": {
-                    "id": event[0], "resident": event[1], "event_type": event[2],
-                    "payload": payload, "status": event[4],
-                    "result": json.loads(event[5]) if event[5] else None,
-                },
-                "turns": [
-                    {"sequence": row[0], "kind": row[1], "content": json.loads(row[2])}
-                    for row in turns
-                ],
+                "event": primary["event"],
+                "turns": primary["turns"],
+                "lineage_event_ids": sorted(events),
+                "lineage": [events[event_id] for event_id in sorted(events)],
             }
         finally:
             connection.close()
