@@ -48,7 +48,7 @@ Send body:
 {"content":"Hello Grace","client_message_id":"stable-client-retry-id"}
 ```
 
-A new message returns HTTP 202 with `message_id`, `sequence`, `delivery_status: "QUEUED"`, `event_id`, and `duplicate: false`. Retry with the same client message ID and same content returns HTTP 200 and the original receipt. Reusing the ID with different content returns 409. Read the messages endpoint to observe the Steward message's eventual `DELIVERED` or `FAILED` state and Grace's response as the next sequence entry. Message and conversation timestamps are Unix epoch seconds from the R3 service clock.
+A new message returns HTTP 202 with `message_id`, `sequence`, `delivery_status: "QUEUED"`, `event_id`, and `duplicate: false`. Retry with the same client message ID and same content returns HTTP 200 and the original receipt. Reusing the ID with different content returns 409. Read the messages endpoint to observe the Steward message's eventual `PROCESSING`, `DELIVERED`, or `FAILED` state and Grace's response as the next sequence entry. Message and conversation timestamps are Unix epoch seconds from the R3 service clock.
 
 ## Persistence verification
 
