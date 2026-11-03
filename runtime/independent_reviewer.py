@@ -19,6 +19,7 @@
 """Independent criterion evaluator that withholds executor-provided evidence."""
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import time
@@ -92,6 +93,148 @@ class IndependentReviewer:
         compact_event = {**event, "payload": payload, "result": result}
         return {"event": compact_event, "turns": turns}
 
+    @staticmethod
+    def _summarize_lineage(events: dict[int, dict], *, source_event_id: int) -> dict:
+        """Summarize repeated journal actions while preserving their durable references."""
+        event_ids = sorted(events)
+        child_event_ids = set()
+        event_type_counts = {}
+        status_counts = {}
+        terminal_events = []
+        tool_actions = {}
+        call_tools = {}
+
+        def digest(value) -> str:
+            encoded = json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                 separators=(",", ":")).encode("utf-8")
+            return hashlib.sha256(encoded).hexdigest()
+
+        for event_id in event_ids:
+            item = events[event_id]
+            event = item["event"]
+            payload = event["payload"]
+            event_type = event["event_type"]
+            event_type_counts[event_type] = event_type_counts.get(event_type, 0) + 1
+            status = event["status"]
+            status_counts[status] = status_counts.get(status, 0) + 1
+
+            for key in ("source_event_id", "previous_event_id"):
+                linked_id = payload.get(key)
+                if isinstance(linked_id, int) and not isinstance(linked_id, bool) and linked_id in events:
+                    child_event_ids.add(event_id)
+
+            result = event.get("result")
+            decision = result.get("decision") if isinstance(result, dict) else None
+            state = decision.get("state") if isinstance(decision, dict) else None
+            if state != "continue" and result is not None:
+                evidence = decision.get("evidence") if isinstance(decision, dict) else None
+                terminal_events.append({
+                    "event_id": event_id,
+                    "event_type": event_type,
+                    "status": status,
+                    "decision_state": state,
+                    "objective_status": result.get("objective_status") if isinstance(result, dict) else None,
+                    "result_sha256": digest(result),
+                    "evidence_sha256": digest(evidence) if evidence is not None else None,
+                })
+
+            for turn in item["turns"]:
+                kind = turn.get("kind")
+                content = turn.get("content") or {}
+                sequence = turn.get("sequence")
+                if kind == "TOOL_INTENT":
+                    name = content.get("tool")
+                    name = name if isinstance(name, str) and name else "<unknown>"
+                    params = content.get("params", {})
+                    params_digest = digest(params)
+                    action = tool_actions.setdefault(name, {
+                        "call_count": 0,
+                        "parameter_digests": set(),
+                        "first_call": None,
+                        "last_call": None,
+                        "result_count": 0,
+                        "first_result": None,
+                        "last_result": None,
+                        "result_digests": set(),
+                        "result_chain": hashlib.sha256(),
+                    })
+                    reference = {
+                        "event_id": event_id,
+                        "sequence": sequence,
+                        "tool_call_id": content.get("tool_call_id"),
+                        "params_sha256": params_digest,
+                    }
+                    action["call_count"] += 1
+                    action["parameter_digests"].add(params_digest)
+                    if action["first_call"] is None:
+                        action["first_call"] = reference
+                    action["last_call"] = reference
+                    call_tools[(event_id, content.get("tool_call_id"))] = (name, params)
+                elif kind == "TOOL_RESULT":
+                    call_id = content.get("tool_call_id")
+                    matched = call_tools.get((event_id, call_id))
+                    name = matched[0] if matched else "<unmatched>"
+                    action = tool_actions.setdefault(name, {
+                        "call_count": 0,
+                        "parameter_digests": set(),
+                        "first_call": None,
+                        "last_call": None,
+                        "result_count": 0,
+                        "first_result": None,
+                        "last_result": None,
+                        "result_digests": set(),
+                        "result_chain": hashlib.sha256(),
+                    })
+                    result_content = content.get("content")
+                    result_digest = digest(result_content)
+                    sample = {
+                        "event_id": event_id,
+                        "sequence": sequence,
+                        "tool_call_id": call_id,
+                        "content": result_content,
+                    }
+                    action["result_count"] += 1
+                    action["result_digests"].add(result_digest)
+                    encoded_digest = result_digest.encode("ascii")
+                    action["result_chain"].update(len(encoded_digest).to_bytes(4, "big"))
+                    action["result_chain"].update(encoded_digest)
+                    if action["first_result"] is None:
+                        action["first_result"] = sample
+                    action["last_result"] = sample
+
+        root_event_ids = [event_id for event_id in event_ids if event_id not in child_event_ids]
+        root_events = [
+            IndependentReviewer._compact_lineage_event(
+                events[event_id], source_event_id=source_event_id
+            )
+            for event_id in root_event_ids
+        ]
+
+        summarized_actions = {}
+        for name, action in sorted(tool_actions.items()):
+            summarized_actions[name] = {
+                "call_count": action["call_count"],
+                "parameter_variant_count": len(action["parameter_digests"]),
+                "first_call": action["first_call"],
+                "last_call": action["last_call"],
+                "result_count": action["result_count"],
+                "distinct_result_count": len(action["result_digests"]),
+                "result_sequence_sha256": action["result_chain"].hexdigest(),
+                "first_result": action["first_result"],
+                "last_result": action["last_result"],
+            }
+
+        return {
+            "event_count": len(event_ids),
+            "event_ids": event_ids,
+            "root_event_ids": root_event_ids,
+            "event_type_counts": event_type_counts,
+            "status_counts": status_counts,
+            "terminal_events": terminal_events,
+            "root_events": root_events,
+            "tool_actions": summarized_actions,
+        }
+
     def _observe_journal(self, request: dict) -> dict:
         source_event_id = request.get("source_event_id")
         if isinstance(source_event_id, bool) or not isinstance(source_event_id, int):
@@ -150,15 +293,13 @@ class IndependentReviewer:
             if source_event_id not in events:
                 raise LookupError("Review source event is unavailable")
             primary = events[source_event_id]
-            lineage = [
-                self._compact_lineage_event(events[event_id], source_event_id=source_event_id)
-                for event_id in sorted(events)
-            ]
+            lineage_event_ids = sorted(events)
             return {
                 "event": primary["event"],
                 "turns": primary["turns"],
-                "lineage_event_ids": sorted(events),
-                "lineage": lineage,
+                "lineage_event_ids": lineage_event_ids,
+                "lineage_summary": self._summarize_lineage(
+                    events, source_event_id=source_event_id),
             }
         finally:
             connection.close()
