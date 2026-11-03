@@ -128,6 +128,19 @@ class InferenceEndpoint:
         if not self.model:
             raise ValueError("Model name is required")
 
+    def probe(self) -> None:
+        """Check model-server reachability without disclosing or retaining response content."""
+        request = urllib.request.Request(
+            self.url.rstrip("/") + "/models",
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                if response.status < 200 or response.status >= 300:
+                    raise RuntimeError("Inference endpoint unavailable")
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f"Inference HTTP {exc.code}") from None
+
     def complete(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
         request = urllib.request.Request(
             self.url.rstrip("/") + "/chat/completions",
