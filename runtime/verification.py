@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/verification.py
 # Component: R3-VERIFICATION-LEARNING
-# File Revision: 1.3.4
+# File Revision: 1.3.5
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Durable criterion-level independent review records and improvement candidates.
@@ -17,10 +17,11 @@
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-011 | Respect outer SQLite transaction during review submission.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-013 | Authoritative assignment verification status query.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-014 | Durable idempotent review feedback events for manager correction.
+# Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-015 | Optional manager feedback dispatch after independent review.
 # Supersedes: None
 # Contracts: hints/verification-and-learning.md; hints/engineering-test-policy.md
 # Tests: tests/test_verification.py
-# History/Predecessor: Git blob 68c2ea1c600b573e6762421f2d55a719af4fc44a
+# History/Predecessor: Git blob 16e4cd5a1ceb7a57fae631b47e3e3338c5ce24b8
 """Record evidence-based review findings and proposed improvements without applying changes."""
 from __future__ import annotations
 
@@ -308,12 +309,15 @@ class VerificationLedger:
 class IndependentReviewWorker:
     """Invoke an independent evaluator; retain pending work when evaluation fails."""
 
-    def __init__(self, ledger: VerificationLedger, reviewer: str, evaluator):
+    def __init__(self, ledger: VerificationLedger, reviewer: str, evaluator, *, manager: str | None = None):
         if not isinstance(reviewer, str) or not reviewer.strip():
             raise ValueError("Reviewer identity required")
         self.ledger = ledger
         self.reviewer = reviewer
         self.evaluator = evaluator
+        if manager is not None and (not isinstance(manager, str) or not manager.strip()):
+            raise ValueError("Manager identity must be nonempty")
+        self.manager = manager
 
     def process_pending(self) -> list[dict]:
         outcomes = []
@@ -345,5 +349,9 @@ class IndependentReviewWorker:
                 request["id"], reviewer=self.reviewer,
                 implementation_revision=assessment["implementation_revision"],
                 findings=assessment["findings"])
-            outcomes.append({"request_id": request["id"], "outcome": outcome})
+            feedback_event_id = (self.ledger.queue_review_feedback(request["id"], manager=self.manager)
+                                 if self.manager is not None and outcome in ("NEEDS_WORK", "INCONCLUSIVE")
+                                 else None)
+            outcomes.append({"request_id": request["id"], "outcome": outcome,
+                             **({"feedback_event_id": feedback_event_id} if feedback_event_id is not None else {})})
         return outcomes
