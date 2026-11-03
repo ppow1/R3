@@ -154,9 +154,9 @@ async def serve(db: Path, health_file: Path, config_dir: Path,
     verification_stop = threading.Event()
 
     def close_admission() -> None:
-        admission_gate.close()
         institution._stop.set()
         verification_stop.set()
+        admission_gate.close()
 
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGINT, signal.SIGTERM):
