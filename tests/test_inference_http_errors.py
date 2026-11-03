@@ -20,12 +20,36 @@ import io
 import json
 import unittest
 import urllib.error
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from runtime.resident_inference import InferenceEndpoint
 
 
 class HttpErrorTests(unittest.TestCase):
+    def test_inference_probe_uses_models_endpoint_and_configured_timeout(self):
+        endpoint = InferenceEndpoint("http://127.0.0.1:8080/v1", "model", timeout=3)
+        response = MagicMock()
+        response.status = 200
+        response.__enter__.return_value = response
+        with patch("runtime.resident_inference.urllib.request.urlopen",
+                   return_value=response) as open_url:
+            endpoint.probe()
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.full_url, "http://127.0.0.1:8080/v1/models")
+        self.assertEqual(request.get_method(), "GET")
+        self.assertEqual(open_url.call_args.kwargs["timeout"], 3)
+
+    def test_inference_probe_reports_http_status_without_reading_body(self):
+        endpoint = InferenceEndpoint("http://127.0.0.1:8080/v1", "model")
+        failure = urllib.error.HTTPError(
+            "http://127.0.0.1:8080/v1/models", 503, "Unavailable", {},
+            io.BytesIO(b"private response body")
+        )
+        with patch("runtime.resident_inference.urllib.request.urlopen", side_effect=failure):
+            with self.assertRaisesRegex(RuntimeError, "Inference HTTP 503") as caught:
+                endpoint.probe()
+        self.assertNotIn("private response body", str(caught.exception))
+
     def test_structured_error_code_preserved_without_body_disclosure(self):
         body = json.dumps({
             "error": {
