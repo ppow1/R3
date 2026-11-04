@@ -1,12 +1,13 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/native_tools.py
 # Component: R3-NATIVE-TOOLS
-# File Revision: 1.1.0
+# File Revision: 1.1.1
 # Created: 2026-11-02 UTC
 # Purpose: R3-owned discovery and invocation client with explicitly supplied resident credential.
 # Contracts: docs/r3-native-tool-contract.md
 # Tests: tests/test_native_tools.py
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-003 | Authenticated governed read/write contract with fail-closed legacy behavior.
+# Changed: 2026-11-04 UTC | R3-GRACE-AUTH-006 | Validate action and exact scope in server grant evidence.
 # History/Predecessor: Git blob ad06a78b6ea847a7bc1d07d4604c131344cc084b
 """R3-native tool client; server grants alone authorize governed execution."""
 from __future__ import annotations
@@ -81,7 +82,9 @@ class NativeTools:
         headers = None
         if governed:
             operation, resource = descriptor.get("operation"), descriptor.get("resource_id")
-            if (operation not in ("read", "write") or not isinstance(resource, str)
+            action = descriptor.get("action")
+            if (operation not in ("read", "write") or not isinstance(action, str)
+                    or not action or not isinstance(resource, str)
                     or not resource or descriptor.get("read_only") is not (operation == "read")):
                 raise ToolContractError("Invalid governed descriptor")
             if self.credential_provider is None:
@@ -120,6 +123,8 @@ class NativeTools:
                     or not evidence["grant_id"]
                     or evidence.get("resource_id") != resource
                     or evidence.get("operation") != operation
+                    or evidence.get("action") != action
+                    or evidence.get("scope_ref") != params.get("scope_ref")
                     or result.get("correlation_id") != correlation_id):
                 raise ToolContractError("Governed server authorization evidence mismatch")
         return json.dumps(result, ensure_ascii=False)
