@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/capability_authority.py
 # Component: R3-CANONICAL-CAPABILITY-AUTHORITY
-# File Revision: 2.0.0
+# File Revision: 2.0.1
 # Created: 2026-11-04 UTC (original file date; exact creation time unknown)
 # Created By: Unknown (original provenance not independently established)
 # Purpose: The one R3-native grant database, additive migration, exact effective-grant checks and audit.
@@ -11,6 +11,7 @@
 # Authority: Steward unified integration; Website #16 / Grace #28 authority contract.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-001 | Original exact-grant verifier and empty schema.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-009 | Add resource/read-write/revocation/parent grant fields without new database.
+# Changed: 2026-11-04 UTC | R3-GRACE-AUTH-014 | Retain actual delegation reason with separate idempotency key.
 # Supersedes: Earlier untyped R3 schema; existing grant rows retained but NOT auto-authorized.
 # Contracts: docs/r3-native-tool-contract.md; issues #16 and #28.
 # Tests: tests/test_capability_authority.py; tests/test_grant_management.py
@@ -35,6 +36,7 @@ GRANT_COLUMNS = {
     "revoked_at": "REAL",
     "reason": "TEXT",
     "delegable": "INTEGER NOT NULL DEFAULT 0",
+    "idempotency_key": "TEXT",
 }
 AUDIT_COLUMNS = {"resource_ref": "TEXT", "operation": "TEXT"}
 
@@ -58,8 +60,11 @@ def initialize_empty_schema(database: str | Path) -> None:
             expires_at REAL, resource_ref TEXT, operation TEXT,
             issued_by TEXT, approved_by TEXT, parent_grant_id TEXT,
             created_at REAL, effective_at REAL, revoked_at REAL,
-            reason TEXT, delegable INTEGER NOT NULL DEFAULT 0)""")
+            reason TEXT, delegable INTEGER NOT NULL DEFAULT 0,
+            idempotency_key TEXT)""")
         _add_missing_columns(db, "capability_grants", GRANT_COLUMNS)
+        db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS capability_grant_idempotency_unique
+                   ON capability_grants(idempotency_key) WHERE idempotency_key IS NOT NULL""")
         db.execute("""CREATE INDEX IF NOT EXISTS capability_grant_exact_lookup
                    ON capability_grants(principal,resource_ref,action,operation,scope_ref,active)""")
         db.execute("""CREATE TABLE IF NOT EXISTS capability_audit (
