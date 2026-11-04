@@ -17,6 +17,7 @@
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; hints/engineering-test-policy.md
 # Tests: tests/test_inference_http_errors.py (permanent transport diagnostic contract).
 # Changed: 2026-11-02 UTC | R3-GRACE-005 | Preserve safe upstream HTTP error codes without leaking request content.
+# Changed: 2026-11-04 UTC | R3-GRACE-OBJECTIVES-001 | Supply stable durable native tool correlation for every resident invocation.
 # History/Predecessor: Git blob f890fef537d1463d3ccfca3e660028c03312e732
 """Durable resident inbox and inference adapter; tool routing uses existing llama.cpp /tools adapter."""
 from __future__ import annotations
@@ -279,6 +280,7 @@ class ResidentInference:
                     try:
                         output = await asyncio.to_thread(
                             self.tools.invoke, by_name[name], params,
+                            correlation_id="inbox:" + str(event_id) + ":call:" + call_id,
                         )
                     except Exception as exc:
                         output = json.dumps({"error": str(exc)})
