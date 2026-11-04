@@ -15,8 +15,11 @@
     "timeout_seconds": 15,
     "allowed_tools": [
       "r3.status",
-      "r3.host.uptime"
-    ]
+      "r3.host.uptime",
+      "r3.resources.local_snapshot",
+      "r3.evidence.record"
+    ],
+    "credential_file": "/home/admin1/.local/share/r3/secrets/grace-resident-credential"
   },
   "continuation_event_types": [
     "RESIDENT_ACTIVITY",
