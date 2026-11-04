@@ -312,19 +312,11 @@ class ResidentInference:
                         if repeated_tools:
                             repeated_without_evidence = True
                         recovery_required = repeated_without_evidence
-                        # One recovery opportunity is allowed after detecting
-                        # unchanged evidence. If recovery still supplies no new
-                        # evidence, persist a blocked outcome, not another event.
-                        if repeated_without_evidence and payload.get("recovery_required"):
-                            self.inbox.finish(event_id, "FAILED", {
-                                "decision": {"state": "blocked",
-                                             "reason": "Recovery did not produce new evidence",
-                                             "next_step": next_step},
-                                "model": result.get("model"),
-                                "objective_status": "UNVERIFIED",
-                                "recovery_required": True,
-                            })
-                            return
+                        # Repeated observations request recovery, but do not
+                        # automatically fail an objective: monitoring may be
+                        # legitimate and an unchanged result is not a blocker.
+                        # The resident must explicitly report state=blocked
+                        # when no authorized alternative exists.
                         self.inbox.continue_activity(event_id, resident, event_type, {
                             **payload,
                             "objective": payload.get("objective", payload),
