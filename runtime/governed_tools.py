@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/governed_tools.py
 # Component: R3-GRACE-GOVERNED-EXECUTION
-# File Revision: 1.0.1
+# File Revision: 1.1.0
 # Created: 2026-11-04 UTC (date precision only)
 # Created By: ChatGPT GPT-6
 # Purpose: Authenticated, server-enforced resident tool execution using the ONE shared R3 authority verifier.
@@ -11,6 +11,7 @@
 # Authority: Steward unified R3 integration directive; no R2 imports or implicit grants.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-001 | Add resident execution enforcement and uncertain-write protection.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-006 | Include trusted action in advertised descriptor.
+# Changed: 2026-11-04 UTC | R3-GRACE-AUTH-007 | Supply authenticated execution context to tools, never caller claims.
 # Supersedes: None
 # Contracts: docs/r3-native-tool-contract.md; GitHub issues #16 and #28.
 # Tests: tests/test_governed_tools.py
@@ -46,6 +47,17 @@ class CanonicalGrantVerifier(Protocol):
 
 
 @dataclass(frozen=True)
+class ExecutionContext:
+    principal: str
+    grant_id: str
+    resource_id: str
+    action: str
+    operation: str
+    scope_ref: str
+    correlation_id: str
+
+
+@dataclass(frozen=True)
 class GovernedCapability:
     name: str
     resource_id: str
@@ -53,7 +65,7 @@ class GovernedCapability:
     operation: str
     description: str
     parameters: dict
-    executor: Callable[[dict], object]
+    executor: Callable[[dict, ExecutionContext], object]
 
     def __post_init__(self):
         if not all(isinstance(value, str) and value for value in
@@ -203,7 +215,11 @@ class GovernedToolGateway:
                 principal=principal, correlation_id=correlation_id,
                 capability=name, parameters=params)
         try:
-            result = capability.executor(params)
+            result = capability.executor(params, ExecutionContext(
+                principal=principal, grant_id=evidence["grant_id"],
+                resource_id=capability.resource_id, action=capability.action,
+                operation=capability.operation, scope_ref=scope,
+                correlation_id=correlation_id))
             event["outcome"] = "COMPLETED"
             self.audit(dict(event))
         except Exception:
