@@ -36,10 +36,10 @@ class CapacityWorkTests(unittest.TestCase):
         self.assertEqual(self.work.status("work:1")["state"],"AWAITING_INDEPENDENT_REVIEW")
         self.assertIsNone(self.work.assess_next(lambda:[gpu()]))
         with self.assertRaises(ValueError):
-            self.work.accept_review("work:1","",independent=True)
+            self.work.accept_review("work:1","",verify_review=lambda w,r: {"accepted":True,"independent":True,"review_ref":r})
         with self.assertRaises(ValueError):
-            self.work.accept_review("work:1","review:1",independent=False)
-        self.work.accept_review("work:1","review:1",independent=True)
+            self.work.accept_review("work:1","review:1",verify_review=lambda w,r: {"accepted":True,"independent":False,"review_ref":r})
+        self.work.accept_review("work:1","review:1",verify_review=lambda w,r: {"accepted":True,"independent":True,"review_ref":r})
         self.assertEqual(self.work.status("work:1")["state"],"VERIFIED")
 
     def test_stale_and_insufficient_capacity_blocks_without_completion(self):
