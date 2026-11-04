@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/PARKING_LOT.md
 Component: DOCS-PARKING-LOT-MD
-File Revision: 1.0.0 (provenance baseline; earlier revisions not tracked)
+File Revision: 1.0.1
 Created: Unknown (legacy)
 Created By: Unknown (legacy)
 Purpose: R3 project governance and planning reference
@@ -10,11 +10,12 @@ Execution Model: N/A
 Observability: N/A
 Dependencies: R3 repository
 Authority: Existing document authority unchanged; see body
+Changed: 2026-11-04 UTC | R3-ENG-CONVERGENCE | ChatGPT GPT-6 | Index engineering convergence and grounding parking-lot issue
 Changed: 2026-10-31 UTC | R3-PROVENANCE-001 | ChatGPT GPT-6 | Add provenance baseline
 Supersedes: None (see body for substantive charter revisions)
 Contracts: hints/file-provenance.md
 Tests: Not run (metadata-only)
-History/Predecessor: Git blob b650ae24c29d92806036e213a3e75b03078c4d32
+History/Predecessor: Git blob ed2caca70824d191f8b2b868c7837fea103f63e5
 -->
 # R3 — Parking Lot
 
@@ -36,3 +37,5 @@ Ideas intentionally deferred from immediate delivery; not rejected or committed 
 | R3-L011 | Epistemic threshold and audit architecture experiments | Compare inline, background and hybrid classification; experiment with confidence/assurance thresholds by evidence class and consequence, including 100% required evidence compliance for claims presented as verified versus more latitude for clearly marked inference/roleplay; measure latency and false alarms |
 | R3-L012 | Epistemic visual/alarm UX experiments | Evaluate configurable category palettes, brighter diagonal candy-cane mismatch stripes, chat-wide late-alert treatment, jump-to-span, return-to-reading-position, severity and acknowledgement settings |
 
+
+| R3-L013 | [Engineering convergence, re-grounding, Grace knowledge-first execution and acceptance](https://github.com/ppow1/R3/issues/31) | Evaluate the [executive summary](../hints/engineering-convergence-and-grounding.md); adapt existing deployment runner first, consider automatic grounding and browser monitor later; no implementation authorized |
