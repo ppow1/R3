@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/serve.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.2.4
+# File Revision: 1.2.5
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Start and monitor R3 institutional scheduler and supervisor.
@@ -21,7 +21,7 @@
 # Changed: 2026-11-02 UTC | R3-TOOLS-001 | Wire configured native tool client.
 # Changed: 2026-11-03T02:00:13.409Z | R3-VERIFY-WIRING-003 | Codex | Supply a read-only journal observation for criterion-level review.
 # Changed: 2026-11-03T02:27:54.002Z | R3-REVIEWER-OPTIONAL-001 | Codex | Run the reviewer worker only when an optional reviewer is configured.
-# History/Predecessor: Git blob dc5a16dd64b4865298e746cdbcf00a6afbb4f513
+# Changed: 2026-11-04 UTC | R3-GRACE-OBJECTIVES-005 | Opt-in external resident credential file for actual governed tool calls; no credential or grant issuance.\n# History/Predecessor: Git blob dc5a16dd64b4865298e746cdbcf00a6afbb4f513
 """R3 runtime infrastructure entrypoint.
 
 Starts the scheduler and supervisor without inventing resident activities.
@@ -85,10 +85,19 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
         if provider == "none":
             tools = None
         elif provider == "r3-native":
+            credential_path = tool_settings.get("credential_file")
+            credential_provider = None
+            if credential_path is not None:
+                # Read at invocation so a revoked or rotated credential is not
+                # cached in the running resident. Never log the secret.
+                def read_credential(path=Path(credential_path)):
+                    return path.read_text(encoding="utf-8").strip()
+                credential_provider = read_credential
             tools = NativeTools(
                 tool_settings["endpoint"],
                 timeout=tool_settings["timeout_seconds"],
                 allowed_tools=tuple(tool_settings["allowed_tools"]),
+                credential_provider=credential_provider,
             )
         else:
             raise ConfigurationError("Unknown tool provider")
