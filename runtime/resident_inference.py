@@ -290,7 +290,27 @@ class ResidentInference:
                         if not isinstance(previous, list):
                             previous = []
                         previous = [x for x in previous if isinstance(x, str)]
+                        # A model's evidence text is not proof of external progress.
+                        # Record whether tool output has repeated across turns.
+                        observed = []
+                        tool_names = {}
+                        for kind, item in self.inbox.history(event_id):
+                            if kind == "TOOL_INTENT":
+                                tool_names[item.get("tool_call_id")] = item.get("tool")
+                            elif kind == "TOOL_RESULT":
+                                name = tool_names.get(item.get("tool_call_id"), "unknown")
+                                output = item.get("content", "")
+                                if not isinstance(output, str):
+                                    output = json.dumps(output, sort_keys=True, default=str)
+                                observed.append([name, hashlib.sha256(output.encode()).hexdigest()])
+                        prior_observations = payload.get("continuation_observations", [])
+                        if not isinstance(prior_observations, list):
+                            prior_observations = []
+                        repeated_tools = sorted({name for name, digest in observed
+                                                 if [name, digest] in prior_observations})
                         repeated_without_evidence = evidence_key in previous
+                        if repeated_tools:
+                            repeated_without_evidence = True
                         recovery_required = repeated_without_evidence
                         # One recovery opportunity is allowed after detecting
                         # unchanged evidence. If recovery still supplies no new
@@ -312,6 +332,8 @@ class ResidentInference:
                             "previous_result": decision,
                             "next_step": next_step,
                             "continuation_evidence": [*previous, evidence_key],
+                            "continuation_observations": prior_observations + observed,
+                            "repeated_tool_observations": repeated_tools,
                             "recovery_required": recovery_required,
                         }, {"decision": decision, "model": result.get("model")})
                         return
