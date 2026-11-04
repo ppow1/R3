@@ -209,12 +209,11 @@
         const now = Date.now() / 1000;
         const visible = view === "expired"
           ? rows.filter(record =>
+              record.revoked_at == null &&
               record.expires_at != null &&
               Number(record.expires_at) <= now)
           : view === "revoked"
-            ? rows.filter(record =>
-                record.revoked_at != null ||
-                Number(record.active) === 0)
+            ? rows.filter(record => record.revoked_at != null)
             : rows;
         renderRows(view, visible);
         status.textContent = view + " loaded";
