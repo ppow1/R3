@@ -278,29 +278,27 @@ class ResidentInference:
                         next_step = decision.get("next_step")
                         if not isinstance(next_step, str) or not next_step.strip():
                             raise RuntimeError("Continuing activity requires next_step")
-                        # Track observations from actual tool results, not merely
-                        # model-authored evidence or next-step phrasing.
+                        # Durable evidence lineage is independent of the wording
+                        # of the proposed next step. This catches alternating or
+                        # rephrased plans that recycle the same claimed evidence.
                         import hashlib
-                        observations = []
-                        for kind, item in self.inbox.history(event_id):
-                            if kind == "TOOL_RESULT":
-                                content = item.get("content", "")
-                                if not isinstance(content, str):
-                                    content = json.dumps(content, sort_keys=True, default=str)
-                                observations.append(hashlib.sha256(content.encode()).hexdigest())
-                        observation_key = hashlib.sha256(
-                            json.dumps(observations, sort_keys=True).encode()
+                        evidence_key = hashlib.sha256(
+                            json.dumps(decision.get("evidence"), sort_keys=True,
+                                       default=str).encode()
                         ).hexdigest()
-                        previous = payload.get("continuation_observations", [])
+                        previous = payload.get("continuation_evidence", [])
                         if not isinstance(previous, list):
                             previous = []
                         previous = [x for x in previous if isinstance(x, str)]
-                        repeated_without_progress = observation_key in previous
-                        recovery_required = repeated_without_progress
-                        if repeated_without_progress and payload.get("recovery_required"):
+                        repeated_without_evidence = evidence_key in previous
+                        recovery_required = repeated_without_evidence
+                        # One recovery opportunity is allowed after detecting
+                        # unchanged evidence. If recovery still supplies no new
+                        # evidence, persist a blocked outcome, not another event.
+                        if repeated_without_evidence and payload.get("recovery_required"):
                             self.inbox.finish(event_id, "FAILED", {
                                 "decision": {"state": "blocked",
-                                             "reason": "Recovery repeated previously observed tool results",
+                                             "reason": "Recovery did not produce new evidence",
                                              "next_step": next_step},
                                 "model": result.get("model"),
                                 "objective_status": "UNVERIFIED",
@@ -313,7 +311,7 @@ class ResidentInference:
                             "previous_event_id": event_id,
                             "previous_result": decision,
                             "next_step": next_step,
-                            "continuation_observations": [*previous, observation_key],
+                            "continuation_evidence": [*previous, evidence_key],
                             "recovery_required": recovery_required,
                         }, {"decision": decision, "model": result.get("model")})
                         return
