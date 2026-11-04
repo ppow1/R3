@@ -117,6 +117,61 @@ class RealR3AuthorizationRoundtripTests(unittest.TestCase):
         self.assertEqual(json.loads(saved[0])["acceptance"],
                          "NOT_INDEPENDENTLY_VERIFIED")
 
+    def test_resident_inference_executes_real_governed_read_and_write(self):
+        import asyncio
+        from runtime.resident_inference import Inbox, ResidentInference
+        self.approve("registry:local", "inventory.snapshot", "read", key="inference-read")
+        self.approve("journal:institution", "evidence.record", "write", key="inference-write")
+        self.client.allowed_tools = ("r3.resources.local_snapshot", "r3.evidence.record")
+        class Endpoint:
+            def __init__(self):
+                self.turn = 0
+            def complete(self, messages, tools):
+                self.turn += 1
+                if self.turn == 1:
+                    message = {"role": "assistant", "content": None,
+                               "tool_calls": [{"id": "read-resource", "type": "function",
+                                 "function": {"name": "r3.resources.local_snapshot",
+                                              "arguments": '{"scope_ref":"institution:r3"}'}}]}
+                elif self.turn == 2:
+                    observed = json.loads(messages[-1]["content"])
+                    assert observed["authorization"]["operation"] == "read"
+                    message = {"role": "assistant", "content": None,
+                               "tool_calls": [{"id": "record-evidence", "type": "function",
+                                 "function": {"name": "r3.evidence.record",
+                                              "arguments": json.dumps({
+                                                  "scope_ref": "institution:r3",
+                                                  "objective_id": "objective-http-activity",
+                                                  "statement": "Observed local registry from governed tool",
+                                                  "evidence_refs": ["read-resource"]})}}]}
+                else:
+                    written = json.loads(messages[-1]["content"])
+                    assert written["authorization"]["operation"] == "write"
+                    message = {"role": "assistant",
+                               "content": json.dumps({"state": "complete",
+                                    "evidence": {"journal_event": written["result"]["event_id"]}})}
+                return {"model": "contract-endpoint", "choices": [{"message": message}]}
+        inbox = Inbox(self.journal.db)
+        event = inbox.enqueue("Grace", "RESIDENT_ACTIVITY", {
+            "assignment_id": "objective-http-activity",
+            "objective": "Read local host inventory, then record observed evidence",
+            "acceptance_criteria": [{"id": "inventory", "description": "Host observed"},
+                                    {"id": "evidence", "description": "Evidence event persisted"}]})
+        worker = ResidentInference(inbox, Endpoint(), tools=self.client, system_prompt="Grace",
+                                   continuation_event_types=("RESIDENT_ACTIVITY",))
+        asyncio.run(worker("Grace"))
+        row = self.journal.db.execute(
+            "SELECT status,result FROM resident_inbox WHERE id=?", (event,)).fetchone()
+        self.assertEqual(row[0], "COMPLETED")
+        self.assertEqual(json.loads(row[1])["objective_status"], "UNVERIFIED")
+        self.assertEqual(self.journal.db.execute(
+            "SELECT count(*) FROM events WHERE kind='EVIDENCE_SUBMITTED'").fetchone()[0], 1)
+        review = self.journal.db.execute(
+            "SELECT status FROM verification_requests WHERE source_event_id=?", (event,)).fetchone()
+        self.assertEqual(review[0], "PENDING")
+        self.assertEqual(self.journal.db.execute(
+            "SELECT count(*) FROM resident_turns WHERE event_id=? AND kind='TOOL_RESULT'",(event,)).fetchone()[0],2)
+
     def test_revoked_grant_denies_new_http_invocation(self):
         grant_id = self.approve(
             "journal:institution", "evidence.record", "write", key="approve-before-revoke")
