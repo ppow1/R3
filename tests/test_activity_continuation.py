@@ -1,6 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_activity_continuation.py
 # Purpose: Permanent resident-neutral durable activity continuation regressions.
+# Changed: 2026-11-04 UTC | R3-GRACE-FEEDBACK-LOOP-002 | ChatGPT GPT-6 | Test repeated lineage and evidence progression.
 from __future__ import annotations
 import asyncio
 import json
@@ -59,9 +60,45 @@ class ActivityContinuationTests(unittest.TestCase):
         asyncio.run(handler("TestResident"))
         third = self.db.execute("SELECT payload FROM resident_inbox WHERE id=?", (event + 3,)).fetchone()
         self.assertIsNotNone(third)
-        self.assertFalse(json.loads(third[0])["recovery_required"])
+        self.assertTrue(json.loads(third[0])["recovery_required"])
         sent = handler.endpoint.complete.call_args_list[2].args[0]
         self.assertIn("Recovery required", sent[0]["content"])
+
+    def test_alternating_ineffective_steps_eventually_block_durably(self):
+        event = self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY",
+                                   {"objective": "Resolve incident"})
+        handler = self.handler([
+            {"state": "continue", "next_step": "Inspect A", "evidence": "unchanged"},
+            {"state": "continue", "next_step": "Inspect B", "evidence": "unchanged"},
+            {"state": "continue", "next_step": "Inspect A", "evidence": "unchanged"},
+            {"state": "continue", "next_step": "Inspect B", "evidence": "unchanged"},
+        ])
+        for _ in range(4):
+            asyncio.run(handler("TestResident"))
+        rows = self.db.execute(
+            "SELECT status,result FROM resident_inbox ORDER BY id"
+        ).fetchall()
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(rows[-1][0], "FAILED")
+        result = json.loads(rows[-1][1])
+        self.assertEqual(result["decision"]["state"], "blocked")
+        self.assertEqual(result["objective_status"], "UNVERIFIED")
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM resident_inbox WHERE status='PENDING'"
+        ).fetchone()[0], 0)
+
+    def test_changed_evidence_allows_revisiting_step(self):
+        self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY",
+                           {"objective": "Investigate"})
+        handler = self.handler([
+            {"state": "continue", "next_step": "Inspect A", "evidence": "before"},
+            {"state": "continue", "next_step": "Inspect A", "evidence": "after"},
+        ])
+        asyncio.run(handler("TestResident"))
+        asyncio.run(handler("TestResident"))
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM resident_inbox WHERE status='PENDING'"
+        ).fetchone()[0], 1)
 
     def test_regular_event_keeps_ordinary_response(self):
         event = self.inbox.enqueue("TestResident", "CONVERSATION", {"text": "hello"})
