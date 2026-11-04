@@ -278,29 +278,27 @@ class ResidentInference:
                         next_step = decision.get("next_step")
                         if not isinstance(next_step, str) or not next_step.strip():
                             raise RuntimeError("Continuing activity requires next_step")
-                        # Compare the full durable lineage, not only the adjacent
-                        # model phrasing. Reworded or alternating ineffective steps
-                        # must not erase an earlier recovery signal.
+                        # Durable evidence lineage is independent of the wording
+                        # of the proposed next step. This catches alternating or
+                        # rephrased plans that recycle the same claimed evidence.
                         import hashlib
-                        evidence = decision.get("evidence")
                         evidence_key = hashlib.sha256(
-                            json.dumps(evidence, sort_keys=True, default=str).encode()
+                            json.dumps(decision.get("evidence"), sort_keys=True,
+                                       default=str).encode()
                         ).hexdigest()
-                        step_key = " ".join(next_step.casefold().split())
-                        signature = hashlib.sha256(
-                            json.dumps([step_key, evidence_key]).encode()
-                        ).hexdigest()
-                        previous = payload.get("continuation_signatures", [])
+                        previous = payload.get("continuation_evidence", [])
                         if not isinstance(previous, list):
                             previous = []
                         previous = [x for x in previous if isinstance(x, str)]
-                        repeated_without_evidence = signature in previous
-                        # An already-repeated, still-unproductive decision is a
-                        # durable blocked outcome, not another self-queued turn.
+                        repeated_without_evidence = evidence_key in previous
+                        recovery_required = repeated_without_evidence
+                        # One recovery opportunity is allowed after detecting
+                        # unchanged evidence. If recovery still supplies no new
+                        # evidence, persist a blocked outcome, not another event.
                         if repeated_without_evidence and payload.get("recovery_required"):
                             self.inbox.finish(event_id, "FAILED", {
                                 "decision": {"state": "blocked",
-                                             "reason": "Repeated continuation without new evidence",
+                                             "reason": "Recovery did not produce new evidence",
                                              "next_step": next_step},
                                 "model": result.get("model"),
                                 "objective_status": "UNVERIFIED",
@@ -313,8 +311,8 @@ class ResidentInference:
                             "previous_event_id": event_id,
                             "previous_result": decision,
                             "next_step": next_step,
-                            "continuation_signatures": [*previous, signature],
-                            "recovery_required": bool(payload.get("recovery_required")) or repeated_without_evidence,
+                            "continuation_evidence": [*previous, evidence_key],
+                            "recovery_required": recovery_required,
                         }, {"decision": decision, "model": result.get("model")})
                         return
                     # An inbox turn is not the same thing as a verified objective.
