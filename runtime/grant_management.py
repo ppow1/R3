@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/grant_management.py
 # Component: R3-CANONICAL-GRANT-MANAGEMENT
-# File Revision: 1.1.1
+# File Revision: 1.1.2
 # Created: 2026-11-04 UTC (date precision only)
 # Created By: ChatGPT GPT-6
 # Purpose: Typed request/approval/revoke/delegation service against ONE R3 authority database.
@@ -13,6 +13,7 @@
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-014 | Harden idempotency and expiry, retain delegation reason.
 # Changed: 2026-11-04 UTC | R3-GRACE-ID-004 | Add Steward-issued and revoked resident credentials.
 # Changed: 2026-11-04 UTC | R3-GRACE-RECOVERY-001 | Reject stale or revoked idempotent delegation retries.
+# Changed: 2026-11-04 UTC | R3-GRACE-RECOVERY-003 | Revalidate delegation ancestor chain on idempotent retry.
 # Supersedes: None
 # Contracts: docs/r3-native-tool-contract.md; #16 comment 6632391220.
 # Tests: tests/test_grant_management.py
@@ -259,6 +260,13 @@ class R3GrantManagement:
                     if (not active or active["active"] != 1 or active["revoked_at"] is not None
                             or (existing["expires_at"] is not None and existing["expires_at"] <= now)):
                         raise CapabilityDenied("Delegation is no longer active")
+                    # An active-looking child cannot outlive a revoked ancestor.
+                    # Consult the canonical verifier's exact chain check before
+                    # answering an idempotent request as ACTIVE.
+                    delegated = db.execute(
+                        "SELECT * FROM capability_grants WHERE grant_id=?",
+                        (existing["grant_id"],)).fetchone()
+                    self.authority._verify_parent_chain(db, delegated, now)
                     return {"grant_id": existing["grant_id"], "status": "ACTIVE"}
                 parent = db.execute(
                     "SELECT * FROM capability_grants WHERE grant_id=?", (parent_grant_id,)).fetchone()
