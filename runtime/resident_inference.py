@@ -18,6 +18,7 @@
 # Tests: tests/test_inference_http_errors.py (permanent transport diagnostic contract).
 # Changed: 2026-11-02 UTC | R3-GRACE-005 | Preserve safe upstream HTTP error codes without leaking request content.
 # Changed: 2026-11-04 UTC | R3-GRACE-OBJECTIVES-001 | Supply stable durable native tool correlation for every resident invocation.
+# Changed: 2026-11-04 UTC | R3-GRACE-OBJECTIVES-003 | Reject duplicate tool-call IDs in durable history and current turn.
 # History/Predecessor: Git blob f890fef537d1463d3ccfca3e660028c03312e732
 """Durable resident inbox and inference adapter; tool routing uses existing llama.cpp /tools adapter."""
 from __future__ import annotations
@@ -201,6 +202,14 @@ class ResidentInference:
                     messages.append(item)
             if pending:
                 raise RuntimeError("Uncertain tool outcome requires reconciliation; no replay")
+            # Do not let a resumed resident invoke a prior write again. A
+            # completed tool call is durable evidence, not permission to replay.
+            prior_call_ids = {
+                call.get("id")
+                for kind, item in history if kind == "ASSISTANT"
+                for call in (item.get("tool_calls") or [])
+                if isinstance(call, dict) and isinstance(call.get("id"), str)
+            }
             descriptors = await asyncio.to_thread(self.tools.discover) if self.tools else []
             definitions = [d["definition"] for d in descriptors]
             by_name = {d["tool"]: d for d in descriptors}
@@ -270,6 +279,9 @@ class ResidentInference:
                     call_id = call.get("id")
                     if not isinstance(call_id, str) or not call_id or name not in by_name:
                         raise RuntimeError("Invalid or unknown tool call")
+                    if call_id in prior_call_ids:
+                        raise RuntimeError("Repeated durable tool-call ID requires reconciliation; no replay")
+                    prior_call_ids.add(call_id)
                     arguments = function.get("arguments", "{}")
                     params = json.loads(arguments) if isinstance(arguments, str) else arguments
                     if not isinstance(params, dict):
