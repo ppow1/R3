@@ -13,8 +13,10 @@
     "timeout_seconds": 15,
     "allowed_tools": [
       "r3.status",
-      "r3.host.uptime"
-    ]
+      "r3.host.uptime",
+      "r3.resources.local_snapshot"
+    ],
+    "credential_file": "/home/admin1/.local/share/r3/secrets/independent-reviewer-credential"
   },
   "system_prompt_file": "residents/prompts/reviewer.md"
 }
