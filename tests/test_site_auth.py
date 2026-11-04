@@ -228,6 +228,16 @@ class AuthenticationCookieRegressionTests(unittest.TestCase):
         self.assertEqual(captured["csrf"], "xyz")
         self.assertEqual(len(cookies), 2)
 
+    def test_profile_logout_uses_native_r3_csrf_cookie(self):
+        from pathlib import Path
+        source = (Path(__file__).resolve().parents[1] /
+                  "web/index.html").read_text(encoding="utf-8")
+        logout = source.split("// R3-SITE-LOGOUT-003", 1)[1]
+        self.assertIn("value.startsWith('r3_steward_csrf=')", logout)
+        self.assertNotIn("value.startsWith('rv_account_csrf=')", logout)
+        self.assertIn("X-Riverview-CSRF", logout)
+        self.assertIn("method: 'DELETE'", logout)
+
     def test_profile_menu_has_site_wide_logout(self):
         from pathlib import Path
 
