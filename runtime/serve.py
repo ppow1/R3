@@ -91,7 +91,14 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
                 # Read at invocation so a revoked or rotated credential is not
                 # cached in the running resident. Never log the secret.
                 def read_credential(path=Path(credential_path)):
-                    return path.read_text(encoding="utf-8").strip()
+                    token = path.read_text(encoding="utf-8")
+                    if token.endswith("\r\n"):
+                        token = token[:-2]
+                    elif token.endswith("\n"):
+                        token = token[:-1]
+                    if not token or token != token.strip() or "\n" in token or "\r" in token:
+                        raise ValueError("Resident credential file must contain one unmodified token")
+                    return token
                 credential_provider = read_credential
             tools = NativeTools(
                 tool_settings["endpoint"],
