@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/comms-incidents/R3-COMMS-004.md
 Component: COMMS-INCIDENT
-File Revision: 1.0.9
+File Revision: 1.1.2
 Created: 2026-10-31 UTC (exact time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Record Camrui Comms command gateway internal failure during R3 deployment preflight
@@ -11,10 +11,12 @@ Observability: Tool error and verified grant status
 Dependencies: R3 deployment; Camrui command gateway
 Authority: Steward instruction to log Comms failures and punch list
 Changed: 2026-11-01T15:06:03.086Z | R3-P020 | ChatGPT GPT-6 | Record successful queued deployment and remaining visual acceptance
+# Changed: 2026-11-03T01:47:48.880Z | R3-COMMS-005/006 | Codex | Record reviewer preflight denials and Q2 wrapper failures.
+# Changed: 2026-11-03T02:08:29.426Z | R3-COMMS-007 | Codex | Record reviewer runtime deployment and post-deploy result retrieval block.
 Supersedes: None
 Contracts: hints/comms-failure-recovery.md; hints/file-provenance.md
 Tests: Pending reproduction and gateway diagnostics
-History/Predecessor: Git blob 14aa05d460ac91dfd45386ee8ffa9eddcdf22017
+History/Predecessor: Git blob 3eea08400531d96b538a9bca1657fc0fc7f40bae
 -->
 # R3-COMMS-004 — Camrui command task submission fails internally
 
@@ -82,3 +84,36 @@ History/Predecessor: Git blob 14aa05d460ac91dfd45386ee8ffa9eddcdf22017
 - Independent read-back confirmed remote HEAD `f5d689cf9ff307c2ae9c18edcc8a81ca44e4f6a6`, health HTTP 200, title `Riverview 3`, old prototype/demo labels absent, top bar absent, Engineering status UI present, and target marker code present. The read-back shell returned exit 2 after these checks because its final `exit 0` line retained a carriage return; the deployer's own activation and health checks completed successfully.
 - The recovery was temporary; the installed deployment script was restored. Browser visual acceptance remains pending.
 - **Punch-list reference:** `R3-P020` — preserve this successful outcome and finish visual acceptance against the Steward's screenshot.
+
+
+## 2026-11-03 — Grace reviewer runtime preflight and gateway recovery
+
+**Objective:** deploy the configured independent-reviewer wiring to the institutional runtime on Camrui and observe the existing pending review.
+
+**Discovery:** caller grant `grant:6422d222eca74cb3b328bf3a80384a59` and executor grant `grant:8327c8d7a74b4bf78e5529e53057fe69` were read and returned active for standard Camrui tasks. The Windows Q2 caller and executor grants were also active. Comms5 contract info returned `riverview-comms-contract:5.0`; a read-only transport probe returned `available`, healthy dashboard projection, 215.95 ms, correlation `r3-reviewer-deploy-transport-20261103`. `comms5_describe_operation` for `comms5_command_task_submit` returned `RIV-COMMS5-0004` / `operation is unknown`. This does not establish whether task dispatch itself is unavailable.
+
+**Camrui attempt:** read-only preflight submitted with standard privilege and idempotency `r3-reviewer-camrui-preflight-20261103-a`, execution `35bb5c90-9d27-448c-a8f3-078e5e304b12`, command SHA-256 `08e5c935bd4d2b1a6543bb73e5b5e6e8cfd067885d6ec6cb749f27450f70848b`. The gateway returned `status=failed`, exit 2, stdout `{"status":"denied","reason":"bounded_request_or_state_invalid"}`; no shell output was produced. The command was not verified as executed on Camrui. Do not classify this as a grant denial or a successful preflight.
+
+**Q2 staging:** the first PowerShell staging task completed with a script-author error: `Int64.ToString('D4')` formatting failed, then the blank target path could not be written. It returned exit 0 despite those PowerShell errors because the staging wrapper did not make errors terminating. No Q2 file path was produced. The wrapper was corrected to format a typed Int64 with `-f` and use terminating errors. It successfully wrote the read-only preflight as `A:\\AI\\Scripts\\Riverview\\Q2\\4039.ps1`; expected result: `A:\\AI\\Scripts\\Riverview\\Queue\\Results\\4039.ps1.txt`. This records Q2 submission only; it does not show watcher execution.
+
+**Current status at 2026-11-03T01:44:08.378Z:** a read-only Windows task to read the matching result file, execution `c5cd45ce-919f-4e1e-97b1-cfaacfe4c8a4`, remains `running` with no stdout/stderr and no exit code. The deployment preflight output and pending-review database state are not yet available. No Camrui source deployment, service restart, or verification outcome is claimed. Avoid duplicate submissions while this result task remains unresolved.
+
+**Recovery state:** `RECOVERY_IN_PROGRESS`. Grants, transport, operation description, and the existing Q2 route were checked; the actual Linux task command was denied, while Q2 staging succeeded. Continue polling the original result task. After its result is read, resolve the deployment method, deploy only the verified branch SHA, and independently observe runtime health and the original review request. **Status remains OPEN.**
+
+
+**Additional recovery evidence at 2026-11-03T01:47:48.880Z:** the minimal Camrui command `hostname` completed successfully (execution `8851dd68-a506-4745-8d9a-4786a1909e08`, exit 0, output `admin1-Default-string`). The bounded `git -C /home/admin1/R3 rev-parse HEAD` query was denied with `bounded_request_or_state_invalid` (execution `886d3de2-ab3f-43a5-8612-2f538b6c0c77`, exit 2). This narrows the result to command-shape or state policy; the exact rule is unknown.
+
+The corrected Q2 wrapper `4040.ps1` reached the SSH command, but Bash reported its Python here-document was not terminated (`wanted PY`); PowerShell treated stderr as a native-command failure and the result contained no SSH exit code. No preflight outcome was established. A corrected wrapper `4041.ps1` was staged to Q2 after adding a final newline, capturing native stderr, and replacing the heredoc with a one-line Python query. Its first result-read attempt completed as `Q2_RESULT_NOT_READY`; a second read task (`9567f0c2-b773-4f35-967d-7d6916bbdaa1`) remains `running` with no output or exit code at this update. Do not duplicate it.
+
+**Current classification:** `RECOVERY_IN_PROGRESS`, not yet `OBJECTIVE_BLOCKED`; Q2 dispatch is still being polled and direct authorized Camrui command execution works for at least the minimal hostname operation. No deployment or reviewer outcome is claimed.
+
+
+## 2026-11-02 — reviewer release activated; status retrieval pending
+
+**Deployment evidence:** Q2 script `4047.ps1` completed in `Queue\\Completed`; result `Queue\\Results\\4047.ps1.txt` (1,245 bytes). SSH exit 0. It fetched and verified commit `2332826038c18efc0a5eec65f67dba1b38e8a07d`, validated reviewer configuration, compiled runtime modules, and created immutable release `/home/admin1/.local/share/r3/releases/grace-2332826038`. Systemd reports `r3-institution.service` active, PID `3340785`, working directory at that release. The user website service was not targeted.
+
+At the deployment snapshot, health reported `resident_tool_execution_connected=true`, `independent_reviewer_connected=true`, and no reviewer error. Verification request 1 for source event 12, assignment `R3-GRACE-TOOL-ROUNDTRIP-20261102-02`, was still PENDING, with no findings yet at that instant. This confirms activation and endpoint connectivity; it does not establish independent acceptance.
+
+A read-only post-deploy monitor was staged as `A:\\AI\\Scripts\\Riverview\\Q2\\4050.ps1`. Its result retrieval through `comms5_command_task_submit` returned `BACKEND_UNAVAILABLE`, `command_agent_failure_unclassified`, `executed=false` on two attempts. A read-only Comms5 transport probe remained healthy (307.743 ms); both Windows grants were still active. Therefore neither attempt ran on Windows, and the precise command-task failure remains unknown. Do not duplicate the Q2 monitor; read `Queue\\Results\\4050.ps1.txt` through the established Windows PowerShell path.
+
+**Current classification:** release deployment verified; verification outcome and any manager correction remain unverified. `RECOVERY_IN_PROGRESS`; do not report the assignment accepted until the ledger shows an independently assessed outcome.

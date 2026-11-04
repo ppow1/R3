@@ -242,3 +242,18 @@ def visual_background():
     except (OSError, zipfile.BadZipFile) as exc:
         raise HTTPException(503, "Approved visual archive unreadable") from exc
     return Response(content=data, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
+
+@app.get("/api/v1/institution/runtime")
+def institution_runtime():
+    """Read the live runtime snapshot; never invent resident activity."""
+    path = Path(os.environ.get("R3_RUNTIME_HEALTH_FILE",
+                               "/home/admin1/.local/state/r3-runtime/health.json"))
+    try:
+        import json
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise HTTPException(503, "Institutional runtime telemetry unavailable") from exc
+    age = datetime.now(timezone.utc).timestamp() - payload.get("observed_at", 0)
+    if age < 0 or age > 15:
+        raise HTTPException(503, "Institutional runtime telemetry stale")
+    return payload
