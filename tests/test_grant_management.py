@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_grant_management.py
 # Component: R3-CANONICAL-GRANT-MANAGEMENT-TESTS
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-04 UTC (date precision only)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanent Steward-authenticated request/approve/revoke/delegate and single-store tests.
@@ -10,6 +10,7 @@
 # Dependencies: Python stdlib, runtime/capability_authority.py, runtime/grant_management.py
 # Authority: Steward unified R3 integration contract issues #16 and #28.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-013 | Cover canonical management lifecycle and fail-closed identity.
+# Changed: 2026-11-04 UTC | R3-GRACE-RECOVERY-002 | Permanent tests for idempotent delegation after revocation.
 # Supersedes: None
 # Contracts: docs/r3-native-tool-contract.md
 # Tests: python -m unittest tests.test_grant_management -v
@@ -155,6 +156,35 @@ class ManagementTests(unittest.TestCase):
                             reason="Parent permission revoked")
         with self.assertRaises(CapabilityDenied):
             self.effective(principal="resident:helen")
+
+    def test_idempotent_delegation_retry_after_parent_revocation_denied(self):
+        expiry = time.time() + 60
+        parent = self.approve(self.request(
+            delegable=True, expires_at=expiry)["request_id"])["grant_id"]
+        kwargs = dict(resident_credential="valid-resident-credential",
+            parent_grant_id=parent, target_principal="resident:helen",
+            expires_at=expiry-10, reason="Delegated status observation",
+            idempotency_key="delegate-retry-revoked-parent")
+        first = self.service.delegate(**kwargs)
+        self.assertEqual(self.service.delegate(**kwargs)["grant_id"], first["grant_id"])
+        self.service.revoke(steward_context="valid-human-session",grant_id=parent,
+                            reason="Parent revoked before retry")
+        with self.assertRaises(CapabilityDenied):
+            self.service.delegate(**kwargs)
+
+    def test_idempotent_delegation_retry_after_child_revocation_denied(self):
+        expiry = time.time() + 60
+        parent = self.approve(self.request(
+            delegable=True, expires_at=expiry)["request_id"])["grant_id"]
+        kwargs = dict(resident_credential="valid-resident-credential",
+            parent_grant_id=parent, target_principal="resident:helen",
+            expires_at=expiry-10, reason="Delegated status observation",
+            idempotency_key="delegate-retry-revoked-child")
+        first = self.service.delegate(**kwargs)
+        self.service.revoke(steward_context="valid-human-session",
+                            grant_id=first["grant_id"],reason="Child revoked")
+        with self.assertRaises(CapabilityDenied):
+            self.service.delegate(**kwargs)
 
     def test_nondelegable_grant_cannot_delegate(self):
         parent = self.approve(self.request()["request_id"])["grant_id"]
