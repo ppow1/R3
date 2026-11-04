@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/grace_capacity_work.py
 # Component: R3-GRACE-DURABLE-CAPACITY-WORK
-# File Revision: 1.0.1
+# File Revision: 1.1.0
 # Purpose: Durable event-driven capacity review; assessment is not execution.
 # Authority: Grace #28 and unified Website #16; no grants or production actions.
 # Tests: tests/test_grace_capacity_work.py
@@ -46,6 +46,12 @@ class CapacityWork:
                             (work_id,required_vram_bytes,"PENDING",None,time.time(),None))
             self._event(work_id,"ENQUEUED",{"required_vram_bytes":required_vram_bytes})
             return True
+
+    def has_assessable_work(self):
+        """True only when durable work needs assessment or retry."""
+        return self.db.execute(
+            "SELECT 1 FROM grace_capacity_work WHERE state IN ('PENDING','BLOCKED') LIMIT 1"
+        ).fetchone() is not None
 
     def assess_next(self, snapshot_provider):
         """One event-driven unit of work; no scheduling or model execution."""
