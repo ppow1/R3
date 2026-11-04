@@ -4,6 +4,9 @@
 import unittest
 from datetime import datetime, timezone, timedelta
 from runtime.resource_registry import Resource, ResourceRegistry
+# Permanent capacity-assessment contract tests are collected by the existing
+# Grace-native resource registry CI module until the workflow list is expanded.
+from tests.test_capacity_assessment import CapacityAssessmentTests
 
 class ResourceRegistryTests(unittest.TestCase):
     def test_stale_resource_never_claimed_usable(self):
