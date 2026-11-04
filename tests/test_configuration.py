@@ -60,6 +60,22 @@ class ConfigurationContractTests(unittest.TestCase):
         self.assertIn("For RESIDENT_ACTIVITY and REVIEW_FEEDBACK events only",
                       grace["system_prompt"])
 
+    def test_governed_credential_configuration_is_explicit_and_external(self):
+        root = Path(__file__).resolve().parent.parent / "config"
+        settings = load_configuration(root)
+        grace = next(item["settings"] for item in settings["residents"] if item["settings"]["name"] == "Grace")
+        self.assertIn("r3.resources.local_snapshot", grace["tools"]["allowed_tools"])
+        self.assertIn("r3.evidence.record", grace["tools"]["allowed_tools"])
+        self.assertTrue(Path(grace["tools"]["credential_file"]).is_absolute())
+
+    def test_relative_credential_path_rejected(self):
+        self.grace["tools"] = {"provider": "r3-native", "endpoint": "http://localhost:8080",
+            "timeout_seconds": 3, "allowed_tools": ["r3.resources.local_snapshot"],
+            "credential_file": "private/token.txt"}
+        self.save()
+        with self.assertRaises(ConfigurationError):
+            load_configuration(self.root)
+
     def test_prompt_and_model_are_external(self):
         result = load_configuration(self.root)
         self.assertEqual(result["residents"][0]["system_prompt"], "Original personality")
