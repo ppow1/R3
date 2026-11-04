@@ -13,6 +13,7 @@
 # Changed: 2026-11-02 UTC | R3-GRACE-004 | Durable tool-call continuation with fail-closed recovery
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-005 | Atomically queue review on completion with explicit criteria.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-006 | Preserve assignment metadata across activity continuation.
+# Changed: 2026-11-04 UTC | R3-GRACE-FEEDBACK-LOOP-002 | ChatGPT GPT-6 | Durable lineage repetition detection and blocked outcome.
 # Changed: 2026-11-03 UTC | R3-GRACE-RECOVERY-001 | Persist ineffective continuation signal and request alternative method.
 # Supersedes: revision 1.3.1
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; hints/engineering-test-policy.md
@@ -277,21 +278,43 @@ class ResidentInference:
                         next_step = decision.get("next_step")
                         if not isinstance(next_step, str) or not next_step.strip():
                             raise RuntimeError("Continuing activity requires next_step")
-                        previous_step = payload.get("next_step")
-                        previous_decision = payload.get("previous_result")
-                        repeated_without_evidence = (
-                            isinstance(previous_step, str)
-                            and previous_step.strip().casefold() == next_step.strip().casefold()
-                            and isinstance(previous_decision, dict)
-                            and previous_decision.get("evidence") == decision.get("evidence")
-                        )
+                        # Compare the full durable lineage, not only the adjacent
+                        # model phrasing. Reworded or alternating ineffective steps
+                        # must not erase an earlier recovery signal.
+                        import hashlib
+                        evidence = decision.get("evidence")
+                        evidence_key = hashlib.sha256(
+                            json.dumps(evidence, sort_keys=True, default=str).encode()
+                        ).hexdigest()
+                        step_key = " ".join(next_step.casefold().split())
+                        signature = hashlib.sha256(
+                            json.dumps([step_key, evidence_key]).encode()
+                        ).hexdigest()
+                        previous = payload.get("continuation_signatures", [])
+                        if not isinstance(previous, list):
+                            previous = []
+                        previous = [x for x in previous if isinstance(x, str)]
+                        repeated_without_evidence = signature in previous
+                        # An already-repeated, still-unproductive decision is a
+                        # durable blocked outcome, not another self-queued turn.
+                        if repeated_without_evidence and payload.get("recovery_required"):
+                            self.inbox.finish(event_id, "FAILED", {
+                                "decision": {"state": "blocked",
+                                             "reason": "Repeated continuation without new evidence",
+                                             "next_step": next_step},
+                                "model": result.get("model"),
+                                "objective_status": "UNVERIFIED",
+                                "recovery_required": True,
+                            })
+                            return
                         self.inbox.continue_activity(event_id, resident, event_type, {
                             **payload,
                             "objective": payload.get("objective", payload),
                             "previous_event_id": event_id,
                             "previous_result": decision,
                             "next_step": next_step,
-                            "recovery_required": repeated_without_evidence,
+                            "continuation_signatures": [*previous, signature],
+                            "recovery_required": bool(payload.get("recovery_required")) or repeated_without_evidence,
                         }, {"decision": decision, "model": result.get("model")})
                         return
                     # An inbox turn is not the same thing as a verified objective.
