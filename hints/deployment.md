@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/deployment.md
 Component: DEPLOYMENT
-File Revision: 1.0.2 (provenance baseline; prior revisions untracked)
+File Revision: 1.0.3 (provenance baseline; prior revisions untracked)
 Created: Unknown (legacy; initial commit can establish earliest publication)
 Created By: Unknown (legacy)
 Purpose: R3 engineering reference and continuation guidance
@@ -12,11 +12,12 @@ Dependencies: /home/admin1/R3 authenticated Git checkout, SSH alias camrui, Pyth
 Authority: R3 engineering guidance; approved charter prevails
 Changed: 2026-10-31 UTC | R3-PROVENANCE-001 | ChatGPT GPT-6 | Add provenance baseline
 Changed: 2026-11-01 UTC | R3-Q2-DOC-001 | ChatGPT GPT-6 | Index Q2 watched-folder runbook
+Changed: 2026-11-04 UTC | R3-GRACE-QUAL-002 | ChatGPT GPT-6 | Record accepted live qualification and correct nested here-document failure handling
 Changed: 2026-11-04 UTC | R3-GRACE-DEPLOY-001 | ChatGPT GPT-6 | Document verified Grace git-archive deployment, failure avoidance, and evidence
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Observed 2026-11-04 deployment b6a02b3: 84 unittest tests passed, service active, PID and working directory matched; independent autonomy not established
-History/Predecessor: Git blob a22856d0bedb1ef6cd34660efb0f06106571f46f (revision 1.0.1); older predecessor 7e4420fa5c55aadeb4f96283919de0706c478ff3
+History/Predecessor: Git blob 4d56dd8ff8d2508c4f4ed759b1e21cd597e75f67 (revision 1.0.2); older predecessor a22856d0bedb1ef6cd34660efb0f06106571f46f (revision 1.0.1); older predecessor 7e4420fa5c55aadeb4f96283919de0706c478ff3
 -->
 # Deployment and operations
 
@@ -46,10 +47,18 @@ Prefer authorized Riverview Comms 1.1 / Q2, following [Q2 runbook](q2-script-que
 
 ### Verified deployment evidence and failure history
 
-On 2026-11-04 at 01:50–01:51 UTC, commit `b6a02b30735c73edfb8da730195b41c8c1cf2400` from branch `engineering/grace-feedback-progress-20261103` was fetched through `/home/admin1/R3`, archived to `/home/admin1/.local/share/r3/releases/grace-b6a02b30735c`, compiled, and passed **84 permanent tests** (two nonfatal ResourceWarnings about unclosed test file handles). `r3-institution.service` restarted active, MainPID `390562`, and `/proc/390562/cwd` matched that release. Deployment reported `GRACE_DEPLOY_EXIT_CODE=0`. Health reported resident inference, tool execution, assignment intake, conversation API, and independent reviewer connected; the health JSON PID was stale, so it was **not** treated as proof of current process identity. **Autonomous recovery was not yet verified**.
+On 2026-11-04 at 01:50–01:51 UTC, commit `b6a02b30735c73edfb8da730195b41c8c1cf2400` from branch `engineering/grace-feedback-progress-20261103` was fetched through `/home/admin1/R3`, archived to `/home/admin1/.local/share/r3/releases/grace-b6a02b30735c`, compiled, and passed **84 permanent tests** (two nonfatal ResourceWarnings about unclosed test file handles). `r3-institution.service` restarted active, MainPID `390562`, and `/proc/390562/cwd` matched that release. Deployment reported `GRACE_DEPLOY_EXIT_CODE=0`. Health reported resident inference, tool execution, assignment intake, conversation API, and independent reviewer connected; the health JSON PID was stale, so it was **not** treated as proof of current process identity. **Autonomous recovery was not yet verified at deployment time**.
 
 The immediately preceding failed attempt reported `GRACE_DEPLOY_EXIT_CODE=128` because it attempted `git fetch origin` from `.../releases/grace-61eca560-deployed` (no Git origin). The successful correction was to use the source checkout and `git archive`. Do not repeat the failed approach.
 
 ### Operational priority
 
 When the Steward requests a runbook correction, **update this tracked file, commit it, fetch it again from GitHub, and verify the exact new text before requesting any further terminal command**. Do not proceed to runtime diagnostics until that instruction is satisfied.
+
+## Grace live qualification and command-wrapper correction (2026-11-04)
+
+A real post-deployment assignment `R3-GRACE-LIVE-RECOVERY-20261104T015837Z` was accepted by the existing loopback-only authenticated intake (HTTP 202; root event 290). Event 290 continued once; event 291 completed and submitted verification request 6. The independent reviewer marked request 6 `ACCEPTED`, with all five criteria `PASS` (durable-intake, status-tool, uptime-tool, evidence-report, read-only). The original pre-fix assignment had 269 `continue` decisions and one `complete`; this new assignment had one `continue` and one `complete`. The repeated-feedback failure did not recur in this live qualification; a single successful case does not prove universal recovery. No extra qualification-only gate or production restriction was installed.
+
+**Diagnostic wrapper defect:** The PowerShell-to-SSH command returned `GRACE_LIVE_QUALIFICATION_EXIT_CODE=1` **after** the production assignment was accepted and independently verified. Bash warned `here-document ... delimited by end-of-file (wanted 'PY')`; Python subsequently raised `NameError: name 'PY' is not defined`. This is a command-envelope failure, **not** a Grace runtime or reviewer failure. The production outcome must be reported independently from the shell exit code. The root formatting defect is that the heredoc closing delimiter was not recognized at the beginning of a line by Bash; do not infer a Grace failure from this wrapper exit.
+
+For future one-block PowerShell fallbacks, prefer a **heredoc-free** Python delivery pattern, especially for long embedded programs. For example, assign the Python source to a single-quoted PowerShell here-string, convert CRLF to LF, base64-encode it in PowerShell, then pass only the encoded string to a short, single-line remote `python3 -c` decoder/exec command; or use a remote `python3 -c` with a small, properly escaped program. If a Bash `<<'PY'` heredoc is unavoidable, the closing `PY` must appear **alone at column zero** with no indentation, prefix, trailing spaces, or appended text; ensure the Bash here-string is closed separately in PowerShell. Capture the remote process exit code and full transcript with `$LASTEXITCODE` and `Set-Clipboard`. Never append a literal `PY` as executable Python. Preserve credentials on Camrui and avoid printing token contents. Verify the wrapper on ordinary read-only operations; do not create another production assignment solely to validate shell quoting.
