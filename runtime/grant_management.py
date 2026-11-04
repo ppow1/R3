@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/grant_management.py
 # Component: R3-CANONICAL-GRANT-MANAGEMENT
-# File Revision: 1.1.0
+# File Revision: 1.1.1
 # Created: 2026-11-04 UTC (date precision only)
 # Created By: ChatGPT GPT-6
 # Purpose: Typed request/approval/revoke/delegation service against ONE R3 authority database.
@@ -12,6 +12,7 @@
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-012 | Add fail-closed management service, no default grants.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-014 | Harden idempotency and expiry, retain delegation reason.
 # Changed: 2026-11-04 UTC | R3-GRACE-ID-004 | Add Steward-issued and revoked resident credentials.
+# Changed: 2026-11-04 UTC | R3-GRACE-RECOVERY-001 | Reject stale or revoked idempotent delegation retries.
 # Supersedes: None
 # Contracts: docs/r3-native-tool-contract.md; #16 comment 6632391220.
 # Tests: tests/test_grant_management.py
@@ -249,6 +250,15 @@ class R3GrantManagement:
                     if (existing["principal"] != target_principal
                             or existing["expires_at"] != expires_at or existing["reason"] != reason):
                         raise CapabilityDenied("Delegation key reused with different target")
+                    # Idempotent retries must never turn a revoked/expired
+                    # historical delegation into a claim of active authority.
+                    now = time.time()
+                    active = db.execute("""SELECT active,revoked_at FROM capability_grants
+                                           WHERE grant_id=?""",
+                                        (existing["grant_id"],)).fetchone()
+                    if (not active or active["active"] != 1 or active["revoked_at"] is not None
+                            or (existing["expires_at"] is not None and existing["expires_at"] <= now)):
+                        raise CapabilityDenied("Delegation is no longer active")
                     return {"grant_id": existing["grant_id"], "status": "ACTIVE"}
                 parent = db.execute(
                     "SELECT * FROM capability_grants WHERE grant_id=?", (parent_grant_id,)).fetchone()
