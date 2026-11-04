@@ -38,6 +38,18 @@ class NativeToolTests(unittest.TestCase):
                 self.client.invoke(dict(self.descriptor, read_only=False), {})
             request.assert_not_called()
 
+    def test_write_requires_explicit_opt_in_and_server_result(self):
+        client = NativeTools("http://127.0.0.1:9000", 5, ("status",), allow_write=True)
+        descriptor = dict(self.descriptor, read_only=False)
+        with patch.object(NativeTools, "_request", return_value={
+            "ok": True, "result": {"authorization": {"grant_id": "g"}}}) as request:
+            self.assertIn("grant_id", client.invoke(descriptor, {"scope_ref": "office:grace"}))
+            request.assert_called_once()
+        with patch.object(NativeTools, "_request", return_value={"ok": False}) as request:
+            with self.assertRaises(ToolContractError):
+                client.invoke(descriptor, {})
+            request.assert_called_once()
+
     def test_rejects_unlisted_tool(self):
         with patch.object(NativeTools, "_request") as request:
             with self.assertRaises(PermissionError):
