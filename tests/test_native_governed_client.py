@@ -11,6 +11,7 @@
 # Authority: Steward R3 unified integration; issues #16 and #28.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-005 | Test governed client contract.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-006 | Require exact action and scope evidence.
+# Changed: 2026-11-04 UTC | R3-GRACE-OBJECTIVES-002 | Assert inference-to-governed-tool durable correlation.
 # Supersedes: None
 # Contracts: docs/r3-native-tool-contract.md
 # Tests: python -m unittest tests.test_native_governed_client -v
@@ -29,6 +30,37 @@ class NativeGovernedClientTests(unittest.TestCase):
             "definition": {"type": "function", "function": {
                 "name": "r3.operations.write", "parameters": {"type": "object"}}},
         }
+
+    def test_resident_inference_supplies_durable_correlations(self):
+        import asyncio
+        import json
+        import sqlite3
+        from unittest.mock import Mock
+        from runtime.resident_inference import Inbox, ResidentInference
+        db = sqlite3.connect(":memory:")
+        self.addCleanup(db.close)
+        inbox = Inbox(db)
+        event_id = inbox.enqueue("Grace", "RESIDENT_ACTIVITY", {"objective": "Read status"})
+        endpoint = Mock()
+        endpoint.complete.side_effect = [
+            {"choices": [{"message": {"role": "assistant", "content": None,
+                "tool_calls": [{"id": "call-1", "type": "function",
+                    "function": {"name": "r3.operations.write",
+                                 "arguments": '{"scope_ref":"office:operations"}'}}]}}]},
+            {"choices": [{"message": {"role": "assistant",
+                "content": json.dumps({"state": "complete", "evidence": "tool response"})}}]},
+        ]
+        tools = Mock()
+        tools.discover.return_value = [self.descriptor]
+        tools.invoke.return_value = json.dumps({"authorization": {"grant_id": "test"}})
+        handler = ResidentInference(inbox, endpoint, system_prompt="Grace",
+                                    tools=tools, continuation_event_types=("RESIDENT_ACTIVITY",))
+        asyncio.run(handler("Grace"))
+        tools.invoke.assert_called_once_with(
+            self.descriptor, {"scope_ref": "office:operations"},
+            correlation_id="inbox:" + str(event_id) + ":call:call-1")
+        self.assertEqual(db.execute(
+            "SELECT status FROM resident_inbox WHERE id=?", (event_id,)).fetchone()[0], "COMPLETED")
 
     def test_no_credential_never_forwards_write(self):
         client = NativeTools("http://127.0.0.1:9000", 5, ("r3.operations.write",))
