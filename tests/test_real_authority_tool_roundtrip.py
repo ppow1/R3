@@ -210,6 +210,7 @@ class RealR3AuthorizationRoundtripTests(unittest.TestCase):
 
     def test_independent_reviewer_can_observe_authorized_read_but_not_write(self):
         from runtime.independent_reviewer import IndependentReviewer
+        from runtime.resident_inference import Inbox
         reviewer_principal = "resident:independent-reviewer"
         credential = self.management.issue_resident_credential(
             steward_context="session-steward", resident_principal=reviewer_principal,
