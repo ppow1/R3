@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/grant_management.py
 # Component: R3-CANONICAL-GRANT-MANAGEMENT
-# File Revision: 1.0.1
+# File Revision: 1.1.0
 # Created: 2026-11-04 UTC (date precision only)
 # Created By: ChatGPT GPT-6
 # Purpose: Typed request/approval/revoke/delegation service against ONE R3 authority database.
@@ -11,6 +11,7 @@
 # Authority: Steward directive, Website #16 and Grace #28 agreed shared authority contract.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-012 | Add fail-closed management service, no default grants.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-014 | Harden idempotency and expiry, retain delegation reason.
+# Changed: 2026-11-04 UTC | R3-GRACE-ID-004 | Add Steward-issued and revoked resident credentials.
 # Supersedes: None
 # Contracts: docs/r3-native-tool-contract.md; #16 comment 6632391220.
 # Tests: tests/test_grant_management.py
@@ -25,6 +26,7 @@ from __future__ import annotations
 
 import json
 import math
+import secrets
 import sqlite3
 import time
 import uuid
@@ -32,6 +34,7 @@ from typing import Callable
 
 from runtime.capability_authority import R3Authority
 from runtime.capabilities import AuthorityUnavailable, CapabilityDenied
+from runtime.resident_identity import PREFIX, digest_secret
 
 
 def _required(value: str, label: str) -> str:
@@ -289,6 +292,71 @@ class R3GrantManagement:
                 return {"grant_id": grant_id, "status": "ACTIVE"}
             except sqlite3.Error as exc:
                 raise AuthorityUnavailable("R3 delegation persistence unavailable") from exc
+
+    def issue_resident_credential(self, *, steward_context: object,
+                                  resident_principal: str, expires_at: float,
+                                  reason: str, idempotency_key: str) -> dict:
+        """Issue one high-entropy resident credential; token returned ONCE, never logged."""
+        steward = self._steward(steward_context)
+        _required(resident_principal, "resident principal")
+        _required(reason, "credential issuance reason")
+        _required(idempotency_key, "idempotency key")
+        if (not resident_principal.startswith("resident:")
+                or resident_principal == "resident:"):
+            raise CapabilityDenied("Only independent resident identities may be provisioned")
+        _expiry(None, expires_at)
+        if expires_at is None:
+            raise ValueError("Resident credential must expire")
+        with self.authority._connect() as db:
+            try:
+                db.execute("BEGIN IMMEDIATE")
+                existing = db.execute(
+                    """SELECT credential_id,principal,expires_at
+                       FROM resident_credentials WHERE idempotency_key=?""",
+                    (idempotency_key,)).fetchone()
+                if existing is not None:
+                    if existing[1] != resident_principal or existing[2] != expires_at:
+                        raise CapabilityDenied("Credential key reused with different intent")
+                    return {"credential_id": existing[0], "status": "ALREADY_ISSUED"}
+                credential_id = uuid.uuid4().hex
+                token = PREFIX + "." + credential_id + "." + secrets.token_urlsafe(32)
+                db.execute("""INSERT INTO resident_credentials
+                    (credential_id,principal,secret_hash,created_at,
+                     expires_at,revoked_at,issued_by,idempotency_key)
+                    VALUES (?,?,?,?,?,?,?,?)""",
+                    (credential_id, resident_principal,
+                     digest_secret(credential_id, token),
+                     time.time(), expires_at, None, steward, idempotency_key))
+                _audit(db, actor=steward, event="RESIDENT_CREDENTIAL_ISSUED",
+                       detail={"credential_id": credential_id,
+                               "principal": resident_principal, "reason": reason})
+                return {"credential_id": credential_id, "credential": token,
+                        "status": "ISSUED"}
+            except sqlite3.Error as exc:
+                raise AuthorityUnavailable("R3 resident credential issuance unavailable") from exc
+
+    def revoke_resident_credential(self, *, steward_context: object,
+                                   credential_id: str, reason: str) -> dict:
+        steward = self._steward(steward_context)
+        _required(credential_id, "credential ID")
+        _required(reason, "revocation reason")
+        with self.authority._connect() as db:
+            try:
+                db.execute("BEGIN IMMEDIATE")
+                row = db.execute(
+                    "SELECT revoked_at FROM resident_credentials WHERE credential_id=?",
+                    (credential_id,)).fetchone()
+                if row is None:
+                    raise CapabilityDenied("Resident credential not found")
+                if row[0] is None:
+                    db.execute(
+                        "UPDATE resident_credentials SET revoked_at=? WHERE credential_id=?",
+                        (time.time(), credential_id))
+                    _audit(db, actor=steward, event="RESIDENT_CREDENTIAL_REVOKED",
+                           detail={"credential_id": credential_id, "reason": reason})
+                return {"credential_id": credential_id, "status": "REVOKED"}
+            except sqlite3.Error as exc:
+                raise AuthorityUnavailable("R3 credential revocation unavailable") from exc
 
     def list_grants(self, *, steward_context: object, active_only: bool = False) -> list[dict]:
         self._steward(steward_context)
