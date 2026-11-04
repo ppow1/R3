@@ -47,7 +47,7 @@ class CapacityWorkTests(unittest.TestCase):
         result=self.work.assess_next(lambda:[gpu(free=20)])
         self.assertEqual(result["state"],"BLOCKED")
         with self.assertRaises(ValueError):
-            self.work.accept_review("work:1","review:1",independent=True)
+            self.work.accept_review("work:1","review:1",verify_review=lambda work, ref: dict(accepted=True, independent=True, review_ref=ref))
         result=self.work.assess_next(lambda:[gpu(fresh=False)])
         self.assertEqual(result["state"],"BLOCKED")
         self.assertIsNone(self.work.status("work:1")["review_ref"])
