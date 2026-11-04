@@ -1,7 +1,7 @@
 # R3 CONTROLLED CONFIGURATION
 # File: .github/workflows/grace-native-regression.yml
 # Component: R3-GRACE-PERMANENT-REGRESSION
-# File Revision: 1.0.2
+# File Revision: 1.0.3
 # Created: 2026-11-04 UTC (date precision only)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanently test resident identity, grants, resource registry and native execution, independently of Website dependencies.
@@ -12,6 +12,7 @@
 # Changed: 2026-11-04 UTC | R3-GRACE-CI-001 | Add permanent Grace-native regression job without bypassing full suite.
 # Changed: 2026-11-04 UTC | R3-GRACE-TOOLS-003 | Include durable operational tool regressions.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-015 | Cover canonical single-store management lifecycle.
+# Changed: 2026-11-04 UTC | R3-GRACE-ID-008 | Add real resident credential and HTTP roundtrip regressions.
 # Supersedes: None
 # Contracts: GitHub issues #16 and #28.
 # Tests: python -m unittest -v [listed permanent modules]
@@ -36,6 +37,8 @@ jobs:
             tests.test_capabilities \
             tests.test_capability_authority \
             tests.test_grant_management \
+            tests.test_resident_identity \
+            tests.test_real_authority_tool_roundtrip \
             tests.test_grace_r3_independence \
             tests.test_resource_registry \
             tests.test_grace_native_capabilities \
