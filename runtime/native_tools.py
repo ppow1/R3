@@ -23,6 +23,7 @@ class NativeTools:
     base_url: str
     timeout: float
     allowed_tools: tuple[str, ...]
+    allow_write: bool = False
 
     def __post_init__(self):
         if not self.base_url.startswith(("http://", "https://")):
@@ -66,8 +67,8 @@ class NativeTools:
         name = descriptor.get("tool")
         if not isinstance(name, str) or name not in self.allowed_tools:
             raise PermissionError("Tool not authorized")
-        if descriptor.get("read_only") is not True:
-            raise PermissionError("Write tool requires server-side authorization")
+        if descriptor.get("read_only") is not True and not self.allow_write:
+            raise PermissionError("Write tool requires explicit client opt-in and server-side authorization")
         response = self._request("POST", "/v1/tools/invoke", {"tool": name, "params": params})
         if not isinstance(response, dict) or not isinstance(response.get("ok"), bool):
             raise ToolContractError("Invalid invocation response")
