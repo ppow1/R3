@@ -1,12 +1,14 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/tool_server.py
 # Component: R3-NATIVE-TOOL-SERVER
-# File Revision: 1.1.0
+# File Revision: 1.2.0
 # Created: 2026-11-02 UTC
-# Purpose: Independent read-only R3 tool router and durable audit.
+# Purpose: R3 tool router with optional authenticated server-enforced resident capability execution.
 # Contracts: docs/r3-native-tool-contract.md
-# Tests: tests/test_tool_server.py
-"""R3 native tool server: initial read-only status capability."""
+# Tests: tests/test_tool_server.py; tests/test_governed_tools.py
+# Changed: 2026-11-04 UTC | R3-GRACE-AUTH-002 | Optional canonical-grant resident gateway, no default grant activation.
+# History/Predecessor: Git blob ce6832254a195c67eb846036ba244f8a4bcb02f0
+"""R3 native tool server: legacy read-only tools, optional authenticated gateway."""
 from __future__ import annotations
 
 import argparse
@@ -17,6 +19,8 @@ import sqlite3
 import threading
 import time
 from runtime.host_execution import HostExecutor
+from runtime.capabilities import CapabilityDenied
+from runtime.governed_tools import GovernedToolGateway, UncertainWrite
 
 STATUS = {"tool": "r3.status", "read_only": True, "definition": {
     "type": "function", "function": {"name": "r3.status",
@@ -25,8 +29,10 @@ STATUS = {"tool": "r3.status", "read_only": True, "definition": {
 
 
 class ToolRouter:
-    def __init__(self, database: Path, executor: HostExecutor | None = None):
+    def __init__(self, database: Path, executor: HostExecutor | None = None,
+                 governed: GovernedToolGateway | None = None):
         self.executor = executor
+        self.governed = governed
         database.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(database), check_same_thread=False)
         self.lock = threading.Lock()
@@ -34,14 +40,27 @@ class ToolRouter:
         self.db.commit()
 
     def discover(self):
-        return [STATUS] + (self.executor.discover() if self.executor else [])
+        return ([STATUS] + (self.executor.discover() if self.executor else [])
+                + (self.governed.discover() if self.governed else []))
 
-    def invoke(self, payload):
+    def invoke(self, payload, *, authorization: str | None = None):
         name = payload.get("tool") if isinstance(payload, dict) else None
         params = payload.get("params") if isinstance(payload, dict) else None
-        allowed = (name == "r3.status" and params == {}) or (
-            self.executor is not None and name in self.executor.tools and params == {})
-        if not allowed:
+        # Governed capabilities cannot fall back to the legacy read-only route.
+        if (self.governed is not None and isinstance(name, str)
+                and self.governed.contains(name)):
+            try:
+                value = self.governed.invoke(payload, authorization=authorization)
+                code, outcome, result = 200, "OK", {"ok": True, "result": value}
+            except UncertainWrite:
+                code, outcome, result = 409, "UNCERTAIN", {"ok": False, "error": "Write attempt already reserved; no replay"}
+            except CapabilityDenied:
+                code, outcome, result = 403, "DENIED", {"ok": False, "error": "Resident authorization denied"}
+            except Exception:
+                code, outcome, result = 500, "FAILED", {"ok": False, "error": "Governed execution failed; write outcome may be uncertain"}
+        elif not ((name == "r3.status" and params == {}) or (
+                self.executor is not None and isinstance(name, str)
+                and name in self.executor.tools and params == {})):
             code, outcome, result = 403, "DENIED", {"ok": False, "error": "Tool or arguments not authorized"}
         elif name == "r3.status":
             code, outcome, result = 200, "OK", {"ok": True, "result": {"service": "r3-tools", "healthy": True}}
@@ -83,7 +102,7 @@ def handler_for(router):
                 payload = json.loads(self.rfile.read(size))
             except (ValueError, UnicodeError):
                 return self.respond(400, {"error": "Invalid JSON"})
-            code, result = router.invoke(payload)
+            code, result = router.invoke(payload, authorization=self.headers.get("Authorization"))
             self.respond(code, result)
 
     return Handler
