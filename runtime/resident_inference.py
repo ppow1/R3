@@ -19,6 +19,7 @@
 # Changed: 2026-11-02 UTC | R3-GRACE-005 | Preserve safe upstream HTTP error codes without leaking request content.
 # Changed: 2026-11-04 UTC | R3-GRACE-OBJECTIVES-001 | Supply stable durable native tool correlation for every resident invocation.
 # Changed: 2026-11-04 UTC | R3-GRACE-OBJECTIVES-003 | Reject duplicate tool-call IDs in durable history and current turn.
+# Changed: 2026-11-04 UTC | R3-GRACE-OBJECTIVES-004 | Preserve uncertain tool intents for durable reconciliation without automatic replay.
 # History/Predecessor: Git blob f890fef537d1463d3ccfca3e660028c03312e732
 """Durable resident inbox and inference adapter; tool routing uses existing llama.cpp /tools adapter."""
 from __future__ import annotations
@@ -201,7 +202,10 @@ class ResidentInference:
                     pending.discard(item["tool_call_id"])
                     messages.append(item)
             if pending:
-                raise RuntimeError("Uncertain tool outcome requires reconciliation; no replay")
+                # The attempt may have reached the tool; refuse repeat dispatch.
+                self.inbox.record(event_id, "RECONCILIATION_REQUIRED", {
+                    "pending_tool_call_ids": sorted(pending)})
+                return
             # Do not let a resumed resident invoke a prior write again. A
             # completed tool call is durable evidence, not permission to replay.
             prior_call_ids = {
@@ -295,7 +299,12 @@ class ResidentInference:
                             correlation_id="inbox:" + str(event_id) + ":call:" + call_id,
                         )
                     except Exception as exc:
-                        output = json.dumps({"error": str(exc)})
+                        # An exception is not proof the remote operation did not
+                        # execute. Retain durable intent and stop, never fabricate
+                        # a tool result or tell the model the write failed safely.
+                        self.inbox.record(event_id, "RECONCILIATION_REQUIRED", {
+                            "tool_call_id": call_id, "error_type": type(exc).__name__})
+                        return
                     tool_message = {
                         "role": "tool", "tool_call_id": call_id, "content": output,
                     }
