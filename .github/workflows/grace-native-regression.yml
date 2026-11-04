@@ -1,0 +1,42 @@
+# R3 CONTROLLED CONFIGURATION
+# File: .github/workflows/grace-native-regression.yml
+# Component: R3-GRACE-PERMANENT-REGRESSION
+# File Revision: 1.0.0
+# Created: 2026-11-04 UTC (date precision only)
+# Created By: ChatGPT GPT-6
+# Purpose: Permanently test resident identity, grants, resource registry and native execution, independently of Website dependencies.
+# Execution Model: GitHub Actions on every push/PR; no production operations.
+# Observability: GitHub Actions test counts, revisions, failure logs.
+# Dependencies: Python 3.12 standard library.
+# Authority: R3 hints/engineering-test-policy.md; Website owns unified release gates.
+# Changed: 2026-11-04 UTC | R3-GRACE-CI-001 | Add permanent Grace-native regression job without bypassing full suite.
+# Supersedes: None
+# Contracts: GitHub issues #16 and #28.
+# Tests: python -m unittest -v [listed permanent modules]
+# History/Predecessor: New workflow; .github/workflows/python-regression.yml unchanged.
+name: Grace native regression
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  grace-native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test native identity, authority, resources and execution
+        run: |
+          python -m unittest -v \
+            tests.test_capabilities \
+            tests.test_capability_authority \
+            tests.test_grace_r3_independence \
+            tests.test_resource_registry \
+            tests.test_resident_personnel \
+            tests.test_governed_tools \
+            tests.test_native_governed_client \
+            tests.test_native_tools \
+            tests.test_tool_server
