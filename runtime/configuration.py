@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/configuration.py
 # Component: R3-CONFIGURATION
-# File Revision: 1.0.2
+# File Revision: 1.0.3
 # Created: 2026-11-02 UTC
 # Purpose: Validate externally defined runtime and resident settings.
 # Dependencies: Python standard library only.
@@ -98,6 +98,13 @@ def load_configuration(directory: str | Path):
             allowed = tools.get("allowed_tools")
             if not isinstance(allowed, list) or any(not isinstance(t, str) or not t for t in allowed) or len(allowed) != len(set(allowed)):
                 raise ConfigurationError(f"{key}.tools.allowed_tools must be a unique list of names")
+            credential_file = tools.get("credential_file")
+            if credential_file is not None:
+                file_path = Path(_text(credential_file, f"{key}.tools.credential_file"))
+                if not file_path.is_absolute():
+                    raise ConfigurationError(f"{key}.tools.credential_file must be an absolute path outside checked-in config")
+                if not any(item.startswith("r3.") for item in allowed):
+                    raise ConfigurationError(f"{key}.tools.credential_file requires R3 native allowed tools")
         prompt_path = (root / _text(entry.get("system_prompt_file"), f"{key}.system_prompt_file")).resolve()
         if not prompt_path.is_relative_to(root):
             raise ConfigurationError("System prompt escapes config directory")
