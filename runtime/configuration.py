@@ -142,6 +142,11 @@ def load_configuration(directory: str | Path):
     allowed = tools.get("allowed_tools")
     if not isinstance(allowed, list) or any(not isinstance(t, str) or not t for t in allowed) or len(allowed) != len(set(allowed)):
         raise ConfigurationError("reviewer.tools.allowed_tools must be a unique list of names")
+    credential_file = tools.get("credential_file")
+    if credential_file is not None:
+        file_path = Path(_text(credential_file, "reviewer.tools.credential_file"))
+        if not file_path.is_absolute():
+            raise ConfigurationError("reviewer.tools.credential_file must be an absolute external path")
     prompt_path = (root / _text(reviewer.get("system_prompt_file"), "reviewer.system_prompt_file")).resolve()
     if not prompt_path.is_relative_to(root):
         raise ConfigurationError("Reviewer system prompt escapes config directory")
