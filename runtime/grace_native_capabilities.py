@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/grace_native_capabilities.py
 # Component: R3-GRACE-OPERATIONAL-TOOLS
-# File Revision: 1.1.1
+# File Revision: 1.2.0
 # Created: 2026-11-04 UTC (date precision only)
 # Created By: ChatGPT GPT-6
 # Purpose: Reusable live local-resource observation and governed durable evidence submission.
@@ -33,6 +33,7 @@ from runtime.capabilities import AuthorityUnavailable, CapabilityDenied
 from runtime.governed_tools import (
     ExecutionContext, GovernedCapability, GovernedToolGateway)
 from runtime.resource_registry import Resource, ResourceRegistry
+from runtime.capacity_assessment import assess_gpu_capacity
 
 
 def local_nvidia_gpu_observations():
@@ -180,6 +181,20 @@ def register_grace_operational_tools(
             "scope_ref": {"type": "string"}}, "required": ["scope_ref"],
             "additionalProperties": False},
         executor=lambda _params, _context: {"resources": resources.snapshot()},
+    ))
+    gateway.register(GovernedCapability(
+        name="r3.resources.assess_gpu_capacity",
+        resource_id="registry:local",
+        action="capacity.assess",
+        operation="read",
+        description="Compare local GPU free VRAM against requirement without allocating resources",
+        parameters={"type": "object", "properties": {
+            "scope_ref": {"type": "string"},
+            "required_vram_bytes": {"type": "integer", "minimum": 1}},
+            "required": ["scope_ref", "required_vram_bytes"],
+            "additionalProperties": False},
+        executor=lambda params, _context: assess_gpu_capacity(
+            resources.snapshot(), required_vram_bytes=params["required_vram_bytes"]),
     ))
     if evidence_journal is not None:
         gateway.register(GovernedCapability(
