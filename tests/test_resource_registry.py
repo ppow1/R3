@@ -9,6 +9,8 @@ from runtime.resource_registry import Resource, ResourceRegistry
 from tests.test_capacity_assessment import CapacityAssessmentTests
 from tests.test_grace_capacity_work import CapacityWorkTests
 from tests.test_grace_capacity_resident import CapacityResidentTests
+# Permanent read-only operator review visibility regressions.
+from tests.test_inbox_cli import InboxCliTests
 
 class ResourceRegistryTests(unittest.TestCase):
     def test_stale_resource_never_claimed_usable(self):
