@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_grace_native_capabilities.py
 # Component: R3-GRACE-OPERATIONAL-TOOL-REGRESSION
-# File Revision: 1.1.0
+# File Revision: 1.1.1
 # Created: 2026-11-04 UTC (date precision only)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanent live resource observation and canonical journal evidence write tests.
@@ -11,6 +11,7 @@
 # Authority: R3 unified integration; issues #16, #28 and #29.
 # Changed: 2026-11-04 UTC | R3-GRACE-TOOLS-002 | Add permanent host and evidence contracts.
 # Changed: 2026-11-04 UTC | R3-GRACE-TOOLS-005 | Permanent bounded GPU probe tests and portable snapshot assertions.
+# Changed: 2026-11-04 UTC | R3-GRACE-TOOLS-006 | Correct test fixture line terminators for nvidia-smi CSV.
 # Supersedes: None
 # Contracts: docs/r3-native-tool-contract.md
 # Tests: python -m unittest tests.test_grace_native_capabilities -v
@@ -99,7 +100,7 @@ class GraceOperationalToolsTests(unittest.TestCase):
 
     def test_nvidia_gpu_probe_records_vram_and_source(self):
         result = SimpleNamespace(returncode=0,
-            stdout="GPU-0123, NVIDIA Test GPU, 16384, 8192\\n", stderr="")
+            stdout="GPU-0123, NVIDIA Test GPU, 16384, 8192\n", stderr="")
         with patch("runtime.grace_native_capabilities.subprocess.run", return_value=result) as run:
             resources = list(local_nvidia_gpu_observations())
         self.assertEqual(len(resources), 1)
@@ -121,7 +122,7 @@ class GraceOperationalToolsTests(unittest.TestCase):
 
     def test_nvidia_probe_discards_invalid_capacity_rows(self):
         result = SimpleNamespace(returncode=0,
-            stdout="GPU-1, GPU, 100, 101\\nGPU-2, GPU, invalid, 5\\nGPU-3, GPU, 50, 25\\n",
+            stdout="GPU-1, GPU, 100, 101\nGPU-2, GPU, invalid, 5\nGPU-3, GPU, 50, 25\n",
             stderr="")
         with patch("runtime.grace_native_capabilities.subprocess.run", return_value=result):
             resources = list(local_nvidia_gpu_observations())
