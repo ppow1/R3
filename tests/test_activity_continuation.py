@@ -100,6 +100,31 @@ class ActivityContinuationTests(unittest.TestCase):
             "SELECT count(*) FROM resident_inbox WHERE status='PENDING'"
         ).fetchone()[0], 1)
 
+    def test_repeated_status_with_changing_uptime_requests_recovery(self):
+        self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY",
+                           {"objective": "Determine actual readiness"})
+        handler = self.handler([
+            {"state": "continue", "next_step": "Check readiness", "evidence": "first"},
+            {"state": "continue", "next_step": "Check readiness again", "evidence": "second"},
+        ])
+        def record_tools():
+            event = self.db.execute(
+                "SELECT id FROM resident_inbox WHERE status='PENDING' ORDER BY id LIMIT 1"
+            ).fetchone()[0]
+            self.inbox.record(event, "TOOL_INTENT", {"tool_call_id": "status", "tool": "r3.status"})
+            self.inbox.record(event, "TOOL_RESULT", {"tool_call_id": "status", "content": '{"ready":false}'})
+            self.inbox.record(event, "TOOL_INTENT", {"tool_call_id": "uptime", "tool": "r3.host.uptime"})
+            self.inbox.record(event, "TOOL_RESULT", {"tool_call_id": "uptime", "content": '{"seconds":123}'})
+        record_tools()
+        asyncio.run(handler("TestResident"))
+        record_tools()
+        asyncio.run(handler("TestResident"))
+        payload = json.loads(self.db.execute(
+            "SELECT payload FROM resident_inbox WHERE status='PENDING'"
+        ).fetchone()[0])
+        self.assertTrue(payload["recovery_required"])
+        self.assertIn("r3.status", payload["repeated_tool_observations"])
+
     def test_regular_event_keeps_ordinary_response(self):
         event = self.inbox.enqueue("TestResident", "CONVERSATION", {"text": "hello"})
         handler = self.handler([{"state": "continue", "next_step": "not activated"}])
