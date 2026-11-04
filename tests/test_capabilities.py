@@ -1,4 +1,9 @@
-"""Permanent regressions for R3-owned capabilities; no R2 dependency."""
+"""Permanent regressions for R3-owned typed capabilities; no R2 dependency."""
+# R3 CONTROLLED SOURCE
+# File: tests/test_capabilities.py
+# Component: R3-TYPED-CAPABILITY-REGRESSION
+# File Revision: 2.0.0
+# Changed: 2026-11-04 UTC | R3-GRACE-AUTH-011 | Require canonical resource and independent operation.
 import unittest
 from runtime.capabilities import (Capability, CapabilityRegistry,
                                   CapabilityDenied, AuthorityUnavailable)
@@ -27,7 +32,7 @@ class CapabilityTests(unittest.TestCase):
             "r3.example", "office.update", "Example write capability",
             {"type": "object", "required": ["scope_ref"]},
             lambda args: self.executions.append(args) or {"changed": True},
-            read_only=False))
+            read_only=False, resource_id="resource:office", operation="write"))
 
     def test_native_write_authorized_and_audited(self):
         result = self.registry.invoke("r3.example", {"scope_ref": "office:grace"},
@@ -36,7 +41,8 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual([x["outcome"] for x in self.events],
                          ["AUTHORIZED", "COMPLETED"])
         self.assertEqual(self.verifier.calls[0], {
-            "principal": "resident:grace", "action": "office.update",
+            "principal": "resident:grace", "resource_id": "resource:office",
+            "action": "office.update", "operation": "write",
             "scope_ref": "office:grace"})
         self.assertEqual(len(self.executions), 1)
 
