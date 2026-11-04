@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_grace_native_capabilities.py
 # Component: R3-GRACE-OPERATIONAL-TOOL-REGRESSION
-# File Revision: 1.0.0
+# File Revision: 1.1.0
 # Created: 2026-11-04 UTC (date precision only)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanent live resource observation and canonical journal evidence write tests.
@@ -10,6 +10,7 @@
 # Dependencies: Python stdlib, runtime/grace_native_capabilities.py, runtime/institution.py
 # Authority: R3 unified integration; issues #16, #28 and #29.
 # Changed: 2026-11-04 UTC | R3-GRACE-TOOLS-002 | Add permanent host and evidence contracts.
+# Changed: 2026-11-04 UTC | R3-GRACE-TOOLS-005 | Permanent bounded GPU probe tests and portable snapshot assertions.
 # Supersedes: None
 # Contracts: docs/r3-native-tool-contract.md
 # Tests: python -m unittest tests.test_grace_native_capabilities -v
@@ -21,10 +22,13 @@ import threading
 import unittest
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from runtime.capabilities import CapabilityDenied
 from runtime.grace_native_capabilities import (
-    EvidenceJournal, local_host_observations, register_grace_operational_tools)
+    EvidenceJournal, local_host_observations, local_nvidia_gpu_observations,
+    register_grace_operational_tools)
 from runtime.governed_tools import ExecutionAttemptLedger, GovernedToolGateway
 from runtime.institution import Journal
 from runtime.tool_server import ToolRouter
@@ -88,9 +92,40 @@ class GraceOperationalToolsTests(unittest.TestCase):
         code, response = self.invoke(name, args, "read-authorized")
         self.assertEqual(code, 200)
         resources = response["result"]["result"]["resources"]
+        hosts = [item for item in resources if item["kind"] == "physical-host"]
+        self.assertEqual(len(hosts), 1)
+        self.assertEqual(hosts[0]["source"], "r3:local-os-probe")
+        self.assertIsNone(hosts[0]["authorized"])
+
+    def test_nvidia_gpu_probe_records_vram_and_source(self):
+        result = SimpleNamespace(returncode=0,
+            stdout="GPU-0123, NVIDIA Test GPU, 16384, 8192\\n", stderr="")
+        with patch("runtime.grace_native_capabilities.subprocess.run", return_value=result) as run:
+            resources = list(local_nvidia_gpu_observations())
         self.assertEqual(len(resources), 1)
-        self.assertEqual(resources[0]["source"], "r3:local-os-probe")
-        self.assertIsNone(resources[0]["authorized"])
+        self.assertEqual(resources[0].resource_id, "gpu:GPU-0123")
+        self.assertEqual(resources[0].kind, "nvidia-gpu")
+        self.assertEqual(resources[0].capacity["vram_total_bytes"], 16384 * 1048576)
+        self.assertEqual(resources[0].capacity["vram_free_bytes"], 8192 * 1048576)
+        self.assertEqual(resources[0].source, "r3:local-nvidia-smi")
+        self.assertEqual(run.call_args.kwargs["timeout"], 3)
+
+    def test_nvidia_probe_absent_or_unavailable_does_not_invent_gpu(self):
+        for error in (FileNotFoundError("nvidia-smi absent"), TimeoutError("timeout")):
+            with self.subTest(error=type(error).__name__):
+                with patch("runtime.grace_native_capabilities.subprocess.run", side_effect=error):
+                    self.assertEqual(list(local_nvidia_gpu_observations()), [])
+        with patch("runtime.grace_native_capabilities.subprocess.run",
+                   return_value=SimpleNamespace(returncode=1, stdout="", stderr="failure")):
+            self.assertEqual(list(local_nvidia_gpu_observations()), [])
+
+    def test_nvidia_probe_discards_invalid_capacity_rows(self):
+        result = SimpleNamespace(returncode=0,
+            stdout="GPU-1, GPU, 100, 101\\nGPU-2, GPU, invalid, 5\\nGPU-3, GPU, 50, 25\\n",
+            stderr="")
+        with patch("runtime.grace_native_capabilities.subprocess.run", return_value=result):
+            resources = list(local_nvidia_gpu_observations())
+        self.assertEqual([r.resource_id for r in resources], ["gpu:GPU-3"])
 
     def test_evidence_write_denied_without_grant(self):
         name = "r3.evidence.record"
