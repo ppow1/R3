@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/independent_reviewer.py
 # Component: R3-INDEPENDENT-REVIEWER
-# File Revision: 1.0.2
+# File Revision: 1.0.3
 # Created: 2026-11-03T01:37:00.460Z
 # Created By: Codex
 # Purpose: Evaluate durable assignments using independent read-only tool observations.
@@ -118,6 +118,9 @@ class IndependentReviewer:
             raise ValueError("Review request has no acceptance criteria")
         journal = self._observe_journal(request)
         descriptors = self.tools.discover()
+        # Independent review may observe but never execute resident writes.
+        descriptors = [item for item in descriptors if item.get("read_only") is True
+                       and item.get("operation", "read") == "read"]
         by_name = {item["tool"]: item for item in descriptors}
         definitions = [item["definition"] for item in descriptors]
         journal_id = "journal-event-" + str(request["source_event_id"])
@@ -169,7 +172,9 @@ class IndependentReviewer:
                 observation_id = "obs-" + str(next_observation)
                 next_observation += 1
                 try:
-                    raw = self.tools.invoke(by_name[name], params)
+                    raw = self.tools.invoke(
+                        by_name[name], params,
+                        correlation_id="review:" + str(request["id"]) + ":call:" + call_id)
                     value = json.loads(raw)
                     observations[observation_id] = {
                         "tool": name, "observed_at": time.time(), "result": value,
