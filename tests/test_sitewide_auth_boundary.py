@@ -7,7 +7,7 @@
 # Execution Model: Permanent source regression; unittest with FastAPI TestClient
 # Authority: Steward website-wide authentication requirement
 # Changed: 2026-11-04 UTC | R3-AUTH-GATE-001 | Add permanent anonymous access regression
-# Tests: Not executed; expected to FAIL against currently unprotected R3 source
+# Tests: Not executed; expected to FAIL against currently unprotected R3 source; dependencies mandatory
 """Regression gate: sensitive R3 content must not be anonymously accessible.
 
 This test intentionally fails until a real authenticated session boundary is
@@ -20,14 +20,13 @@ try:
     from fastapi.testclient import TestClient
     from r3_app import app
 except ImportError as exc:
-    TestClient = None
-    _IMPORT_ERROR = exc
+    raise RuntimeError("R3 authentication regression requires FastAPI and httpx; missing dependencies are not a pass") from exc
 
 
-@unittest.skipIf(TestClient is None, "FastAPI/TestClient dependency unavailable")
 class SitewideAuthBoundaryTests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app, follow_redirects=False)
+        self.addCleanup(self.client.close)
 
     def test_anonymous_estate_home_is_not_served(self):
         response = self.client.get("/")
@@ -47,6 +46,11 @@ class SitewideAuthBoundaryTests(unittest.TestCase):
                 response = self.client.get(route)
                 self.assertEqual(response.status_code, 401,
                                  f"Authentication must precede {route}")
+
+    def test_anonymous_artwork_index_is_not_disclosed(self):
+        response = self.client.get("/api/v1/artwork")
+        self.assertEqual(response.status_code, 401,
+                         "Artwork metadata is institutional content")
 
     def test_anonymous_snapshot_cannot_be_written(self):
         response = self.client.post("/api/v1/snapshot", json={})
