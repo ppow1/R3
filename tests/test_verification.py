@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_verification.py
 # Component: R3-VERIFICATION-LEARNING-REGRESSION
-# File Revision: 1.3.6
+# File Revision: 1.3.7
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanent regression for criterion identity and non-automatic learning changes.
@@ -19,7 +19,7 @@
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-013 | Permanent regression for authoritative assignment review status.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-015 | Test manager feedback dispatch after failed review.
 # Changed: 2026-11-03T02:24:59.876Z | R3-VERIFY-FEEDBACK-LOOP-001 | Codex | Test source context and recovery of undelivered review feedback.
-# Supersedes: None
+# Changed: 2026-11-04 UTC | R3-GRACE-FEEDBACK-RECOVERY-003 | ChatGPT GPT-6 | Cover adverse review through corrected independent acceptance.\n# Supersedes: revision 1.3.6
 # Contracts: hints/verification-and-learning.md
 # Tests: This file.
 # History/Predecessor: Git blob 37315a802a29d04f6961a7c8590b919633715399
@@ -304,6 +304,99 @@ class VerificationLedgerTests(unittest.TestCase):
         self.assertEqual(feedback[2]["objective"], "Restore the service")
         self.assertEqual(feedback[2]["review_request_id"], request)
         self.assertEqual(self.ledger.undelivered_review_feedback(), [])
+
+    def test_rejected_review_feedback_reaches_corrected_independently_accepted_completion(self):
+        """Permanent contract: adverse review leads to a new evidenced review, not self-acceptance."""
+        import asyncio
+        import json
+        from unittest.mock import Mock
+        from runtime.resident_inference import Inbox, ResidentInference
+
+        inbox = Inbox(self.db)
+        criteria = [{"id": "A", "version": "v1",
+                     "description": "Provide independently observable evidence"}]
+        assignment_id = "feedback-recovery-contract"
+        source = inbox.enqueue("Grace", "RESIDENT_ACTIVITY", {
+            "assignment_id": assignment_id,
+            "objective": "Establish an independently observable result",
+            "acceptance_criteria": criteria,
+        })
+        inbox.next("Grace")
+        inbox.finish(source, "COMPLETED", {"decision": {
+            "state": "complete", "evidence": "unsupported assertion",
+        }}, review={"assignment_id": assignment_id,
+                   "criteria": criteria, "evidence": "unsupported assertion"})
+
+        def adverse(_request):
+            return {"implementation_revision": "rev1", "findings": [{
+                "criterion_id": "A", "result": "INSUFFICIENT_EVIDENCE",
+                "reason": "Independent observation is missing", "evidence": {},
+            }]}
+
+        reviewer = IndependentReviewWorker(
+            self.ledger, "independent-reviewer", adverse, manager="Grace")
+        first = reviewer.process_pending()
+        self.assertEqual(first[0]["outcome"], "INCONCLUSIVE")
+        feedback_id = first[0]["feedback_event_id"]
+        self.assertEqual(self.db.execute(
+            "SELECT event_type FROM resident_inbox WHERE id=?",
+            (feedback_id,)).fetchone()[0], "REVIEW_FEEDBACK")
+        self.assertEqual(len(self.ledger.undelivered_review_feedback()), 0)
+
+        endpoint = Mock()
+        decisions = [
+            {"state": "continue", "next_step": "Collect independent observation",
+             "evidence": "Reviewer identified missing observation"},
+            {"state": "complete", "objective_verified": True,
+             "evidence": {"independent_observation": "observed after correction"}},
+        ]
+        endpoint.complete.side_effect = [
+            {"choices": [{"message": {"role": "assistant",
+                                      "content": json.dumps(decision)}}],
+             "model": "test"} for decision in decisions
+        ]
+        inference = ResidentInference(
+            inbox, endpoint, system_prompt="Test resident",
+            continuation_event_types=("REVIEW_FEEDBACK",))
+        asyncio.run(inference("Grace"))
+        first_result = json.loads(self.db.execute(
+            "SELECT result FROM resident_inbox WHERE id=?",
+            (feedback_id,)).fetchone()[0])
+        continuation_id = first_result["continuation_event_id"]
+        next_payload = json.loads(self.db.execute(
+            "SELECT payload FROM resident_inbox WHERE id=?",
+            (continuation_id,)).fetchone()[0])
+        self.assertEqual(next_payload["assignment_id"], assignment_id)
+        self.assertEqual(next_payload["acceptance_criteria"], criteria)
+        self.assertEqual(next_payload["review_outcome"], "INCONCLUSIVE")
+        asyncio.run(inference("Grace"))
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM resident_inbox WHERE id=?",
+            (continuation_id,)).fetchone()[0], "COMPLETED")
+        pending = self.ledger.pending_reviews()
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]["source_event_id"], continuation_id)
+        self.assertEqual(pending[0]["assignment_id"], assignment_id)
+
+        def independent_acceptance(request):
+            self.assertEqual(request["source_event_id"], continuation_id)
+            return {"implementation_revision": "rev2", "findings": [{
+                "criterion_id": "A", "result": "PASS",
+                "reason": "Independently observed corrected result",
+                "evidence": {"independent_observation": {"result": "observed"}},
+            }]}
+
+        accepted = IndependentReviewWorker(
+            self.ledger, "independent-reviewer", independent_acceptance,
+            manager="Grace").process_pending()
+        self.assertEqual(accepted[0]["outcome"], "ACCEPTED")
+        self.assertEqual(self.ledger.assignment_review_status(
+            assignment_id)["verification_status"], "ACCEPTED")
+        self.assertEqual(self.ledger.assignment_review_status(
+            assignment_id)["review_count"], 2)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM verification_feedback_delivery"
+        ).fetchone()[0], 1)
 
     def test_worker_failure_does_not_lose_pending_request(self):
         self.ledger.submit_review(42, "assignment", [{"id": "A"}], {})

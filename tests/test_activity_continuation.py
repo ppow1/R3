@@ -1,6 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_activity_continuation.py
 # Purpose: Permanent resident-neutral durable activity continuation regressions.
+# Changed: 2026-11-04 UTC | R3-GRACE-FEEDBACK-LOOP-002 | ChatGPT GPT-6 | Test repeated lineage and evidence progression.
 from __future__ import annotations
 import asyncio
 import json
@@ -62,6 +63,63 @@ class ActivityContinuationTests(unittest.TestCase):
         self.assertFalse(json.loads(third[0])["recovery_required"])
         sent = handler.endpoint.complete.call_args_list[2].args[0]
         self.assertIn("Recovery required", sent[0]["content"])
+
+    def test_repeated_observations_request_recovery_without_forced_failure(self):
+        self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY",
+                           {"objective": "Monitor authorized dependency"})
+        handler = self.handler([
+            {"state": "continue", "next_step": "Inspect A", "evidence": "unchanged"},
+            {"state": "continue", "next_step": "Inspect B", "evidence": "unchanged"},
+            {"state": "continue", "next_step": "Inspect A", "evidence": "unchanged"},
+        ])
+        for _ in range(3):
+            asyncio.run(handler("TestResident"))
+        rows = self.db.execute("SELECT status FROM resident_inbox ORDER BY id").fetchall()
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(rows[-1][0], "PENDING")
+        payload = json.loads(self.db.execute(
+            "SELECT payload FROM resident_inbox WHERE status='PENDING'"
+        ).fetchone()[0])
+        self.assertTrue(payload["recovery_required"])
+
+    def test_changed_evidence_allows_revisiting_step(self):
+        self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY",
+                           {"objective": "Investigate"})
+        handler = self.handler([
+            {"state": "continue", "next_step": "Inspect A", "evidence": "before"},
+            {"state": "continue", "next_step": "Inspect A", "evidence": "after"},
+        ])
+        asyncio.run(handler("TestResident"))
+        asyncio.run(handler("TestResident"))
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM resident_inbox WHERE status='PENDING'"
+        ).fetchone()[0], 1)
+
+    def test_repeated_status_with_changing_uptime_requests_recovery(self):
+        self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY",
+                           {"objective": "Determine actual readiness"})
+        handler = self.handler([
+            {"state": "continue", "next_step": "Check readiness", "evidence": "first"},
+            {"state": "continue", "next_step": "Check readiness again", "evidence": "second"},
+        ])
+        def record_tools(uptime):
+            event = self.db.execute(
+                "SELECT id FROM resident_inbox WHERE status='PENDING' ORDER BY id LIMIT 1"
+            ).fetchone()[0]
+            self.inbox.record(event, "TOOL_INTENT", {"tool_call_id": "status", "tool": "r3.status"})
+            self.inbox.record(event, "TOOL_RESULT", {"tool_call_id": "status", "content": '{"ready":false}'})
+            self.inbox.record(event, "TOOL_INTENT", {"tool_call_id": "uptime", "tool": "r3.host.uptime"})
+            self.inbox.record(event, "TOOL_RESULT", {"tool_call_id": "uptime", "content": json.dumps({"seconds": uptime})})
+        record_tools(123)
+        asyncio.run(handler("TestResident"))
+        record_tools(124)
+        asyncio.run(handler("TestResident"))
+        payload = json.loads(self.db.execute(
+            "SELECT payload FROM resident_inbox WHERE status='PENDING'"
+        ).fetchone()[0])
+        self.assertTrue(payload["recovery_required"])
+        self.assertIn("r3.status", payload["repeated_tool_observations"])
+        self.assertNotIn("r3.host.uptime", payload["repeated_tool_observations"])
 
     def test_regular_event_keeps_ordinary_response(self):
         event = self.inbox.enqueue("TestResident", "CONVERSATION", {"text": "hello"})

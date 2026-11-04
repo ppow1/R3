@@ -13,6 +13,7 @@
 # Changed: 2026-11-02 UTC | R3-GRACE-004 | Durable tool-call continuation with fail-closed recovery
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-005 | Atomically queue review on completion with explicit criteria.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-006 | Preserve assignment metadata across activity continuation.
+# Changed: 2026-11-04 UTC | R3-GRACE-FEEDBACK-LOOP-002 | ChatGPT GPT-6 | Durable lineage repetition detection and blocked outcome.
 # Changed: 2026-11-03 UTC | R3-GRACE-RECOVERY-001 | Persist ineffective continuation signal and request alternative method.
 # Supersedes: revision 1.3.1
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; hints/engineering-test-policy.md
@@ -228,7 +229,21 @@ class ResidentInference:
                 "step without new evidence. Reassess the objective, inspect prior "
                 "results, and select a materially different authorized method. "
                 "Do not claim completion without verified acceptance evidence. "
-                "If no authorized alternative exists, report the actual dependency."
+                "If no authorized alternative exists, report the actual dependency. "
+                "A repeated tool observation is not objective progress, even if "
+                "other observations such as uptime change. "
+                "Do not repeat the same inspection as a substitute for action."
+            )
+            repeated_tools = payload.get("repeated_tool_observations")
+            if isinstance(repeated_tools, list) and repeated_tools:
+                continuity_contract += (
+                    "\\nPreviously unchanged tool observations: "
+                    + json.dumps([name for name in repeated_tools if isinstance(name, str)])
+                    + ". Identify the unmet acceptance condition and a different "
+                    "authorized action or an explicit external dependency."
+                )
+            continuity_contract += (""
+
             )
         if event_type == "CONVERSATION_MESSAGE":
             if self.conversation_store is None:
@@ -277,21 +292,55 @@ class ResidentInference:
                         next_step = decision.get("next_step")
                         if not isinstance(next_step, str) or not next_step.strip():
                             raise RuntimeError("Continuing activity requires next_step")
-                        previous_step = payload.get("next_step")
-                        previous_decision = payload.get("previous_result")
-                        repeated_without_evidence = (
-                            isinstance(previous_step, str)
-                            and previous_step.strip().casefold() == next_step.strip().casefold()
-                            and isinstance(previous_decision, dict)
-                            and previous_decision.get("evidence") == decision.get("evidence")
-                        )
+                        # Durable evidence lineage is independent of the wording
+                        # of the proposed next step. This catches alternating or
+                        # rephrased plans that recycle the same claimed evidence.
+                        import hashlib
+                        evidence_key = hashlib.sha256(
+                            json.dumps(decision.get("evidence"), sort_keys=True,
+                                       default=str).encode()
+                        ).hexdigest()
+                        previous = payload.get("continuation_evidence", [])
+                        if not isinstance(previous, list):
+                            previous = []
+                        previous = [x for x in previous if isinstance(x, str)]
+                        # A model's evidence text is not proof of external progress.
+                        # Record whether tool output has repeated across turns.
+                        observed = []
+                        tool_names = {}
+                        for kind, item in self.inbox.history(event_id):
+                            if kind == "TOOL_INTENT":
+                                tool_names[item.get("tool_call_id")] = item.get("tool")
+                            elif kind == "TOOL_RESULT":
+                                name = tool_names.get(item.get("tool_call_id"), "unknown")
+                                output = item.get("content", "")
+                                if not isinstance(output, str):
+                                    output = json.dumps(output, sort_keys=True, default=str)
+                                observed.append([name, hashlib.sha256(output.encode()).hexdigest()])
+                        prior_observations = payload.get("continuation_observations", [])
+                        if not isinstance(prior_observations, list):
+                            prior_observations = []
+                        repeated_tools = sorted({name for name, digest in observed
+                                                 if [name, digest] in prior_observations})
+                        repeated_without_evidence = evidence_key in previous
+                        if repeated_tools:
+                            repeated_without_evidence = True
+                        recovery_required = repeated_without_evidence
+                        # Repeated observations request recovery, but do not
+                        # automatically fail an objective: monitoring may be
+                        # legitimate and an unchanged result is not a blocker.
+                        # The resident must explicitly report state=blocked
+                        # when no authorized alternative exists.
                         self.inbox.continue_activity(event_id, resident, event_type, {
                             **payload,
                             "objective": payload.get("objective", payload),
                             "previous_event_id": event_id,
                             "previous_result": decision,
                             "next_step": next_step,
-                            "recovery_required": repeated_without_evidence,
+                            "continuation_evidence": [*previous, evidence_key],
+                            "continuation_observations": prior_observations + observed,
+                            "repeated_tool_observations": repeated_tools,
+                            "recovery_required": recovery_required,
                         }, {"decision": decision, "model": result.get("model")})
                         return
                     # An inbox turn is not the same thing as a verified objective.
