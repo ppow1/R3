@@ -1,0 +1,23 @@
+.steward-authority-panel {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  border: 1px solid rgba(150,170,200,.3);
+  border-radius: 10px;
+}
+.steward-authority-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin: 1rem 0;
+}
+.steward-authority-tabs button {
+  padding: .5rem 1rem;
+  cursor: pointer;
+}
+#steward-authority-status {
+  margin: .75rem 0;
+}
+#steward-authority-results pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
