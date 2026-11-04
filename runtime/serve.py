@@ -137,10 +137,23 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
             raise ConfigurationError("Independent reviewer must have a distinct identity from every resident")
         if reviewer_settings["manager"] not in registered:
             raise ConfigurationError("Reviewer manager must be a registered resident")
+        reviewer_credential_file = reviewer_settings["tools"].get("credential_file")
+        reviewer_credential_provider = None
+        if reviewer_credential_file is not None:
+            def reviewer_credential_provider(path=Path(reviewer_credential_file)):
+                token = path.read_text(encoding="utf-8")
+                if token.endswith("\r\n"):
+                    token = token[:-2]
+                elif token.endswith("\n"):
+                    token = token[:-1]
+                if not token or token != token.strip() or "\n" in token or "\r" in token:
+                    raise ValueError("Reviewer credential file must contain one unmodified token")
+                return token
         reviewer_tools = NativeTools(
             reviewer_settings["tools"]["endpoint"],
             timeout=reviewer_settings["tools"]["timeout_seconds"],
             allowed_tools=tuple(reviewer_settings["tools"]["allowed_tools"]),
+            credential_provider=reviewer_credential_provider,
         )
         reviewer_endpoint = InferenceEndpoint(
             reviewer_settings["inference"]["endpoint"],
