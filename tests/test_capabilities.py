@@ -46,7 +46,7 @@ class CapabilityTests(unittest.TestCase):
             self.registry.invoke("r3.example", {"scope_ref": "office:grace"},
                                  correlation_id="call-2")
         self.assertFalse(self.executions)
-        self.assertEqual(self.events[-1]["outcome"], "FAILED")
+        self.assertEqual(self.events[-1]["outcome"], "DENIED")
 
     def test_unregistered_capability_denied(self):
         with self.assertRaises(CapabilityDenied):
