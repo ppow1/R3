@@ -62,6 +62,36 @@ class NativeGovernedClientTests(unittest.TestCase):
         self.assertEqual(db.execute(
             "SELECT status FROM resident_inbox WHERE id=?", (event_id,)).fetchone()[0], "COMPLETED")
 
+    def test_resident_rejects_duplicate_tool_call_id_in_one_objective(self):
+        import asyncio
+        import json
+        import sqlite3
+        from unittest.mock import Mock
+        from runtime.resident_inference import Inbox, ResidentInference
+        db = sqlite3.connect(":memory:")
+        self.addCleanup(db.close)
+        inbox = Inbox(db)
+        event_id = inbox.enqueue("Grace", "RESIDENT_ACTIVITY", {"objective": "Read status"})
+        call = {"id": "same-call", "type": "function", "function": {
+            "name": "r3.operations.write", "arguments": '{"scope_ref":"office:operations"}'}}
+        endpoint = Mock()
+        endpoint.complete.side_effect = [
+            {"choices": [{"message": {"role": "assistant", "content": None,
+                                      "tool_calls": [call]}}]},
+            {"choices": [{"message": {"role": "assistant", "content": None,
+                                      "tool_calls": [call]}}]},
+        ]
+        tools = Mock()
+        tools.discover.return_value = [self.descriptor]
+        tools.invoke.return_value = json.dumps({"status": "ok"})
+        handler = ResidentInference(inbox, endpoint, system_prompt="Grace",
+                                    tools=tools, continuation_event_types=("RESIDENT_ACTIVITY",))
+        with self.assertRaisesRegex(RuntimeError, "Repeated durable tool-call ID"):
+            asyncio.run(handler("Grace"))
+        self.assertEqual(tools.invoke.call_count, 1)
+        self.assertEqual(db.execute("SELECT status FROM resident_inbox WHERE id=?",
+                                    (event_id,)).fetchone()[0], "FAILED")
+
     def test_no_credential_never_forwards_write(self):
         client = NativeTools("http://127.0.0.1:9000", 5, ("r3.operations.write",))
         with patch.object(NativeTools, "_request") as request:
