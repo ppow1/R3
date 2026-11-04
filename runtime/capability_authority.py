@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/capability_authority.py
 # Component: R3-CANONICAL-CAPABILITY-AUTHORITY
-# File Revision: 2.1.0
+# File Revision: 2.1.1
 # Created: 2026-11-04 UTC (original file date; exact creation time unknown)
 # Created By: Unknown (original provenance not independently established)
 # Purpose: The one R3-native grant database, additive migration, exact effective-grant checks and audit.
@@ -13,6 +13,7 @@
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-009 | Add resource/read-write/revocation/parent grant fields without new database.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-014 | Retain actual delegation reason with separate idempotency key.
 # Changed: 2026-11-04 UTC | R3-GRACE-ID-001 | Store separate resident service credentials in same canonical R3 DB.
+# Changed: 2026-11-04 UTC | R3-GRACE-ID-003 | Make credential issuance idempotent, no credential auto-provision.
 # Supersedes: Earlier untyped R3 schema; existing grant rows retained but NOT auto-authorized.
 # Contracts: docs/r3-native-tool-contract.md; issues #16 and #28.
 # Tests: tests/test_capability_authority.py; tests/test_grant_management.py
@@ -89,7 +90,8 @@ def initialize_empty_schema(database: str | Path) -> None:
         db.execute("""CREATE TABLE IF NOT EXISTS resident_credentials (
             credential_id TEXT PRIMARY KEY, principal TEXT NOT NULL,
             secret_hash TEXT NOT NULL UNIQUE, created_at REAL NOT NULL,
-            expires_at REAL NOT NULL, revoked_at REAL, issued_by TEXT NOT NULL)""")
+            expires_at REAL NOT NULL, revoked_at REAL, issued_by TEXT NOT NULL,
+            idempotency_key TEXT NOT NULL UNIQUE)""")
         db.execute("""CREATE TABLE IF NOT EXISTS capability_management_audit (
             id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL,
             actor TEXT NOT NULL, event TEXT NOT NULL,
