@@ -101,6 +101,14 @@ class StewardAuthorityRegressionTests(unittest.TestCase):
         self.assertIn("steward-authority.js", page)
         self.assertIn("steward-authority.css", page)
 
+    def test_expired_and_revoked_tabs_use_disjoint_termination_reasons(self):
+        """Release guard: revocation precedence, not the inactive bit."""
+        source = (ROOT / "web/steward-authority.js").read_text(encoding="utf-8")
+        self.assertIn('record.revoked_at == null &&', source)
+        self.assertIn('Number(record.expires_at) <= now', source)
+        self.assertIn('rows.filter(record => record.revoked_at != null)', source)
+        self.assertNotIn('Number(record.active) === 0', source)
+
     def test_authority_assets_exist(self):
         self.assertTrue(
             (ROOT / "web/steward-authority.js").is_file()
