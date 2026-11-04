@@ -1,12 +1,13 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/tool_server.py
 # Component: R3-NATIVE-TOOL-SERVER
-# File Revision: 1.2.0
+# File Revision: 1.3.0
 # Created: 2026-11-02 UTC
 # Purpose: R3 tool router with optional authenticated server-enforced resident capability execution.
 # Contracts: docs/r3-native-tool-contract.md
 # Tests: tests/test_tool_server.py; tests/test_governed_tools.py
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-002 | Optional canonical-grant resident gateway, no default grant activation.
+# Changed: 2026-11-04 UTC | R3-GRACE-ID-006 | Explicit opt-in CLI wiring for canonical resident auth and operational tools.
 # History/Predecessor: Git blob ce6832254a195c67eb846036ba244f8a4bcb02f0
 """R3 native tool server: legacy read-only tools, optional authenticated gateway."""
 from __future__ import annotations
@@ -20,7 +21,10 @@ import threading
 import time
 from runtime.host_execution import HostExecutor
 from runtime.capabilities import CapabilityDenied
-from runtime.governed_tools import GovernedToolGateway, UncertainWrite
+from runtime.governed_tools import (GovernedToolGateway, UncertainWrite, ExecutionAttemptLedger)
+from runtime.capability_authority import R3Authority
+from runtime.resident_identity import R3ResidentIdentity
+from runtime.grace_native_capabilities import (register_grace_operational_tools, EvidenceJournal)
 
 STATUS = {"tool": "r3.status", "read_only": True, "definition": {
     "type": "function", "function": {"name": "r3.status",
@@ -115,12 +119,40 @@ def main():
     parser.add_argument("--audit-db", type=Path, required=True)
     parser.add_argument("--catalog", type=Path)
     parser.add_argument("--hosts", type=Path)
+    parser.add_argument("--authority-db", type=Path, help="Existing canonical R3 authority database (explicit opt-in)")
+    parser.add_argument("--institution-db", type=Path, help="Existing R3 institution journal for governed evidence writes")
     args = parser.parse_args()
     if args.hosts and not args.catalog:
         parser.error("--hosts requires --catalog")
+    if args.institution_db and not args.authority_db:
+        parser.error("--institution-db requires --authority-db")
     if args.host not in ("127.0.0.1", "::1", "localhost"):
         parser.error("Initial native tool server is loopback-only")
-    ThreadingHTTPServer((args.host, args.port), handler_for(ToolRouter(args.audit_db, HostExecutor(args.catalog, args.hosts) if args.catalog else None))).serve_forever()
+    gateway = None
+    ledger_connection = None
+    if args.authority_db is not None:
+        # No schema creation or implicit grant issuance at server startup.
+        authority = R3Authority(args.authority_db)
+        identity = R3ResidentIdentity(authority)
+        args.audit_db.parent.mkdir(parents=True, exist_ok=True)
+        ledger_connection = sqlite3.connect(str(args.audit_db), check_same_thread=False)
+        gateway = GovernedToolGateway(
+            identity_resolver=identity.authenticate,
+            verifier=authority,
+            audit=authority.audit,
+            write_ledger=ExecutionAttemptLedger(ledger_connection, threading.Lock()),
+        )
+        evidence = EvidenceJournal(args.institution_db) if args.institution_db else None
+        register_grace_operational_tools(gateway, evidence_journal=evidence)
+    router = ToolRouter(args.audit_db,
+        HostExecutor(args.catalog, args.hosts) if args.catalog else None,
+        governed=gateway)
+    try:
+        ThreadingHTTPServer((args.host, args.port), handler_for(router)).serve_forever()
+    finally:
+        router.db.close()
+        if ledger_connection is not None:
+            ledger_connection.close()
 
 
 if __name__ == "__main__":
