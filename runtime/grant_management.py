@@ -381,7 +381,12 @@ class R3GrantManagement:
         with self.authority._connect() as db:
             sql = "SELECT * FROM capability_grants"
             if active_only:
-                sql += " WHERE active=1 AND revoked_at IS NULL"
+                sql += """ WHERE active=1 AND revoked_at IS NULL
+                    AND (effective_at IS NULL OR effective_at <= ?)
+                    AND (expires_at IS NULL OR expires_at > ?)"""
+                now = time.time()
+                return _as_dict(db.execute(
+                    sql + " ORDER BY created_at DESC, grant_id", (now, now)))
             return _as_dict(db.execute(sql + " ORDER BY created_at DESC, grant_id"))
 
     def list_requests(self, *, steward_context: object,
