@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/governed_tools.py
 # Component: R3-GRACE-GOVERNED-EXECUTION
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-04 UTC (date precision only)
 # Created By: ChatGPT GPT-6
 # Purpose: Authenticated, server-enforced resident tool execution using the ONE shared R3 authority verifier.
@@ -10,6 +10,7 @@
 # Dependencies: Python stdlib; Website-owned R3 identity resolver and canonical grant verifier.
 # Authority: Steward unified R3 integration directive; no R2 imports or implicit grants.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-001 | Add resident execution enforcement and uncertain-write protection.
+# Changed: 2026-11-04 UTC | R3-GRACE-AUTH-006 | Include trusted action in advertised descriptor.
 # Supersedes: None
 # Contracts: docs/r3-native-tool-contract.md; GitHub issues #16 and #28.
 # Tests: tests/test_governed_tools.py
@@ -145,6 +146,7 @@ class GovernedToolGateway:
     def discover(self) -> list[dict]:
         return [{"tool": c.name, "read_only": c.operation == "read",
                  "resource_id": c.resource_id, "operation": c.operation,
+                 "action": c.action,
                  "definition": {"type": "function", "function": {
                      "name": c.name, "description": c.description,
                      "parameters": c.parameters}}}
