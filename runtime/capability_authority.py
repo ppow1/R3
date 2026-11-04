@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/capability_authority.py
 # Component: R3-CANONICAL-CAPABILITY-AUTHORITY
-# File Revision: 2.0.1
+# File Revision: 2.1.0
 # Created: 2026-11-04 UTC (original file date; exact creation time unknown)
 # Created By: Unknown (original provenance not independently established)
 # Purpose: The one R3-native grant database, additive migration, exact effective-grant checks and audit.
@@ -12,6 +12,7 @@
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-001 | Original exact-grant verifier and empty schema.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-009 | Add resource/read-write/revocation/parent grant fields without new database.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-014 | Retain actual delegation reason with separate idempotency key.
+# Changed: 2026-11-04 UTC | R3-GRACE-ID-001 | Store separate resident service credentials in same canonical R3 DB.
 # Supersedes: Earlier untyped R3 schema; existing grant rows retained but NOT auto-authorized.
 # Contracts: docs/r3-native-tool-contract.md; issues #16 and #28.
 # Tests: tests/test_capability_authority.py; tests/test_grant_management.py
@@ -85,6 +86,10 @@ def initialize_empty_schema(database: str | Path) -> None:
             reason TEXT NOT NULL, status TEXT NOT NULL,
             decided_by TEXT, decision_at REAL, grant_id TEXT,
             idempotency_key TEXT NOT NULL UNIQUE)""")
+        db.execute("""CREATE TABLE IF NOT EXISTS resident_credentials (
+            credential_id TEXT PRIMARY KEY, principal TEXT NOT NULL,
+            secret_hash TEXT NOT NULL UNIQUE, created_at REAL NOT NULL,
+            expires_at REAL NOT NULL, revoked_at REAL, issued_by TEXT NOT NULL)""")
         db.execute("""CREATE TABLE IF NOT EXISTS capability_management_audit (
             id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL,
             actor TEXT NOT NULL, event TEXT NOT NULL,
@@ -107,6 +112,7 @@ class R3Authority:
                            correlation_id,grant_id,outcome,resource_ref,operation
                            FROM capability_audit LIMIT 0""")
                 db.execute("SELECT request_id FROM capability_requests LIMIT 0")
+                db.execute("SELECT credential_id FROM resident_credentials LIMIT 0")
                 db.execute("SELECT id FROM capability_management_audit LIMIT 0")
         except sqlite3.Error as exc:
             raise AuthorityUnavailable("R3 canonical authority schema unavailable") from exc
@@ -166,7 +172,9 @@ class R3Authority:
                 raise CapabilityDenied("Delegation parent expired")
             if (parent["effective_at"] is not None and parent["effective_at"] > now):
                 raise CapabilityDenied("Delegation parent not effective")
-            if (parent["principal"] != child["issued_by"] or
+            if (not isinstance(parent["approved_by"], str) or
+                not parent["approved_by"].startswith("human:steward:") or
+                parent["principal"] != child["issued_by"] or
                 parent["resource_ref"] != child["resource_ref"] or
                 parent["action"] != child["action"] or
                 parent["operation"] != child["operation"] or
