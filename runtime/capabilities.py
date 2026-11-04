@@ -1,6 +1,9 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/capabilities.py
-# Purpose: Native R3 capability catalog and fail-closed invocation.
+# Purpose: Native R3 capability catalog and fail-closed exact read/write invocation.
+# Component: R3-NATIVE-CAPABILITY-REGISTRY
+# File Revision: 2.0.0
+# Changed: 2026-11-04 UTC | R3-GRACE-AUTH-011 | Require resource/operation in canonical grants; predecessor blob recorded in Git.
 """R3-owned capability contracts. No R2 imports, services, or database access."""
 from __future__ import annotations
 
@@ -17,7 +20,8 @@ class AuthorityUnavailable(CapabilityDenied):
 
 
 class GrantVerifier(Protocol):
-    def authorize(self, *, principal: str, action: str, scope_ref: str) -> dict:
+    def authorize(self, *, principal: str, resource_id: str, action: str,
+                  operation: str, scope_ref: str) -> dict:
         """Return verified active grant evidence or raise CapabilityDenied."""
 
 
@@ -29,6 +33,8 @@ class Capability:
     parameters: dict
     executor: Callable[[dict], object]
     read_only: bool = False
+    resource_id: str = ""
+    operation: str = ""
 
 
 class CapabilityRegistry:
@@ -43,7 +49,10 @@ class CapabilityRegistry:
         self._capabilities: dict[str, Capability] = {}
 
     def register(self, capability: Capability) -> None:
-        if not capability.name or not capability.action or not callable(capability.executor):
+        if (not capability.name or not capability.action or not capability.resource_id
+                or capability.operation not in ("read", "write")
+                or capability.read_only is not (capability.operation == "read")
+                or not callable(capability.executor)):
             raise ValueError("Invalid capability")
         if capability.name in self._capabilities:
             raise ValueError("Duplicate capability")
@@ -52,6 +61,8 @@ class CapabilityRegistry:
     def discover(self) -> list[dict]:
         # Discovery is metadata only; it does not grant execution authority.
         return [{"tool": cap.name, "read_only": cap.read_only,
+                 "resource_id": cap.resource_id, "operation": cap.operation,
+                 "action": cap.action,
                  "definition": {"type": "function", "function": {
                      "name": cap.name, "description": cap.description,
                      "parameters": cap.parameters}}}
@@ -67,10 +78,13 @@ class CapabilityRegistry:
         if cap is None:
             raise CapabilityDenied("Unregistered capability")
         event = {"principal": self.principal, "capability": name, "action": cap.action,
+                 "resource_id": cap.resource_id, "operation": cap.operation,
                  "scope_ref": scope, "correlation_id": correlation_id, "outcome": "DENIED"}
         try:
             evidence = self.verifier.authorize(principal=self.principal,
-                                               action=cap.action, scope_ref=scope)
+                                               resource_id=cap.resource_id,
+                                               action=cap.action, operation=cap.operation,
+                                               scope_ref=scope)
             if not isinstance(evidence, dict) or not evidence.get("grant_id"):
                 raise AuthorityUnavailable("Missing grant evidence")
             event["grant_id"] = evidence["grant_id"]
@@ -91,5 +105,6 @@ class CapabilityRegistry:
         self.audit(dict(event))
         return {"status": "ok", "authorization": {
             "principal_id": self.principal, "grant_id": evidence["grant_id"],
-            "action": cap.action, "scope_ref": scope},
+            "resource_id": cap.resource_id, "action": cap.action,
+            "operation": cap.operation, "scope_ref": scope},
             "correlation_id": correlation_id, "result": result}
