@@ -17,6 +17,7 @@ import sqlite3
 import threading
 import time
 from runtime.host_execution import HostExecutor
+from runtime.r2_capabilities import R2Capabilities
 
 STATUS = {"tool": "r3.status", "read_only": True, "definition": {
     "type": "function", "function": {"name": "r3.status",
@@ -25,22 +26,48 @@ STATUS = {"tool": "r3.status", "read_only": True, "definition": {
 
 
 class ToolRouter:
-    def __init__(self, database: Path, executor: HostExecutor | None = None):
+    def __init__(self, database: Path, executor: HostExecutor | None = None, capabilities: R2Capabilities | None = None):
         self.executor = executor
+        self.capabilities = capabilities
         database.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(database), check_same_thread=False)
         self.lock = threading.Lock()
         self.db.execute("CREATE TABLE IF NOT EXISTS tool_audit (id INTEGER PRIMARY KEY, at REAL NOT NULL, tool TEXT NOT NULL, outcome TEXT NOT NULL)")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS capability_audit (
+            id INTEGER PRIMARY KEY, at REAL NOT NULL, tool TEXT NOT NULL,
+            scope_ref TEXT, principal_id TEXT, grant_id TEXT,
+            outcome TEXT NOT NULL)""")
         self.db.commit()
 
     def discover(self):
-        return [STATUS] + (self.executor.discover() if self.executor else [])
+        return ([STATUS] + (self.executor.discover() if self.executor else []) +
+                (self.capabilities.discover() if self.capabilities else []))
 
     def invoke(self, payload):
         name = payload.get("tool") if isinstance(payload, dict) else None
         params = payload.get("params") if isinstance(payload, dict) else None
         allowed = (name == "r3.status" and params == {}) or (
             self.executor is not None and name in self.executor.tools and params == {})
+        if self.capabilities is not None and isinstance(name, str) and name != "r3.status" and (
+                self.executor is None or name not in self.executor.tools):
+            scope = params.get("scope_ref") if isinstance(params, dict) else None
+            envelope = None
+            try:
+                envelope = self.capabilities.invoke(name, params)
+                code, outcome = 200, "OK"
+                result = {"ok": True, "result": envelope}
+            except Exception:
+                code, outcome = 403, "DENIED"
+                result = {"ok": False, "error": "Capability authorization or execution failed"}
+            auth = envelope.get("authorization", {}) if isinstance(envelope, dict) else {}
+            with self.lock:
+                self.db.execute("""INSERT INTO capability_audit
+                    (at,tool,scope_ref,principal_id,grant_id,outcome)
+                    VALUES (?,?,?,?,?,?)""",
+                    (time.time(), name, scope if isinstance(scope, str) else None,
+                     auth.get("principal_id"), auth.get("grant_id"), outcome))
+                self.db.commit()
+            return code, result
         if not allowed:
             code, outcome, result = 403, "DENIED", {"ok": False, "error": "Tool or arguments not authorized"}
         elif name == "r3.status":
