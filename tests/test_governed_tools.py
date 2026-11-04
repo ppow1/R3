@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_governed_tools.py
 # Component: R3-GRACE-GOVERNED-EXECUTION-REGRESSION
-# File Revision: 1.0.0
+# File Revision: 1.1.0
 # Created: 2026-11-04 UTC (date precision only)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanent resident read/write grant, identity, audit and no-replay tests.
@@ -10,6 +10,7 @@
 # Dependencies: Python stdlib; runtime/governed_tools.py, runtime/tool_server.py.
 # Authority: Steward R3 unified integration, issues #16 and #28.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-004 | Add reusable authorization boundary tests.
+# Changed: 2026-11-04 UTC | R3-GRACE-AUTH-007 | Verify all executors receive authenticated context.
 # Supersedes: None
 # Contracts: docs/r3-native-tool-contract.md
 # Tests: python -m unittest tests.test_governed_tools -v
@@ -77,11 +78,11 @@ class GovernedToolTests(unittest.TestCase):
         self.gateway.register(GovernedCapability(
             "r3.operations.read", "resource:operations", "report", "read",
             "Read operations", {"type": "object", "required": ["scope_ref"]},
-            lambda p: {"value": "ok"}))
+            lambda p, ctx: {"value": "ok", "principal": ctx.principal}))
         self.gateway.register(GovernedCapability(
             "r3.operations.write", "resource:operations", "report", "write",
             "Record operations", {"type": "object", "required": ["scope_ref"]},
-            lambda p: self.effects.append(p["scope_ref"]) or {"changed": True}))
+            lambda p, ctx: self.effects.append((p["scope_ref"], ctx.principal)) or {"changed": True}))
         self.router = ToolRouter(path / "tool_audit.db", governed=self.gateway)
         self.addCleanup(self.router.db.close)
 
@@ -97,6 +98,7 @@ class GovernedToolTests(unittest.TestCase):
         status, result = self.call("read")
         self.assertEqual(status, 200)
         self.assertEqual(result["result"]["authorization"]["operation"], "read")
+        self.assertEqual(result["result"]["result"]["principal"], "resident:grace")
         self.assertEqual(self.call("write")[0], 403)
         self.assertFalse(self.effects)
 
@@ -106,7 +108,7 @@ class GovernedToolTests(unittest.TestCase):
         status, result = self.call("write")
         self.assertEqual(status, 200)
         self.assertEqual(result["result"]["authorization"]["principal_id"], "resident:grace")
-        self.assertEqual(self.effects, ["office:operations"])
+        self.assertEqual(self.effects, [("office:operations", "resident:grace")])
 
     def test_no_grants_deny_both_even_when_discoverable(self):
         self.assertIn("r3.operations.write", [d["tool"] for d in self.router.discover()])
@@ -150,8 +152,8 @@ class GovernedToolTests(unittest.TestCase):
 
     def test_uncertain_write_is_not_replayed(self):
         self.authority.provision("resident:grace", "write")
-        def uncertain(params):
-            self.effects.append(params["scope_ref"])
+        def uncertain(params, context):
+            self.effects.append((params["scope_ref"], context.principal))
             raise OSError("Result acknowledgement lost")
         self.gateway._capabilities["r3.operations.write"] = GovernedCapability(
             "r3.operations.write", "resource:operations", "report", "write",
