@@ -8,6 +8,7 @@ from runtime.resource_registry import Resource, ResourceRegistry
 # Grace-native resource registry CI module until the workflow list is expanded.
 from tests.test_capacity_assessment import CapacityAssessmentTests
 from tests.test_grace_capacity_work import CapacityWorkTests
+from tests.test_grace_capacity_resident import CapacityResidentTests
 
 class ResourceRegistryTests(unittest.TestCase):
     def test_stale_resource_never_claimed_usable(self):
