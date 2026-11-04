@@ -49,7 +49,8 @@ with tempfile.TemporaryDirectory() as tmp:
     authority = R3Authority(db)
     try:
         authority.authorize(principal='resident:grace',
-                            action='office.update', scope_ref='office:grace')
+                            resource_id='resource:office', action='office.update',
+                            operation='write', scope_ref='office:grace')
     except CapabilityDenied:
         pass
     else:
