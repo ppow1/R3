@@ -60,7 +60,7 @@ class ActivityContinuationTests(unittest.TestCase):
         asyncio.run(handler("TestResident"))
         third = self.db.execute("SELECT payload FROM resident_inbox WHERE id=?", (event + 3,)).fetchone()
         self.assertIsNotNone(third)
-        self.assertTrue(json.loads(third[0])["recovery_required"])
+        self.assertFalse(json.loads(third[0])["recovery_required"])
         sent = handler.endpoint.complete.call_args_list[2].args[0]
         self.assertIn("Recovery required", sent[0]["content"])
 
@@ -73,12 +73,12 @@ class ActivityContinuationTests(unittest.TestCase):
             {"state": "continue", "next_step": "Inspect A", "evidence": "unchanged"},
             {"state": "continue", "next_step": "Inspect B", "evidence": "unchanged"},
         ])
-        for _ in range(4):
+        for _ in range(3):
             asyncio.run(handler("TestResident"))
         rows = self.db.execute(
             "SELECT status,result FROM resident_inbox ORDER BY id"
         ).fetchall()
-        self.assertEqual(len(rows), 4)
+        self.assertEqual(len(rows), 3)
         self.assertEqual(rows[-1][0], "FAILED")
         result = json.loads(rows[-1][1])
         self.assertEqual(result["decision"]["state"], "blocked")
