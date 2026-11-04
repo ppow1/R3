@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -10,12 +10,13 @@ Execution Model: N/A
 Observability: N/A
 Dependencies: hints/README.md
 Authority: R3 engineering navigation, subordinate to approved charter
+Changed: 2026-11-04 UTC | R3-GRANT-RUNBOOK-MIGRATION | ChatGPT GPT-6 | Direct all new grant/delegation runbooks to R3
 Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Index resident avatar implementation notes
 Changed: 2026-10-31 UTC | R3-COMMS-001 | ChatGPT GPT-6 | Index mandatory Comms incident capture
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Manual source inspection; automated validation pending
-History/Predecessor: Git blob 1a12ce31f4882b916babbf85120fe06e8b1d10b2
+History/Predecessor: Git blob 27ad852c7f9fdf2e11404031128bf9c192979376
 -->
 # AI_HINTS.md — Riverview 3
 
@@ -28,6 +29,8 @@ When adding project knowledge, **store the substantive document in `hints/` and 
 Start with [the hints index](hints/README.md). Keep this root file short; put detailed guidance in `hints/` and link onward to authoritative documents.
 
 **Riverview Comms:** For every failed or blocked operation, follow [Comms failure recording and recovery](hints/comms-failure-recovery.md) and create/update a durable incident with a punch-list reference. Record preflight blocks even when no command was submitted.
+
+**Runbook ownership:** All NEW Riverview 3 engineering and operational runbooks, including grants and delegations, must be created or updated in `ppow1/R3` only. `ppow1/Riverview-` is historical/reference material, not the destination for new R3 runbooks. See [Command Access Grants and Delegations](docs/runbooks/COMMAND_ACCESS_GRANTS_AND_DELEGATIONS.md). Do not silently update legacy runbooks.
 
 ## Essential rules
 
