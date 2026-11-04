@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.0.6
+File Revision: 1.0.7
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -10,6 +10,7 @@ Execution Model: N/A
 Observability: N/A
 Dependencies: hints/README.md
 Authority: R3 engineering navigation, subordinate to approved charter
+Changed: 2026-11-04 UTC | R3-RUNTIME-ROUTING-001 | ChatGPT GPT-6 | Index canonical live routing and auth runbook
 Changed: 2026-11-02 UTC | R3-MISTAKE-001 | ChatGPT GPT-6 | Index mistakes log and MCP autonomy failure case
 Changed: 2026-10-31 UTC | R3-COMMS-001 | ChatGPT GPT-6 | Index mandatory Comms incident capture
 Changed: 2026-11-01 UTC | R3-Q2-DOC-001 | ChatGPT GPT-6 | Index Q2 watched-folder runbook
@@ -17,7 +18,7 @@ Changed: 2026-11-01 UTC | R3-IMAGE-PUBLISH-001 | ChatGPT GPT-6 | Index verified 
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Manual source inspection; automated validation pending
-History/Predecessor: Git blob 3471309641de45c32c58e484fc9b1045a5c3dff1
+History/Predecessor: Git blob a3d9aa48e679ed07fe27ef9e31a283b55d582c8f
 -->
 # AI_HINTS.md — Riverview 3
 
@@ -49,6 +50,7 @@ Start with [the hints index](hints/README.md). Keep this root file short; put de
 - [Grace MCP autonomy milestone and Comms 3 architecture (2026-11-02)](hints/milestones/2026-11-02-grace-mcp-milestone.md) — verified Event 2 tool invocation, HTTP 400 continuation failure, R2 isolation, STDIO/LAN/external topology and follow-up investigations.
 - [Institutional architecture and durable state](hints/architecture.md)
 - [Deployment and command execution](hints/deployment.md)
+- **[R3 live runtime routing, service identification and authentication boundary](hints/r3-runtime-routing.md)** — read before website diagnostics or deployment; includes observed 404s, upstreams and legacy deploy-script warning.
 - [Q2 watched script queue: submit, dispatch, and retrieve results](hints/q2-script-queue.md)
 - [ChatGPT-generated image publishing: Download → A: → GitHub](hints/chatgpt-image-publishing.md)
 
