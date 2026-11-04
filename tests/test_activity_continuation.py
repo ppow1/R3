@@ -64,28 +64,23 @@ class ActivityContinuationTests(unittest.TestCase):
         sent = handler.endpoint.complete.call_args_list[2].args[0]
         self.assertIn("Recovery required", sent[0]["content"])
 
-    def test_alternating_ineffective_steps_eventually_block_durably(self):
-        event = self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY",
-                                   {"objective": "Resolve incident"})
+    def test_repeated_observations_request_recovery_without_forced_failure(self):
+        self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY",
+                           {"objective": "Monitor authorized dependency"})
         handler = self.handler([
             {"state": "continue", "next_step": "Inspect A", "evidence": "unchanged"},
             {"state": "continue", "next_step": "Inspect B", "evidence": "unchanged"},
             {"state": "continue", "next_step": "Inspect A", "evidence": "unchanged"},
-            {"state": "continue", "next_step": "Inspect B", "evidence": "unchanged"},
         ])
         for _ in range(3):
             asyncio.run(handler("TestResident"))
-        rows = self.db.execute(
-            "SELECT status,result FROM resident_inbox ORDER BY id"
-        ).fetchall()
-        self.assertEqual(len(rows), 3)
-        self.assertEqual(rows[-1][0], "FAILED")
-        result = json.loads(rows[-1][1])
-        self.assertEqual(result["decision"]["state"], "blocked")
-        self.assertEqual(result["objective_status"], "UNVERIFIED")
-        self.assertEqual(self.db.execute(
-            "SELECT count(*) FROM resident_inbox WHERE status='PENDING'"
-        ).fetchone()[0], 0)
+        rows = self.db.execute("SELECT status FROM resident_inbox ORDER BY id").fetchall()
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(rows[-1][0], "PENDING")
+        payload = json.loads(self.db.execute(
+            "SELECT payload FROM resident_inbox WHERE status='PENDING'"
+        ).fetchone()[0])
+        self.assertTrue(payload["recovery_required"])
 
     def test_changed_evidence_allows_revisiting_step(self):
         self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY",
