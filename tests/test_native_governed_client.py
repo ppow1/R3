@@ -92,6 +92,38 @@ class NativeGovernedClientTests(unittest.TestCase):
         self.assertEqual(db.execute("SELECT status FROM resident_inbox WHERE id=?",
                                     (event_id,)).fetchone()[0], "FAILED")
 
+    def test_uncertain_write_stays_processing_and_cannot_replay(self):
+        import asyncio
+        import json
+        import sqlite3
+        from unittest.mock import Mock
+        from runtime.resident_inference import Inbox, ResidentInference
+        db = sqlite3.connect(":memory:")
+        self.addCleanup(db.close)
+        inbox = Inbox(db)
+        event_id = inbox.enqueue("Grace", "RESIDENT_ACTIVITY", {"objective": "Record evidence"})
+        call = {"id": "write-call", "type": "function", "function": {
+            "name": "r3.operations.write", "arguments": '{"scope_ref":"office:operations"}'}}
+        endpoint = Mock()
+        endpoint.complete.return_value = {
+            "choices": [{"message": {"role": "assistant", "content": None,
+                                     "tool_calls": [call]}}]}
+        tools = Mock()
+        tools.discover.return_value = [self.descriptor]
+        tools.invoke.side_effect = RuntimeError("Network interrupted after dispatch")
+        handler = ResidentInference(inbox, endpoint, system_prompt="Grace",
+                                    tools=tools, continuation_event_types=("RESIDENT_ACTIVITY",))
+        asyncio.run(handler("Grace"))
+        self.assertEqual(db.execute(
+            "SELECT status FROM resident_inbox WHERE id=?", (event_id,)).fetchone()[0], "PROCESSING")
+        turns = db.execute(
+            "SELECT kind FROM resident_turns WHERE event_id=? ORDER BY seq", (event_id,)).fetchall()
+        self.assertIn(("RECONCILIATION_REQUIRED",), turns)
+        self.assertNotIn(("TOOL_RESULT",), turns)
+        asyncio.run(handler("Grace"))
+        self.assertEqual(tools.invoke.call_count, 1)
+        self.assertEqual(endpoint.complete.call_count, 1)
+
     def test_no_credential_never_forwards_write(self):
         client = NativeTools("http://127.0.0.1:9000", 5, ("r3.operations.write",))
         with patch.object(NativeTools, "_request") as request:
