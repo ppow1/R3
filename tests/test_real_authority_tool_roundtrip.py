@@ -210,8 +210,23 @@ class RealR3AuthorizationRoundtripTests(unittest.TestCase):
 
     def test_independent_reviewer_can_observe_authorized_read_but_not_write(self):
         from runtime.independent_reviewer import IndependentReviewer
-        self.approve("registry:local", "inventory.snapshot", "read", key="reviewer-read")
-        self.approve("journal:institution", "evidence.record", "write", key="reviewer-write")
+        reviewer_principal = "resident:independent-reviewer"
+        credential = self.management.issue_resident_credential(
+            steward_context="session-steward", resident_principal=reviewer_principal,
+            expires_at=time.time()+3600, reason="Independent reviewer fixture",
+            idempotency_key="independent-reviewer-credential")["credential"]
+        request = self.management.request(
+            steward_context="session-steward", target_principal=reviewer_principal,
+            resource_ref="registry:local", action="inventory.snapshot", operation="read",
+            scope_ref="institution:r3", reason="Independent read fixture",
+            idempotency_key="independent-reviewer-read")
+        self.management.decide(
+            steward_context="session-steward", request_id=request["request_id"],
+            approve=True, reason="Independent read-only review fixture")
+        reviewer_client = NativeTools(
+            self.client.base_url, timeout=3,
+            allowed_tools=("r3.resources.local_snapshot", "r3.evidence.record"),
+            credential_provider=lambda: credential)
         class Endpoint:
             def __init__(self):
                 self.count = 0
@@ -242,7 +257,7 @@ class RealR3AuthorizationRoundtripTests(unittest.TestCase):
         ledger = VerificationLedger(self.journal.db)
         request = ledger.submit_review(event, "review-read",
             [{"id": "inventory", "description": "Inventory observed"}], {"claim": "done"})
-        reviewer = IndependentReviewer(Endpoint(), self.client, "Review independently",
+        reviewer = IndependentReviewer(Endpoint(), reviewer_client, "Review independently",
                                        journal_path=self.journal.db.execute(
                                            "PRAGMA database_list").fetchone()[2])
         outcome = IndependentReviewWorker(ledger, "Independent Reviewer", reviewer).process_pending()
