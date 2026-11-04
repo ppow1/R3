@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/grace_native_capabilities.py
 # Component: R3-GRACE-OPERATIONAL-TOOLS
-# File Revision: 1.0.0
+# File Revision: 1.1.0
 # Created: 2026-11-04 UTC (date precision only)
 # Created By: ChatGPT GPT-6
 # Purpose: Reusable live local-resource observation and governed durable evidence submission.
@@ -10,6 +10,7 @@
 # Dependencies: Python stdlib; runtime/resource_registry.py; runtime/governed_tools.py.
 # Authority: Steward R3 integration directive; no implicit grants, no R2 application services.
 # Changed: 2026-11-04 UTC | R3-GRACE-TOOLS-001 | Add useful general-purpose read and durable write capabilities.
+# Changed: 2026-11-04 UTC | R3-GRACE-TOOLS-004 | Add bounded local NVIDIA VRAM observations to resource snapshot.
 # Supersedes: None
 # Contracts: docs/r3-native-tool-contract.md; issues #16, #28 and #29.
 # Tests: tests/test_grace_native_capabilities.py
@@ -23,6 +24,7 @@ import os
 from pathlib import Path
 import platform
 import shutil
+import subprocess
 import sqlite3
 import time
 
@@ -30,6 +32,47 @@ from runtime.capabilities import AuthorityUnavailable, CapabilityDenied
 from runtime.governed_tools import (
     ExecutionContext, GovernedCapability, GovernedToolGateway)
 from runtime.resource_registry import Resource, ResourceRegistry
+
+
+def local_nvidia_gpu_observations():
+    """Best-effort local GPU inventory; no inference of remote/usable model capacity.
+
+    Missing drivers, timeouts, malformed rows and command failures are
+    observational absence, not a false claim of zero installed GPUs.
+    """
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=uuid,name,memory.total,memory.free",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=3, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    if result.returncode != 0:
+        return
+    for line in result.stdout.splitlines():
+        parts = [p.strip() for p in line.split(",", 3)]
+        if len(parts) != 4:
+            continue
+        uuid, name, total, free = parts
+        if not uuid.startswith("GPU-") or not name:
+            continue
+        try:
+            total_mib, free_mib = int(total), int(free)
+        except ValueError:
+            continue
+        if total_mib <= 0 or not (0 <= free_mib <= total_mib):
+            continue
+        yield Resource(
+            resource_id="gpu:" + uuid,
+            kind="nvidia-gpu",
+            host=platform.node() or "local",
+            capabilities=("gpu.cuda", "gpu.vram_capacity"),
+            capacity={"vram_total_bytes": total_mib * 1048576,
+                      "vram_free_bytes": free_mib * 1048576},
+            observed_at=datetime.now(timezone.utc).isoformat(),
+            state="observed",
+            source="r3:local-nvidia-smi",
+        )
 
 
 def local_host_observations():
@@ -125,7 +168,7 @@ def register_grace_operational_tools(
         *, resources: ResourceRegistry | None = None,
         evidence_journal: EvidenceJournal | None = None) -> None:
     """Register durable general-purpose tools; canonical grants are external."""
-    resources = resources if resources is not None else ResourceRegistry((local_host_observations,))
+    resources = resources if resources is not None else ResourceRegistry((local_host_observations, local_nvidia_gpu_observations))
     gateway.register(GovernedCapability(
         name="r3.resources.local_snapshot",
         resource_id="registry:local",
