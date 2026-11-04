@@ -45,6 +45,12 @@ app = FastAPI(title="R3 Institutional Capabilities", version="0.1.0")
 app.include_router(build_settings_router(ROOT))
 app.include_router(build_chat_router())
 
+# R3-native sitewide Steward authentication.
+from r3_native_auth_api import build_native_auth_router
+app.include_router(build_native_auth_router(
+    allowed_origins=("https://riverview.ionoge.com",)
+))
+
 def git(*args):
     p = subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True,
                        text=True, timeout=12, check=False)
@@ -55,13 +61,14 @@ def git(*args):
 
 
 # R3-SITE-AUTH-001
-# Reuse the existing R2 session and Steward role verification.
+# R3-native Steward session verification; no R2 authentication dependency.
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from r3_chat_api import load_config as _auth_config
 from r3_chat_api import _principal as _auth_principal
 
 _PUBLIC_ROUTES = frozenset({
     "/login",
+    "/api/v1/native-auth/login",
     "/api/v1/health",
     "/api/v1/chat/login",
     "/api/v1/chat/password-reset",
@@ -72,7 +79,11 @@ _PUBLIC_ROUTES = frozenset({
 async def r3_site_authentication(request: Request, call_next):
     path = request.scope.get("path", request.url.path)
 
-    if path not in _PUBLIC_ROUTES or (
+    resident_delegation = (
+        path == "/api/v1/steward-authority/delegate"
+        and request.method == "POST"
+    )
+    if (path not in _PUBLIC_ROUTES and not resident_delegation) or (
         path == "/api/v1/chat/session" and request.method == "DELETE"
     ):
         try:

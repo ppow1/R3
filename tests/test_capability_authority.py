@@ -19,12 +19,13 @@ class AuthorityTests(unittest.TestCase):
 
     def grant(self, *, scope="office:grace", active=1, expiry=None):
         with sqlite3.connect(self.path) as db:
-            db.execute("INSERT INTO capability_grants VALUES (?,?,?,?,?,?)",
-                       ("g1", "resident:grace", "office.update", scope, active, expiry))
+            db.execute('INSERT INTO capability_grants (principal, action, scope_ref, expires_at, active, grant_id, resource_ref, operation, approved_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                       ("resident:grace", "office.update", scope, expiry, active, "g1", "office:grace", "write", "human:steward:test"))
 
     def check(self, scope="office:grace"):
         return self.authority.authorize(principal="resident:grace",
-             action="office.update", scope_ref=scope)
+             action="office.update", scope_ref=scope,
+              resource_id="office:grace", operation="write")
 
     def test_empty_store_denies(self):
         with self.assertRaises(CapabilityDenied):
@@ -35,6 +36,16 @@ class AuthorityTests(unittest.TestCase):
         self.assertEqual(self.check()["grant_id"], "g1")
         with self.assertRaises(CapabilityDenied):
             self.check("office:other")
+
+    def test_missing_approval_evidence_denied(self):
+        self.grant()
+        with sqlite3.connect(self.path) as db:
+            db.execute(
+                "UPDATE capability_grants SET approved_by=NULL WHERE grant_id=?",
+                ("g1",)
+            )
+        with self.assertRaises(CapabilityDenied):
+            self.check()
 
     def test_revocation(self):
         self.grant()

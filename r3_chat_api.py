@@ -12,6 +12,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
+from r3_native_auth_api import native_store, SESSION_COOKIE, CSRF_COOKIE
+from r3_native_sessions import AuthenticationDenied
 
 CONFIG_PATH = Path(os.environ.get("R3_WEBSITE_CHAT_CONFIG", "~/.config/r3/chat.json")).expanduser()
 MAX_BODY = 1_100_000
@@ -24,18 +26,13 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
         raise HTTPException(503, "Website chat configuration is unavailable") from exc
     required = {
         "conversation_api_base_url", "conversation_api_credential_file",
-        "website_auth_session_url", "website_auth_login_url", "website_auth_reset_url",
         "resident_id", "required_role", "request_timeout_seconds", "allowed_origins",
     }
     if not isinstance(cfg, dict) or required - cfg.keys():
         raise HTTPException(503, "Website chat configuration is invalid")
     api = urllib.parse.urlparse(cfg["conversation_api_base_url"])
-    auth_urls = [urllib.parse.urlparse(cfg[name]) for name in
-                 ("website_auth_session_url", "website_auth_login_url", "website_auth_reset_url")]
     if api.scheme != "http" or api.hostname not in {"127.0.0.1", "localhost", "::1"}:
         raise HTTPException(503, "Conversation API must remain on loopback")
-    if any(u.scheme != "http" or u.hostname not in {"127.0.0.1", "localhost", "::1"} for u in auth_urls):
-        raise HTTPException(503, "Website authentication proxy must remain on loopback")
     if not isinstance(cfg["allowed_origins"], list) or not cfg["allowed_origins"]:
         raise HTTPException(503, "Website chat origins are invalid")
     return cfg
@@ -89,24 +86,20 @@ def _portal_request(url: str, request: Request, method: str = "GET",
 
 
 def _principal(request: Request, cfg: dict[str, Any]) -> str:
-    status, payload, _ = _portal_request(cfg["website_auth_session_url"], request,
-                                         timeout=int(cfg["request_timeout_seconds"]))
-    if status != 200:
-        raise HTTPException(401, "Sign in to R3 to use Chat")
+    """Validate R3-native human session, never browser identity headers."""
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        raise HTTPException(401, "Sign in to R3")
     try:
-        session = json.loads(payload)
-    except ValueError as exc:
-        raise HTTPException(503, "Website session response is invalid") from exc
-    identity = session.get("identity") if isinstance(session, dict) else None
-    if not isinstance(identity, dict):
-        raise HTTPException(401, "Sign in to R3 to use Chat")
-    email = identity.get("email")
-    roles = identity.get("roles", session.get("roles", []))
-    if not isinstance(email, str) or "@" not in email or cfg["required_role"] not in roles:
-        raise HTTPException(403, "Steward access is required for Chat")
-    # Only the server-validated session identity is passed downstream. Browser-supplied
-    # X-R3-Principal and similar headers are deliberately ignored.
-    return email.strip().lower()
+        identity = native_store().authenticate(token)
+    except AuthenticationDenied as exc:
+        raise HTTPException(401, "Sign in to R3") from exc
+
+    if identity["role"] != "steward":
+        raise HTTPException(403, "Steward access required")
+
+    return identity["email"]
+
 
 
 def _runtime(cfg: dict[str, Any], principal: str, path: str, method: str = "GET",
@@ -150,72 +143,104 @@ def build_chat_router() -> APIRouter:
 
     @router.post("/api/v1/chat/login")
     async def login(request: Request):
-        cfg = load_config(); _origin(request, cfg, required=True)
+        cfg = load_config()
+        _origin(request, cfg, required=True)
+
         raw = await request.body()
         if len(raw) > 16384:
             raise HTTPException(413, "Login request is too large")
+
         try:
             data = json.loads(raw)
         except ValueError as exc:
             raise HTTPException(400, "Invalid sign-in request") from exc
-        if not isinstance(data, dict) or not isinstance(data.get("email"), str) or not isinstance(data.get("password"), str):
-            raise HTTPException(400, "Email and password are required")
-        status, payload, cookie = _portal_request(cfg["website_auth_login_url"], request, "POST", raw,
-                                                  timeout=int(cfg["request_timeout_seconds"]))
-        headers = {"Cache-Control": "no-store"}
+
+        if not isinstance(data, dict):
+            raise HTTPException(400, "Invalid sign-in request")
+
         try:
-            out = json.loads(payload)
-        except ValueError:
-            out = {"error": "Sign-in service returned invalid data"}
-        response = JSONResponse(out, status_code=status, headers=headers)
-        for value in _browser_cookies(cookie):
-            response.raw_headers.append((b"set-cookie", value.encode("latin-1")))
+            session = native_store().login(
+                data.get("email"),
+                data.get("password"),
+            )
+        except AuthenticationDenied as exc:
+            raise HTTPException(401, "Invalid credentials") from exc
+
+        response = JSONResponse(
+            {"authenticated": True, "role": session["role"]},
+            headers={"Cache-Control": "no-store"},
+        )
+        response.set_cookie(
+            SESSION_COOKIE, session["token"],
+            httponly=True, secure=True,
+            samesite="strict", path="/",
+            max_age=session["expires_in"],
+        )
+        response.set_cookie(
+            CSRF_COOKIE, session["csrf"],
+            httponly=False, secure=True,
+            samesite="strict", path="/",
+            max_age=session["expires_in"],
+        )
         return response
 
     @router.post("/api/v1/chat/password-reset")
     async def password_reset(request: Request):
-        cfg = load_config(); _origin(request, cfg, required=True)
-        raw = await request.body()
-        if len(raw) > 8192:
-            raise HTTPException(413, "Reset request is too large")
-        status, payload, _ = _portal_request(cfg["website_auth_reset_url"], request, "POST", raw,
-                                             timeout=int(cfg["request_timeout_seconds"]))
-        try:
-            out = json.loads(payload)
-        except ValueError:
-            out = {"status": "request_received"}
-        return JSONResponse(out, status_code=status, headers={"Cache-Control": "no-store"})
+        cfg = load_config()
+        _origin(request, cfg, required=True)
+        # Recovery requires a separately approved, audited workflow.
+        # Never forward credentials or recovery requests to R2.
+        return JSONResponse(
+            {"detail": "R3-native password recovery is not configured"},
+            status_code=503,
+            headers={"Cache-Control": "no-store"},
+        )
 
     @router.delete("/api/v1/chat/session")
     def logout(request: Request):
         cfg = load_config()
         _origin(request, cfg, required=True)
-        _principal(request, cfg)
-        session_url = cfg["website_auth_session_url"]
-        status, payload, cookies = _portal_request(
-            session_url, request, method="DELETE",
-            timeout=int(cfg["request_timeout_seconds"]))
+
+        token = request.cookies.get(SESSION_COOKIE)
+        csrf = request.headers.get("X-Riverview-CSRF")
+
         try:
-            out = json.loads(payload)
-        except ValueError:
-            out = {"error": "Logout service returned invalid data"}
+            store = native_store()
+            store.authenticate(token, csrf=csrf, mutation=True)
+            store.logout(token)
+        except AuthenticationDenied as exc:
+            raise HTTPException(401, "Invalid session or CSRF") from exc
+
         response = JSONResponse(
-            out, status_code=status,
-            headers={"Cache-Control": "no-store"})
-        for value in _browser_cookies(cookies):
-            response.raw_headers.append((b"set-cookie", value.encode("latin-1")))
+            {"authenticated": False},
+            headers={"Cache-Control": "no-store"},
+        )
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        response.delete_cookie(CSRF_COOKIE, path="/")
         return response
 
     @router.get("/api/v1/chat/session")
     def session(request: Request):
-        cfg = load_config(); _origin(request, cfg)
-        status, payload, _ = _portal_request(cfg["website_auth_session_url"], request,
-                                             timeout=int(cfg["request_timeout_seconds"]))
+        cfg = load_config()
+        _origin(request, cfg)
+
+        token = request.cookies.get(SESSION_COOKIE)
+
         try:
-            out = json.loads(payload)
-        except ValueError:
-            out = {"authenticated": False}
-        return JSONResponse(out, status_code=status, headers={"Cache-Control": "no-store"})
+            identity = native_store().authenticate(token)
+        except AuthenticationDenied as exc:
+            raise HTTPException(401, "Sign in to R3") from exc
+
+        return JSONResponse(
+            {
+                "authenticated": True,
+                "identity": {
+                    "email": identity["email"],
+                    "roles": [identity["role"]],
+                },
+            },
+            headers={"Cache-Control": "no-store"},
+        )
 
     @router.get("/api/v1/chat/capabilities")
     def capabilities(request: Request):

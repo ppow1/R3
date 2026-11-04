@@ -173,168 +173,85 @@ class FakeR2:
 
 
 class AuthenticationLifecycleTests(unittest.TestCase):
+    """Native R3 authentication lifecycle, independent of retired R2."""
 
     def test_full_login_access_refresh_logout_revocation(self):
-        fake = FakeR2()
+        import tempfile
+        from pathlib import Path
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from r3_native_sessions import (
+            NativeSessions,
+            initialize_empty_schema,
+        )
+        from r3_native_auth_api import build_native_auth_router
 
-        with (
-            patch(
-                "r3_chat_api._portal_request",
-                side_effect=fake.request
-            ),
-            patch(
-                "r3_chat_api.load_config",
-                return_value=CONFIG
-            ),
-            patch.object(
-                r3_app,
-                "_auth_config",
-                return_value=CONFIG
-            ),
-        ):
+        origin = "https://riverview.ionoge.com"
 
-            def call(
-                method, path, cookies="",
-                body=b"", headers=None
-            ):
-                return asyncio.run(
-                    asgi_request(
-                        method, path, cookies, body, headers
-                    )
-                )
-
-            # Anonymous access must be denied.
-            status, headers, _ = call("GET", "/")
-            self.assertEqual(status, 303)
-            self.assertIn(
-                "/login",
-                header_values(headers, "location")
-            )
-
-            status, _, _ = call(
-                "GET", "/api/v1/institution/runtime"
-            )
-            self.assertEqual(status, 401)
-
-            # Sign in through R3.
-            payload = json.dumps({
-                "email": "steward@example.test",
-                "password": "test-only-password",
-            }).encode()
-
-            status, headers, _ = call(
-                "POST",
-                "/api/v1/chat/login",
-                body=payload,
-                headers={
-                    "content-type": "application/json"
-                },
-            )
-
-            self.assertEqual(status, 200)
-
-            set_cookies = header_values(
-                headers, "set-cookie"
-            )
-            self.assertEqual(len(set_cookies), 2)
-
-            jar = SimpleCookie()
-
-            for value in set_cookies:
-                jar.load(value)
-
-            self.assertIn(
-                "rv_account_session", jar
-            )
-            self.assertIn(
-                "rv_account_csrf", jar
-            )
-
-            self.assertEqual(
-                jar["rv_account_session"]["path"], "/"
-            )
-            self.assertEqual(
-                jar["rv_account_csrf"]["path"], "/"
-            )
-
-            self.assertTrue(
-                jar["rv_account_session"]["httponly"]
-            )
-            self.assertTrue(
-                jar["rv_account_session"]["secure"]
-            )
-
-            browser_cookies = (
-                "rv_account_session=valid-session; "
-                "rv_account_csrf=valid-csrf"
-            )
-
-            # Authenticated access persists.
-            for _ in range(2):
-                status, _, _ = call(
-                    "GET", "/", browser_cookies
-                )
-                self.assertEqual(status, 200)
-
-            status, _, body = call(
-                "GET",
-                "/api/v1/chat/session",
-                browser_cookies
-            )
-
-            self.assertEqual(status, 200)
-            self.assertEqual(
-                json.loads(body)["identity"]["email"],
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "native.sqlite"
+            initialize_empty_schema(db)
+            store = NativeSessions(db)
+            store.bootstrap_steward(
                 "steward@example.test",
+                "Strong-test-password-123",
             )
 
-            # CSRF protection must reject missing token.
-            status, _, _ = call(
-                "DELETE",
-                "/api/v1/chat/session",
-                browser_cookies
+            app = FastAPI()
+            app.include_router(
+                build_native_auth_router(
+                    store_factory=lambda: store,
+                    allowed_origins=(origin,),
+                )
             )
 
-            self.assertEqual(status, 403)
-            self.assertFalse(fake.revoked)
+            with TestClient(app, base_url=origin) as client:
+                anonymous = client.get(
+                    "/api/v1/native-auth/session"
+                )
+                self.assertEqual(anonymous.status_code, 401)
 
-            # Valid logout must revoke the session.
-            status, headers, _ = call(
-                "DELETE",
-                "/api/v1/chat/session",
-                browser_cookies,
-                headers={
-                    "x-riverview-csrf": "valid-csrf"
-                },
-            )
+                login = client.post(
+                    "/api/v1/native-auth/login",
+                    headers={"Origin": origin},
+                    json={
+                        "email": "steward@example.test",
+                        "password": "Strong-test-password-123",
+                    },
+                )
+                self.assertEqual(login.status_code, 200, login.text)
 
-            self.assertEqual(status, 200)
-            self.assertEqual(fake.logout_calls, 1)
+                session = client.get(
+                    "/api/v1/native-auth/session"
+                )
+                self.assertEqual(session.status_code, 200)
+                self.assertEqual(
+                    session.json()["identity"]["roles"],
+                    ["steward"],
+                )
 
-            cleared = header_values(
-                headers, "set-cookie"
-            )
+                csrf = client.cookies.get("r3_steward_csrf")
+                self.assertTrue(csrf)
 
-            self.assertEqual(len(cleared), 2)
-            self.assertTrue(
-                all("Max-Age=0" in value for value in cleared)
-            )
-            self.assertTrue(
-                all("Path=/" in value for value in cleared)
-            )
+                no_csrf = client.delete(
+                    "/api/v1/native-auth/session",
+                    headers={"Origin": origin},
+                )
+                self.assertEqual(no_csrf.status_code, 401)
 
-            # Replaying a revoked cookie must fail.
-            status, _, _ = call(
-                "GET", "/", browser_cookies
-            )
-            self.assertEqual(status, 303)
+                logout = client.delete(
+                    "/api/v1/native-auth/session",
+                    headers={
+                        "Origin": origin,
+                        "X-Riverview-CSRF": csrf,
+                    },
+                )
+                self.assertEqual(logout.status_code, 200)
 
-            status, _, _ = call(
-                "GET",
-                "/api/v1/institution/runtime",
-                browser_cookies
-            )
-            self.assertEqual(status, 401)
+                revoked = client.get(
+                    "/api/v1/native-auth/session"
+                )
+                self.assertEqual(revoked.status_code, 401)
 
 
 if __name__ == "__main__":

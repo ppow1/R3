@@ -45,13 +45,43 @@ class ChatApiTests(unittest.TestCase):
         with self.assertRaises(HTTPException):
             load_config(self.config_file)
 
-    def test_principal_is_read_from_portal_session_not_browser_header(self):
-        request = FakeRequest({"cookie": "r3_session=valid", "x-r3-principal": "attacker@example.com"})
-        result = json.dumps({"authenticated": True, "identity": {"email": "Steward@Example.com", "roles": ["steward"]}}).encode()
-        with patch("r3_chat_api._portal_request", return_value=(200, result, None)) as portal:
+    def test_principal_uses_native_session_not_browser_header(self):
+        from r3_native_sessions import NativeSessions, initialize_empty_schema
+
+        db = self.root / "native-auth.sqlite"
+        initialize_empty_schema(db)
+        store = NativeSessions(db)
+        store.bootstrap_steward(
+            "steward@example.test",
+            "Strong-test-password-123",
+        )
+        session = store.login(
+            "steward@example.test",
+            "Strong-test-password-123",
+        )
+
+        request = FakeRequest({
+            "x-r3-principal": "attacker@example.com",
+        })
+        request.cookies = {
+            "r3_steward_session": session["token"],
+        }
+
+        with patch("r3_chat_api.native_store", return_value=store):
             principal = _principal(request, self.config)
-        self.assertEqual(principal, "steward@example.com")
-        self.assertEqual(portal.call_args.args[1].headers.get("cookie"), "r3_session=valid")
+
+        self.assertEqual(principal, "steward@example.test")
+
+    def test_spoofed_browser_header_without_native_session_denied(self):
+        request = FakeRequest({
+            "x-r3-principal": "human:steward:spoofed",
+        })
+        request.cookies = {}
+
+        with self.assertRaises(HTTPException) as context:
+            _principal(request, self.config)
+
+        self.assertEqual(context.exception.status_code, 401)
 
     def test_runtime_uses_server_credential_and_trusted_principal(self):
         class Reply:
