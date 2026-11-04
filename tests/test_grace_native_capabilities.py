@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_grace_native_capabilities.py
 # Component: R3-GRACE-OPERATIONAL-TOOL-REGRESSION
-# File Revision: 1.1.1
+# File Revision: 1.2.0
 # Created: 2026-11-04 UTC (date precision only)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanent live resource observation and canonical journal evidence write tests.
@@ -127,6 +127,20 @@ class GraceOperationalToolsTests(unittest.TestCase):
         with patch("runtime.grace_native_capabilities.subprocess.run", return_value=result):
             resources = list(local_nvidia_gpu_observations())
         self.assertEqual([r.resource_id for r in resources], ["gpu:GPU-3"])
+
+    def test_capacity_assessment_has_separate_read_grant(self):
+        name = "r3.resources.assess_gpu_capacity"
+        args = {"scope_ref": "institution:r3", "required_vram_bytes": 1024}
+        self.assertEqual(self.invoke(name, args, "assess-denied")[0], 403)
+        self.allow("registry:local", "inventory.snapshot", "read")
+        self.assertEqual(self.invoke(name, args, "assess-still-denied")[0], 403)
+        self.allow("registry:local", "capacity.assess", "read")
+        code, response = self.invoke(name, args, "assess-authorized")
+        self.assertEqual(code, 200)
+        assessment = response["result"]["result"]
+        self.assertEqual(assessment["required_vram_bytes"], 1024)
+        self.assertFalse(assessment["execution_authorized"])
+        self.assertFalse(assessment["model_fit_verified"])
 
     def test_evidence_write_denied_without_grant(self):
         name = "r3.evidence.record"
