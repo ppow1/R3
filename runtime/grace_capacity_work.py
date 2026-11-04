@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/grace_capacity_work.py
 # Component: R3-GRACE-DURABLE-CAPACITY-WORK
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Purpose: Durable event-driven capacity review; assessment is not execution.
 # Authority: Grace #28 and unified Website #16; no grants or production actions.
 # Tests: tests/test_grace_capacity_work.py
@@ -73,9 +73,14 @@ class CapacityWork:
                         {"candidate_count":len(assessment["candidates"]),"state":state})
         return {"work_id":work_id,"state":state,"assessment":assessment}
 
-    def accept_review(self, work_id: str, review_ref: str, *, independent: bool):
-        if not independent or not isinstance(review_ref,str) or not review_ref.strip():
-            raise ValueError("Independent review reference required")
+    def accept_review(self, work_id: str, review_ref: str, *, verify_review):
+        if not isinstance(review_ref,str) or not review_ref.strip() or not callable(verify_review):
+            raise ValueError("Independent review verifier and reference required")
+        # The caller cannot assert independence with a boolean. A trusted
+        # integration adapter must validate review provenance and acceptance.
+        evidence=verify_review(work_id,review_ref)
+        if not isinstance(evidence,dict) or evidence.get("accepted") is not True or evidence.get("independent") is not True or evidence.get("review_ref") != review_ref:
+            raise ValueError("Independent review not accepted")
         with self.db:
             row=self.db.execute("SELECT state FROM grace_capacity_work WHERE work_id=?",
                                 (work_id,)).fetchone()
