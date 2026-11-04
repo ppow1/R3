@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/grace_native_capabilities.py
 # Component: R3-GRACE-OPERATIONAL-TOOLS
-# File Revision: 1.1.0
+# File Revision: 1.1.1
 # Created: 2026-11-04 UTC (date precision only)
 # Created By: ChatGPT GPT-6
 # Purpose: Reusable live local-resource observation and governed durable evidence submission.
@@ -11,6 +11,7 @@
 # Authority: Steward R3 integration directive; no implicit grants, no R2 application services.
 # Changed: 2026-11-04 UTC | R3-GRACE-TOOLS-001 | Add useful general-purpose read and durable write capabilities.
 # Changed: 2026-11-04 UTC | R3-GRACE-TOOLS-004 | Add bounded local NVIDIA VRAM observations to resource snapshot.
+# Changed: 2026-11-04 UTC | R3-GRACE-TOOLS-007 | Align GPU observation state with ResourceRegistry contract.
 # Supersedes: None
 # Contracts: docs/r3-native-tool-contract.md; issues #16, #28 and #29.
 # Tests: tests/test_grace_native_capabilities.py
@@ -70,7 +71,7 @@ def local_nvidia_gpu_observations():
             capacity={"vram_total_bytes": total_mib * 1048576,
                       "vram_free_bytes": free_mib * 1048576},
             observed_at=datetime.now(timezone.utc).isoformat(),
-            state="observed",
+            state="online",
             source="r3:local-nvidia-smi",
         )
 
