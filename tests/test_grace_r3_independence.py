@@ -16,6 +16,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = (ROOT / "runtime" / "capabilities.py",
           ROOT / "runtime" / "capability_authority.py",
+          ROOT / "runtime" / "grant_management.py",
           ROOT / "runtime" / "governed_tools.py",
           ROOT / "runtime" / "grace_native_capabilities.py",
           ROOT / "runtime" / "native_tools.py",
