@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_native_governed_client.py
 # Component: R3-GRACE-NATIVE-CLIENT-REGRESSION
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-04 UTC (date precision only)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanent client-side governed envelope and server-evidence contract tests.
@@ -10,6 +10,7 @@
 # Dependencies: Python stdlib, runtime/native_tools.py
 # Authority: Steward R3 unified integration; issues #16 and #28.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-005 | Test governed client contract.
+# Changed: 2026-11-04 UTC | R3-GRACE-AUTH-006 | Require exact action and scope evidence.
 # Supersedes: None
 # Contracts: docs/r3-native-tool-contract.md
 # Tests: python -m unittest tests.test_native_governed_client -v
@@ -24,6 +25,7 @@ class NativeGovernedClientTests(unittest.TestCase):
         self.descriptor = {
             "tool": "r3.operations.write", "read_only": False,
             "resource_id": "resource:operations", "operation": "write",
+            "action": "report",
             "definition": {"type": "function", "function": {
                 "name": "r3.operations.write", "parameters": {"type": "object"}}},
         }
@@ -43,7 +45,8 @@ class NativeGovernedClientTests(unittest.TestCase):
             "status": "ok", "correlation_id": "work-1",
             "authorization": {"principal_id": "resident:grace",
                               "grant_id": "grant-1", "resource_id": "resource:operations",
-                              "operation": "write"},
+                              "operation": "write", "action": "report",
+                              "scope_ref": "office:operations"},
             "result": {"changed": True}}}
         with patch.object(NativeTools, "_request", return_value=response) as request:
             output = client.invoke(self.descriptor, {"scope_ref": "office:operations"},
