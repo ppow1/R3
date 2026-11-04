@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_governed_tools.py
 # Component: R3-GRACE-GOVERNED-EXECUTION-REGRESSION
-# File Revision: 1.1.0
+# File Revision: 1.1.1
 # Created: 2026-11-04 UTC (date precision only)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanent resident read/write grant, identity, audit and no-replay tests.
@@ -11,6 +11,7 @@
 # Authority: Steward R3 unified integration, issues #16 and #28.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-004 | Add reusable authorization boundary tests.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-007 | Verify all executors receive authenticated context.
+# Changed: 2026-11-04 UTC | R3-GRACE-AUTH-008 | Align cross-resident assertion with contextual effect evidence.
 # Supersedes: None
 # Contracts: docs/r3-native-tool-contract.md
 # Tests: python -m unittest tests.test_governed_tools -v
@@ -127,7 +128,7 @@ class GovernedToolTests(unittest.TestCase):
         self.authority.provision("resident:grace", "write")
         self.assertEqual(self.call("write", token="valid-helen")[0], 403)
         self.assertEqual(self.call("write", token="valid-grace")[0], 200)
-        self.assertEqual(self.effects, ["office:operations"])
+        self.assertEqual(self.effects, [("office:operations", "resident:grace")])
 
     def test_revoked_and_expired_grants_deny(self):
         self.authority.provision("resident:grace", "write", active=False)
