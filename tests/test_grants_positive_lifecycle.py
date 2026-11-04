@@ -223,6 +223,42 @@ class PositiveGrantLifecycleTests(unittest.TestCase):
             events,
         )
 
+    def test_active_inventory_excludes_expired_and_future_grants(self):
+        """Release regression: Active reflects effective time, inventory retains history."""
+        now = time.time()
+        with self.authority._connect() as db:
+            def row(suffix, effective_at, expires_at, active=1, revoked_at=None):
+                db.execute(
+                    """INSERT INTO capability_grants
+                       (grant_id, principal, action, scope_ref, active,
+                        expires_at, resource_ref, operation, issued_by, approved_by,
+                        created_at, effective_at, revoked_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    ("test-" + suffix, "resident:test", "office.read", "office:test",
+                     active, expires_at, "office:test", "read",
+                     "human:steward:fixture", "human:steward:fixture",
+                     now, effective_at, revoked_at),
+                )
+            row("active", now - 60, now + 3600)
+            row("expired", now - 3600, now - 60)
+            row("future", now + 3600, now + 7200)
+            row("revoked", now - 60, now + 3600, revoked_at=now - 10)
+            row("inactive", now - 60, now + 3600, active=0)
+
+        active = self.client.get(BASE + "/active")
+        inventory = self.client.get(BASE + "/inventory")
+        self.assertEqual(active.status_code, 200, active.text)
+        self.assertEqual(inventory.status_code, 200, inventory.text)
+        self.assertEqual(
+            {r["grant_id"] for r in active.json()},
+            {"test-active"},
+        )
+        self.assertEqual(
+            {r["grant_id"] for r in inventory.json()},
+            {"test-active", "test-expired", "test-future",
+             "test-revoked", "test-inactive"},
+        )
+
     def test_missing_csrf_cannot_approve(self):
         response = self.client.post(
             BASE + "/decide",
