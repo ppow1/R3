@@ -208,6 +208,51 @@ class RealR3AuthorizationRoundtripTests(unittest.TestCase):
         self.assertIn("RECONCILIATION_REQUIRED", [item[0] for item in
             self.journal.db.execute("SELECT kind FROM resident_turns WHERE event_id=?", (event,))])
 
+    def test_independent_reviewer_can_observe_authorized_read_but_not_write(self):
+        from runtime.independent_reviewer import IndependentReviewer
+        self.approve("registry:local", "inventory.snapshot", "read", key="reviewer-read")
+        self.approve("journal:institution", "evidence.record", "write", key="reviewer-write")
+        class Endpoint:
+            def __init__(self):
+                self.count = 0
+            def complete(self, messages, tools):
+                self.count += 1
+                names = [item["function"]["name"] for item in tools]
+                assert names == ["r3.resources.local_snapshot"], names
+                if self.count == 1:
+                    message = {"role": "assistant", "content": None, "tool_calls": [{
+                        "id": "observe-local", "type": "function",
+                        "function": {"name": "r3.resources.local_snapshot",
+                                     "arguments": '{"scope_ref":"institution:r3"}'}}]}
+                else:
+                    observed = json.loads(messages[-1]["content"])
+                    assert observed["result"]["authorization"]["operation"] == "read"
+                    message = {"role": "assistant", "content": json.dumps({"findings": [{
+                        "criterion_id": "inventory", "result": "PASS",
+                        "reason": "Authorized local resource observation returned",
+                        "observation_ids": ["obs-1"]}]})}
+                return {"choices": [{"message": message}]}
+        inbox = Inbox(self.journal.db)
+        event = inbox.enqueue("Grace", "RESIDENT_ACTIVITY", {
+            "assignment_id": "review-read", "objective": "Observe resources",
+            "acceptance_criteria": [{"id": "inventory", "description": "Inventory observed"}]})
+        inbox.next("Grace")
+        inbox.finish(event, "COMPLETED", {"decision": {"state": "complete"}})
+        from runtime.verification import VerificationLedger, IndependentReviewWorker
+        ledger = VerificationLedger(self.journal.db)
+        request = ledger.submit_review(event, "review-read",
+            [{"id": "inventory", "description": "Inventory observed"}], {"claim": "done"})
+        reviewer = IndependentReviewer(Endpoint(), self.client, "Review independently",
+                                       journal_path=self.journal.db.execute(
+                                           "PRAGMA database_list").fetchone()[2])
+        outcome = IndependentReviewWorker(ledger, "Independent Reviewer", reviewer).process_pending()
+        self.assertEqual(outcome[0]["request_id"], request)
+        self.assertEqual(outcome[0]["outcome"], "ACCEPTED")
+        self.assertEqual(ledger.assignment_review_status("review-read")["verification_status"],
+                         "ACCEPTED")
+        self.assertEqual(self.journal.db.execute(
+            "SELECT COUNT(*) FROM events WHERE kind='EVIDENCE_SUBMITTED'").fetchone()[0], 0)
+
     def test_revoked_grant_denies_new_http_invocation(self):
         grant_id = self.approve(
             "journal:institution", "evidence.record", "write", key="approve-before-revoke")
