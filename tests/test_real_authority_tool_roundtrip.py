@@ -229,6 +229,7 @@ class RealR3AuthorizationRoundtripTests(unittest.TestCase):
             allowed_tools=("r3.resources.local_snapshot", "r3.evidence.record"),
             credential_provider=lambda: credential)
         class Endpoint:
+            timeout = 3
             def __init__(self):
                 self.count = 0
             def complete(self, messages, tools):
