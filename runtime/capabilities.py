@@ -77,6 +77,11 @@ class CapabilityRegistry:
             event["outcome"] = "AUTHORIZED"
             # Fail closed when the durable authorization audit cannot be written.
             self.audit(dict(event))
+        except Exception:
+            event["outcome"] = "DENIED"
+            self.audit(dict(event))
+            raise
+        try:
             result = cap.executor(params)
         except Exception:
             event["outcome"] = "FAILED"
