@@ -102,23 +102,24 @@ class ActivityContinuationTests(unittest.TestCase):
             {"state": "continue", "next_step": "Check readiness", "evidence": "first"},
             {"state": "continue", "next_step": "Check readiness again", "evidence": "second"},
         ])
-        def record_tools():
+        def record_tools(uptime):
             event = self.db.execute(
                 "SELECT id FROM resident_inbox WHERE status='PENDING' ORDER BY id LIMIT 1"
             ).fetchone()[0]
             self.inbox.record(event, "TOOL_INTENT", {"tool_call_id": "status", "tool": "r3.status"})
             self.inbox.record(event, "TOOL_RESULT", {"tool_call_id": "status", "content": '{"ready":false}'})
             self.inbox.record(event, "TOOL_INTENT", {"tool_call_id": "uptime", "tool": "r3.host.uptime"})
-            self.inbox.record(event, "TOOL_RESULT", {"tool_call_id": "uptime", "content": '{"seconds":123}'})
-        record_tools()
+            self.inbox.record(event, "TOOL_RESULT", {"tool_call_id": "uptime", "content": json.dumps({"seconds": uptime})})
+        record_tools(123)
         asyncio.run(handler("TestResident"))
-        record_tools()
+        record_tools(124)
         asyncio.run(handler("TestResident"))
         payload = json.loads(self.db.execute(
             "SELECT payload FROM resident_inbox WHERE status='PENDING'"
         ).fetchone()[0])
         self.assertTrue(payload["recovery_required"])
         self.assertIn("r3.status", payload["repeated_tool_observations"])
+        self.assertNotIn("r3.host.uptime", payload["repeated_tool_observations"])
 
     def test_regular_event_keeps_ordinary_response(self):
         event = self.inbox.enqueue("TestResident", "CONVERSATION", {"text": "hello"})
