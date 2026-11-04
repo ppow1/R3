@@ -61,7 +61,6 @@ def run(argv=None):
                               "result": json.loads(row[4]) if row[4] else None,
                               "turns": [{"seq": seq, "kind": kind} for seq, kind in turns]}))
         else:
-            from runtime.verification import VerificationLedger
             if not args.assignment_id.strip():
                 parser.error("Assignment ID must be nonempty")
             # Read the existing ledger only. A status query must never create
