@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/grant_management.py
 # Component: R3-CANONICAL-GRANT-MANAGEMENT
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-04 UTC (date precision only)
 # Created By: ChatGPT GPT-6
 # Purpose: Typed request/approval/revoke/delegation service against ONE R3 authority database.
@@ -10,6 +10,7 @@
 # Dependencies: Python stdlib; runtime/capability_authority.py.
 # Authority: Steward directive, Website #16 and Grace #28 agreed shared authority contract.
 # Changed: 2026-11-04 UTC | R3-GRACE-AUTH-012 | Add fail-closed management service, no default grants.
+# Changed: 2026-11-04 UTC | R3-GRACE-AUTH-014 | Harden idempotency and expiry, retain delegation reason.
 # Supersedes: None
 # Contracts: docs/r3-native-tool-contract.md; #16 comment 6632391220.
 # Tests: tests/test_grant_management.py
@@ -23,6 +24,7 @@ and never creates default grants on startup.
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import time
 import uuid
@@ -41,10 +43,10 @@ def _required(value: str, label: str) -> str:
 def _expiry(effective_at, expires_at):
     now = time.time()
     if effective_at is not None and (
-            not isinstance(effective_at, (int, float)) or effective_at != effective_at):
+            not isinstance(effective_at, (int, float)) or isinstance(effective_at, bool) or not math.isfinite(effective_at)):
         raise ValueError("Invalid effective timestamp")
     if expires_at is not None and (
-            not isinstance(expires_at, (int, float)) or expires_at != expires_at):
+            not isinstance(expires_at, (int, float)) or isinstance(expires_at, bool) or not math.isfinite(expires_at)):
         raise ValueError("Invalid expiry timestamp")
     if expires_at is not None and expires_at <= (effective_at or now):
         raise ValueError("Grant expiry must be future and after effective time")
@@ -126,7 +128,7 @@ class R3GrantManagement:
                     # Never mistake a reused key with differing parameters as authorization.
                     fields = (target_principal, resource_ref, action, operation, scope_ref,
                               reason, effective_at, expires_at, int(delegable))
-                    if tuple(row[i] for i in (2,3,4,5,6,11,8,9,10)) != fields:
+                    if row[1] != steward or tuple(row[i] for i in (2,3,4,5,6,11,8,9,10)) != fields:
                         raise CapabilityDenied("Idempotency key reused with different request")
                     return {"request_id": row[0], "status": row[12]}
                 request_id = "r3-request:" + uuid.uuid4().hex
@@ -237,11 +239,12 @@ class R3GrantManagement:
                 db.row_factory = sqlite3.Row
                 db.execute("BEGIN IMMEDIATE")
                 existing = db.execute(
-                    """SELECT grant_id,principal,parent_grant_id FROM capability_grants
-                       WHERE reason=? AND issued_by=? AND parent_grant_id=?""",
-                    ("delegation-key:" + idempotency_key, issuer, parent_grant_id)).fetchone()
+                    """SELECT grant_id,principal,parent_grant_id,expires_at,reason FROM capability_grants
+                       WHERE idempotency_key=? AND issued_by=? AND parent_grant_id=?""",
+                    (idempotency_key, issuer, parent_grant_id)).fetchone()
                 if existing:
-                    if existing["principal"] != target_principal:
+                    if (existing["principal"] != target_principal
+                            or existing["expires_at"] != expires_at or existing["reason"] != reason):
                         raise CapabilityDenied("Delegation key reused with different target")
                     return {"grant_id": existing["grant_id"], "status": "ACTIVE"}
                 parent = db.execute(
@@ -274,12 +277,12 @@ class R3GrantManagement:
                 db.execute("""INSERT INTO capability_grants
                     (grant_id,principal,resource_ref,action,operation,scope_ref,active,
                      effective_at,expires_at,issued_by,approved_by,parent_grant_id,
-                     created_at,revoked_at,reason,delegable)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     created_at,revoked_at,reason,delegable,idempotency_key)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (grant_id, target_principal, parent["resource_ref"], parent["action"],
                      parent["operation"], parent["scope_ref"], 1,
                      parent["effective_at"], expires_at, issuer, parent["approved_by"],
-                     parent_grant_id, now, None, "delegation-key:" + idempotency_key, 0))
+                     parent_grant_id, now, None, reason, 0, idempotency_key))
                 _audit(db, actor=issuer, event="DELEGATED", grant_id=grant_id,
                        detail={"parent_grant_id": parent_grant_id,
                                "target_principal": target_principal, "reason": reason})
