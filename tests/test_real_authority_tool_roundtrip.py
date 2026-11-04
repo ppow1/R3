@@ -171,6 +171,43 @@ class RealR3AuthorizationRoundtripTests(unittest.TestCase):
         self.assertEqual(self.journal.db.execute(
             "SELECT count(*) FROM resident_turns WHERE event_id=? AND kind='TOOL_RESULT'",(event,)).fetchone()[0],2)
 
+    def test_ungranted_resident_objective_cannot_create_evidence(self):
+        import asyncio
+        from runtime.resident_inference import Inbox, ResidentInference
+        class Endpoint:
+            def __init__(self):
+                self.calls = 0
+            def complete(self, messages, tools):
+                self.calls += 1
+                if self.calls != 1:
+                    raise AssertionError("Denied action cannot proceed as completed")
+                return {"model": "contract-endpoint", "choices": [{"message": {
+                    "role": "assistant", "content": None,
+                    "tool_calls": [{"id": "ungranted-write", "type": "function",
+                                    "function": {"name": "r3.evidence.record",
+                                                 "arguments": json.dumps({
+                                                     "scope_ref":"institution:r3",
+                                                     "objective_id":"denied",
+                                                     "statement":"Should not persist"})}}]}}]}
+        inbox = Inbox(self.journal.db)
+        event = inbox.enqueue("Grace", "RESIDENT_ACTIVITY", {
+            "assignment_id": "objective-denied", "objective": "Record evidence",
+            "acceptance_criteria": [{"id":"write", "description":"Record persisted"}]})
+        endpoint = Endpoint()
+        worker = ResidentInference(inbox, endpoint, tools=self.client, system_prompt="Grace",
+                                   continuation_event_types=("RESIDENT_ACTIVITY",))
+        asyncio.run(worker("Grace"))
+        self.assertEqual(endpoint.calls, 1)
+        self.assertEqual(self.journal.db.execute(
+            "SELECT status FROM resident_inbox WHERE id=?", (event,)).fetchone()[0],
+                         "PROCESSING")
+        self.assertEqual(self.journal.db.execute(
+            "SELECT COUNT(*) FROM events WHERE kind='EVIDENCE_SUBMITTED'").fetchone()[0], 0)
+        self.assertEqual(self.journal.db.execute(
+            "SELECT COUNT(*) FROM verification_requests WHERE assignment_id='objective-denied'").fetchone()[0],0)
+        self.assertIn("RECONCILIATION_REQUIRED", [item[0] for item in
+            self.journal.db.execute("SELECT kind FROM resident_turns WHERE event_id=?", (event,))])
+
     def test_revoked_grant_denies_new_http_invocation(self):
         grant_id = self.approve(
             "journal:institution", "evidence.record", "write", key="approve-before-revoke")
