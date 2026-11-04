@@ -122,7 +122,6 @@ class RealR3AuthorizationRoundtripTests(unittest.TestCase):
         from runtime.resident_inference import Inbox, ResidentInference
         self.approve("registry:local", "inventory.snapshot", "read", key="inference-read")
         self.approve("journal:institution", "evidence.record", "write", key="inference-write")
-        self.client.allowed_tools = ("r3.resources.local_snapshot", "r3.evidence.record")
         class Endpoint:
             def __init__(self):
                 self.turn = 0
