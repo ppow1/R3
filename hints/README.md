@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/README.md
 Component: README
-File Revision: 1.0.5 (provenance baseline; prior revisions untracked)
+File Revision: 1.0.6 (provenance baseline; prior revisions untracked)
 Created: Unknown (legacy; initial commit can establish earliest publication)
 Created By: Unknown (legacy)
 Purpose: R3 engineering reference and continuation guidance
@@ -10,13 +10,14 @@ Execution Model: N/A
 Observability: N/A
 Dependencies: R3 docs and hints index
 Authority: R3 engineering guidance; approved charter prevails
+Changed: 2026-11-04 UTC | R3-RUNTIME-ROUTING-001 | ChatGPT GPT-6 | Index live routing and authentication discovery
 Changed: 2026-11-01 UTC | R3-CHAT-SETTINGS-UI-001 | ChatGPT GPT-6 | Index chat and scoped settings review drafts
 Changed: 2026-11-01 UTC | R3-Q2-DOC-001 | ChatGPT GPT-6 | Index Q2 watched-folder runbook
 Changed: 2026-11-01 UTC | R3-IMAGE-PUBLISH-001 | ChatGPT GPT-6 | Index image publishing runbook
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Not run (metadata-only change)
-History/Predecessor: Git blob d1428fec677c08f9993344839afa109ec49a8b41
+History/Predecessor: Git blob 4ec0346b65a1071f00ffe13e023ede223be58f8e
 -->
 # R3 Hints Library
 
@@ -37,5 +38,6 @@ This directory is the first-level reference index for the root [AI_HINTS.md](../
 - [Engineering and continuation](engineering.md): workflow, branch/worktree discipline, and current handoff.
 - [Institutional architecture](architecture.md): charter and capability-first, durable institution principles.
 - [Deployment](deployment.md): Comms-first execution, Camrui bootstrap and verification.
+- **[R3 runtime routing and authentication discovery](r3-runtime-routing.md)**: known host, ports, legacy-vs-current release paths, diagnostic evidence and required checks.
 - [Q2 script queue](q2-script-queue.md): Windows watched-folder submission and execution-result retrieval.
 - [ChatGPT image publishing](chatgpt-image-publishing.md): Steward download, Q2 copy to A:, GitHub upload, and checksum verification.
