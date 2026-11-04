@@ -229,7 +229,21 @@ class ResidentInference:
                 "step without new evidence. Reassess the objective, inspect prior "
                 "results, and select a materially different authorized method. "
                 "Do not claim completion without verified acceptance evidence. "
-                "If no authorized alternative exists, report the actual dependency."
+                "If no authorized alternative exists, report the actual dependency. "
+                "A repeated tool observation is not objective progress, even if "
+                "other observations such as uptime change. "
+                "Do not repeat the same inspection as a substitute for action."
+            )
+            repeated_tools = payload.get("repeated_tool_observations")
+            if isinstance(repeated_tools, list) and repeated_tools:
+                continuity_contract += (
+                    "\\nPreviously unchanged tool observations: "
+                    + json.dumps([name for name in repeated_tools if isinstance(name, str)])
+                    + ". Identify the unmet acceptance condition and a different "
+                    "authorized action or an explicit external dependency."
+                )
+            continuity_contract += (""
+
             )
         if event_type == "CONVERSATION_MESSAGE":
             if self.conversation_store is None:
