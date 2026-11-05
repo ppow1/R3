@@ -84,7 +84,7 @@ def git(*args):
 # R3-SITE-AUTH-001
 # R3-native Steward session verification; no R2 authentication dependency.
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from r3_native_auth_api import authenticated_identity
+from r3_chat_api import load_config, _principal
 
 _PUBLIC_ROUTES = frozenset({
     "/login",
@@ -107,10 +107,7 @@ async def r3_site_authentication(request: Request, call_next):
         path == "/api/v1/chat/session" and request.method == "DELETE"
     ):
         try:
-            from r3_native_auth_api import SESSION_COOKIE
-            if not request.cookies.get(SESSION_COOKIE):
-                raise HTTPException(401, "R3 authentication required")
-            authenticated_identity(request)
+            _principal(request, load_config())
         except HTTPException as exc:
             if exc.status_code in (401, 403):
                 if path == "/" and request.method == "GET":
