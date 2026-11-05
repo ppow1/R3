@@ -20,5 +20,17 @@
   "verification": {
     "requireHttp200": true,
     "browserAcceptance": "manual"
+  },
+  "dependencies": {
+    "manager": "pip",
+    "pythonVersion": "3.12",
+    "installMode": "locked",
+    "requirementsFile": "requirements-deploy.lock",
+    "hashesRequired": true
+  },
+  "tests": {
+    "profile": "website",
+    "timeoutSeconds": 300,
+    "onFailure": "abort-before-activation"
   }
 }
