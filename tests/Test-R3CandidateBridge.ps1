@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/Test-R3CandidateBridge.ps1
 # Component: R3-MANIFEST-DEPLOY
-# File Revision: 1.0.3
+# File Revision: 1.0.4
 # Created: 2026-11-05 UTC (exact time not independently verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanent PowerShell 7 offline bridge regression tests
@@ -13,6 +13,7 @@
 # Changed: 2026-11-04 UTC | R3-MANIFEST-DEPLOY-017 | ChatGPT GPT-6 | Add missing, malformed and unapproved manifest regression cases
 # Changed: 2026-11-04 UTC | R3-MANIFEST-DEPLOY-019 | ChatGPT GPT-6 | Enforce bounded SSH/fetch/build contract
 # Changed: 2026-11-04 UTC | R3-MANIFEST-DEPLOY-020 | ChatGPT GPT-6 | Preserve literal variable in timeout substitution assertion
+# Changed: 2026-11-04 UTC | R3-MANIFEST-DEPLOY-021 | ChatGPT GPT-6 | Verify real SSH failure returns nonzero without candidate success
 # Supersedes: None
 # Superseded By: None
 # Contracts: docs/runbooks/R3_MANIFEST_DEPLOYMENT.md
@@ -123,6 +124,30 @@ Test-Case 'SSH and remote work are bounded' {
     Assert-True ($source.Contains('Replace(''__BUILD_TIMEOUT__'', [string]$buildTimeout)')) 'Builder timeout substitution missing'
     Assert-True ($source.Contains('if ($sshExit -ne 0)')) 'Nonzero SSH exit not rejected'
     Assert-True ($source.Contains("Emit 'WEBSITE_ACTIVATION=NOT_RUN'")) 'No activation safety status'
+}
+# Exercise the actual bridge subprocess with a reserved documentation IP.
+# The address is not Camrui and must never be mapped to a production host.
+Test-Case 'unreachable SSH target fails closed' {
+    $manifest = Join-Path ([IO.Path]::GetTempPath()) ("r3-unreachable-" + [guid]::NewGuid().ToString('N') + '.json')
+    try {
+        $fixture = @{
+            schemaVersion = 1
+            source = @{ type='github'; repositoryUrl='https://github.com/ppow1/R3.git'; commit=('a'*40) }
+            target = @{ service='website'; sshAlias='192.0.2.1'; port=18303; releaseRoot='/tmp/releases'; activeSymlink='/tmp/active'; venvPath='/tmp/venv'; entrypoint='r3_app:app'; healthPath='/health' }
+            dependencies = @{ manager='pip'; installMode='locked'; requirementsFile='requirements-deploy.lock'; pythonVersion='3.12'; hashesRequired=$true }
+            tests = @{ profile='website'; timeoutSeconds=30; onFailure='abort-before-activation' }
+        }
+        $fixture | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $manifest
+        $output = & pwsh -NoProfile -NonInteractive -File $bridge -Manifest $manifest -CandidateRoot '/home/admin1/r3-candidate-test' -SkipClipboard 2>&1 | Out-String
+        $code = $LASTEXITCODE
+        Assert-True ($code -ne 0) 'Unreachable SSH target returned success'
+        Assert-True ($output -match 'SSH_EXIT_CODE=[1-9][0-9]*') 'SSH failure code missing'
+        Assert-True ($output -match 'ERROR=Candidate build failed') 'SSH failure diagnostics missing'
+        Assert-True ($output -notmatch 'CANDIDATE_BRIDGE_PASS=TRUE') 'Failed SSH reported candidate success'
+        Assert-True ($output -match 'WEBSITE_ACTIVATION=NOT_RUN') 'Activation safety status missing'
+    } finally {
+        Remove-Item -LiteralPath $manifest -ErrorAction SilentlyContinue
+    }
 }
 Write-Host "BRIDGE_TESTS_PASS=$passed"
 Write-Host "BRIDGE_TESTS_FAIL=$failed"
