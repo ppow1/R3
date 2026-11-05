@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/runbooks/R3_MANIFEST_DEPLOYMENT.md
 Component: R3-MANIFEST-DEPLOY
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-05 UTC (exact time not independently verified)
 Created By: ChatGPT GPT-6
 Purpose: Document manifest-driven deployment workflow and exact operator commands
@@ -10,6 +10,7 @@ Execution Model: Documentation
 Observability: Git history and deployment reports
 Dependencies: scripts/deployment/ and hints/deployment.md
 Authority: Steward directive for R3 repository-owned deployment package
+Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-004 | ChatGPT GPT-6 | Add guarded candidate preparation tool and describe unverified execution gate
 Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-003 | ChatGPT GPT-6 | Record verified dual-listener topology and unittest inventory; fail-closed build prerequisites
 Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-002 | ChatGPT GPT-6 | Specify isolated dependency provisioning and bounded regression contract
 Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-001 | ChatGPT GPT-6 | Initial documentation
@@ -17,7 +18,7 @@ Supersedes: None
 Superseded By: None
 Contracts: hints/file-provenance.md
 Tests: Documentation review only; live deployment not run
-History/Predecessor: Git blob 27b777cb3665ba4a73d1755c939a9243dd0b2ca7
+History/Predecessor: Git blob c17650686094c048a74e141475841b1b3e520830
 -->
 # R3 manifest-driven deployment — website first
 
@@ -123,3 +124,20 @@ Read-only inspection of live Camrui supervisor, release paths, active revision, 
 **Build gate:** No production candidate environment may be provisioned from an invented dependency lock. Before enabling candidate build, create/review a reproducible, hash-verified lock from the actual source dependencies; determine which assets and auth configuration the tests require; choose a separate candidate directory and venv. Until then, the manifest runner must remain plan-only. Do not in-place checkout, stop either website listener, or modify the shared venv.
 
 **Implementation correction:** The plan-only PowerShell runner was found malformed in repository inspection and rewritten in revision 1.0.2. The replacement is committed but **not executed or syntax-tested on Windows PowerShell 7**. It must pass a PowerShell parser check and positive/negative manifest tests before use. It does not deploy.
+
+## Phase 2 candidate preparation (implemented in source; NOT EXECUTED)
+
+`scripts/deployment/prepare_candidate.py` is a separate **explicitly invoked** candidate-only stage. It does not activate, restart, or stop either website process and does not alter `/home/admin1/R3` or its shared venv. It uses an exact existing commit in an existing local Git repository, requires a new candidate directory, checks for an exact-version SHA256-hashed requirements file **inside that commit before creating any directory**, clones into the candidate directory, creates a candidate-only Python venv, installs with `pip --require-hashes`, and runs `unittest discover` with bounded subprocess timeouts. Logs are written under `<candidate-root>/logs/`. A failed candidate is preserved for diagnostics, never activated.
+
+**This is not wired into the Windows manifest runner yet.** No actual lockfile has been verified in R3; do not invoke this build stage against live Camrui until dependency lock and candidate location are reviewed. The program has not been executed or regression-tested. It may require adjustments to handle the eventual lockfile formatting and runtime-specific test dependencies. It is intentionally not an operational deployment command.
+
+Proposed invocation, **not authorized or executed**:
+```bash
+python3 scripts/deployment/prepare_candidate.py \
+  --source /home/admin1/R3 \
+  --commit <EXACT_40_CHARACTER_SHA> \
+  --candidate-root /home/admin1/.local/share/r3/candidates/<UNIQUE_ID> \
+  --requirements requirements-deploy.lock \
+  --timeout 300
+```
+The parent candidate directory must exist; the child must not exist. Never choose a path inside the active checkout. Source SHA and lockfile must be from the same revision. The old `requirements-deploy.lock` name remains a placeholder until a reviewed file is committed. Verify this program independently before operational use.
