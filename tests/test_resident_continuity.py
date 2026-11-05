@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_resident_continuity.py
 # Component: R3-RESIDENT-CONTINUITY-REGRESSION
-# File Revision: 1.0.2
+# File Revision: 1.0.3
 # Created: Unknown (existing file)
 # Created By: Unknown (existing file)
 # Purpose: Permanent resident-neutral regression for durable activity/objective distinction.
@@ -11,6 +11,7 @@
 # Authority: R3 charter revision 2
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-006 | Verify assignment continuity through review submission.
 # Changed: 2026-11-03T02:24:59.876Z | R3-VERIFY-FEEDBACK-LOOP-001 | Codex | Verify review feedback resumes the assignment and queues a new review.
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-006 | Make inference fixtures asynchronous and deterministic across event-loop shutdown.
 # Supersedes: None
 # Tests: This file
 # History/Predecessor: Git blob 944dce6ff5075fdc75f80d048bb461dced0cf2af
@@ -30,7 +31,7 @@ class FakeEndpoint:
         self.decisions = iter(decisions)
         self.messages = []
 
-    def complete(self, messages, tools):
+    async def complete(self, messages, tools):
         self.messages.append(messages)
         return {"model": "fixture", "choices": [{"message": {
             "role": "assistant", "content": json.dumps(next(self.decisions))

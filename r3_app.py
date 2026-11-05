@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.11
+# File Revision: 1.0.12
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Initial shared read-only institutional API
@@ -13,10 +13,11 @@
 # Changed: 2026-11-03 UTC | R3-SETTINGS-WORKBENCH-001 | ChatGPT GPT-6 | Connect settings UI to guarded local JSON configuration API
 # Changed: 2026-11-01 UTC | R3-PANEL-INTERACTION-002 | ChatGPT GPT-6 | Align snapshot anchors and report dragged Infrastructure marker
 # Changed: 2026-11-05 UTC | HR-010 | Initialize persistent HR capability inside R3 app lifecycle
+# Changed: 2026-11-05 UTC | R3-AUTH-REGRESSION-001 | Avoid loading unrelated chat configuration before rejecting anonymous requests.
 # Supersedes: None
 # Contracts: hints/file-provenance.md
 # Tests: Not run for this source change; module route and browser verification pending
-# History/Predecessor: Git blob b3195f5a0ea8bacc030b642bc3dbb76258a4e747
+# History/Predecessor: Git blob b3195f5a0ea8bacc030b642bc3dbb76258a4e747; prior revision in commit 8750557799b19a00fc976496fd345feae4bbc547.
 
 """R3 first vertical slice: shared read-only capabilities, not UI-owned logic.
 
@@ -84,7 +85,6 @@ def git(*args):
 # R3-SITE-AUTH-001
 # R3-native Steward session verification; no R2 authentication dependency.
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from r3_chat_api import load_config as _auth_config
 from r3_chat_api import _principal as _auth_principal
 
 _PUBLIC_ROUTES = frozenset({
@@ -108,7 +108,10 @@ async def r3_site_authentication(request: Request, call_next):
         path == "/api/v1/chat/session" and request.method == "DELETE"
     ):
         try:
-            _auth_principal(request, _auth_config())
+            # Site authorization depends on the native session store. The chat
+            # proxy configuration is unrelated and may be unavailable while a
+            # valid anonymous request still needs a 401 or login redirect.
+            _auth_principal(request, {})
         except HTTPException as exc:
             if exc.status_code in (401, 403):
                 if path == "/" and request.method == "GET":
