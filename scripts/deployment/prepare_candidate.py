@@ -2,7 +2,7 @@
 # R3 CONTROLLED SOURCE
 # File: scripts/deployment/prepare_candidate.py
 # Component: R3-MANIFEST-DEPLOY
-# File Revision: 1.0.1
+# File Revision: 1.0.2
 # Created: 2026-11-05 UTC (exact time not independently verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Prepare isolated website candidate and run bounded unittest regression suite
@@ -10,13 +10,14 @@
 # Observability: stdout status and candidate-local build/test logs
 # Dependencies: git, Python venv, pip, reviewed hash-locked requirements
 # Authority: Steward directive for R3 isolated candidate build
+# Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-007 | ChatGPT GPT-6 | Repair literal escaped newline in Python preflight
 # Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-005 | ChatGPT GPT-6 | Fail-closed lock parser and candidate preflight hardening
 # Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-004 | ChatGPT GPT-6 | Initial fail-closed candidate stage
 # Supersedes: None
 # Superseded By: None
 # Contracts: docs/runbooks/R3_MANIFEST_DEPLOYMENT.md
 # Tests: Not executed against Camrui; requires independent verification
-# History/Predecessor: Git blob c3c582a635b95023486754ca78609ddae5d4b589
+# History/Predecessor: Git blob 74330358a4ae0d63f439efaf4c1bf9ecfd37d663
 """Never stops/restarts services, mutates active checkout, or activates candidates."""
 import argparse
 import os
@@ -92,7 +93,8 @@ def main():
         ap.error("--commit must be an exact 40-character SHA")
     if not 1 <= args.timeout <= 1800:
         ap.error("--timeout must be between 1 and 1800 seconds")
-    if (not re.fullmatch(r"[A-Za-z0-9_./-]+", args.requirements) or\n            Path(args.requirements).is_absolute() or ".." in Path(args.requirements).parts):
+    if (not re.fullmatch(r"[A-Za-z0-9_./-]+", args.requirements) or
+            Path(args.requirements).is_absolute() or ".." in Path(args.requirements).parts):
         ap.error("--requirements must be a relative path without ..")
     source = Path(args.source).resolve(strict=True)
     target = Path(args.candidate_root).resolve()
