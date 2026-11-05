@@ -12,8 +12,6 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
-from r3_native_auth_api import native_store, SESSION_COOKIE, CSRF_COOKIE
-from r3_native_sessions import AuthenticationDenied
 
 CONFIG_PATH = Path(os.environ.get("R3_WEBSITE_CHAT_CONFIG", "~/.config/r3/chat.json")).expanduser()
 MAX_BODY = 1_100_000
@@ -75,6 +73,9 @@ def _portal_request(url: str, request: Request, method: str = "GET",
         csrf = request.headers.get("X-Riverview-CSRF")
         if csrf:
             headers["X-Riverview-CSRF"] = csrf
+        origin = request.headers.get("origin")
+        if origin:
+            headers["Origin"] = origin
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as res:
@@ -85,21 +86,43 @@ def _portal_request(url: str, request: Request, method: str = "GET",
         raise HTTPException(503, "Website sign-in service is unavailable") from exc
 
 
-def _principal(request: Request, cfg: dict[str, Any]) -> str:
-    """Validate R3-native human session, never browser identity headers."""
-    token = request.cookies.get(SESSION_COOKIE)
-    if not token:
+def _auth_url(cfg: dict[str, Any], key: str) -> str:
+    value = cfg.get(key)
+    if not isinstance(value, str):
+        raise HTTPException(503, "Website authentication configuration is missing")
+    url = urllib.parse.urlparse(value)
+    if url.scheme != "http" or url.hostname not in {"127.0.0.1", "localhost", "::1"} or url.username or url.password or url.fragment:
+        raise HTTPException(503, "Website authentication must use loopback")
+    if url.path != "/api/v1/auth/session" or url.query:
+        raise HTTPException(503, "Unexpected website authentication endpoint")
+    return value
+
+
+def _portal_identity(request: Request, cfg: dict[str, Any]) -> dict[str, Any]:
+    if not request.cookies.get("rv_account_session"):
         raise HTTPException(401, "Sign in to R3")
+    status, raw, _ = _portal_request(
+        _auth_url(cfg, "website_auth_session_url"), request
+    )
+    if status == 401 or status == 403:
+        raise HTTPException(401, "Sign in to R3")
+    if status != 200:
+        raise HTTPException(503, "Website authentication service unavailable")
     try:
-        identity = native_store().authenticate(token)
-    except AuthenticationDenied as exc:
-        raise HTTPException(401, "Sign in to R3") from exc
+        body = json.loads(raw)
+        identity = body["identity"]
+        if not isinstance(identity["email"], str) or not isinstance(identity["roles"], list):
+            raise ValueError("Invalid identity")
+    except (ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(502, "Invalid website authentication response") from exc
+    return identity
 
-    if identity["role"] != "steward":
+
+def _principal(request: Request, cfg: dict[str, Any]) -> str:
+    identity = _portal_identity(request, cfg)
+    if "steward" not in identity["roles"]:
         raise HTTPException(403, "Steward access required")
-
     return identity["email"]
-
 
 
 def _runtime(cfg: dict[str, Any], principal: str, path: str, method: str = "GET",
@@ -158,30 +181,31 @@ def build_chat_router() -> APIRouter:
         if not isinstance(data, dict):
             raise HTTPException(400, "Invalid sign-in request")
 
+        status, payload, cookies = _portal_request(
+            _auth_url(cfg, "website_auth_login_url"), request,
+            method="POST", body=raw, content_type="application/json"
+        )
+        if status in (401, 403):
+            raise HTTPException(401, "Invalid credentials")
+        if status != 200:
+            raise HTTPException(503, "Website sign-in service unavailable")
         try:
-            session = native_store().login(
-                data.get("email"),
-                data.get("password"),
-            )
-        except AuthenticationDenied as exc:
-            raise HTTPException(401, "Invalid credentials") from exc
-
+            identity = json.loads(payload)["identity"]
+            roles = identity["roles"]
+            if not isinstance(roles, list):
+                raise ValueError("Invalid roles")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(502, "Invalid website sign-in response") from exc
+        if "steward" not in roles:
+            raise HTTPException(403, "Steward access required")
         response = JSONResponse(
-            {"authenticated": True, "role": session["role"]},
+            {"authenticated": True, "role": "steward"},
             headers={"Cache-Control": "no-store"},
         )
-        response.set_cookie(
-            SESSION_COOKIE, session["token"],
-            httponly=True, secure=True,
-            samesite="strict", path="/",
-            max_age=session["expires_in"],
-        )
-        response.set_cookie(
-            CSRF_COOKIE, session["csrf"],
-            httponly=False, secure=True,
-            samesite="strict", path="/",
-            max_age=session["expires_in"],
-        )
+        if len(cookies) != 2:
+            raise HTTPException(502, "Website authentication cookies missing")
+        for cookie in _browser_cookies(cookies):
+            response.headers.append("set-cookie", cookie)
         return response
 
     @router.post("/api/v1/chat/password-reset")
@@ -201,22 +225,21 @@ def build_chat_router() -> APIRouter:
         cfg = load_config()
         _origin(request, cfg, required=True)
 
-        token = request.cookies.get(SESSION_COOKIE)
-        csrf = request.headers.get("X-Riverview-CSRF")
-
-        try:
-            store = native_store()
-            store.authenticate(token, csrf=csrf, mutation=True)
-            store.logout(token)
-        except AuthenticationDenied as exc:
-            raise HTTPException(401, "Invalid session or CSRF") from exc
-
+        _portal_identity(request, cfg)
+        status, _, _ = _portal_request(
+            _auth_url(cfg, "website_auth_session_url"),
+            request, method="DELETE"
+        )
+        if status in (401, 403):
+            raise HTTPException(401, "Invalid session or CSRF")
+        if status != 200:
+            raise HTTPException(503, "Website logout unavailable")
         response = JSONResponse(
             {"authenticated": False},
             headers={"Cache-Control": "no-store"},
         )
-        response.delete_cookie(SESSION_COOKIE, path="/")
-        response.delete_cookie(CSRF_COOKIE, path="/")
+        response.delete_cookie("rv_account_session", path="/")
+        response.delete_cookie("rv_account_csrf", path="/")
         return response
 
     @router.get("/api/v1/chat/session")
@@ -224,21 +247,11 @@ def build_chat_router() -> APIRouter:
         cfg = load_config()
         _origin(request, cfg)
 
-        token = request.cookies.get(SESSION_COOKIE)
-
-        try:
-            identity = native_store().authenticate(token)
-        except AuthenticationDenied as exc:
-            raise HTTPException(401, "Sign in to R3") from exc
-
+        identity = _portal_identity(request, cfg)
         return JSONResponse(
-            {
-                "authenticated": True,
-                "identity": {
-                    "email": identity["email"],
-                    "roles": [identity["role"]],
-                },
-            },
+            {"authenticated": True, "identity": {
+                "email": identity["email"], "roles": identity["roles"]
+            }},
             headers={"Cache-Control": "no-store"},
         )
 
