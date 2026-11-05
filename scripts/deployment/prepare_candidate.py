@@ -2,7 +2,7 @@
 # R3 CONTROLLED SOURCE
 # File: scripts/deployment/prepare_candidate.py
 # Component: R3-MANIFEST-DEPLOY
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-05 UTC (exact time not independently verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Prepare isolated website candidate and run bounded unittest regression suite
@@ -10,12 +10,13 @@
 # Observability: stdout status and candidate-local build/test logs
 # Dependencies: git, Python venv, pip, reviewed hash-locked requirements
 # Authority: Steward directive for R3 isolated candidate build
+# Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-005 | ChatGPT GPT-6 | Fail-closed lock parser and candidate preflight hardening
 # Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-004 | ChatGPT GPT-6 | Initial fail-closed candidate stage
 # Supersedes: None
 # Superseded By: None
 # Contracts: docs/runbooks/R3_MANIFEST_DEPLOYMENT.md
 # Tests: Not executed against Camrui; requires independent verification
-# History/Predecessor: None
+# History/Predecessor: Git blob c3c582a635b95023486754ca78609ddae5d4b589
 """Never stops/restarts services, mutates active checkout, or activates candidates."""
 import argparse
 import os
@@ -23,7 +24,6 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-import time
 
 SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 HASH = re.compile(r"--hash=sha256:[0-9a-fA-F]{64}")
@@ -50,31 +50,33 @@ def run(args, *, cwd=None, timeout=300, output=None, env=None):
 
 
 def validate_lock(contents):
-    logical = []
-    for raw in contents.splitlines():
-        stripped = raw.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if stripped.startswith(("--", "-r", "-c", "-e", ".", "/", "git+", "http:")):
-            raise ValueError("Lockfile contains unsupported option, include, path, or URL")
-        if stripped.endswith("\\"):
-            logical.append(stripped[:-1].strip())
-            continue
-        logical.append(stripped)
-    if not logical:
-        raise ValueError("Lockfile has no pinned packages")
-    # Each requirement must have exact version and at least one SHA256 hash.
+    """Allow only exact pinned package entries with explicit SHA256 hashes.
+
+    This deliberately supports a narrow pip-compile style subset. Reject
+    unsupported syntax rather than silently weakening hash enforcement.
+    """
     entries = []
-    for line in logical:
-        if LOCK_ENTRY.match(line):
-            entries.append(line)
-        elif entries and line.startswith("--hash="):
-            entries[-1] += " " + line
-        else:
-            raise ValueError("Lockfile must contain only exact pinned packages and hashes")
+    current = ""
+    for raw in contents.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.endswith("\\"):
+            current += line[:-1].strip() + " "
+            continue
+        current += line
+        entries.append(current.strip())
+        current = ""
+    if current:
+        raise ValueError("Unterminated requirements continuation")
+    if not entries:
+        raise ValueError("Lockfile has no pinned packages")
     for entry in entries:
-        if not HASH.search(entry):
-            raise ValueError("Missing sha256 hash for pinned package")
+        parts = entry.split()
+        if not parts or not re.fullmatch(r"[A-Za-z0-9_.-]+==[A-Za-z0-9_.!+~-]+", parts[0]):
+            raise ValueError("Requirement must be an exact pinned package")
+        if len(parts) < 2 or any(not re.fullmatch(r"--hash=sha256:[0-9a-fA-F]{64}", part) for part in parts[1:]):
+            raise ValueError("Every package must have SHA256 hashes and no other options")
     return len(entries)
 
 
@@ -90,7 +92,7 @@ def main():
         ap.error("--commit must be an exact 40-character SHA")
     if not 1 <= args.timeout <= 1800:
         ap.error("--timeout must be between 1 and 1800 seconds")
-    if Path(args.requirements).is_absolute() or ".." in Path(args.requirements).parts:
+    if (not re.fullmatch(r"[A-Za-z0-9_./-]+", args.requirements) or\n            Path(args.requirements).is_absolute() or ".." in Path(args.requirements).parts):
         ap.error("--requirements must be a relative path without ..")
     source = Path(args.source).resolve(strict=True)
     target = Path(args.candidate_root).resolve()
@@ -104,7 +106,7 @@ def main():
         ap.error("Candidate path overlaps source checkout")
     if target.parent == Path("/") or not target.parent.is_dir():
         ap.error("Candidate parent directory must already exist")
-    if target.is_symlink() or target.parent.is_symlink():
+    if target.is_symlink() or any(p.is_symlink() for p in target.parents):
         ap.error("Candidate path/parent must not be a symlink")
     resolved = run(["git", "-C", str(source), "rev-parse", "--verify", f"{args.commit}^{{commit}}"], timeout=30).strip()
     if resolved.lower() != args.commit.lower():
