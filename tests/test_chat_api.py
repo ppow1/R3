@@ -70,7 +70,8 @@ class ChatApiTests(unittest.TestCase):
         with patch("r3_chat_api.native_store", return_value=store):
             principal = _principal(request, self.config)
 
-        self.assertEqual(principal, "steward@example.test")
+        self.assertEqual(principal.principal_id, "steward@example.test")
+        self.assertEqual(principal.role, "steward")
 
     def test_spoofed_browser_header_without_native_session_denied(self):
         request = FakeRequest({
