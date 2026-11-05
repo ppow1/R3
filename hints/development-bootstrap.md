@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/development-bootstrap.md
 Component: ENG-DEV-BOOTSTRAP
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-05 UTC (date only; exact time not independently verified)
 Created By: ChatGPT GPT-6
 Purpose: Standardize the start of new R3 feature-development conversations
@@ -10,6 +10,7 @@ Execution Model: Documentation / development conversation initialization
 Observability: Git history and bootstrap readiness summary
 Dependencies: AI_HINTS.md; hints/README.md; hints/engineering.md; hints/development-governance.md
 Authority: Steward direction, R3 charter, AI_HINTS.md
+Changed: 2026-11-05 UTC | R3-BOOTSTRAP-ACCEPTANCE-006 | ChatGPT GPT-6 | Require operational completion rather than plan-only milestones
 Changed: 2026-11-05 UTC | R3-DEPLOY-BOOTSTRAP-005 | ChatGPT GPT-6 | Require verified real activation and protected integration/fallback
 Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-003 | ChatGPT GPT-6 | Require dated cited evidence correction
 Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-002 | ChatGPT GPT-6 | Require local-evidence-first gateway execution and PowerShell clipboard fallback
@@ -38,6 +39,16 @@ History/Predecessor: Git blob d136a4ddf31f199615670b4c91856f5fd22a11b1
 ## Production activation readiness
 
 Before attempting production activation, verify the documented runner performs a REAL activation (not a plan-only validation); inspect the live service owner, source, release path and current deployment baseline. Resolve feature-branch divergence through an isolated candidate preserving other workstreams. Do not deploy a whole outdated branch over the shared runtime, reset a dirty shared checkout, or use a legacy script whose service/port assumptions do not match live state. If the authorized Command Gateway rejects deployment-related requests despite active grants, record the blocker and use the complete PowerShell clipboard fallback for safe live preflight and activation, with observed evidence. If a safe activation procedure cannot yet be determined, report PREDEPLOY_BLOCKED, not DEPLOYED.
+
+## Operational completion gate — no plan-only substitutions
+
+**The requested operational outcome is the acceptance criterion.** A document, manifest, implementation plan, prototype, candidate build, tests passing, or a script that only validates a plan is an intermediate deliverable, **not completion**, when the Steward requested working functionality. Labels such as `plan-only`, `phase 1`, `pending integration`, and `ready to deploy` must not be reported as deployed, operational, or done.
+
+Before beginning work, record the requested observable end-to-end behavior and how it will be verified on the intended host/service. For a deployment capability, the minimum acceptance is **one actual update installed through the intended procedure, the intended running revision verified, and essential live behavior checked**. A zero exit code from a manifest validator or an HTTP 200 alone does not satisfy that criterion.
+
+When a stage is incomplete, explicitly report **NOT OPERATIONAL / BLOCKED**, what is implemented, what remains, and the exact blocker. Do not silently move the missing activation/integration work into an unspecified future phase or declare the original request completed. Only treat a plan-only artifact as final when the Steward **explicitly requested planning only**.
+
+Use the existing R/3 Bootstrap, deployment governance, and runbooks; do not create another manager, parallel installer, or architectural workstream to satisfy this rule. For urgent feature delivery, use an already verified safe activation path if available, and defer installer improvement without delaying the feature. Preserve live services and the dirty shared checkout.
 
 ## Deployment policy during accelerated development
 
