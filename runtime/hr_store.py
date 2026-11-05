@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/hr_store.py
 # Component: HR-PERSISTENCE
-# File Revision: 1.1.0
+# File Revision: 1.2.0
 # Created: 2026-11-05 UTC (date precision)
 # Created By: ChatGPT GPT-6
 # Purpose: Local persistent, versioned, extensible R/3 personnel records
@@ -14,7 +14,8 @@
 # Contracts: runtime/hr_records.py; hints/file-provenance.md
 # Tests: tests/test_hr_store.py
 # Changed: 2026-11-05 UTC | HR-008 | Discover stored residents without caller-supplied IDs
-# History/Predecessor: f13859dd677d8c665e5beca98624b9bcbebd3f3a
+# Changed: 2026-11-05 UTC | HR-CREDENTIAL-IDENTITY-002 | Codex | Enforce unique HR principal links atomically on save
+# History/Predecessor: R3 integration candidate source at 88526f126a847a6d49186ff870924929bd8bdcb1
 """R/3-only local HR storage. No cross-institution dependencies or HTTP surface.
 
 Never place the database in a web-served directory or a Git checkout.
@@ -25,7 +26,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from runtime.hr_records import HRField, ResidentHRRecord
+from runtime.hr_records import AUTHORITY_PRINCIPAL_FIELD, HRField, ResidentHRRecord
 
 def _encode(record: ResidentHRRecord) -> str:
     def pack(fields):
@@ -66,23 +67,70 @@ class HRStore:
 
     def put(self, record: ResidentHRRecord, *, expected_revision: int | None = None) -> int:
         """Create with expected_revision=None; update with exact revision."""
-        encoded = _encode(record)
-        with self._db:
+        # Serialize read/check/write so concurrent onboarding cannot associate
+        # the same authority principal with two HR residents.
+        self._db.execute("BEGIN IMMEDIATE")
+        try:
             current = self._db.execute(
-                "SELECT revision FROM hr_records WHERE resident_id=?",
+                "SELECT revision, payload FROM hr_records WHERE resident_id=?",
                 (record.resident_id,)).fetchone()
+
+            record_to_store = record
+            if current is not None:
+                existing_record = _decode(current[1])
+                existing_association = existing_record.extensions.get(
+                    AUTHORITY_PRINCIPAL_FIELD
+                )
+                proposed_association = record.extensions.get(
+                    AUTHORITY_PRINCIPAL_FIELD
+                )
+                if existing_association is not None:
+                    if (proposed_association is not None and
+                            proposed_association.value != existing_association.value):
+                        raise ValueError("authority principal association cannot be changed")
+                    if proposed_association is None:
+                        extensions = dict(record.extensions)
+                        extensions[AUTHORITY_PRINCIPAL_FIELD] = existing_association
+                        record_to_store = ResidentHRRecord(
+                            resident_id=record.resident_id,
+                            display_name=record.display_name,
+                            office=record.office,
+                            status=record.status,
+                            schema_version=record.schema_version,
+                            fields=dict(record.fields),
+                            extensions=extensions,
+                            history_refs=list(record.history_refs),
+                        )
+
+            association = record_to_store.extensions.get(AUTHORITY_PRINCIPAL_FIELD)
+            if association is not None:
+                for resident_id, payload in self._db.execute(
+                        "SELECT resident_id, payload FROM hr_records"):
+                    if resident_id == record.resident_id:
+                        continue
+                    existing = _decode(payload).extensions.get(AUTHORITY_PRINCIPAL_FIELD)
+                    if existing is not None and existing.value == association.value:
+                        raise ValueError("authority principal already associated")
+
+            encoded = _encode(record_to_store)
+
             if current is None:
                 if expected_revision is not None:
                     raise ValueError("revision conflict")
                 self._db.execute("INSERT INTO hr_records VALUES (?, ?, ?)",
                                  (record.resident_id, 1, encoded))
-                return 1
-            if expected_revision != current[0]:
-                raise ValueError("revision conflict")
-            revision = current[0] + 1
-            self._db.execute("UPDATE hr_records SET revision=?, payload=? WHERE resident_id=?",
-                             (revision, encoded, record.resident_id))
+                revision = 1
+            else:
+                if expected_revision != current[0]:
+                    raise ValueError("revision conflict")
+                revision = current[0] + 1
+                self._db.execute("UPDATE hr_records SET revision=?, payload=? WHERE resident_id=?",
+                                 (revision, encoded, record.resident_id))
+            self._db.commit()
             return revision
+        except BaseException:
+            self._db.rollback()
+            raise
 
     def resident_ids(self) -> list[str]:
         """Discover all stored R/3 resident IDs without a fixed roster or limit."""

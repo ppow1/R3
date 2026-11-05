@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/hr_stdio.py
 # Component: HR-STDIO
-# File Revision: 1.2.0
+# File Revision: 1.3.0
 # Created: 2026-11-05 UTC (date precision)
 # Created By: ChatGPT GPT-6
 # Purpose: Transport-neutral JSON-lines stdio dispatcher for R/3 HR
@@ -15,6 +15,7 @@
 # Tests: tests/test_hr_stdio.py
 # Changed: 2026-11-05 UTC | HR-008 | Discover stored residents without caller-supplied IDs
 # Changed: 2026-11-05 UTC | HR-009 | Support create/update over local stdio
+# Changed: 2026-11-05 UTC | HR-CREDENTIAL-IDENTITY-002 | Codex | Add explicit no-rotation principal association workflow
 # History/Predecessor: e66c60be7f9657aeb1909e7d33decce9b53c43fc
 """A stdio adapter, NOT a standalone unauthenticated HR server.
 
@@ -71,6 +72,19 @@ def dispatch(capability: HRCapability, principal: VerifiedPrincipal, request: di
                 history_refs=payload.get("history_refs", []))
             return {"ok": True, "revision": capability.save(
                 principal, record, expected_revision=revision)}
+        if operation == "hr.associate_principal":
+            resident_id = request.get("resident_id")
+            authority_principal = request.get("authority_principal")
+            revision = request.get("expected_revision")
+            if not isinstance(resident_id, str) or not resident_id.strip():
+                return {"ok": False, "error": "invalid_resident_id"}
+            if not isinstance(authority_principal, str):
+                return {"ok": False, "error": "invalid_authority_principal"}
+            if type(revision) is not int or revision < 1:
+                return {"ok": False, "error": "invalid_revision"}
+            return {"ok": True, "revision": capability.associate_authority_principal(
+                principal, resident_id, authority_principal,
+                expected_revision=revision)}
         return {"ok": False, "error": "unsupported_operation"}
     except PermissionError:
         return {"ok": False, "error": "forbidden"}
