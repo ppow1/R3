@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_activity_continuation.py
 # Component: R3-RESIDENT-CONTINUATION-TESTS
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: Unknown (legacy; prior version lacked creation metadata)
 # Created By: Unknown (legacy)
 # Purpose: Permanent resident-neutral durable activity continuation regressions.
@@ -10,11 +10,11 @@
 # Dependencies: runtime.resident_inference; runtime.assignment_intake; Python standard library.
 # Authority: R3 development bootstrap and Charter Revision 2.
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-003 | ChatGPT GPT-6 | Test no-progress guard and add controlled provenance.
-# Supersedes: None
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-005 | Test authority-referenced blocked resumption, idempotency and restart.\n# Supersedes: None
 # Superseded By: None
 # Contracts: hints/file-provenance.md; hints/development-governance.md
 # Tests: python -m unittest tests.test_activity_continuation -v
-# History/Predecessor: Git blob 507ef5ed29ad0a7389e4bfceb677728336873c9b
+# History/Predecessor: Git blob 1f0de33875c6bea13482fad65ab17d78fcd8a916
 from __future__ import annotations
 import asyncio
 import json
@@ -102,6 +102,44 @@ class ActivityContinuationTests(unittest.TestCase):
             self.db.execute("SELECT status FROM resident_inbox ORDER BY id DESC LIMIT 1").fetchone()[0],
             "PENDING",
         )
+
+    def test_blocked_resumption_preserves_evidence_and_is_idempotent(self):
+        event = self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY", {"objective": "Investigate"})
+        self.inbox.next("TestResident")
+        self.inbox.finish(event, "BLOCKED", {"objective_status": "BLOCKED", "dependency": "Missing grant"})
+        with self.assertRaisesRegex(ValueError, "authority"):
+            self.inbox.resume_blocked(event, authority_ref="", resolution_evidence="Grant issued")
+        with self.assertRaisesRegex(ValueError, "evidence"):
+            self.inbox.resume_blocked(event, authority_ref="approved:1", resolution_evidence="")
+        successor = self.inbox.resume_blocked(
+            event, authority_ref="approved:1", resolution_evidence="Grant issued"
+        )
+        self.assertEqual(successor, self.inbox.resume_blocked(
+            event, authority_ref="approved:1", resolution_evidence="Grant issued"
+        ))
+        with self.assertRaisesRegex(ValueError, "different evidence"):
+            self.inbox.resume_blocked(
+                event, authority_ref="approved:2", resolution_evidence="Grant issued"
+            )
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM resident_inbox WHERE id=?", (event,)
+        ).fetchone()[0], "BLOCKED")
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM resident_inbox"
+        ).fetchone()[0], 2)
+        row = self.db.execute(
+            "SELECT status,payload FROM resident_inbox WHERE id=?", (successor,)
+        ).fetchone()
+        self.assertEqual(row[0], "PENDING")
+        self.assertEqual(json.loads(row[1])["previous_result"]["dependency"], "Missing grant")
+        self.assertEqual(json.loads(row[1])["resumption_authority_ref"], "approved:1")
+
+    def test_nonblocked_event_cannot_be_resumed(self):
+        event = self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY", {"objective": "Check"})
+        with self.assertRaisesRegex(ValueError, "BLOCKED"):
+            self.inbox.resume_blocked(
+                event, authority_ref="approved:1", resolution_evidence="Resolved"
+            )
 
     def test_regular_event_keeps_ordinary_response(self):
         event = self.inbox.enqueue("TestResident", "CONVERSATION", {"text": "hello"})
