@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/resident_inference.py
 # Component: R3-RESIDENT-INFERENCE
-# File Revision: 1.3.1
+# File Revision: 1.3.2
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Reusable event-driven resident inference against an existing OpenAI-compatible endpoint.
@@ -14,11 +14,12 @@
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-005 | Atomically queue review on completion with explicit criteria.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-006 | Preserve assignment metadata across activity continuation.
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-002 | Preserve evidence-backed blocked state as durable unresolved outcome.
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-003 | Block repeated no-progress continuation, preserving durable evidence.
 # Supersedes: None
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; hints/engineering-test-policy.md
 # Tests: tests/test_inference_http_errors.py (permanent transport diagnostic contract).
 # Changed: 2026-11-02 UTC | R3-GRACE-005 | Preserve safe upstream HTTP error codes without leaking request content.
-# History/Predecessor: Git blob f890fef537d1463d3ccfca3e660028c03312e732
+# History/Predecessor: Git blob 785acfe84175b4afa2f583f54cb6cc632af89303
 """Durable resident inbox and inference adapter; tool routing uses existing llama.cpp /tools adapter."""
 from __future__ import annotations
 
@@ -233,6 +234,24 @@ class ResidentInference:
                         next_step = decision.get("next_step")
                         if not isinstance(next_step, str) or not next_step.strip():
                             raise RuntimeError("Continuing activity requires next_step")
+                        prior = payload.get("previous_result")
+                        # An identical proposed action with identical evidence and no
+                        # newly observed tool result is not a meaningful continuation.
+                        # Do not invent progress or enqueue an infinite feedback loop.
+                        if (isinstance(prior, dict)
+                                and prior.get("state") == "continue"
+                                and prior.get("next_step") == next_step
+                                and prior.get("evidence") == decision.get("evidence")
+                                and not any(kind == "TOOL_RESULT" for kind, _ in history)):
+                            self.inbox.finish(event_id, "BLOCKED", {
+                                "decision": decision,
+                                "model": result.get("model"),
+                                "objective_status": "BLOCKED",
+                                "dependency": "Repeated continuation without new evidence",
+                                "previous_event_id": payload.get("previous_event_id"),
+                                "previous_result": prior,
+                            })
+                            return
                         self.inbox.continue_activity(event_id, resident, event_type, {
                             **payload,
                             "objective": payload.get("objective", payload),
