@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/development-governance.md
 Component: ENG-DEV-GOVERNANCE
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-05 UTC (date only; exact time not independently verified)
 Created By: ChatGPT GPT-6
 Purpose: Initial R3 development lifecycle, Definition of Done and deployment-input contract
@@ -10,13 +10,14 @@ Execution Model: Documentation / development conversation initialization
 Observability: Git history and bootstrap readiness summary
 Dependencies: hints/development-bootstrap.md; hints/engineering.md; hints/deployment.md
 Authority: Steward direction, R3 charter, AI_HINTS.md
+Changed: 2026-11-05 UTC | R3-DEPLOY-BOOTSTRAP-005 | ChatGPT GPT-6 | Require verified real activation and protected integration/fallback
 Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-002 | ChatGPT GPT-6 | Require local-evidence-first gateway execution and PowerShell clipboard fallback
 Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-001 | ChatGPT GPT-6 | Initial bootstrap guidance
 Supersedes: None
 Superseded By: None
 Contracts: hints/file-provenance.md; docs/PROJECT_CHARTER_REVISION_2_REVIEW.md
 Tests: Link and content review; no runtime deployment
-History/Predecessor: Git blob e7d91615e2d713358401523db59feb8b33a4dfd4
+History/Predecessor: Git blob e9c0ac42fdc36ce6345d38658661b9998ff0f6e0
 -->
 # R/3 Development Governance — Initial Working Standard
 
@@ -53,6 +54,10 @@ Each team supplies the **same categories of information**, not identical code or
 - Observed outcome, failures and fix-in-place instructions.
 
 This is a **human-readable initial contract**, not a claim that the current deployment runner can already consume all fields. Formal machine-readable schema and enforcement may evolve separately.
+
+## Production activation readiness
+
+Deployment readiness requires an independently verified activation-capable procedure, actual service and release topology, and integration of the exact delivered feature against the current live baseline. A plan-only manifest validation is never a deployment. Preserve dirty shared checkouts, unrelated runtime/services and existing release. An authorized gateway probe succeeding does not establish that deployment commands are permitted; when substantive requests fail, record the reason and use the PowerShell 7 clipboard fallback. Report PREDEPLOY_BLOCKED rather than attempt an unverified activation.
 
 ## Shared baseline rule
 
