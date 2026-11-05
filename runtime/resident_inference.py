@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/resident_inference.py
 # Component: R3-RESIDENT-INFERENCE
-# File Revision: 1.3.3
+# File Revision: 1.3.4
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Reusable event-driven resident inference against an existing OpenAI-compatible endpoint.
@@ -16,11 +16,11 @@
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-002 | Preserve evidence-backed blocked state as durable unresolved outcome.
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-003 | Block repeated no-progress continuation, preserving durable evidence.
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-004 | Include tool results observed during the active inference turn.
-# Supersedes: None
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-005 | Authority-referenced idempotent blocked activity resumption.\n# Supersedes: None
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; hints/engineering-test-policy.md
 # Tests: tests/test_inference_http_errors.py (permanent transport diagnostic contract).
 # Changed: 2026-11-02 UTC | R3-GRACE-005 | Preserve safe upstream HTTP error codes without leaking request content.
-# History/Predecessor: Git blob deddd8d10c89a7fcc64cba3541d2a3cbeafacb03
+# History/Predecessor: Git blob 1e433f2ddb10f439ef7599bf48a19c6fb11ea2c0
 """Durable resident inbox and inference adapter; tool routing uses existing llama.cpp /tools adapter."""
 from __future__ import annotations
 
@@ -78,6 +78,45 @@ class Inbox:
                 "UPDATE resident_inbox SET status='COMPLETED',result=?,updated_at=? WHERE id=?",
                 (json.dumps({**result, "continuation_event_id": cursor.lastrowid}), now, event_id))
         return int(cursor.lastrowid)
+
+    def resume_blocked(self, event_id: int, *, authority_ref: str, resolution_evidence: str) -> int:
+        """Queue a successor while preserving blocked evidence; caller validates authority."""
+        if not isinstance(authority_ref, str) or not authority_ref.strip():
+            raise ValueError("Resumption requires an authority reference")
+        if not isinstance(resolution_evidence, str) or not resolution_evidence.strip():
+            raise ValueError("Resumption requires dependency resolution evidence")
+        with self.db:
+            row = self.db.execute(
+                "SELECT resident,event_type,payload,status,result FROM resident_inbox WHERE id=?",
+                (event_id,),
+            ).fetchone()
+            if row is None or row[3] != "BLOCKED" or row[1] != "RESIDENT_ACTIVITY":
+                raise ValueError("Resumption requires a BLOCKED resident activity")
+            resident, event_type, raw_payload, _, raw_result = row
+            for successor_id, raw in self.db.execute(
+                "SELECT id,payload FROM resident_inbox WHERE resident=? AND event_type=?",
+                (resident, event_type),
+            ):
+                existing = json.loads(raw)
+                if existing.get("resumed_from_blocked_event_id") == event_id:
+                    if (existing.get("resumption_authority_ref") != authority_ref
+                            or existing.get("resumption_evidence") != resolution_evidence):
+                        raise ValueError("Blocked activity already resumed with different evidence")
+                    return int(successor_id)
+            payload = {
+                **json.loads(raw_payload),
+                "previous_event_id": event_id,
+                "previous_result": json.loads(raw_result or "{}"),
+                "resumed_from_blocked_event_id": event_id,
+                "resumption_authority_ref": authority_ref,
+                "resumption_evidence": resolution_evidence,
+            }
+            now = time.time()
+            cursor = self.db.execute(
+                "INSERT INTO resident_inbox(resident,event_type,payload,created_at,updated_at) VALUES (?,?,?,?,?)",
+                (resident, event_type, json.dumps(payload), now, now),
+            )
+            return int(cursor.lastrowid)
 
     def next(self, resident: str) -> tuple[int, str, dict] | None:
         row = self.db.execute(
