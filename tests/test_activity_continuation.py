@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import Mock
 from runtime.resident_inference import Inbox, ResidentInference
 
@@ -63,7 +65,79 @@ class ActivityContinuationTests(unittest.TestCase):
         event = self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY", {"objective": "Check"})
         handler = self.handler([{"state": "blocked", "evidence": "Need access"}])
         asyncio.run(handler("TestResident"))
-        self.assertEqual(self.db.execute("SELECT status FROM resident_inbox WHERE id=?", (event,)).fetchone()[0], "FAILED")
+        row = self.db.execute(
+            "SELECT status,result FROM resident_inbox WHERE id=?", (event,)
+        ).fetchone()
+        self.assertEqual(row[0], "BLOCKED")
+        self.assertEqual(json.loads(row[1])["objective_status"], "BLOCKED")
+        self.assertIsNone(self.inbox.next("TestResident"))
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM resident_inbox"
+        ).fetchone()[0], 1)
+
+    def test_blocked_without_dependency_evidence_fails_closed(self):
+        event = self.inbox.enqueue(
+            "TestResident", "RESIDENT_ACTIVITY", {"objective": "Investigate"}
+        )
+        with self.assertRaisesRegex(RuntimeError, "dependency evidence"):
+            asyncio.run(self.handler([{"state": "blocked"}])("TestResident"))
+        row = self.db.execute(
+            "SELECT status,result FROM resident_inbox WHERE id=?", (event,)
+        ).fetchone()
+        self.assertEqual(row[0], "FAILED")
+        self.assertNotEqual(json.loads(row[1]).get("objective_status"), "BLOCKED")
+
+    def test_blocked_survives_restart_without_implicit_reexecution(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "institution.sqlite3"
+            connection = sqlite3.connect(path)
+            inbox = Inbox(connection)
+            event = inbox.enqueue(
+                "ResearchResident", "RESIDENT_ACTIVITY",
+                {"objective": "Investigate missing authority"},
+            )
+            inbox.next("ResearchResident")
+            inbox.finish(event, "BLOCKED", {
+                "decision": {"state": "blocked", "reason": "Grant not approved"},
+                "objective_status": "BLOCKED",
+            })
+            connection.close()
+
+            restarted = sqlite3.connect(path)
+            try:
+                inbox = Inbox(restarted)
+                self.assertIsNone(inbox.next("ResearchResident"))
+                row = restarted.execute(
+                    "SELECT status,result FROM resident_inbox WHERE id=?", (event,)
+                ).fetchone()
+                self.assertEqual(row[0], "BLOCKED")
+                self.assertEqual(json.loads(row[1])["objective_status"], "BLOCKED")
+            finally:
+                restarted.close()
+
+    def test_blocked_cannot_submit_independent_review(self):
+        event = self.inbox.enqueue(
+            "TestResident", "RESIDENT_ACTIVITY", {"assignment_id": "assignment"}
+        )
+        self.inbox.next("TestResident")
+        with self.assertRaisesRegex(ValueError, "Only completed"):
+            self.inbox.finish(event, "BLOCKED", {
+                "objective_status": "BLOCKED"
+            }, review={
+                "assignment_id": "assignment",
+                "criteria": [{"id": "acceptance"}],
+                "evidence": {},
+            })
+        self.assertEqual(
+            self.db.execute(
+                "SELECT count(*) FROM verification_requests"
+            ).fetchone()[0], 0,
+        )
+        self.assertEqual(
+            self.db.execute(
+                "SELECT status FROM resident_inbox WHERE id=?", (event,)
+            ).fetchone()[0], "PROCESSING",
+        )
 
 
 if __name__ == "__main__":
