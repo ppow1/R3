@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_activity_continuation.py
 # Component: R3-RESIDENT-CONTINUATION-TESTS
-# File Revision: 1.0.1
+# File Revision: 1.0.3
 # Created: Unknown (legacy; prior version lacked creation metadata)
 # Created By: Unknown (legacy)
 # Purpose: Permanent resident-neutral durable activity continuation regressions.
@@ -10,11 +10,13 @@
 # Dependencies: runtime.resident_inference; runtime.assignment_intake; Python standard library.
 # Authority: R3 development bootstrap and Charter Revision 2.
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-003 | ChatGPT GPT-6 | Test no-progress guard and add controlled provenance.
-# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-005 | Test authority-referenced blocked resumption, idempotency and restart.\n# Supersedes: None
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-005 | Test authority-referenced blocked resumption, idempotency and restart.
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-007 | Cover concurrent blocked-resumption idempotency.
+# Supersedes: None
 # Superseded By: None
 # Contracts: hints/file-provenance.md; hints/development-governance.md
 # Tests: python -m unittest tests.test_activity_continuation -v
-# History/Predecessor: Git blob 1f0de33875c6bea13482fad65ab17d78fcd8a916
+# History/Predecessor: Git blob 0f98ff269d01777d237461cf596425088038e5f7
 from __future__ import annotations
 import asyncio
 import json
@@ -133,6 +135,39 @@ class ActivityContinuationTests(unittest.TestCase):
         self.assertEqual(row[0], "PENDING")
         self.assertEqual(json.loads(row[1])["previous_result"]["dependency"], "Missing grant")
         self.assertEqual(json.loads(row[1])["resumption_authority_ref"], "approved:1")
+
+    def test_simultaneous_resumption_creates_only_one_successor(self):
+        import concurrent.futures
+        import threading
+        with tempfile.TemporaryDirectory() as folder:
+            database = Path(folder) / "concurrent.sqlite3"
+            with sqlite3.connect(database) as db:
+                inbox = Inbox(db)
+                event = inbox.enqueue(
+                    "TestResident", "RESIDENT_ACTIVITY", {"objective": "Investigate"}
+                )
+                inbox.next("TestResident")
+                inbox.finish(event, "BLOCKED", {
+                    "objective_status": "BLOCKED", "dependency": "Grant pending"})
+            barrier = threading.Barrier(2)
+
+            def resume():
+                db = sqlite3.connect(database, timeout=10)
+                try:
+                    inbox = Inbox(db)
+                    barrier.wait(timeout=5)
+                    return inbox.resume_blocked(
+                        event, authority_ref="approved:1",
+                        resolution_evidence="Grant issued")
+                finally:
+                    db.close()
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                results = list(executor.map(lambda _: resume(), range(2)))
+            self.assertEqual(results[0], results[1])
+            with sqlite3.connect(database) as db:
+                self.assertEqual(db.execute(
+                    "SELECT COUNT(*) FROM resident_inbox").fetchone()[0], 2)
 
     def test_nonblocked_event_cannot_be_resumed(self):
         event = self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY", {"objective": "Check"})
