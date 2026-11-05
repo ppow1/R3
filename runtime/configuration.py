@@ -54,6 +54,40 @@ def _read_json(path):
         raise ConfigurationError(f"Cannot load {path}: {exc}") from exc
 
 
+
+def _service_config(runtime, key):
+    """Validate an explicitly configured loopback listener."""
+    section = runtime.get(key)
+    if section is None:
+        return None
+    section = _object(section, key)
+    enabled = section.get("enabled")
+    if not isinstance(enabled, bool):
+        raise ConfigurationError(f"{key}.enabled must be boolean")
+    if not enabled:
+        return None
+    if section.get("host") != "127.0.0.1":
+        raise ConfigurationError(f"{key}.host must be 127.0.0.1")
+    port = section.get("port")
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise ConfigurationError(f"{key}.port must be an integer from 1 to 65535")
+    token_file = Path(_text(section.get("token_file"), f"{key}.token_file"))
+    if not token_file.is_absolute():
+        raise ConfigurationError(f"{key}.token_file must be absolute")
+    return {"port": port, "token_file": token_file}
+
+
+def _credential_config(runtime):
+    section = runtime.get("resident_credentials")
+    if section is None:
+        return None
+    section = _object(section, "resident_credentials")
+    directory = Path(_text(section.get("directory"), "resident_credentials.directory"))
+    if not directory.is_absolute():
+        raise ConfigurationError("resident_credentials.directory must be absolute")
+    return directory
+
+
 def load_configuration(directory: str | Path):
     """Return validated settings and resident definitions; never silently default."""
     root = Path(directory).resolve()
@@ -61,6 +95,12 @@ def load_configuration(directory: str | Path):
     _positive(runtime.get("scheduler_tick_seconds"), "scheduler_tick_seconds")
     _positive(runtime.get("health_interval_seconds"), "health_interval_seconds")
     _positive(runtime.get("sqlite_busy_timeout_ms"), "sqlite_busy_timeout_ms")
+    runtime["_conversation_api"] = _service_config(runtime, "conversation_api")
+    runtime["_assignment_intake"] = _service_config(runtime, "assignment_intake")
+    runtime["_resident_credentials"] = _credential_config(runtime)
+    if (runtime["_conversation_api"] is not None and runtime["_assignment_intake"] is not None
+            and runtime["_conversation_api"]["port"] == runtime["_assignment_intake"]["port"]):
+        raise ConfigurationError("Conversation API and assignment intake cannot share a port")
     residents = _object(runtime.get("residents"), "residents")
     if not residents:
         raise ConfigurationError("At least one resident must be configured")

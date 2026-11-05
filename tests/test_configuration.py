@@ -71,6 +71,40 @@ class ConfigurationContractTests(unittest.TestCase):
         self.assertEqual(result["residents"][0]["system_prompt"], "Revised personality")
         self.assertEqual(result["residents"][0]["settings"]["inference"]["model"], "another-model")
 
+
+    def test_institutional_listeners_loaded_from_json(self):
+        self.runtime["conversation_api"] = {
+            "enabled": True, "host": "127.0.0.1", "port": 8770,
+            "token_file": "/tmp/conversation-api.token"}
+        self.runtime["assignment_intake"] = {
+            "enabled": True, "host": "127.0.0.1", "port": 8769,
+            "token_file": "/tmp/assignment-intake.token"}
+        self.runtime["resident_credentials"] = {"directory": "/tmp/resident-credentials"}
+        self.save()
+        result = load_configuration(self.root)["runtime"]
+        self.assertEqual(result["_conversation_api"]["port"], 8770)
+        self.assertEqual(result["_assignment_intake"]["port"], 8769)
+        self.assertEqual(result["_resident_credentials"], Path("/tmp/resident-credentials"))
+
+    def test_listener_invalid_host_fails_closed(self):
+        self.runtime["conversation_api"] = {
+            "enabled": True, "host": "0.0.0.0", "port": 8770,
+            "token_file": "/tmp/conversation-api.token"}
+        self.save()
+        with self.assertRaises(ConfigurationError):
+            load_configuration(self.root)
+
+    def test_listener_port_collision_fails_closed(self):
+        self.runtime["conversation_api"] = {
+            "enabled": True, "host": "127.0.0.1", "port": 8770,
+            "token_file": "/tmp/conversation-api.token"}
+        self.runtime["assignment_intake"] = {
+            "enabled": True, "host": "127.0.0.1", "port": 8770,
+            "token_file": "/tmp/assignment-intake.token"}
+        self.save()
+        with self.assertRaises(ConfigurationError):
+            load_configuration(self.root)
+
     def test_invalid_timeout_fails_closed(self):
         self.grace["inference"]["timeout_seconds"] = 0
         self.save()

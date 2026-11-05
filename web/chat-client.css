@@ -21,3 +21,8 @@
 #chat-panel .r3-chat-compose{display:flex;gap:.6rem;padding:.6rem;border-top:1px solid rgba(160,185,210,.2)}
 #chat-panel .r3-chat-compose textarea{flex:1;resize:vertical;min-height:3rem;max-height:12rem}
 @media(max-width:700px){#chat-panel .r3-chat-message{max-width:95%}.chat-sidebar{max-width:38vw}}
+
+#chat-panel .r3-resident-select{width:100%;min-height:2.65rem;padding:.55rem .8rem;margin:.45rem 0 .65rem;border-radius:.75rem;border:1px solid rgba(176,205,228,.25);background:rgba(17,35,53,.92);color:#eef6ff;font:inherit;cursor:pointer;outline-offset:2px}
+#chat-panel .r3-resident-select:focus-visible{outline:2px solid #9ac9ef}
+#chat-panel .r3-chat-conversation{transition:background-color .12s ease,border-color .12s ease}
+@media(prefers-reduced-motion:reduce){#chat-panel .r3-chat-conversation{transition:none}}
