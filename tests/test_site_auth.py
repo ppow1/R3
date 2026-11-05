@@ -75,38 +75,38 @@ class SiteAuthenticationTests(unittest.TestCase):
         return result
 
     def test_anonymous_root_redirects_to_login(self):
-        with patch("r3_app._auth_principal",
+        with patch("r3_app.authenticated_identity",
                    side_effect=HTTPException(401, "No session")):
             response = self.client.get("/")
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["location"], "/login")
 
     def test_anonymous_infrastructure_is_denied(self):
-        with patch("r3_app._auth_principal",
+        with patch("r3_app.authenticated_identity",
                    side_effect=HTTPException(401, "No session")):
             response = self.client.get("/api/v1/institution/runtime")
         self.assertEqual(response.status_code, 401)
 
     def test_anonymous_settings_are_denied(self):
-        with patch("r3_app._auth_principal",
+        with patch("r3_app.authenticated_identity",
                    side_effect=HTTPException(401, "No session")):
             response = self.client.get("/api/v1/settings/manifest")
         self.assertEqual(response.status_code, 401)
 
     def test_anonymous_snapshot_is_denied(self):
-        with patch("r3_app._auth_principal",
+        with patch("r3_app.authenticated_identity",
                    side_effect=HTTPException(401, "No session")):
             response = self.client.get("/api/v1/snapshot")
         self.assertEqual(response.status_code, 401)
 
     def test_anonymous_assets_are_denied(self):
-        with patch("r3_app._auth_principal",
+        with patch("r3_app.authenticated_identity",
                    side_effect=HTTPException(401, "No session")):
             response = self.client.get("/web/chat-client.js")
         self.assertEqual(response.status_code, 401)
 
     def test_forged_identity_header_does_not_bypass_auth(self):
-        with patch("r3_app._auth_principal",
+        with patch("r3_app.authenticated_identity",
                    side_effect=HTTPException(401, "No session")):
             response = self.client.get(
                 "/api/v1/institution/runtime",
@@ -124,7 +124,7 @@ class SiteAuthenticationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_r3_prefix_redirect(self):
-        with patch("r3_app._auth_principal",
+        with patch("r3_app.authenticated_identity",
                    side_effect=HTTPException(401, "No session")):
             response = self.client.get(
                 "/", headers={"X-Forwarded-Prefix": "/r3"}

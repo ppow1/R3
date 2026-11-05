@@ -1,0 +1,5 @@
+{
+  "schema_version": "r3.settings.access.v1",
+  "write_enabled": false,
+  "reason": "Write mode remains disabled until the local operator enables it."
+}

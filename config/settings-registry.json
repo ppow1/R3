@@ -1,0 +1,55 @@
+{
+  "schema_version": "r3.settings.registry.v1",
+  "scopes": [
+    {
+      "id": "Institutional",
+      "path": "config/"
+    },
+    {
+      "id": "Departmental",
+      "path": "config/departments/"
+    },
+    {
+      "id": "Resident",
+      "path": "config/residents/"
+    },
+    {
+      "id": "Chat",
+      "path": "config/chat/"
+    },
+    {
+      "id": "User",
+      "path": "config/users/"
+    },
+    {
+      "id": "Device",
+      "path": "config/devices/"
+    },
+    {
+      "id": "Infrastructure",
+      "path": "config/infrastructure/"
+    }
+  ],
+  "path_scope_prefixes": {
+    "departments/": "Departmental",
+    "residents/": "Resident",
+    "chat/": "Chat",
+    "users/": "User",
+    "devices/": "Device",
+    "infrastructure/": "Infrastructure"
+  },
+  "inheritance": {
+    "status": "not_defined_pending_runtime_contract",
+    "order": []
+  },
+  "discovery": {
+    "format": "json",
+    "recursive": true,
+    "root": "config/"
+  },
+  "validation": "JSON syntax and object root; runtime validators may be registered per configuration family.",
+  "configuration_root": "~/.config/r3",
+  "configuration_root_label": "Persistent local R3 configuration",
+  "source_label": "Persistent local R3 configuration (~/.config/r3)",
+  "runtime_activation": "The running runtime reads a versioned release snapshot; saved settings require explicit runtime activation."
+}

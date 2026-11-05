@@ -116,3 +116,8 @@ Start with [the hints index](hints/README.md). Keep this root file short; put de
 - [ChatGPT-generated image publishing: Download → A: → GitHub](hints/chatgpt-image-publishing.md)
 
 When asked to add material to AI_HINTS, update a focused `hints/` document and add or adjust a concise pointer here only if needed.
+
+
+## Unified R/3 integration baseline v1
+- `docs/integration/UNIFIED_BASELINE_V1.md`: shared architecture, contracts, invariants and verification.
+- `docs/integration/TEAM_HANDOFF_V1.md`: Website, HR and Grace autonomy handoff.
