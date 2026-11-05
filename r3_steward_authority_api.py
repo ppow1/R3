@@ -7,7 +7,7 @@ No website-owned grant registry, implicit grants or startup provisioning.
 # R3 CONTROLLED SOURCE
 # File: r3_steward_authority_api.py
 # Component: STEWARD-AUTHORITY-API
-# File Revision: 1.1.0
+# File Revision: 1.2.0
 # Created: Unknown (legacy)
 # Created By: Unknown (legacy)
 # Purpose: Steward-authorized R3 authority and resident credential operations
@@ -16,6 +16,7 @@ No website-owned grant registry, implicit grants or startup provisioning.
 # Dependencies: FastAPI, R3 authority, classified HR records
 # Authority: Steward-only mutations; existing grants remain canonical
 # Changed: 2026-11-05 UTC | HR-CREDENTIAL-IDENTITY-001 | Codex | Resolve principals from confidential HR associations
+# Changed: 2026-11-05 UTC | HR-CREDENTIAL-IDENTITY-002 | Codex | Require the validated confidential HR extension contract
 # Supersedes: Git predecessor at d49a4bb35ae9bbfc75f79a3bad7adb8ee9abcac2
 # Contracts: HR hr_records payload extensions; canonical R3 authority
 # Tests: tests/test_hr_credential_provision.py
@@ -140,6 +141,8 @@ def _validate_hr_resident_principal(principal):
             raise HTTPException(409, "Conflicting HR principal associations")
         if not locations:
             continue
+        if HR_PRINCIPAL_FIELD in record.get("fields", {}):
+            raise HTTPException(409, "HR principal must be a confidential extension")
 
         association = locations[0]
         if (
