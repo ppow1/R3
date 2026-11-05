@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_blocked_recovery.py
 # Component: R3-AUTHORIZED-BLOCKED-RECOVERY-TESTS
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-05 UTC (date only; exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Verify fail-closed canonical authorization, resumptions, idempotency and lineage.
@@ -14,7 +14,7 @@
 # Superseded By: None
 # Contracts: hints/file-provenance.md
 # Tests: python -m unittest discover -s tests -p test_blocked_recovery.py -v
-# History/Predecessor: New file; none
+# History/Predecessor: Git blob 6c77a75ae749d5697fc8d1190c95440dc956af15
 from __future__ import annotations
 
 import json
@@ -130,6 +130,11 @@ class BlockedRecoveryTests(unittest.TestCase):
             "acceptance_criteria": [{
                 "id": "c1", "version": "1", "description": "Completed"}],
         }, "second-request")["event_id"]
+        with sqlite3.connect(self.institution) as db:
+            inbox = Inbox(db)
+            inbox.next("Grace")
+            inbox.finish(other_root, "BLOCKED", {
+                "objective_status": "BLOCKED", "dependency": "Separate problem"})
         with self.assertRaisesRegex(ValueError, "lineage"):
             self.resume(event_id=other_root)
 
