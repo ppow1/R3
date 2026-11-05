@@ -139,6 +139,41 @@ class ActivityContinuationTests(unittest.TestCase):
             ).fetchone()[0], "PROCESSING",
         )
 
+    def test_assignment_status_api_displays_blocked_without_acceptance(self):
+        from runtime.assignment_intake import AssignmentIntake
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "institution.sqlite3"
+            app = AssignmentIntake(
+                path, "test-token-" * 4, {"TestResident"}, {"TestResident"}
+            )
+            connection = sqlite3.connect(path)
+            try:
+                inbox = Inbox(connection)
+                event = inbox.enqueue(
+                    "TestResident", "RESIDENT_ACTIVITY",
+                    {"assignment_id": "work", "objective": "Check authorization"},
+                )
+                connection.execute(
+                    "INSERT INTO assignment_intake_assignments VALUES (?,?,?,?,?)",
+                    ("work", "test-request-hash", event, "TestResident", 0),
+                )
+                connection.commit()
+                inbox.next("TestResident")
+                inbox.finish(event, "BLOCKED", {
+                    "decision": {"state": "blocked", "reason": "Missing grant"},
+                    "objective_status": "BLOCKED",
+                })
+                status = app.status(event)
+                self.assertEqual(status["events"][-1]["status"], "BLOCKED")
+                self.assertEqual(
+                    status["events"][-1]["result"]["objective_status"], "BLOCKED",
+                )
+                self.assertEqual(
+                    status["verification"]["verification_status"], "NOT_REQUESTED",
+                )
+            finally:
+                connection.close()
+
 
 if __name__ == "__main__":
     unittest.main()
