@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "name": "R3 website - example only",
+  "source": {
+    "type": "github",
+    "repositoryUrl": "https://github.com/ppow1/R3.git",
+    "commit": "REPLACE_WITH_EXACT_40_CHARACTER_COMMIT_SHA"
+  },
+  "target": {
+    "sshAlias": "camrui",
+    "user": "admin1",
+    "service": "website",
+    "port": 8303,
+    "releaseRoot": "/home/admin1/.local/share/r3/releases",
+    "activeSymlink": "/home/admin1/.local/share/r3/active-website",
+    "venvPath": "/home/admin1/R3/.venv",
+    "entrypoint": "r3_app:app",
+    "healthPath": "/api/v1/health"
+  },
+  "verification": {
+    "requireHttp200": true,
+    "browserAcceptance": "manual"
+  }
+}
