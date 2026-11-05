@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/resident_inference.py
 # Component: R3-RESIDENT-INFERENCE
-# File Revision: 1.3.2
+# File Revision: 1.3.3
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Reusable event-driven resident inference against an existing OpenAI-compatible endpoint.
@@ -15,11 +15,12 @@
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-006 | Preserve assignment metadata across activity continuation.
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-002 | Preserve evidence-backed blocked state as durable unresolved outcome.
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-003 | Block repeated no-progress continuation, preserving durable evidence.
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-004 | Include tool results observed during the active inference turn.
 # Supersedes: None
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; hints/engineering-test-policy.md
 # Tests: tests/test_inference_http_errors.py (permanent transport diagnostic contract).
 # Changed: 2026-11-02 UTC | R3-GRACE-005 | Preserve safe upstream HTTP error codes without leaking request content.
-# History/Predecessor: Git blob 785acfe84175b4afa2f583f54cb6cc632af89303
+# History/Predecessor: Git blob deddd8d10c89a7fcc64cba3541d2a3cbeafacb03
 """Durable resident inbox and inference adapter; tool routing uses existing llama.cpp /tools adapter."""
 from __future__ import annotations
 
@@ -201,12 +202,14 @@ class ResidentInference:
         try:
             history = self.inbox.history(event_id)
             pending = set()
+            observed_tool_result = False
             for kind, item in history:
                 if kind == "ASSISTANT":
                     messages.append(item)
                 elif kind == "TOOL_INTENT":
                     pending.add(item["tool_call_id"])
                 elif kind == "TOOL_RESULT":
+                    observed_tool_result = True
                     pending.discard(item["tool_call_id"])
                     messages.append(item)
             if pending:
@@ -242,7 +245,7 @@ class ResidentInference:
                                 and prior.get("state") == "continue"
                                 and prior.get("next_step") == next_step
                                 and prior.get("evidence") == decision.get("evidence")
-                                and not any(kind == "TOOL_RESULT" for kind, _ in history)):
+                                and not observed_tool_result):
                             self.inbox.finish(event_id, "BLOCKED", {
                                 "decision": decision,
                                 "model": result.get("model"),
@@ -341,6 +344,7 @@ class ResidentInference:
                         "role": "tool", "tool_call_id": call_id, "content": output,
                     }
                     self.inbox.record(event_id, "TOOL_RESULT", tool_message)
+                    observed_tool_result = True
                     messages.append(tool_message)
         except Exception as exc:
             self.inbox.finish(event_id, "FAILED", {"error": repr(exc)})
