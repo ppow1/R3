@@ -1,6 +1,20 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_activity_continuation.py
+# Component: R3-RESIDENT-CONTINUATION-TESTS
+# File Revision: 1.0.0
+# Created: Unknown (legacy; prior version lacked creation metadata)
+# Created By: Unknown (legacy)
 # Purpose: Permanent resident-neutral durable activity continuation regressions.
+# Execution Model: Python unittest, in-memory and temporary SQLite.
+# Observability: Test assertions and CI logs.
+# Dependencies: runtime.resident_inference; runtime.assignment_intake; Python standard library.
+# Authority: R3 development bootstrap and Charter Revision 2.
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-003 | ChatGPT GPT-6 | Test no-progress guard and add controlled provenance.
+# Supersedes: None
+# Superseded By: None
+# Contracts: hints/file-provenance.md; hints/development-governance.md
+# Tests: python -m unittest tests.test_activity_continuation -v
+# History/Predecessor: Git blob 507ef5ed29ad0a7389e4bfceb677728336873c9b
 from __future__ import annotations
 import asyncio
 import json
@@ -45,6 +59,49 @@ class ActivityContinuationTests(unittest.TestCase):
         asyncio.run(handler("TestResident"))
         self.assertEqual(self.db.execute("SELECT status FROM resident_inbox WHERE id=?", (second,)).fetchone()[0], "COMPLETED")
         self.assertEqual(self.db.execute("SELECT count(*) FROM resident_inbox").fetchone()[0], 2)
+
+    def test_identical_continuation_without_new_evidence_blocks(self):
+        first = self.inbox.enqueue(
+            "TestResident", "RESIDENT_ACTIVITY", {"objective": "Investigate"}
+        )
+        handler = self.handler([
+            {"state": "continue", "next_step": "Check same record", "evidence": "unchanged"},
+            {"state": "continue", "next_step": "Check same record", "evidence": "unchanged"},
+        ])
+        asyncio.run(handler("TestResident"))
+        second = json.loads(self.db.execute(
+            "SELECT result FROM resident_inbox WHERE id=?", (first,)
+        ).fetchone()[0])["continuation_event_id"]
+        asyncio.run(handler("TestResident"))
+        row = self.db.execute(
+            "SELECT status,result FROM resident_inbox WHERE id=?", (second,)
+        ).fetchone()
+        self.assertEqual(row[0], "BLOCKED")
+        result = json.loads(row[1])
+        self.assertEqual(result["objective_status"], "BLOCKED")
+        self.assertEqual(result["previous_event_id"], first)
+        self.assertIsNone(self.inbox.next("TestResident"))
+        self.assertEqual(
+            self.db.execute("SELECT count(*) FROM resident_inbox").fetchone()[0], 2
+        )
+
+    def test_repeated_next_step_with_new_evidence_continues(self):
+        first = self.inbox.enqueue(
+            "TestResident", "RESIDENT_ACTIVITY", {"objective": "Investigate"}
+        )
+        handler = self.handler([
+            {"state": "continue", "next_step": "Check record", "evidence": "first"},
+            {"state": "continue", "next_step": "Check record", "evidence": "new observation"},
+        ])
+        asyncio.run(handler("TestResident"))
+        asyncio.run(handler("TestResident"))
+        self.assertEqual(
+            self.db.execute("SELECT count(*) FROM resident_inbox").fetchone()[0], 3
+        )
+        self.assertEqual(
+            self.db.execute("SELECT status FROM resident_inbox ORDER BY id DESC LIMIT 1").fetchone()[0],
+            "PENDING",
+        )
 
     def test_regular_event_keeps_ordinary_response(self):
         event = self.inbox.enqueue("TestResident", "CONVERSATION", {"text": "hello"})
