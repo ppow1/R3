@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/Test-R3CandidateBridge.ps1
 # Component: R3-MANIFEST-DEPLOY
-# File Revision: 1.0.1
+# File Revision: 1.0.2
 # Created: 2026-11-05 UTC (exact time not independently verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanent PowerShell 7 offline bridge regression tests
@@ -11,6 +11,7 @@
 # Authority: Steward permanent regression policy
 # Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-015 | ChatGPT GPT-6 | Initial bridge validation tests
 # Changed: 2026-11-04 UTC | R3-MANIFEST-DEPLOY-017 | ChatGPT GPT-6 | Add missing, malformed and unapproved manifest regression cases
+# Changed: 2026-11-04 UTC | R3-MANIFEST-DEPLOY-019 | ChatGPT GPT-6 | Enforce bounded SSH/fetch/build contract
 # Supersedes: None
 # Superseded By: None
 # Contracts: docs/runbooks/R3_MANIFEST_DEPLOYMENT.md
@@ -111,6 +112,16 @@ Test-Case 'unapproved repository fails before SSH' {
     } finally {
         Remove-Item -LiteralPath $manifest -ErrorAction SilentlyContinue
     }
+}
+# Enforce fail-fast SSH options and bounded remote work in the checked-in bridge.
+Test-Case 'SSH and remote work are bounded' {
+    $source = Get-Content -LiteralPath $bridge -Raw
+    Assert-True ($source.Contains('-o BatchMode=yes -o ConnectTimeout=10 -o ConnectionAttempts=1')) 'SSH fail-fast options missing'
+    Assert-True ($source.Contains('timeout 30s git fetch origin main --quiet')) 'Remote Git fetch is unbounded'
+    Assert-True ($source.Contains('timeout __BUILD_TIMEOUT__s python3')) 'Remote candidate builder is unbounded'
+    Assert-True ($source.Contains("Replace('__BUILD_TIMEOUT__', [string]$buildTimeout)")) 'Builder timeout substitution missing'
+    Assert-True ($source.Contains('if ($sshExit -ne 0)')) 'Nonzero SSH exit not rejected'
+    Assert-True ($source.Contains("Emit 'WEBSITE_ACTIVATION=NOT_RUN'")) 'No activation safety status'
 }
 Write-Host "BRIDGE_TESTS_PASS=$passed"
 Write-Host "BRIDGE_TESTS_FAIL=$failed"
