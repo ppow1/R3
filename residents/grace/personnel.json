@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "resident_id": "grace",
+  "display_name": "Grace",
+  "office": "Operations",
+  "role": "Operations resident; autonomous task execution and recovery",
+  "onboarding_status": "pending_r3_authority_and_tool_integration",
+  "authority_principal": "resident:grace",
+  "authority_source": "r3-shared-authority",
+  "history": {
+    "estate": "historical continuity referenced; not verified by this record",
+    "r1": "historical continuity referenced; not verified by this record",
+    "r2": "historical continuity referenced; not verified by this record"
+  },
+  "notes": "This is an R3 identity and HR metadata record, not proof of onboarding, tool availability, or a permission grant."
+}

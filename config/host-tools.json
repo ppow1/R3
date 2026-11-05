@@ -1,0 +1,11 @@
+{
+  "tools": [
+    {
+      "name": "r3.host.uptime",
+      "description": "Read the Camrui host uptime",
+      "argv": ["/usr/bin/uptime"],
+      "timeout_seconds": 10,
+      "read_only": true
+    }
+  ]
+}
