@@ -69,6 +69,10 @@ def _portal_request(url: str, request: Request, method: str = "GET",
         headers["Cookie"] = cookie
     if body is not None:
         headers["Content-Type"] = content_type or "application/json"
+    if method in {"POST", "DELETE"}:
+        origin = request.headers.get("origin")
+        if origin:
+            headers["Origin"] = origin
     if method == "DELETE":
         csrf = request.headers.get("X-Riverview-CSRF")
         if csrf:
