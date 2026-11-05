@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/hr_capability.py
 # Component: HR-CAPABILITY
-# File Revision: 1.0.0
+# File Revision: 1.1.0
 # Created: 2026-11-05 UTC (date precision)
 # Created By: ChatGPT GPT-6
 # Purpose: Shared authenticated capability contract for HR adapters
@@ -13,7 +13,8 @@
 # Supersedes: None
 # Contracts: hints/architecture.md; runtime/hr_store.py
 # Tests: tests/test_hr_capability.py
-# History/Predecessor: New file
+# Changed: 2026-11-05 UTC | HR-008 | Discover stored residents without caller-supplied IDs
+# History/Predecessor: 4230ff21be26f1f078e8254bca4cfb1e1da575e0
 """One HR capability for HTTP, MCP, stdio and Python adapters.
 
 Transport adapters must authenticate their peer, map that identity to an R/3
@@ -56,10 +57,11 @@ class HRCapability:
         result["revision"] = revision
         return result
 
-    def directory(self, principal: VerifiedPrincipal, resident_ids: list[str]) -> list[dict]:
+    def directory(self, principal: VerifiedPrincipal,
+                  resident_ids: list[str] | None = None) -> list[dict]:
         # Directory access uses the same read operation and disclosure filtering.
         results = []
-        for resident_id in resident_ids:
+        for resident_id in (self._store.resident_ids() if resident_ids is None else resident_ids):
             item = self.read(principal, resident_id)
             if item is not None:
                 results.append(item)
