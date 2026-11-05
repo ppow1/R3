@@ -279,6 +279,7 @@ class ResidentInference:
                     try:
                         output = await asyncio.to_thread(
                             self.tools.invoke, by_name[name], params,
+                            correlation_id=call_id,
                         )
                     except Exception as exc:
                         output = json.dumps({"error": str(exc)})

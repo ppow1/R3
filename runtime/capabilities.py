@@ -17,7 +17,10 @@ class AuthorityUnavailable(CapabilityDenied):
 
 
 class GrantVerifier(Protocol):
-    def authorize(self, *, principal: str, action: str, scope_ref: str) -> dict:
+    def authorize(
+        self, *, principal: str, resource_id: str,
+        action: str, operation: str, scope_ref: str
+    ) -> dict:
         """Return verified active grant evidence or raise CapabilityDenied."""
 
 
@@ -29,6 +32,7 @@ class Capability:
     parameters: dict
     executor: Callable[[dict], object]
     read_only: bool = False
+    resource_ref: str = ""
 
 
 class CapabilityRegistry:
@@ -67,10 +71,20 @@ class CapabilityRegistry:
         if cap is None:
             raise CapabilityDenied("Unregistered capability")
         event = {"principal": self.principal, "capability": name, "action": cap.action,
-                 "scope_ref": scope, "correlation_id": correlation_id, "outcome": "DENIED"}
+                 "scope_ref": scope, "correlation_id": correlation_id,
+            "resource_ref": cap.resource_ref if cap else None,
+            "operation": ("read" if cap.read_only else "write") if cap else None,
+            "outcome": "DENIED"}
         try:
-            evidence = self.verifier.authorize(principal=self.principal,
-                                               action=cap.action, scope_ref=scope)
+            if not cap.resource_ref:
+                raise CapabilityDenied("Capability resource identity required")
+            evidence = self.verifier.authorize(
+                principal=self.principal,
+                resource_id=cap.resource_ref,
+                action=cap.action,
+                operation="read" if cap.read_only else "write",
+                scope_ref=scope,
+            )
             if not isinstance(evidence, dict) or not evidence.get("grant_id"):
                 raise AuthorityUnavailable("Missing grant evidence")
             event["grant_id"] = evidence["grant_id"]

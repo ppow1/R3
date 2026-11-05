@@ -42,6 +42,7 @@ import time
 
 from runtime.institution import Institution, Journal, Resident
 from runtime.native_tools import NativeTools
+from runtime.resident_credentials import load_resident_credential
 from runtime.configuration import load_configuration, ConfigurationError
 from runtime.resident_inference import Inbox, InferenceEndpoint, ResidentInference
 from runtime.verification import IndependentReviewWorker, VerificationLedger
@@ -63,7 +64,7 @@ def atomic_snapshot(path: Path, payload: dict) -> None:
             os.unlink(tmp)
 
 
-async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
+async def serve(db: Path, health_file: Path, config_dir: Path, credential_dir: Path | None = None) -> None:
     configuration = load_configuration(config_dir)
     settings = configuration["runtime"]
     interval = settings["health_interval_seconds"]
@@ -89,6 +90,9 @@ async def serve(db: Path, health_file: Path, config_dir: Path) -> None:
                 tool_settings["endpoint"],
                 timeout=tool_settings["timeout_seconds"],
                 allowed_tools=tuple(tool_settings["allowed_tools"]),
+                credential=load_resident_credential(
+                    credential_dir, resident["name"]
+                ),
             )
         else:
             raise ConfigurationError("Unknown tool provider")
@@ -220,8 +224,12 @@ def main() -> None:
     parser.add_argument("--db", type=Path, required=True)
     parser.add_argument("--health-file", type=Path, required=True)
     parser.add_argument("--config-dir", type=Path, required=True)
+    parser.add_argument("--resident-credential-dir", type=Path)
     args = parser.parse_args()
-    asyncio.run(serve(args.db, args.health_file, args.config_dir))
+    asyncio.run(serve(
+        args.db, args.health_file, args.config_dir,
+        credential_dir=args.resident_credential_dir,
+    ))
 
 
 if __name__ == "__main__":

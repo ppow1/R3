@@ -27,18 +27,33 @@ class CapabilityTests(unittest.TestCase):
             "r3.example", "office.update", "Example write capability",
             {"type": "object", "required": ["scope_ref"]},
             lambda args: self.executions.append(args) or {"changed": True},
-            read_only=False))
+            read_only=False, resource_ref="r3.example"))
 
     def test_native_write_authorized_and_audited(self):
-        result = self.registry.invoke("r3.example", {"scope_ref": "office:grace"},
+        result = self.registry.invoke("r3.example", {"scope_ref": "office:grace", "resource_ref": "r3.example"},
                                       correlation_id="call-1")
         self.assertEqual(result["authorization"]["grant_id"], "r3-grant-1")
         self.assertEqual([x["outcome"] for x in self.events],
                          ["AUTHORIZED", "COMPLETED"])
         self.assertEqual(self.verifier.calls[0], {
-            "principal": "resident:grace", "action": "office.update",
+            "principal": "resident:grace",
+            "resource_id": "r3.example",
+            "action": "office.update",
+            "operation": "write",
             "scope_ref": "office:grace"})
         self.assertEqual(len(self.executions), 1)
+
+    def test_invocation_cannot_override_registered_resource(self):
+        self.registry.invoke(
+            "r3.example",
+            {"scope_ref": "office:grace",
+             "resource_ref": "attacker:resource"},
+            correlation_id="resource-override-test",
+        )
+        self.assertEqual(
+            self.verifier.calls[0]["resource_id"],
+            "r3.example",
+        )
 
     def test_revocation_denies_before_execution(self):
         self.verifier.allowed = False
