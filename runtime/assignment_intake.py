@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/assignment_intake.py
 # Component: R3-STEWARD-ASSIGNMENT-INTAKE
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-03 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6 via GitHub API
 # Purpose: Authenticated loopback API for durable resident assignment submission and status.
@@ -10,10 +10,11 @@
 # Dependencies: Python standard library; runtime.resident_inference; runtime.verification.
 # Authority: Steward-approved R3 charter; loopback-only and bearer-token protected.
 # Changed: 2026-11-03 UTC | R3-ASSIGNMENT-INTAKE-001 | ChatGPT GPT-6 | Add opt-in durable assignment API.
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-006 | Follow authorized blocked-activity resumption links in assignment status.
 # Supersedes: None
 # Contracts: docs/r3-assignment-intake-contract.md; hints/engineering-test-policy.md
 # Tests: tests/test_assignment_intake.py
-# History/Predecessor: New file.
+# History/Predecessor: New file; immediate predecessor blob recorded in commit 8750557799b19a00fc976496fd345feae4bbc547.
 """Authenticated, loopback-only assignment ingress for the R3 resident runtime."""
 from __future__ import annotations
 
@@ -204,7 +205,8 @@ class AssignmentIntake:
                 result = json.loads(row[3]) if row[3] else None
                 events.append({"event_id": row[0], "event_type": row[1],
                                "status": row[2], "result": result})
-                next_id = result.get("continuation_event_id") if isinstance(result, dict) else None
+                next_id = (result.get("continuation_event_id") or result.get("resumed_event_id")
+                           if isinstance(result, dict) else None)
                 if not isinstance(next_id, int):
                     break
                 current_id = next_id

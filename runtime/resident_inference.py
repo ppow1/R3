@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/resident_inference.py
 # Component: R3-RESIDENT-INFERENCE
-# File Revision: 1.3.1
+# File Revision: 1.3.5
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Reusable event-driven resident inference against an existing OpenAI-compatible endpoint.
@@ -13,15 +13,20 @@
 # Changed: 2026-11-02 UTC | R3-GRACE-004 | Durable tool-call continuation with fail-closed recovery
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-005 | Atomically queue review on completion with explicit criteria.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-006 | Preserve assignment metadata across activity continuation.
-# Supersedes: None
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-002 | Preserve evidence-backed blocked state as durable unresolved outcome.
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-003 | Block repeated no-progress continuation, preserving durable evidence.
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-004 | Include tool results observed during the active inference turn.
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-005 | Authority-referenced idempotent blocked activity resumption.\n# Supersedes: None
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-006 | Require canonical exact-grant authorization and audit for blocked activity resumption.
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; hints/engineering-test-policy.md
 # Tests: tests/test_inference_http_errors.py (permanent transport diagnostic contract).
 # Changed: 2026-11-02 UTC | R3-GRACE-005 | Preserve safe upstream HTTP error codes without leaking request content.
-# History/Predecessor: Git blob f890fef537d1463d3ccfca3e660028c03312e732
+# History/Predecessor: Git blob 1e433f2ddb10f439ef7599bf48a19c6fb11ea2c0; immediate predecessor blob 82761cbeb022e623295237b3aed3048694fe51cf.
 """Durable resident inbox and inference adapter; tool routing uses existing llama.cpp /tools adapter."""
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import sqlite3
 import time
@@ -76,6 +81,91 @@ class Inbox:
                 (json.dumps({**result, "continuation_event_id": cursor.lastrowid}), now, event_id))
         return int(cursor.lastrowid)
 
+    def resume_blocked(self, event_id: int, *, authority, principal: str,
+                       resolution_evidence: str) -> int:
+        """Resume only under an effective exact R3 grant, preserving the blocked record."""
+        if not isinstance(principal, str) or not principal.strip():
+            raise ValueError("Resumption requires an authenticated authority principal")
+        if not isinstance(resolution_evidence, str) or not resolution_evidence.strip():
+            raise ValueError("Resumption requires dependency resolution evidence")
+        if (authority is None
+                or not callable(getattr(authority, "authorize", None))
+                or not callable(getattr(authority, "audit", None))):
+            raise ValueError("Audited canonical R3 authority is required for resumption")
+        row = self.db.execute(
+            "SELECT resident,event_type,payload,status,result FROM resident_inbox WHERE id=?",
+            (event_id,),
+        ).fetchone()
+        if row is None or row[3] != "BLOCKED" or row[1] != "RESIDENT_ACTIVITY":
+            raise ValueError("Resumption requires a BLOCKED resident activity")
+        payload = json.loads(row[2])
+        assignment_id = payload.get("assignment_id")
+        scope_ref = ("assignment:" + assignment_id
+                     if isinstance(assignment_id, str) and assignment_id.strip()
+                     else "resident-inbox-event:" + str(event_id))
+        grant = authority.authorize(
+            principal=principal,
+            action="resident.activity.resume",
+            scope_ref=scope_ref,
+            resource_id=scope_ref,
+            operation="write",
+        )
+        if not isinstance(grant, dict) or not isinstance(grant.get("grant_id"), str):
+            raise PermissionError("Canonical authority returned no grant identity")
+        grant_id = grant["grant_id"]
+        authority.audit({
+            "principal": principal,
+            "capability": "resident-inbox",
+            "action": "resident.activity.resume",
+            "scope_ref": scope_ref,
+            "correlation_id": "resident-inbox-resume:" + str(event_id),
+            "grant_id": grant_id,
+            "outcome": "AUTHORIZED",
+            "resource_ref": scope_ref,
+            "operation": "write",
+        })
+        with self.db:
+            row = self.db.execute(
+                "SELECT resident,event_type,payload,status,result FROM resident_inbox WHERE id=?",
+                (event_id,),
+            ).fetchone()
+            if row is None or row[3] != "BLOCKED" or row[1] != "RESIDENT_ACTIVITY":
+                raise ValueError("Resumption requires a BLOCKED resident activity")
+            resident, event_type, raw_payload, _, raw_result = row
+            for successor_id, raw in self.db.execute(
+                "SELECT id,payload FROM resident_inbox WHERE resident=? AND event_type=?",
+                (resident, event_type),
+            ):
+                existing = json.loads(raw)
+                if existing.get("resumed_from_blocked_event_id") == event_id:
+                    if (existing.get("resumption_grant_id") != grant_id
+                            or existing.get("resumption_principal") != principal
+                            or existing.get("resumption_evidence") != resolution_evidence):
+                        raise ValueError("Blocked activity already resumed with different evidence")
+                    return int(successor_id)
+            payload = {
+                **json.loads(raw_payload),
+                "previous_event_id": event_id,
+                "previous_result": json.loads(raw_result or "{}"),
+                "resumed_from_blocked_event_id": event_id,
+                "resumption_grant_id": grant_id,
+                "resumption_principal": principal,
+                "resumption_scope_ref": scope_ref,
+                "resumption_evidence": resolution_evidence,
+            }
+            now = time.time()
+            cursor = self.db.execute(
+                "INSERT INTO resident_inbox(resident,event_type,payload,created_at,updated_at) VALUES (?,?,?,?,?)",
+                (resident, event_type, json.dumps(payload), now, now),
+            )
+            blocked_result = json.loads(raw_result or "{}")
+            blocked_result["resumed_event_id"] = int(cursor.lastrowid)
+            self.db.execute(
+                "UPDATE resident_inbox SET result=?,updated_at=? WHERE id=?",
+                (json.dumps(blocked_result), now, event_id),
+            )
+            return int(cursor.lastrowid)
+
     def next(self, resident: str) -> tuple[int, str, dict] | None:
         row = self.db.execute(
             "SELECT id,event_type,payload FROM resident_inbox WHERE resident=? AND status IN ('PENDING','PROCESSING') ORDER BY id LIMIT 1",
@@ -103,7 +193,7 @@ class Inbox:
             )
 
     def finish(self, event_id: int, status: str, result: dict, *, review: dict | None = None) -> None:
-        if status not in ("COMPLETED", "FAILED"):
+        if status not in ("COMPLETED", "FAILED", "BLOCKED"):
             raise ValueError("Invalid terminal inbox status")
         with self.db:
             if review is not None:
@@ -199,12 +289,14 @@ class ResidentInference:
         try:
             history = self.inbox.history(event_id)
             pending = set()
+            observed_tool_result = False
             for kind, item in history:
                 if kind == "ASSISTANT":
                     messages.append(item)
                 elif kind == "TOOL_INTENT":
                     pending.add(item["tool_call_id"])
                 elif kind == "TOOL_RESULT":
+                    observed_tool_result = True
                     pending.discard(item["tool_call_id"])
                     messages.append(item)
             if pending:
@@ -213,7 +305,10 @@ class ResidentInference:
             definitions = [d["definition"] for d in descriptors]
             by_name = {d["tool"]: d for d in descriptors}
             while True:
-                result = await asyncio.to_thread(self.endpoint.complete, messages, definitions)
+                complete = self.endpoint.complete
+                result = (await complete(messages, definitions)
+                          if inspect.iscoroutinefunction(complete)
+                          else await asyncio.to_thread(complete, messages, definitions))
                 choices = result.get("choices") or []
                 if not choices or not isinstance(choices[0].get("message"), dict):
                     raise RuntimeError("Model returned no usable message")
@@ -232,6 +327,24 @@ class ResidentInference:
                         next_step = decision.get("next_step")
                         if not isinstance(next_step, str) or not next_step.strip():
                             raise RuntimeError("Continuing activity requires next_step")
+                        prior = payload.get("previous_result")
+                        # An identical proposed action with identical evidence and no
+                        # newly observed tool result is not a meaningful continuation.
+                        # Do not invent progress or enqueue an infinite feedback loop.
+                        if (isinstance(prior, dict)
+                                and prior.get("state") == "continue"
+                                and prior.get("next_step") == next_step
+                                and prior.get("evidence") == decision.get("evidence")
+                                and not observed_tool_result):
+                            self.inbox.finish(event_id, "BLOCKED", {
+                                "decision": decision,
+                                "model": result.get("model"),
+                                "objective_status": "BLOCKED",
+                                "dependency": "Repeated continuation without new evidence",
+                                "previous_event_id": payload.get("previous_event_id"),
+                                "previous_result": prior,
+                            })
+                            return
                         self.inbox.continue_activity(event_id, resident, event_type, {
                             **payload,
                             "objective": payload.get("objective", payload),
@@ -240,6 +353,19 @@ class ResidentInference:
                             "next_step": next_step,
                         }, {"decision": decision, "model": result.get("model")})
                         return
+                    if decision["state"] == "blocked":
+                        # Keep reported external dependencies distinct from tool/runtime errors.
+                        # A blocked activity has not met objective acceptance criteria.
+                        explanations = (
+                            decision.get("dependency"), decision.get("reason"),
+                            decision.get("evidence"),
+                        )
+                        if not any(
+                            (isinstance(item, str) and bool(item.strip()))
+                            or (isinstance(item, (dict, list)) and bool(item))
+                            for item in explanations
+                        ):
+                            raise RuntimeError("Blocked activity requires dependency evidence")
                     # An inbox turn is not the same thing as a verified objective.
                     # Keep objective status explicit in durable results so downstream
                     # observers cannot mistake a model's 'complete' for acceptance.
@@ -259,9 +385,14 @@ class ResidentInference:
                             "criteria": criteria,
                             "evidence": decision.get("evidence", {}),
                         }
-                    self.inbox.finish(event_id, "COMPLETED" if decision["state"] == "complete" else "FAILED",
+                    terminal = "BLOCKED" if decision["state"] == "blocked" else "COMPLETED"
+                    objective_status = (
+                        "BLOCKED" if terminal == "BLOCKED"
+                        else "REPORTED_VERIFIED" if objective_verified else "UNVERIFIED"
+                    )
+                    self.inbox.finish(event_id, terminal,
                                       {"decision": decision, "model": result.get("model"),
-                                       "objective_status": "REPORTED_VERIFIED" if objective_verified else "UNVERIFIED"},
+                                       "objective_status": objective_status},
                                       review=review)
                     return
                 if not calls:
@@ -303,6 +434,7 @@ class ResidentInference:
                         "role": "tool", "tool_call_id": call_id, "content": output,
                     }
                     self.inbox.record(event_id, "TOOL_RESULT", tool_message)
+                    observed_tool_result = True
                     messages.append(tool_message)
         except Exception as exc:
             self.inbox.finish(event_id, "FAILED", {"error": repr(exc)})
