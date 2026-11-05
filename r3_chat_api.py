@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from r3_native_auth_api import native_store, SESSION_COOKIE, CSRF_COOKIE
 from r3_native_sessions import AuthenticationDenied
+from r3_resident_directory import load_residents, require_resident
 
 CONFIG_PATH = Path(os.environ.get("R3_WEBSITE_CHAT_CONFIG", "~/.config/r3/chat.json")).expanduser()
 MAX_BODY = 1_100_000
@@ -241,6 +242,41 @@ def build_chat_router() -> APIRouter:
             },
             headers={"Cache-Control": "no-store"},
         )
+
+    @router.get("/api/v1/chat/residents")
+    def resident_directory(request: Request):
+        cfg = load_config(); _origin(request, cfg); _principal(request, cfg)
+        # Directory membership is not proof of runtime readiness or permission to converse.
+        return JSONResponse({"residents": [
+            {**row, "availability": "unknown"} for row in load_residents()
+        ]}, headers={"Cache-Control": "no-store"})
+
+    @router.get("/api/v1/chat/residents/{resident_id}/capabilities")
+    def resident_capabilities(resident_id: str, request: Request):
+        cfg = load_config(); _origin(request, cfg); principal = _principal(request, cfg)
+        require_resident(resident_id)
+        return _runtime(cfg, principal, f"/v1/residents/{urllib.parse.quote(resident_id, safe='')}/capabilities")
+
+    @router.get("/api/v1/chat/residents/{resident_id}/conversations")
+    def resident_conversations(resident_id: str, request: Request):
+        cfg = load_config(); _origin(request, cfg); principal = _principal(request, cfg)
+        require_resident(resident_id)
+        return _runtime(cfg, principal, f"/v1/residents/{urllib.parse.quote(resident_id, safe='')}/conversations")
+
+    @router.post("/api/v1/chat/residents/{resident_id}/conversations")
+    async def resident_create_conversation(resident_id: str, request: Request):
+        cfg = load_config(); _origin(request, cfg, required=True); principal = _principal(request, cfg)
+        require_resident(resident_id)
+        raw = await request.body()
+        if len(raw) > 8192:
+            raise HTTPException(413, "Conversation request is too large")
+        try:
+            body = json.loads(raw)
+        except ValueError as exc:
+            raise HTTPException(400, "Invalid conversation request") from exc
+        if not isinstance(body, dict) or not isinstance(body.get("title", "Steward conversation"), str):
+            raise HTTPException(400, "Conversation title must be text")
+        return _runtime(cfg, principal, f"/v1/residents/{urllib.parse.quote(resident_id, safe='')}/conversations", "POST", body)
 
     @router.get("/api/v1/chat/capabilities")
     def capabilities(request: Request):
