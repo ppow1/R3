@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/development-bootstrap.md
 Component: ENG-DEV-BOOTSTRAP
-File Revision: 1.0.4
+File Revision: 1.0.5
 Created: 2026-11-05 UTC (date only; exact time not independently verified)
 Created By: ChatGPT GPT-6
 Purpose: Standardize the start of new R3 feature-development conversations
@@ -10,6 +10,7 @@ Execution Model: Documentation / development conversation initialization
 Observability: Git history and bootstrap readiness summary
 Dependencies: AI_HINTS.md; hints/README.md; hints/engineering.md; hints/development-governance.md
 Authority: Steward direction, R3 charter, AI_HINTS.md
+Changed: 2026-11-05 UTC | R3-BOOTSTRAP-ACCEPTANCE-007 | ChatGPT GPT-6 | Disallow demonstration-only, bounded one-time, and nonproduction substitutes for operational acceptance
 Changed: 2026-11-05 UTC | R3-BOOTSTRAP-ACCEPTANCE-006 | ChatGPT GPT-6 | Require operational completion rather than plan-only milestones
 Changed: 2026-11-05 UTC | R3-DEPLOY-BOOTSTRAP-005 | ChatGPT GPT-6 | Require verified real activation and protected integration/fallback
 Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-003 | ChatGPT GPT-6 | Require dated cited evidence correction
@@ -45,6 +46,8 @@ Before attempting production activation, verify the documented runner performs a
 **The requested operational outcome is the acceptance criterion.** A document, manifest, implementation plan, prototype, candidate build, tests passing, or a script that only validates a plan is an intermediate deliverable, **not completion**, when the Steward requested working functionality. Labels such as `plan-only`, `phase 1`, `pending integration`, and `ready to deploy` must not be reported as deployed, operational, or done.
 
 Before beginning work, record the requested observable end-to-end behavior and how it will be verified on the intended host/service. For a deployment capability, the minimum acceptance is **one actual update installed through the intended procedure, the intended running revision verified, and essential live behavior checked**. A zero exit code from a manifest validator or an HTTP 200 alone does not satisfy that criterion.
+
+**Demonstration and scope-limit guardrail:** Descriptions such as `bounded`, `one-time use`, `demonstration only`, `proof of concept`, `mock`, `stub`, `simulation`, `dry run`, `read-only demonstration`, `temporary workaround`, `pilot`, and `manual-only` do not establish production readiness or completion of a request for an ongoing, reusable capability. A successful single demonstration is evidence of that demonstration only, not proof of durable integration, repeatable operation, ongoing autonomy, or general deployment capability. Do not silently replace a requested persistent/automated/multi-use feature with a limited demonstration, nor impose artificial use counts or narrow test permissions on its operational scope. Such limits are acceptable only if the Steward explicitly requests them or they are necessary, disclosed safety/authorization boundaries. State exactly what is demonstrated versus what remains operationally unverified.
 
 When a stage is incomplete, explicitly report **NOT OPERATIONAL / BLOCKED**, what is implemented, what remains, and the exact blocker. Do not silently move the missing activation/integration work into an unspecified future phase or declare the original request completed. Only treat a plan-only artifact as final when the Steward **explicitly requested planning only**.
 
