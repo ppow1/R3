@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/Test-R3CandidateBridge.ps1
 # Component: R3-MANIFEST-DEPLOY
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-05 UTC (exact time not independently verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanent PowerShell 7 offline bridge regression tests
@@ -10,6 +10,7 @@
 # Dependencies: PowerShell 7, scripts/deployment/Prepare-R3Candidate.ps1
 # Authority: Steward permanent regression policy
 # Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-015 | ChatGPT GPT-6 | Initial bridge validation tests
+# Changed: 2026-11-04 UTC | R3-MANIFEST-DEPLOY-017 | ChatGPT GPT-6 | Add missing, malformed and unapproved manifest regression cases
 # Supersedes: None
 # Superseded By: None
 # Contracts: docs/runbooks/R3_MANIFEST_DEPLOYMENT.md
@@ -67,6 +68,46 @@ Test-Case 'unsafe paths fail before SSH' {
             Assert-True ($output -match 'ERROR=') "No failure diagnostics for: $unsafe"
             Assert-True ($output -notmatch 'R3_CANDIDATE_BUILD_ONLY=TRUE') "Attempted SSH for unsafe path: $unsafe"
         }
+    } finally {
+        Remove-Item -LiteralPath $manifest -ErrorAction SilentlyContinue
+    }
+}
+# Invalid inputs must fail before any remote command can be constructed.
+# Keep these as permanent tests, not one-off diagnostics.
+Test-Case 'missing manifest fails before SSH' {
+    $missing = Join-Path ([IO.Path]::GetTempPath()) ("r3-missing-" + [guid]::NewGuid().ToString('N') + '.json')
+    $output = & pwsh -NoProfile -NonInteractive -File $bridge -Manifest $missing -CandidateRoot '/home/admin1/r3-candidate-test' -SkipClipboard 2>&1 | Out-String
+    Assert-True ($LASTEXITCODE -ne 0) 'Accepted nonexistent manifest'
+    Assert-True ($output -match 'ERROR=') 'Missing manifest produced no diagnostics'
+    Assert-True ($output -notmatch 'R3_CANDIDATE_BUILD_ONLY=TRUE') 'Attempted SSH with missing manifest'
+}
+Test-Case 'malformed JSON fails before SSH' {
+    $manifest = Join-Path ([IO.Path]::GetTempPath()) ("r3-malformed-" + [guid]::NewGuid().ToString('N') + '.json')
+    try {
+        [IO.File]::WriteAllText($manifest, '{invalid json')
+        $output = & pwsh -NoProfile -NonInteractive -File $bridge -Manifest $manifest -CandidateRoot '/home/admin1/r3-candidate-test' -SkipClipboard 2>&1 | Out-String
+        Assert-True ($LASTEXITCODE -ne 0) 'Accepted malformed JSON'
+        Assert-True ($output -match 'ERROR=') 'Malformed JSON produced no diagnostics'
+        Assert-True ($output -notmatch 'R3_CANDIDATE_BUILD_ONLY=TRUE') 'Attempted SSH with malformed JSON'
+    } finally {
+        Remove-Item -LiteralPath $manifest -ErrorAction SilentlyContinue
+    }
+}
+Test-Case 'unapproved repository fails before SSH' {
+    $manifest = Join-Path ([IO.Path]::GetTempPath()) ("r3-repository-" + [guid]::NewGuid().ToString('N') + '.json')
+    try {
+        $fixture = @{
+            schemaVersion = 1
+            source = @{ type='github'; repositoryUrl='https://github.com/other/repo.git'; commit=('a'*40) }
+            target = @{ service='website'; sshAlias='camrui'; port=18303; releaseRoot='/tmp/releases'; activeSymlink='/tmp/active'; venvPath='/tmp/venv'; entrypoint='r3_app:app'; healthPath='/health' }
+            dependencies = @{ manager='pip'; installMode='locked'; requirementsFile='requirements-deploy.lock'; pythonVersion='3.12'; hashesRequired=$true }
+            tests = @{ profile='website'; timeoutSeconds=30; onFailure='abort-before-activation' }
+        }
+        $fixture | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $manifest
+        $output = & pwsh -NoProfile -NonInteractive -File $bridge -Manifest $manifest -CandidateRoot '/home/admin1/r3-candidate-test' -SkipClipboard 2>&1 | Out-String
+        Assert-True ($LASTEXITCODE -ne 0) 'Accepted unapproved repository'
+        Assert-True ($output -match 'ERROR=') 'Unapproved repository produced no diagnostics'
+        Assert-True ($output -notmatch 'R3_CANDIDATE_BUILD_ONLY=TRUE') 'Attempted SSH with unapproved repository'
     } finally {
         Remove-Item -LiteralPath $manifest -ErrorAction SilentlyContinue
     }
