@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "service": {
+    "continuous_operation": true,
+    "transports": {
+      "python": true,
+      "stdio": true,
+      "mcp": true,
+      "http": true
+    }
+  },
+  "directory": {
+    "allow_dynamic_fields": true,
+    "allow_dynamic_departments": true,
+    "include_inactive_residents": true
+  },
+  "storage": {
+    "database_path_env": "R3_HR_DB_PATH"
+  },
+  "operations": {
+    "request_timeout_seconds": 60,
+    "worker_concurrency": 4,
+    "retry": {
+      "enabled": true,
+      "max_attempts": 5,
+      "initial_delay_seconds": 1,
+      "max_delay_seconds": 30
+    }
+  },
+  "authorization": {
+    "provider": "r3_comms",
+    "require_verified_principal": true,
+    "confidential_roles": [
+      "steward",
+      "helen"
+    ]
+  }
+}

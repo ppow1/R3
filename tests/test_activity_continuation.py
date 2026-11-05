@@ -1,0 +1,389 @@
+# R3 CONTROLLED SOURCE
+# File: tests/test_activity_continuation.py
+# Component: R3-RESIDENT-CONTINUATION-TESTS
+# File Revision: 1.0.2
+# Created: Unknown (legacy; prior version lacked creation metadata)
+# Created By: Unknown (legacy)
+# Purpose: Permanent resident-neutral durable activity continuation regressions.
+# Execution Model: Python unittest, in-memory and temporary SQLite.
+# Observability: Test assertions and CI logs.
+# Dependencies: runtime.resident_inference; runtime.assignment_intake; Python standard library.
+# Authority: R3 development bootstrap and Charter Revision 2.
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-003 | ChatGPT GPT-6 | Test no-progress guard and add controlled provenance.
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-006 | Exercise canonical exact-grant resumption and use a deterministic threaded endpoint fake.
+# Supersedes: None
+# Superseded By: None
+# Contracts: hints/file-provenance.md; hints/development-governance.md
+# Tests: python -m unittest tests.test_activity_continuation -v
+# History/Predecessor: Git blob 1f0de33875c6bea13482fad65ab17d78fcd8a916
+from __future__ import annotations
+import asyncio
+import json
+import sqlite3
+import tempfile
+import unittest
+from pathlib import Path
+from runtime.assignment_intake import AssignmentIntake
+from runtime.capability_authority import R3Authority, initialize_empty_schema
+from runtime.capabilities import CapabilityDenied
+from runtime.resident_inference import Inbox, ResidentInference
+from runtime.verification import IndependentReviewWorker, VerificationLedger
+
+
+class ActivityContinuationTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+        self.inbox = Inbox(self.db)
+        self.authority_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.authority_dir.cleanup)
+        self.authority_path = Path(self.authority_dir.name) / "authority.sqlite"
+        initialize_empty_schema(self.authority_path)
+        self.authority = R3Authority(self.authority_path)
+
+    def tearDown(self):
+        self.db.close()
+
+    def handler(self, answers, enabled=("RESIDENT_ACTIVITY",), inbox=None):
+        class Endpoint:
+            def __init__(self, responses):
+                self.responses = iter(responses)
+
+            async def complete(self, _messages, _tools=None):
+                return next(self.responses)
+
+        endpoint = Endpoint([
+            {"choices": [{"message": {"role": "assistant", "content": json.dumps(a)}}], "model": "test"}
+            for a in answers
+        ])
+        return ResidentInference(inbox or self.inbox, endpoint, system_prompt="Test resident",
+                                 continuation_event_types=enabled)
+
+    def grant_resumption(self, *, scope, principal="service:supervisor"):
+        with sqlite3.connect(self.authority_path) as db:
+            db.execute(
+                """INSERT INTO capability_grants
+                   (grant_id,principal,action,scope_ref,active,resource_ref,operation,approved_by)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                ("resume-grant", principal, "resident.activity.resume", scope, 1,
+                 scope, "write", "human:steward:test"),
+            )
+
+    def test_continuation_is_durable_and_resumes_next_activation(self):
+        first = self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY", {"objective": "Investigate"})
+        handler = self.handler([
+            {"state": "continue", "next_step": "Review evidence", "evidence": "Initial observation"},
+            {"state": "complete", "evidence": "Reviewed"},
+        ])
+        asyncio.run(handler("TestResident"))
+        first_result = self.db.execute("SELECT status,result FROM resident_inbox WHERE id=?", (first,)).fetchone()
+        self.assertEqual(first_result[0], "COMPLETED")
+        second = json.loads(first_result[1])["continuation_event_id"]
+        payload, status = self.db.execute("SELECT payload,status FROM resident_inbox WHERE id=?", (second,)).fetchone()
+        self.assertEqual(status, "PENDING")
+        self.assertEqual(json.loads(payload)["objective"], "Investigate")
+        asyncio.run(handler("TestResident"))
+        self.assertEqual(self.db.execute("SELECT status FROM resident_inbox WHERE id=?", (second,)).fetchone()[0], "COMPLETED")
+        self.assertEqual(self.db.execute("SELECT count(*) FROM resident_inbox").fetchone()[0], 2)
+
+    def test_identical_continuation_without_new_evidence_blocks(self):
+        first = self.inbox.enqueue(
+            "TestResident", "RESIDENT_ACTIVITY", {"objective": "Investigate"}
+        )
+        handler = self.handler([
+            {"state": "continue", "next_step": "Check same record", "evidence": "unchanged"},
+            {"state": "continue", "next_step": "Check same record", "evidence": "unchanged"},
+        ])
+        asyncio.run(handler("TestResident"))
+        second = json.loads(self.db.execute(
+            "SELECT result FROM resident_inbox WHERE id=?", (first,)
+        ).fetchone()[0])["continuation_event_id"]
+        asyncio.run(handler("TestResident"))
+        row = self.db.execute(
+            "SELECT status,result FROM resident_inbox WHERE id=?", (second,)
+        ).fetchone()
+        self.assertEqual(row[0], "BLOCKED")
+        result = json.loads(row[1])
+        self.assertEqual(result["objective_status"], "BLOCKED")
+        self.assertEqual(result["previous_event_id"], first)
+        self.assertIsNone(self.inbox.next("TestResident"))
+        self.assertEqual(
+            self.db.execute("SELECT count(*) FROM resident_inbox").fetchone()[0], 2
+        )
+
+    def test_repeated_next_step_with_new_evidence_continues(self):
+        first = self.inbox.enqueue(
+            "TestResident", "RESIDENT_ACTIVITY", {"objective": "Investigate"}
+        )
+        handler = self.handler([
+            {"state": "continue", "next_step": "Check record", "evidence": "first"},
+            {"state": "continue", "next_step": "Check record", "evidence": "new observation"},
+        ])
+        asyncio.run(handler("TestResident"))
+        asyncio.run(handler("TestResident"))
+        self.assertEqual(
+            self.db.execute("SELECT count(*) FROM resident_inbox").fetchone()[0], 3
+        )
+        self.assertEqual(
+            self.db.execute("SELECT status FROM resident_inbox ORDER BY id DESC LIMIT 1").fetchone()[0],
+            "PENDING",
+        )
+
+    def test_blocked_resumption_preserves_evidence_and_is_idempotent(self):
+        event = self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY", {"objective": "Investigate"})
+        self.inbox.next("TestResident")
+        self.inbox.finish(event, "BLOCKED", {"objective_status": "BLOCKED", "dependency": "Missing grant"})
+        scope = f"resident-inbox-event:{event}"
+        with self.assertRaises(CapabilityDenied):
+            self.inbox.resume_blocked(
+                event, authority=self.authority, principal="service:supervisor",
+                resolution_evidence="Grant issued",
+            )
+        with self.assertRaisesRegex(ValueError, "evidence"):
+            self.inbox.resume_blocked(
+                event, authority=self.authority, principal="service:supervisor",
+                resolution_evidence="",
+            )
+        self.grant_resumption(scope=scope)
+        successor = self.inbox.resume_blocked(
+            event, authority=self.authority, principal="service:supervisor",
+            resolution_evidence="Grant issued",
+        )
+        self.assertEqual(successor, self.inbox.resume_blocked(
+            event, authority=self.authority, principal="service:supervisor",
+            resolution_evidence="Grant issued",
+        ))
+        with self.assertRaisesRegex(ValueError, "different evidence"):
+            self.inbox.resume_blocked(
+                event, authority=self.authority, principal="service:supervisor",
+                resolution_evidence="Different resolution evidence",
+            )
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM resident_inbox WHERE id=?", (event,)
+        ).fetchone()[0], "BLOCKED")
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM resident_inbox"
+        ).fetchone()[0], 2)
+        row = self.db.execute(
+            "SELECT status,payload FROM resident_inbox WHERE id=?", (successor,)
+        ).fetchone()
+        self.assertEqual(row[0], "PENDING")
+        self.assertEqual(json.loads(row[1])["previous_result"]["dependency"], "Missing grant")
+        self.assertEqual(json.loads(row[1])["resumption_grant_id"], "resume-grant")
+        self.assertEqual(json.loads(row[1])["resumption_principal"], "service:supervisor")
+        self.assertEqual(json.loads(row[1])["resumption_scope_ref"], scope)
+        self.assertEqual(sqlite3.connect(self.authority_path).execute(
+            "SELECT outcome FROM capability_audit ORDER BY id DESC LIMIT 1"
+        ).fetchone()[0], "AUTHORIZED")
+
+    def test_nonblocked_event_cannot_be_resumed(self):
+        event = self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY", {"objective": "Check"})
+        with self.assertRaisesRegex(ValueError, "BLOCKED"):
+            self.inbox.resume_blocked(
+                event, authority=self.authority, principal="service:supervisor",
+                resolution_evidence="Resolved",
+            )
+
+    def test_assignment_recovers_from_block_and_reaches_independent_acceptance(self):
+        db_path = Path(self.authority_dir.name) / "institution.sqlite"
+        db = sqlite3.connect(db_path)
+        inbox = Inbox(db)
+        intake = AssignmentIntake(
+            db_path, "assignment-intake-test-token-0123456789",
+            {"TestResident"}, {"TestResident"},
+        )
+        submitted = intake.submit({
+            "resident": "TestResident",
+            "assignment_id": "recovery-assignment-1",
+            "objective": "Restore service availability",
+            "acceptance_criteria": [{
+                "id": "availability", "version": "1",
+                "description": "Service responds successfully to an independent probe",
+            }],
+        }, "recovery-assignment-key")
+        root_event = submitted["event_id"]
+        blocked_worker = self.handler([{
+            "state": "blocked", "dependency": "Required host grant",
+            "reason": "The service probe is not authorized",
+            "evidence": {"grant_status": "missing"},
+        }], inbox=inbox)
+        asyncio.run(blocked_worker("TestResident"))
+        blocked = intake.status(root_event)
+        self.assertEqual(blocked["events"][0]["status"], "BLOCKED")
+        self.assertEqual(blocked["verification"]["verification_status"], "NOT_REQUESTED")
+
+        scope = "assignment:recovery-assignment-1"
+        self.grant_resumption(scope=scope)
+        successor = inbox.resume_blocked(
+            root_event, authority=self.authority,
+            principal="service:supervisor",
+            resolution_evidence="Exact host grant was issued and independently read back",
+        )
+        completion_worker = self.handler([{
+            "state": "complete", "objective_verified": True,
+            "evidence": {"probe": "HTTP 200", "artifact": "probe-result:1"},
+        }], inbox=inbox)
+        asyncio.run(completion_worker("TestResident"))
+        self.assertEqual(inbox.db.execute(
+            "SELECT status FROM resident_inbox WHERE id=?", (successor,)
+        ).fetchone()[0], "COMPLETED")
+
+        reviewer = IndependentReviewWorker(
+            VerificationLedger(db), "R3 Independent Reviewer",
+            lambda request: {
+                "implementation_revision": "recovery-test-revision",
+                "findings": [{
+                    "criterion_id": "availability", "result": "PASS",
+                    "reason": "The independent service probe returned success",
+                    "evidence": {"independent_observation": True,
+                                 "source_event_id": successor,
+                                 "observed_status": 200},
+                }],
+            },
+        )
+        self.assertEqual(reviewer.process_pending()[0]["outcome"], "ACCEPTED")
+        status = intake.status(root_event)
+        self.assertEqual([event["event_id"] for event in status["events"]],
+                         [root_event, successor])
+        self.assertEqual(status["events"][0]["status"], "BLOCKED")
+        self.assertEqual(status["events"][1]["status"], "COMPLETED")
+        self.assertEqual(status["verification"]["verification_status"], "ACCEPTED")
+        resumed_payload = json.loads(inbox.db.execute(
+            "SELECT payload FROM resident_inbox WHERE id=?", (successor,)
+        ).fetchone()[0])
+        self.assertEqual(resumed_payload["previous_event_id"], root_event)
+        self.assertEqual(resumed_payload["resumption_evidence"],
+                         "Exact host grant was issued and independently read back")
+        db.close()
+
+    def test_regular_event_keeps_ordinary_response(self):
+        event = self.inbox.enqueue("TestResident", "CONVERSATION", {"text": "hello"})
+        handler = self.handler([{"state": "continue", "next_step": "not activated"}])
+        asyncio.run(handler("TestResident"))
+        self.assertEqual(self.db.execute("SELECT status FROM resident_inbox WHERE id=?", (event,)).fetchone()[0], "COMPLETED")
+        self.assertEqual(self.db.execute("SELECT count(*) FROM resident_inbox").fetchone()[0], 1)
+
+    def test_invalid_decision_fails_without_new_event(self):
+        event = self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY", {"objective": "Check"})
+        handler = self.handler([{"state": "continue"}])
+        with self.assertRaisesRegex(RuntimeError, "next_step"):
+            asyncio.run(handler("TestResident"))
+        self.assertEqual(self.db.execute("SELECT status FROM resident_inbox WHERE id=?", (event,)).fetchone()[0], "FAILED")
+        self.assertEqual(self.db.execute("SELECT count(*) FROM resident_inbox").fetchone()[0], 1)
+
+    def test_blocked_is_not_reported_as_completed(self):
+        event = self.inbox.enqueue("TestResident", "RESIDENT_ACTIVITY", {"objective": "Check"})
+        handler = self.handler([{"state": "blocked", "evidence": "Need access"}])
+        asyncio.run(handler("TestResident"))
+        row = self.db.execute(
+            "SELECT status,result FROM resident_inbox WHERE id=?", (event,)
+        ).fetchone()
+        self.assertEqual(row[0], "BLOCKED")
+        self.assertEqual(json.loads(row[1])["objective_status"], "BLOCKED")
+        self.assertIsNone(self.inbox.next("TestResident"))
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM resident_inbox"
+        ).fetchone()[0], 1)
+        self.assertEqual(json.loads(row[1])["decision"]["evidence"], "Need access")
+
+    def test_blocked_without_dependency_evidence_fails_closed(self):
+        event = self.inbox.enqueue(
+            "TestResident", "RESIDENT_ACTIVITY", {"objective": "Investigate"}
+        )
+        with self.assertRaisesRegex(RuntimeError, "dependency evidence"):
+            asyncio.run(self.handler([{"state": "blocked"}])("TestResident"))
+        row = self.db.execute(
+            "SELECT status,result FROM resident_inbox WHERE id=?", (event,)
+        ).fetchone()
+        self.assertEqual(row[0], "FAILED")
+        self.assertNotEqual(json.loads(row[1]).get("objective_status"), "BLOCKED")
+
+    def test_blocked_survives_restart_without_implicit_reexecution(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "institution.sqlite3"
+            connection = sqlite3.connect(path)
+            inbox = Inbox(connection)
+            event = inbox.enqueue(
+                "ResearchResident", "RESIDENT_ACTIVITY",
+                {"objective": "Investigate missing authority"},
+            )
+            inbox.next("ResearchResident")
+            inbox.finish(event, "BLOCKED", {
+                "decision": {"state": "blocked", "reason": "Grant not approved"},
+                "objective_status": "BLOCKED",
+            })
+            connection.close()
+
+            restarted = sqlite3.connect(path)
+            try:
+                inbox = Inbox(restarted)
+                self.assertIsNone(inbox.next("ResearchResident"))
+                row = restarted.execute(
+                    "SELECT status,result FROM resident_inbox WHERE id=?", (event,)
+                ).fetchone()
+                self.assertEqual(row[0], "BLOCKED")
+                self.assertEqual(json.loads(row[1])["objective_status"], "BLOCKED")
+            finally:
+                restarted.close()
+
+    def test_blocked_cannot_submit_independent_review(self):
+        event = self.inbox.enqueue(
+            "TestResident", "RESIDENT_ACTIVITY", {"assignment_id": "assignment"}
+        )
+        self.inbox.next("TestResident")
+        with self.assertRaisesRegex(ValueError, "Only completed"):
+            self.inbox.finish(event, "BLOCKED", {
+                "objective_status": "BLOCKED"
+            }, review={
+                "assignment_id": "assignment",
+                "criteria": [{"id": "acceptance"}],
+                "evidence": {},
+            })
+        self.assertEqual(
+            self.db.execute(
+                "SELECT count(*) FROM verification_requests"
+            ).fetchone()[0], 0,
+        )
+        self.assertEqual(
+            self.db.execute(
+                "SELECT status FROM resident_inbox WHERE id=?", (event,)
+            ).fetchone()[0], "PROCESSING",
+        )
+
+    def test_assignment_status_api_displays_blocked_without_acceptance(self):
+        from runtime.assignment_intake import AssignmentIntake
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "institution.sqlite3"
+            app = AssignmentIntake(
+                path, "test-token-" * 4, {"TestResident"}, {"TestResident"}
+            )
+            connection = sqlite3.connect(path)
+            try:
+                inbox = Inbox(connection)
+                event = inbox.enqueue(
+                    "TestResident", "RESIDENT_ACTIVITY",
+                    {"assignment_id": "work", "objective": "Check authorization"},
+                )
+                connection.execute(
+                    "INSERT INTO assignment_intake_assignments VALUES (?,?,?,?,?)",
+                    ("work", "test-request-hash", event, "TestResident", 0),
+                )
+                connection.commit()
+                inbox.next("TestResident")
+                inbox.finish(event, "BLOCKED", {
+                    "decision": {"state": "blocked", "reason": "Missing grant"},
+                    "objective_status": "BLOCKED",
+                })
+                status = app.status(event)
+                self.assertEqual(status["events"][-1]["status"], "BLOCKED")
+                self.assertEqual(
+                    status["events"][-1]["result"]["objective_status"], "BLOCKED",
+                )
+                self.assertEqual(
+                    status["verification"]["verification_status"], "NOT_REQUESTED",
+                )
+            finally:
+                connection.close()
+
+
+if __name__ == "__main__":
+    unittest.main()

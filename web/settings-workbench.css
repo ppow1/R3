@@ -1,0 +1,26 @@
+#settings-workbench{display:grid;gap:7px;margin:8px 0;font-size:11px}.settings-mode-row,.settings-file-tools,.settings-actions{display:flex;align-items:center;gap:5px;flex-wrap:wrap}.settings-mode-toggle{display:flex;border:1px solid #c2d5ec44;border-radius:8px;overflow:hidden}.settings-mode-toggle button{border:0;border-radius:0;padding:5px 10px;font-size:11px}.settings-mode-toggle button[aria-pressed=true]{background:#3a5d7d}.settings-mode-row #settings-mode-state{color:#c7d7e9}.settings-token-row{display:grid;gap:4px;color:#c7d7e9}.settings-token-row input,.settings-file-tools input,.settings-file-tools select{min-width:0;padding:6px 8px;border:1px solid #c2d5ec44;border-radius:7px;background:#091522;color:#edf4fc}.settings-file-tools input{flex:1}.settings-file-tools select{flex:2}.settings-file-tools button,.settings-actions button{padding:5px 8px;font-size:11px}.settings-meta{color:#c2d5ec;line-height:1.45}.settings-json{width:100%;height:220px;resize:vertical;padding:8px;border:1px solid #c2d5ec44;border-radius:8px;background:#07121e;color:#e9f2fc;font:11px/1.45 ui-monospace,monospace;white-space:pre}.settings-json[readonly]{opacity:.82}#settings-json{width:100%;height:220px;resize:vertical;padding:8px;border:1px solid #c2d5ec44;border-radius:8px;background:#07121e;color:#e9f2fc;font:11px/1.45 ui-monospace,monospace}.settings-actions #settings-save{margin-left:auto}#settings-save:disabled,#settings-new:disabled{opacity:.45;cursor:not-allowed}#settings-workbench-status{min-height:16px;color:#c8d9ea}.settings-history{border-top:1px solid #c2d5ec33;padding-top:7px;color:#c8d9ea}.settings-history ol{margin:4px 0;padding-left:20px}.settings-history li{padding:2px 0;overflow-wrap:anywhere}@media(max-width:600px){#settings-json{height:160px}.settings-file-tools select{flex-basis:100%}}/* registry-driven field controls */
+#settings-fields{display:grid;gap:7px;margin:10px 0}
+.settings-field-group{min-width:0;margin:2px 0;padding:8px;border:1px solid #c2d5ec2b;border-radius:9px;background:#08152233}
+.settings-field-group legend{padding:0 5px;color:#dcecff;font-size:12px;font-weight:600}
+.settings-value-row{display:grid;grid-template-columns:minmax(120px,38%) minmax(0,1fr);align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid #c2d5ec1c}
+.settings-value-row:last-child{border-bottom:0}
+.settings-value-label{color:#c7d8e9;font-size:11px;overflow-wrap:anywhere}
+.settings-value-input{box-sizing:border-box;width:100%;min-width:0;padding:6px 8px;border:1px solid #c2d5ec38;border-radius:7px;background:#081522aa;color:#eaf4ff;font-size:12px}
+.settings-value-row input[type=checkbox]{justify-self:start;accent-color:#8fb9ec;width:17px;height:17px}
+.settings-value-input:disabled,.settings-value-row input:disabled{opacity:.68}
+.settings-protected-value,.settings-empty{font-size:11px;color:#c2d5ec99}
+@media(max-width:650px){.settings-value-row{grid-template-columns:1fr;gap:4px}.settings-field-group{padding:6px}}
+
+
+/* Descriptor-driven fields, reference pickers, and repeatable values. */
+.settings-file-summary{color:#c2d5ec99;font-size:10px;line-height:1.4}
+.settings-field-help{grid-column:1/-1;color:#c2d5ec99;font-size:10px;line-height:1.35}
+.settings-value-row select.settings-value-input{min-width:0}
+.settings-value-toggle{justify-self:start;accent-color:#8fb9ec;width:17px;height:17px}
+.settings-list-group{display:grid;gap:5px}
+.settings-list-item{display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid #c2d5ec1c}
+.settings-list-item>.settings-value-input{flex:1}
+.settings-list-item>.settings-field-group{flex:1}
+.settings-icon-button{flex:0 0 24px;width:24px;height:24px;padding:0!important;font-size:15px!important}
+.settings-small-button{justify-self:start;padding:4px 8px!important;font-size:10px!important}
+.settings-small-button:disabled,.settings-icon-button:disabled{opacity:.5;cursor:not-allowed}

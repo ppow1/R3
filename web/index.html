@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: web/index.html
 Component: R3-ESTATE-HOME
-File Revision: 1.0.14
+File Revision: 1.0.15
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Present the R3 estate home with Engineering and Infrastructure observability panels
@@ -11,6 +11,7 @@ Observability: Engineering API state; Infrastructure telemetry adapter availabil
 Dependencies: /api/v1/visual/background; /api/v1/health; /api/v1/engineering/branches; /api/v1/engineering/worktrees; /web/resident-avatar.js
 Authority: Steward visual placement references and approved R3 website direction
 Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Load reusable resident avatar module and pinned Three.js import map
+Changed: 2026-11-03 UTC | R3-SETTINGS-WORKBENCH-001 | ChatGPT GPT-6 | Add dynamic local JSON settings editor
 Changed: 2026-11-01 UTC | R3-THREE-PANE-LAUNCHER-ICON-001 | ChatGPT GPT-6 | Use layered three-pane icon for quick layout launcher
 Supersedes: R3-VISUAL-PROTOTYPE framing
 Contracts: docs/IMPLEMENTATION_HANDOFF.md; docs/architecture/ESTATE_SPATIAL_CANON.md; hints/chat-contract-draft.md; hints/settings-contract-draft.md
@@ -27,7 +28,7 @@ History/Predecessor: Git blob 5f681d1009aa1ad9b6a2645b149586cae5f60aea
 :root{--panel-opacity:.45}
 *{box-sizing:border-box}
 body{margin:0;background:#091522;color:#edf4fc;font:15px system-ui,sans-serif;overflow:hidden}
-#estate{position:fixed;inset:0;background:#152635 url('/api/v1/visual/background') center center/cover no-repeat}
+#estate{position:fixed;inset:0;background:#152635 url('api/v1/visual/background') center center/cover no-repeat}
 #estate:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(4,12,23,.3),transparent 70%);pointer-events:none}
 .controls{display:grid;grid-template-columns:1fr auto;gap:8px 10px;align-items:center;padding:10px;margin-top:6px;border-top:1px solid #c2d5ec33}.controls label{font-size:12px}.controls input[type=range]{grid-column:1/-1;width:100%;accent-color:#8fb9ec}.controls #snapshot-status{grid-column:1/-1;min-height:16px;font-size:11px}
 button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;border-radius:7px;padding:7px 12px}
@@ -135,7 +136,8 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"}}
 </script>
-</head>
+<link rel="stylesheet" href="/web/settings-workbench.css">
+<link rel="stylesheet" href="/web/chat-client.css"><script src="/web/chat-client.js"></script></head>
 <body>
 <div id="estate" role="img" aria-label="Riverview 3 estate"></div>
 <nav id="side-rail" aria-label="R3 navigation">
@@ -158,6 +160,7 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 <section class="settings-detail" aria-live="polite"><h3 id="settings-scope-title">Institutional</h3><p class="settings-unavailable" id="settings-registry-status">Settings registry unavailable · no operational settings loaded.</p><div class="settings-row"><span>Inherited value</span><span>Unavailable</span></div><div class="settings-row"><span>Scoped override</span><span>Unavailable</span></div><div class="settings-row"><span>Effective value</span><span>Unavailable</span></div><div class="settings-row"><span>Authorization</span><span>Capability manifest unavailable</span></div><div class="settings-row"><span>Configuration history</span><span>Unavailable</span></div><div class="settings-local">Local appearance · this browser only</div><div id="browser-appearance" hidden><div class="controls"><label for="opacity">Engineering opacity</label><output id="value" for="opacity">45%</output><input id="opacity" type="range" min="45" max="95" value="45"><button id="center-window" type="button">Center window</button><button id="snapshot-button" type="button">Snapshot</button><output id="snapshot-status" aria-live="polite"></output></div><section id="layout-presets"><h3>Floating panel layouts</h3><p>Save up to 10 layouts for this browser. A layout records panel positions, sizes, and open or minimized state. Applying a preset can show Chat, Engineering, and Infrastructure together.</p><div id="layout-presets-controls"><select id="layout-preset-slot" aria-label="Layout preset"></select><input id="layout-preset-name" type="text" maxlength="32" placeholder="Preset name (optional)" aria-label="Preset name"><button id="layout-preset-save" type="button">Save current</button><button id="layout-preset-apply" type="button">Apply</button><button id="layout-preset-clear" type="button">Clear</button></div><output id="layout-preset-status" aria-live="polite"></output></section></div></section></div></div>
   <button class="profile-menu-item" id="profile-engineering" type="button">Engineering Foundry panel</button>
   <button class="profile-menu-item" id="profile-infrastructure" type="button">Infrastructure panel</button>
+  <button class="profile-menu-item" id="profile-signout" type="button">Sign Out</button>
 </div>
 <section class="window min" id="win" aria-label="Engineering Foundry">
   <header id="drag">
@@ -244,13 +247,17 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 // Reconcile the R3 runtime's state and scheduling contract before connecting a telemetry source.
 const infrastructureTelemetryAdapter={
   async read(){
-    return {available:false,reason:'R3 runtime telemetry source is not connected'};
+    try{
+      const response=await fetch('/api/v1/institution/runtime',{cache:'no-store'});
+      if(!response.ok)return {available:false,reason:'Runtime telemetry HTTP '+response.status};
+      return {available:true,...await response.json()};
+    }catch(error){return {available:false,reason:String(error)};}
   }
 };
 const infrastructurePanel=document.getElementById('infrastructure-panel');
 const chatPanel=document.getElementById('chat-panel');
-const chatAdapter={async listConversations(){return{available:false,reason:'R3 conversation API is not connected'};},async capabilityManifest(){return{available:false,reason:'Resident capability manifest is unavailable'};}};
-const settingsRegistryAdapter={async read(){return{available:false,reason:'R3 settings registry is not connected'};}};
+const chatAdapter=window.r3ChatAdapter;
+const settingsRegistryAdapter={async read(){try{const response=await fetch('/api/v1/settings/manifest',{cache:'no-store'});if(!response.ok)return{available:false,reason:'Settings API HTTP '+response.status};return{available:true,...await response.json()}}catch(error){return{available:false,reason:String(error)}}}};
 const infrastructureButton=document.getElementById('nav-infrastructure');
 const infrastructureMinimize=document.getElementById('infrastructure-minimize'),infrastructureAnchor=document.getElementById('infrastructure-anchor');
 const sideRail=document.getElementById('side-rail');
@@ -296,12 +303,20 @@ document.addEventListener('pointerdown',event=>{
   if(!layoutQuickMenu.hidden&&!layoutQuickMenu.contains(event.target)&&!layoutQuickButton.contains(event.target)){layoutQuickMenu.hidden=true;layoutQuickButton.setAttribute('aria-expanded','false');}
 });
 async function refreshInfrastructure(){
-  const model=await infrastructureTelemetryAdapter.read();
-  const unavailable=!model||model.available!==true;
-  if(unavailable)return;
-  // Runtime-specific enum and scheduling fields are mapped here only after architecture reconciliation.
+ const model=await infrastructureTelemetryAdapter.read();
+ if(!model||model.available!==true){const reason=model?.reason||'Runtime telemetry unavailable';document.querySelectorAll('#infrastructure-panel .infra-unavailable').forEach((e,i)=>e.textContent=i===2?'Scheduler time-slice telemetry unavailable':'Unavailable');for(const id of ['main-loop-state','supervisory-loop-state','resident-resource-state','watchdog-state','freshness-state']){const e=document.getElementById(id);if(e)e.textContent=reason;}const h=document.getElementById('transition-history');h.replaceChildren(Object.assign(document.createElement('li'),{textContent:reason}));return;}
+ const s=model.state&&typeof model.state==='object'?model.state:{};const c=s.state_catalog&&typeof s.state_catalog==='object'?s.state_catalog:{};const rs=Array.isArray(s.residents)?s.residents:[];const es=Array.isArray(s.events)?s.events:[];
+ const label=(n,v)=>typeof n==='string'&&Number.isFinite(Number(v))&&Object.prototype.hasOwnProperty.call(c,n)&&Number(c[n])===Number(v)?n+' ('+Number(v)+')':'Unrecognized runtime state';
+ const time=v=>Number.isFinite(Number(v))?new Date(Number(v)*1000).toLocaleString():'timestamp unavailable';const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+ const main=rs.map(r=>String(r.name||'Resident')+'  /  '+label(r.state,r.state_number));set('main-loop-state',main.join(' | ')||'Runtime reports no resident state.');
+ const badges=[...document.querySelectorAll('#infrastructure-panel .infra-unavailable')];const b=(i,t)=>{if(badges[i])badges[i].textContent=t;};b(0,main.length?'Verified runtime state':'No resident state reported');
+ const sa=Number(model.supervisor_age_seconds);set('supervisory-loop-state',Number.isFinite(sa)?'Supervisor heartbeat age: '+sa.toFixed(2)+' s. Supervisor enum, watchdog decision, and recovery detail are not reported.':'Supervisor state and heartbeat are not reported.');b(1,Number.isFinite(sa)?'Supervisor heartbeat reported':'Supervisor telemetry unavailable');b(2,'Scheduler time-slice telemetry not reported');
+ const rc=Number(model.registered_residents);set('resident-resource-state','Registered residents: '+(Number.isFinite(rc)?rc:rs.length)+'. '+(main.join(' | ')||'No resident entries reported.')+' Resource allocation and active time slices are not reported.');b(3,rs.length?'Resident states reported':'Resident activity unavailable');
+ const now=Date.now()/1000;const heart=rs.map(r=>{const age=now-Number(r.heartbeat);return String(r.name||'Resident')+': heartbeat '+(Number.isFinite(age)&&age>=0?age.toFixed(2)+' s ago':'timestamp unavailable')+(Number.isFinite(Number(r.failures))?'; failures reported '+Number(r.failures):'')+(r.state==='RECOVERING'?'; runtime state RECOVERING':'');});set('watchdog-state',(Number.isFinite(sa)?'Supervisor heartbeat '+sa.toFixed(2)+' s ago. ':'')+(heart.join(' | ')||'Resident heartbeat not reported.')+' Watchdog outcome is not reported.');b(4,heart.length?'Heartbeats reported; watchdog outcome unavailable':'Heartbeat unavailable');
+ const age=now-Number(model.observed_at);set('freshness-state','Observed at '+time(model.observed_at)+'; snapshot age '+(Number.isFinite(age)&&age>=0?age.toFixed(2)+' s':'unavailable')+'.');b(5,'Runtime snapshot timestamp verified');
+ const valid=es.filter(e=>label(e.state,e.state_number)!=='Unrecognized runtime state').sort((a,z)=>(Number(z.at)||Number(z.id)||0)-(Number(a.at)||Number(a.id)||0));const h=document.getElementById('transition-history');h.replaceChildren();if(!valid.length){h.appendChild(Object.assign(document.createElement('li'),{textContent:'No verified enum transitions in this snapshot.'}));}else{for(const e of valid.slice(0,30)){const li=document.createElement('li');li.textContent=time(e.at)+'  /  '+String(e.resident||'Resident')+'  /  '+String(e.kind||'Transition')+'  /  '+label(e.state,e.state_number)+(e.reason?'  /  '+String(e.reason):'');h.appendChild(li);}}b(6,valid.length+' verified runtime transition'+(valid.length===1?'':'s'));
 }
-refreshInfrastructure();
+refreshInfrastructure();window.setInterval(refreshInfrastructure,2000);
 const win=document.getElementById('win');
 const slider=document.getElementById('opacity');
 const engineeringOpacitySlider=document.getElementById('engineering-opacity');const engineeringOpacityValue=document.getElementById('engineering-opacity-value');const chatOpacitySlider=document.getElementById('chat-opacity');const chatOpacityValue=document.getElementById('chat-opacity-value');const infrastructureOpacitySlider=document.getElementById('infrastructure-opacity');const infrastructureOpacityValue=document.getElementById('infrastructure-opacity-value');
@@ -505,11 +520,69 @@ snapshotButton.addEventListener('click',async()=>{
 const background=new Image();
 background.onload=()=>{if(win.classList.contains('min'))placeMinimized();};
 background.onerror=()=>{};
-background.src='/api/v1/visual/background';
+background.src='api/v1/visual/background';
 setEngineeringOpacity(slider.value);
 placeMinimized();
 refreshEngineeringStatus();
 </script>
 <script type="module" src="/web/resident-avatar.js"></script>
+<script src="/web/settings-workbench.js"></script>
+
+<script>
+// R3-SITE-LOGOUT-003
+(() => {
+  const button = document.getElementById('profile-signout');
+  if (!button) return;
+
+  button.addEventListener('click', async () => {
+    if (button.disabled) return;
+
+    const base = location.pathname.startsWith('/r3/')
+      ? '/r3' : '';
+
+    const csrf = document.cookie
+      .split(';')
+      .map(value => value.trim())
+      .find(value => value.startsWith('r3_steward_csrf='));
+
+    if (!csrf) {
+      alert('Session security token unavailable. Please refresh and retry.');
+      return;
+    }
+
+    const token = decodeURIComponent(csrf.split('=').slice(1).join('='));
+
+    button.disabled = true;
+    button.textContent = 'Signing out...';
+
+    try {
+      const response = await fetch(
+        base + '/api/v1/chat/session',
+        {
+          method: 'DELETE',
+          credentials: 'same-origin',
+          headers: {
+            'X-Riverview-CSRF': token
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Logout was not confirmed by the server');
+      }
+
+      location.replace(base + '/login');
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = 'Sign Out';
+      alert(error.message || 'Sign out failed');
+    }
+  });
+})();
+</script>
+
+
+<link rel="stylesheet" href="web/steward-authority.css">
+<script defer src="web/steward-authority.js"></script>
 </body>
 </html>

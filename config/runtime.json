@@ -1,0 +1,24 @@
+{
+  "scheduler_tick_seconds": 0.25,
+  "health_interval_seconds": 2,
+  "sqlite_busy_timeout_ms": 5000,
+  "residents": {
+    "grace": "residents/grace.json"
+  },
+  "independent_reviewer": "residents/reviewer.json",
+  "conversation_api": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8770,
+    "token_file": "/home/admin1/.local/state/r3-runtime/credentials/conversation-api.token"
+  },
+  "assignment_intake": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8769,
+    "token_file": "/home/admin1/.local/state/r3-runtime/credentials/assignment-intake.token"
+  },
+  "resident_credentials": {
+    "directory": "/home/admin1/.local/state/r3-runtime/credentials"
+  }
+}
