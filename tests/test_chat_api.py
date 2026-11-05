@@ -45,31 +45,14 @@ class ChatApiTests(unittest.TestCase):
         with self.assertRaises(HTTPException):
             load_config(self.config_file)
 
-    def test_principal_uses_native_session_not_browser_header(self):
-        from r3_native_sessions import NativeSessions, initialize_empty_schema
-
-        db = self.root / "native-auth.sqlite"
-        initialize_empty_schema(db)
-        store = NativeSessions(db)
-        store.bootstrap_steward(
-            "steward@example.test",
-            "Strong-test-password-123",
-        )
-        session = store.login(
-            "steward@example.test",
-            "Strong-test-password-123",
-        )
-
-        request = FakeRequest({
-            "x-r3-principal": "attacker@example.com",
-        })
-        request.cookies = {
-            "r3_steward_session": session["token"],
-        }
-
-        with patch("r3_chat_api.native_store", return_value=store):
+    def test_principal_uses_verified_portal_session_not_browser_header(self):
+        request = FakeRequest({"x-r3-principal": "attacker@example.com"})
+        request.cookies = {"rv_account_session": "opaque-test-token"}
+        payload = json.dumps({"identity": {
+            "email": "steward@example.test", "roles": ["steward"]
+        }}).encode()
+        with patch("r3_chat_api._portal_request", return_value=(200, payload, [])):
             principal = _principal(request, self.config)
-
         self.assertEqual(principal, "steward@example.test")
 
     def test_spoofed_browser_header_without_native_session_denied(self):
