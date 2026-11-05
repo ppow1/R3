@@ -46,10 +46,24 @@ class FullApplicationGrantAcceptance(unittest.TestCase):
                 "R3_CANONICAL_AUTHORITY_DB": str(authority_db),
             }):
                 from r3_app import app
+                from fastapi import HTTPException
+
+                def fixture_principal(request, cfg):
+                    token = request.cookies.get("r3_steward_session")
+                    if not token:
+                        raise HTTPException(401, "Fixture session required")
+                    try:
+                        identity = NativeSessions(session_db).authenticate(token)
+                    except Exception as exc:
+                        raise HTTPException(401, "Fixture session invalid") from exc
+                    if identity["role"] != "steward":
+                        raise HTTPException(403, "Fixture Steward required")
+                    return identity["email"]
+
 
                 authority = R3Authority(authority_db)
 
-                with TestClient(app, base_url=ORIGIN) as client:
+                with patch("r3_app._principal", side_effect=fixture_principal), TestClient(app, base_url=ORIGIN) as client:
                     self.assertEqual(
                         client.get(BASE + "/inventory").status_code,
                         401,
