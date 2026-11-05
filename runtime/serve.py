@@ -287,13 +287,36 @@ def main() -> None:
     parser.add_argument("--conversation-port", type=int)
     parser.add_argument("--conversation-token-file", type=Path)
     args = parser.parse_args()
+    # Runtime JSON is authoritative when a capability is configured there.
+    # Legacy command-line options remain supported for older deployments.
+    runtime_settings = load_configuration(args.config_dir)["runtime"]
+    conversation = runtime_settings["_conversation_api"]
+    intake = runtime_settings["_assignment_intake"]
+    credential_dir = runtime_settings["_resident_credentials"]
+
+    def resolve_listener(name, configured, cli_port, cli_token):
+        if configured is None:
+            return cli_port, cli_token
+        if cli_port is not None and cli_port != configured["port"]:
+            raise ConfigurationError(f"{name} CLI port conflicts with runtime.json")
+        if cli_token is not None and cli_token != configured["token_file"]:
+            raise ConfigurationError(f"{name} CLI token file conflicts with runtime.json")
+        return configured["port"], configured["token_file"]
+
+    conversation_port, conversation_token_file = resolve_listener(
+        "conversation_api", conversation, args.conversation_port, args.conversation_token_file)
+    intake_port, intake_token_file = resolve_listener(
+        "assignment_intake", intake, args.assignment_intake_port, args.assignment_intake_token_file)
+    if credential_dir is not None and args.resident_credential_dir is not None:
+        if credential_dir != args.resident_credential_dir:
+            raise ConfigurationError("Resident credential directory conflicts with runtime.json")
     asyncio.run(serve(
         args.db, args.health_file, args.config_dir,
-        credential_dir=args.resident_credential_dir,
-        assignment_intake_port=args.assignment_intake_port,
-        assignment_intake_token_file=args.assignment_intake_token_file,
-        conversation_port=args.conversation_port,
-        conversation_token_file=args.conversation_token_file,
+        credential_dir=credential_dir or args.resident_credential_dir,
+        assignment_intake_port=intake_port,
+        assignment_intake_token_file=intake_token_file,
+        conversation_port=conversation_port,
+        conversation_token_file=conversation_token_file,
     ))
 
 
