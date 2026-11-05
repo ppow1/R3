@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/hr_stdio.py
 # Component: HR-STDIO
-# File Revision: 1.0.0
+# File Revision: 1.1.0
 # Created: 2026-11-05 UTC (date precision)
 # Created By: ChatGPT GPT-6
 # Purpose: Transport-neutral JSON-lines stdio dispatcher for R/3 HR
@@ -13,7 +13,8 @@
 # Supersedes: None
 # Contracts: runtime/hr_capability.py; hints/architecture.md
 # Tests: tests/test_hr_stdio.py
-# History/Predecessor: New file
+# Changed: 2026-11-05 UTC | HR-008 | Discover stored residents without caller-supplied IDs
+# History/Predecessor: e66c60be7f9657aeb1909e7d33decce9b53c43fc
 """A stdio adapter, NOT a standalone unauthenticated HR server.
 
 The trusted host creates HRCapability with real Comms grant enforcement,
@@ -43,7 +44,7 @@ def dispatch(capability: HRCapability, principal: VerifiedPrincipal, request: di
             return {"ok": True, "result": result}
         if operation == "hr.directory":
             ids = request.get("resident_ids")
-            if not isinstance(ids, list) or not all(isinstance(x, str) and x.strip() for x in ids):
+            if ids is not None and (not isinstance(ids, list) or not all(isinstance(x, str) and x.strip() for x in ids)):
                 return {"ok": False, "error": "invalid_resident_ids"}
             return {"ok": True, "result": capability.directory(principal, ids)}
         return {"ok": False, "error": "unsupported_operation"}
