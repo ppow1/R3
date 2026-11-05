@@ -1,0 +1,39 @@
+# R3 CONTROLLED CONFIGURATION
+# File: .github/workflows/hr-tests.yml
+# Component: HR-CI
+# File Revision: 1.0.0
+# Created: 2026-11-05 UTC (date precision)
+# Created By: ChatGPT GPT-6
+# Purpose: Run HR unit tests for branch and pull requests
+# Execution Model: GitHub Actions
+# Observability: Test job result and logs
+# Dependencies: Python 3.11
+# Authority: Test only; no deployment
+# Changed: 2026-11-05 UTC | HR-007 | Add repeatable CI verification
+# Supersedes: None
+# Contracts: tests/test_hr*.py
+# Tests: python -m unittest discover -s tests -p 'test_hr*.py'
+# History/Predecessor: New file
+name: R3 HR unit tests
+on:
+  push:
+    branches:
+      - engineering/hr-foundation-grace-marie-20261105
+  pull_request:
+    paths:
+      - 'runtime/hr_*.py'
+      - 'tests/test_hr*.py'
+      - 'config/hr.json'
+      - '.github/workflows/hr-tests.yml'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: HR regression tests
+        run: python -m unittest discover -s tests -p 'test_hr*.py' -v
