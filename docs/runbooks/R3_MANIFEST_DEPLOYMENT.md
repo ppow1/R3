@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/runbooks/R3_MANIFEST_DEPLOYMENT.md
 Component: R3-MANIFEST-DEPLOY
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-05 UTC (exact time not independently verified)
 Created By: ChatGPT GPT-6
 Purpose: Document manifest-driven deployment workflow and exact operator commands
@@ -10,13 +10,14 @@ Execution Model: Documentation
 Observability: Git history and deployment reports
 Dependencies: scripts/deployment/ and hints/deployment.md
 Authority: Steward directive for R3 repository-owned deployment package
+Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-003 | ChatGPT GPT-6 | Record verified dual-listener topology and unittest inventory; fail-closed build prerequisites
 Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-002 | ChatGPT GPT-6 | Specify isolated dependency provisioning and bounded regression contract
 Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-001 | ChatGPT GPT-6 | Initial documentation
 Supersedes: None
 Superseded By: None
 Contracts: hints/file-provenance.md
 Tests: Documentation review only; live deployment not run
-History/Predecessor: Git blob 5f7282dcc27e9bd22c249fb9e055a3e5e7711c92
+History/Predecessor: Git blob 27b777cb3665ba4a73d1755c939a9243dd0b2ca7
 -->
 # R3 manifest-driven deployment — website first
 
@@ -107,3 +108,18 @@ The directory must exist locally. This is **validation only**, not packaging or 
 
 ## Remaining activation prerequisites
 Read-only inspection of live Camrui supervisor, release paths, active revision, shared configuration, and startup command; review any existing production deployment script/runbook; establish one verified activation procedure. Then extend this same engine, rather than adding another competing script. No LAN-to-public routing changes.
+
+## Live Camrui inspection — 2026-11-05 (operator-supplied read-only output)
+
+**Verified at inspection time, not a deployment acceptance:**
+- `r3-website.service` is a user systemd unit with `WorkingDirectory=/home/admin1/R3`, `ExecStart=/home/admin1/R3/.venv/bin/python -m uvicorn r3_app:app --host 127.0.0.1 --port 18303`; PID observed 417606.
+- A **separate** session-scoped Uvicorn process listens on `0.0.0.0:8303`, PID observed 1299490. Both processes share `/home/admin1/R3` and `/home/admin1/R3/.venv`. Neither may be restarted or have its environment mutated during candidate preparation.
+- Checkout HEAD observed `431eaecebef6660d06fd46a0cfda9a6fe1c2ac1a`; this is **not** independently established as the loaded revision of either running process.
+- Existing venv: Python 3.12.3, FastAPI 0.162.0, Uvicorn 0.54.0, HTTPX 0.28.1. These installed versions are **not** a reviewed hash-locked requirements file.
+- No requirements/lockfile, pyproject, pytest.ini, tox.ini or Makefile appeared in the inspected locations/tracked test configuration.
+- Eight website test modules import Python standard-library `unittest`; `pytest` is absent. Candidate suite command: `python -m unittest discover -s tests -p 'test_*.py' -v`. **Not yet executed**; test count/pass status and runtime are not verified. A historical 22/22 report does not establish the current test selection.
+- Existing example manifest's releaseRoot, activeSymlink and `requirements-deploy.lock` remain **proposed**, not confirmed existing.
+
+**Build gate:** No production candidate environment may be provisioned from an invented dependency lock. Before enabling candidate build, create/review a reproducible, hash-verified lock from the actual source dependencies; determine which assets and auth configuration the tests require; choose a separate candidate directory and venv. Until then, the manifest runner must remain plan-only. Do not in-place checkout, stop either website listener, or modify the shared venv.
+
+**Implementation correction:** The plan-only PowerShell runner was found malformed in repository inspection and rewritten in revision 1.0.2. The replacement is committed but **not executed or syntax-tested on Windows PowerShell 7**. It must pass a PowerShell parser check and positive/negative manifest tests before use. It does not deploy.
