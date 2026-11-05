@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/r3-blocked-resumption-integration.md
 Component: R3-GRACE-RECOVERY
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-05 UTC (date only; exact time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Contract and readiness state for authorized Grace blocked-work recovery
@@ -10,12 +10,13 @@ Execution Model: Documentation
 Observability: GitHub commit, CI targeted regressions and persistent authority/inbox audit
 Dependencies: runtime/blocked_recovery.py; runtime/assignment_intake.py
 Authority: Steward R3 development governance and existing R3 canonical grant service
+Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-008 | Clarify resolution-evidence verification remains an integration prerequisite
 Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-006 | Document isolated integration and remaining production prerequisites
 Supersedes: None
 Superseded By: None
 Contracts: hints/file-provenance.md; hints/development-governance.md
 Tests: tests/test_blocked_recovery.py; tests/test_activity_continuation.py
-History/Predecessor: New file; none
+History/Predecessor: Git blob 4523030c93229659f640e93c084a51c99bd93801
 -->
 # Authorized Grace blocked-work recovery — integration contract
 
@@ -39,7 +40,7 @@ The canonical R3 grant must match:
 
 The R3Authority verifier must find one effective, unrevoked, Steward-approved exact grant and valid delegation chain. Authorization is audit-recorded before the successor is written. No default grant is issued and missing authority fails closed. A named grant string in the payload is not sufficient.
 
-The host must provide a verified principal derived from a trusted session or resident credential. This source **does not create an HTTP route**, does not accept a raw identity header or ordinary user text as proof, and does not automatically configure or provision authority.
+The host must provide a verified principal derived from a trusted session or resident credential. The current source checks only that the supplied resolution-evidence text is nonempty; it does **not** independently prove that an external dependency was resolved. The eventual trusted entry point must verify resolution from an authoritative record before invoking recovery. This source **does not create an HTTP route**, does not accept a raw identity header or ordinary user text as proof, and does not automatically configure or provision authority.
 
 ## Remaining integration and deployment prerequisites
 
