@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/resident_inference.py
 # Component: R3-RESIDENT-INFERENCE
-# File Revision: 1.3.6
+# File Revision: 1.3.7
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Reusable event-driven resident inference against an existing OpenAI-compatible endpoint.
@@ -16,11 +16,12 @@
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-002 | Preserve evidence-backed blocked state as durable unresolved outcome.
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-003 | Block repeated no-progress continuation, preserving durable evidence.
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-004 | Include tool results observed during the active inference turn.
-# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-005 | Authority-referenced idempotent blocked activity resumption.\n# Supersedes: None
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-005 | Authority-referenced idempotent blocked activity resumption.
+# Supersedes: None
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; hints/engineering-test-policy.md
 # Tests: tests/test_inference_http_errors.py (permanent transport diagnostic contract).
 # Changed: 2026-11-02 UTC | R3-GRACE-005 | Preserve safe upstream HTTP error codes without leaking request content.
-# History/Predecessor: Git blob f4a0412b0a33282e29231f3468e6d4c34a18a1cf
+# History/Predecessor: Git blob 8f364827b4e4da625fb1c1bcb3795339e709a73a
 """Durable resident inbox and inference adapter; tool routing uses existing llama.cpp /tools adapter."""
 from __future__ import annotations
 
