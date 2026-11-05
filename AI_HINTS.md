@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.0.4
+File Revision: 1.0.5
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -10,13 +10,14 @@ Execution Model: N/A
 Observability: N/A
 Dependencies: hints/README.md
 Authority: R3 engineering navigation, subordinate to approved charter
+Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-001 | ChatGPT GPT-6 | Index manifest-driven deployment runbook and scripts
 Changed: 2026-11-04 UTC | R3-GRANT-RUNBOOK-MIGRATION | ChatGPT GPT-6 | Direct all new grant/delegation runbooks to R3
 Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Index resident avatar implementation notes
 Changed: 2026-10-31 UTC | R3-COMMS-001 | ChatGPT GPT-6 | Index mandatory Comms incident capture
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Manual source inspection; automated validation pending
-History/Predecessor: Git blob 27ad852c7f9fdf2e11404031128bf9c192979376
+History/Predecessor: Git blob 3061d08891006f8807adcc935cc1c1e9dbe6e45a
 -->
 # AI_HINTS.md — Riverview 3
 
@@ -45,7 +46,7 @@ Start with [the hints index](hints/README.md). Keep this root file short; put de
 
 - [Engineering and current handoff](hints/engineering.md)
 - [Institutional architecture and durable state](hints/architecture.md)
-- [Deployment and command execution](hints/deployment.md)
+- [Deployment and command execution](hints/deployment.md) — [manifest-driven runbook](docs/runbooks/R3_MANIFEST_DEPLOYMENT.md) and [deployment scripts](scripts/deployment/Deploy-R3.ps1) (currently plan-only; no live activation)
 - [Resident avatar system](hints/resident-avatar-system.md) — replaceable website avatar runtime, browser animation API, and pending authorized backend connection
 
 When asked to add material to AI_HINTS, update a focused `hints/` document and add or adjust a concise pointer here only if needed.
