@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/development-execution.md
 Component: ENG-EXECUTION
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-05 UTC (date only; exact time not independently verified)
 Created By: ChatGPT GPT-6
 Purpose: Mandatory evidence-first command execution and PowerShell fallback for R3 development
@@ -10,12 +10,13 @@ Execution Model: Development guidance
 Observability: Captured command output, exit status, source evidence and development summary
 Dependencies: hints/development-bootstrap.md; hints/comms-failure-recovery.md
 Authority: Steward direction; authorized grants and applicable runbooks
+Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-003 | ChatGPT GPT-6 | Require dated evidence correction with cited provenance
 Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-002 | ChatGPT GPT-6 | Establish local-first, gateway-first, clipboard fallback workflow
 Supersedes: None
 Superseded By: None
 Contracts: hints/file-provenance.md; hints/comms-failure-recovery.md
 Tests: Documentation inspection; no remote execution
-History/Predecessor: New file; none
+History/Predecessor: Git blob b280736e4f159ceb6de8e8596550d8b27d0efe8b
 -->
 # R/3 Development Execution — Required Workflow
 
@@ -23,7 +24,7 @@ This is a mandatory companion to [R3 Bootstrap](development-bootstrap.md). Use t
 
 ## 1. Existing information first
 
-Before executing new discovery commands, writing new diagnostics, or running tests, inspect **available local and already-retrieved evidence**: the active repository/worktree, configuration files, source, existing tests, prior command outputs, logs, health snapshots, institutional capability/authority registry, linked runbooks, punch lists and parking lots. Check evidence freshness and relevance. Do not assume old observations describe the live machine. Avoid repeating tests when existing trustworthy results already answer the question.
+Before executing new discovery commands, writing new diagnostics, or running tests, inspect **available local and already-retrieved evidence**: the active repository/worktree, configuration files, source, existing tests, prior command outputs, logs, health snapshots, institutional capability/authority registry, linked runbooks, punch lists and parking lots. Check evidence freshness and relevance. Reuse existing evidence unless verified new information demonstrates that it is incorrect, outdated, or superseded. **Correct the authoritative record** when evidence changes: state what changed, the correction/observation date (UTC with known precision), the source citation (file path and commit, log reference, command output, or other retrievable evidence), and preserve the previous observation and its original date in revision history. An old observation may have been correct when recorded; do not retroactively label it false without proof. If unable to edit the authoritative record, identify the required correction and source explicitly in the handoff. Do not silently overwrite contradictory evidence or assume old observations describe the live machine. Avoid repeating tests when existing trustworthy results already answer the question.
 
 Use [AI_HINTS](../AI_HINTS.md) and its [hints index](README.md) as the current **miniature institutional knowledge base**. Search and follow existing topic pointers, punch lists, parking lots, issue records and historical R/2 references when relevant; do not claim these have already been consolidated. Prefer one authoritative current document per topic and link rather than duplicate. Future knowledge-base consolidation is planned, not implemented.
 
