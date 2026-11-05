@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: scripts/deployment/Deploy-R3.ps1
 # Component: R3-MANIFEST-DEPLOY
-# File Revision: 1.0.2
+# File Revision: 1.0.3
 # Created: 2026-11-05 UTC (exact time not independently verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Fail-closed manifest validation and deployment plan generator
@@ -12,6 +12,7 @@
 # Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-003 | ChatGPT GPT-6 | Repair corrupted script; validate fields and refuse unverified activation
 # Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-002 | ChatGPT GPT-6 | Dependency and test declarations
 # Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-001 | ChatGPT GPT-6 | Initial plan-only runner
+# Changed: 2026-11-04 UTC | R3-MANIFEST-DEPLOY-022 | ChatGPT GPT-6 | Explicitly return validator success exit status to calling bridge
 # Supersedes: None (legacy scripts/Deploy-R3.ps1 retained)
 # Superseded By: None
 # Contracts: hints/file-provenance.md; docs/runbooks/R3_MANIFEST_DEPLOYMENT.md
@@ -96,4 +97,4 @@ try {
         try { Set-Clipboard -Value $report } catch { Write-Warning "Clipboard unavailable: $($_.Exception.Message)" }
     }
 }
-if ($exitCode -ne 0) { exit $exitCode }
+exit $exitCode
