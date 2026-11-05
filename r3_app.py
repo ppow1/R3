@@ -12,6 +12,7 @@
 # Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Serve the fixed resident avatar frontend module
 # Changed: 2026-11-03 UTC | R3-SETTINGS-WORKBENCH-001 | ChatGPT GPT-6 | Connect settings UI to guarded local JSON configuration API
 # Changed: 2026-11-01 UTC | R3-PANEL-INTERACTION-002 | ChatGPT GPT-6 | Align snapshot anchors and report dragged Infrastructure marker
+# Changed: 2026-11-05 UTC | HR-010 | Initialize persistent HR capability inside R3 app lifecycle
 # Supersedes: None
 # Contracts: hints/file-provenance.md
 # Tests: Not run for this source change; module route and browser verification pending
@@ -50,6 +51,26 @@ from r3_native_auth_api import build_native_auth_router
 app.include_router(build_native_auth_router(
     allowed_origins=("https://riverview.ionoge.com",)
 ))
+
+# The HR capability lives in this R/3 process. No separate HR service or MCP
+# dependency. Host-internal callers supply their already-established principal
+# and authorization callback; browser requests cannot select either.
+def get_hr_capability(principal, authorize):
+    from runtime.hr_capability import HRCapability, VerifiedPrincipal
+    from runtime.hr_store import HRStore
+    if not isinstance(principal, VerifiedPrincipal) or not principal.principal_id:
+        raise PermissionError("verified R3 principal required")
+    db_path = os.environ.get("R3_HR_DB_PATH")
+    if not db_path:
+        raise RuntimeError("R3_HR_DB_PATH is not configured")
+    return HRCapability(HRStore(db_path), authorize)
+
+def hr_storage_status():
+    db_path = os.environ.get("R3_HR_DB_PATH")
+    if not db_path:
+        return "unconfigured"
+    return "ready" if Path(db_path).parent.is_dir() else "storage_unavailable"
+
 
 def git(*args):
     p = subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True,
@@ -205,7 +226,7 @@ async def r3_subpath_adapter(request: Request, call_next):
 @app.get("/api/v1/health")
 def health():
     return {"service": "r3", "status": "running", "repository_present": (ROOT / ".git").exists(),
-            "artwork_directory_present": ART.is_dir()}
+            "artwork_directory_present": ART.is_dir(), "hr_storage": hr_storage_status()}
 
 @app.get("/api/v1/institution/runtime")
 def institution_runtime():
