@@ -75,38 +75,38 @@ class SiteAuthenticationTests(unittest.TestCase):
         return result
 
     def test_anonymous_root_redirects_to_login(self):
-        with patch("r3_app.authenticated_identity",
+        with patch("r3_app._principal",
                    side_effect=HTTPException(401, "No session")):
             response = self.client.get("/")
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["location"], "/login")
 
     def test_anonymous_infrastructure_is_denied(self):
-        with patch("r3_app.authenticated_identity",
+        with patch("r3_app._principal",
                    side_effect=HTTPException(401, "No session")):
             response = self.client.get("/api/v1/institution/runtime")
         self.assertEqual(response.status_code, 401)
 
     def test_anonymous_settings_are_denied(self):
-        with patch("r3_app.authenticated_identity",
+        with patch("r3_app._principal",
                    side_effect=HTTPException(401, "No session")):
             response = self.client.get("/api/v1/settings/manifest")
         self.assertEqual(response.status_code, 401)
 
     def test_anonymous_snapshot_is_denied(self):
-        with patch("r3_app.authenticated_identity",
+        with patch("r3_app._principal",
                    side_effect=HTTPException(401, "No session")):
             response = self.client.get("/api/v1/snapshot")
         self.assertEqual(response.status_code, 401)
 
     def test_anonymous_assets_are_denied(self):
-        with patch("r3_app.authenticated_identity",
+        with patch("r3_app._principal",
                    side_effect=HTTPException(401, "No session")):
             response = self.client.get("/web/chat-client.js")
         self.assertEqual(response.status_code, 401)
 
     def test_forged_identity_header_does_not_bypass_auth(self):
-        with patch("r3_app.authenticated_identity",
+        with patch("r3_app._principal",
                    side_effect=HTTPException(401, "No session")):
             response = self.client.get(
                 "/api/v1/institution/runtime",
@@ -124,7 +124,7 @@ class SiteAuthenticationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_r3_prefix_redirect(self):
-        with patch("r3_app.authenticated_identity",
+        with patch("r3_app._principal",
                    side_effect=HTTPException(401, "No session")):
             response = self.client.get(
                 "/", headers={"X-Forwarded-Prefix": "/r3"}
@@ -228,13 +228,13 @@ class AuthenticationCookieRegressionTests(unittest.TestCase):
         self.assertEqual(captured["csrf"], "xyz")
         self.assertEqual(len(cookies), 2)
 
-    def test_profile_logout_uses_native_r3_csrf_cookie(self):
+    def test_profile_logout_uses_riverview_csrf_cookie(self):
         from pathlib import Path
         source = (Path(__file__).resolve().parents[1] /
                   "web/index.html").read_text(encoding="utf-8")
         logout = source.split("// R3-SITE-LOGOUT-003", 1)[1]
-        self.assertIn("value.startsWith('r3_steward_csrf=')", logout)
-        self.assertNotIn("value.startsWith('rv_account_csrf=')", logout)
+        self.assertIn("value.startsWith('rv_account_csrf=')", logout)
+        self.assertNotIn("value.startsWith('r3_steward_csrf=')", logout)
         self.assertIn("X-Riverview-CSRF", logout)
         self.assertIn("method: 'DELETE'", logout)
 
