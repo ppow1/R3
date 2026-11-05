@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/hr_stdio.py
 # Component: HR-STDIO
-# File Revision: 1.1.0
+# File Revision: 1.2.0
 # Created: 2026-11-05 UTC (date precision)
 # Created By: ChatGPT GPT-6
 # Purpose: Transport-neutral JSON-lines stdio dispatcher for R/3 HR
@@ -14,6 +14,7 @@
 # Contracts: runtime/hr_capability.py; hints/architecture.md
 # Tests: tests/test_hr_stdio.py
 # Changed: 2026-11-05 UTC | HR-008 | Discover stored residents without caller-supplied IDs
+# Changed: 2026-11-05 UTC | HR-009 | Support create/update over local stdio
 # History/Predecessor: e66c60be7f9657aeb1909e7d33decce9b53c43fc
 """A stdio adapter, NOT a standalone unauthenticated HR server.
 
@@ -25,6 +26,7 @@ from __future__ import annotations
 import json
 from typing import TextIO
 from runtime.hr_capability import HRCapability, VerifiedPrincipal
+from runtime.hr_records import HRField, ResidentHRRecord
 
 def dispatch(capability: HRCapability, principal: VerifiedPrincipal, request: dict) -> dict:
     if not isinstance(request, dict):
@@ -47,10 +49,32 @@ def dispatch(capability: HRCapability, principal: VerifiedPrincipal, request: di
             if ids is not None and (not isinstance(ids, list) or not all(isinstance(x, str) and x.strip() for x in ids)):
                 return {"ok": False, "error": "invalid_resident_ids"}
             return {"ok": True, "result": capability.directory(principal, ids)}
+        if operation == "hr.save":
+            payload = request.get("record")
+            if not isinstance(payload, dict):
+                return {"ok": False, "error": "invalid_record"}
+            revision = request.get("expected_revision")
+            if revision is not None and (type(revision) is not int or revision < 1):
+                return {"ok": False, "error": "invalid_revision"}
+            def fields(name):
+                raw = payload.get(name, {})
+                if not isinstance(raw, dict):
+                    raise ValueError("invalid fields")
+                return {key: HRField(**entry) for key, entry in raw.items()}
+            record = ResidentHRRecord(
+                resident_id=payload["resident_id"],
+                display_name=payload["display_name"],
+                office=payload["office"],
+                status=payload.get("status", "onboarding"),
+                schema_version=payload.get("schema_version", 1),
+                fields=fields("fields"), extensions=fields("extensions"),
+                history_refs=payload.get("history_refs", []))
+            return {"ok": True, "revision": capability.save(
+                principal, record, expected_revision=revision)}
         return {"ok": False, "error": "unsupported_operation"}
     except PermissionError:
         return {"ok": False, "error": "forbidden"}
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, KeyError):
         return {"ok": False, "error": "invalid_request"}
 
 def serve(capability: HRCapability, principal: VerifiedPrincipal,
