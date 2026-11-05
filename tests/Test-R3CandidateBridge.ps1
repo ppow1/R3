@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/Test-R3CandidateBridge.ps1
 # Component: R3-MANIFEST-DEPLOY
-# File Revision: 1.0.4
+# File Revision: 1.0.5
 # Created: 2026-11-05 UTC (exact time not independently verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Permanent PowerShell 7 offline bridge regression tests
@@ -14,6 +14,7 @@
 # Changed: 2026-11-04 UTC | R3-MANIFEST-DEPLOY-019 | ChatGPT GPT-6 | Enforce bounded SSH/fetch/build contract
 # Changed: 2026-11-04 UTC | R3-MANIFEST-DEPLOY-020 | ChatGPT GPT-6 | Preserve literal variable in timeout substitution assertion
 # Changed: 2026-11-04 UTC | R3-MANIFEST-DEPLOY-021 | ChatGPT GPT-6 | Verify real SSH failure returns nonzero without candidate success
+# Changed: 2026-11-04 UTC | R3-MANIFEST-DEPLOY-023 | ChatGPT GPT-6 | Require explicit validator exit status
 # Supersedes: None
 # Superseded By: None
 # Contracts: docs/runbooks/R3_MANIFEST_DEPLOYMENT.md
@@ -148,6 +149,14 @@ Test-Case 'unreachable SSH target fails closed' {
     } finally {
         Remove-Item -LiteralPath $manifest -ErrorAction SilentlyContinue
     }
+}
+Test-Case 'validator explicitly returns successful status' {
+    $source = Get-Content -LiteralPath $validator -Raw
+    Assert-True ($source -match '(?m)^exit \$exitCode\s*
+Write-Host "BRIDGE_TESTS_FAIL=$failed"
+Write-Host 'WEBSITE_ACTIVATION=NOT_RUN'
+if ($failed -gt 0) { exit 1 }
+) 'Validator does not return explicit exit status'
 }
 Write-Host "BRIDGE_TESTS_PASS=$passed"
 Write-Host "BRIDGE_TESTS_FAIL=$failed"
