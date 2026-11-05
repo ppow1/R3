@@ -4,6 +4,23 @@ All grant mutations go through Grace's canonical R3GrantManagement.
 No website-owned grant registry, implicit grants or startup provisioning.
 """
 
+# R3 CONTROLLED SOURCE
+# File: r3_steward_authority_api.py
+# Component: STEWARD-AUTHORITY-API
+# File Revision: 1.1.0
+# Created: Unknown (legacy)
+# Created By: Unknown (legacy)
+# Purpose: Steward-authorized R3 authority and resident credential operations
+# Execution Model: FastAPI adapter over canonical R3 authority and local HR data
+# Observability: HTTP outcomes; credential secrets are never returned
+# Dependencies: FastAPI, R3 authority, classified HR records
+# Authority: Steward-only mutations; existing grants remain canonical
+# Changed: 2026-11-05 UTC | HR-CREDENTIAL-IDENTITY-001 | Codex | Resolve principals from confidential HR associations
+# Supersedes: Git predecessor at d49a4bb35ae9bbfc75f79a3bad7adb8ee9abcac2
+# Contracts: HR hr_records payload extensions; canonical R3 authority
+# Tests: tests/test_hr_credential_provision.py
+# History/Predecessor: Git commit d49a4bb35ae9bbfc75f79a3bad7adb8ee9abcac2
+
 import os
 from pathlib import Path
 
@@ -73,49 +90,74 @@ HR_RESIDENT_DATABASE = Path(
     "/home/admin1/.local/share/r3/hr/residents.sqlite3"
 )
 
-HR_PRINCIPAL_MAP = {
-    "r3:alyssa": "resident:Alyssa",
-    "r3:cheryl": "resident:Cheryl",
-    "r3:chloe": "resident:Chloe",
-    "r3:eleanor": "resident:Eleanor",
-    "r3:evelyn": "resident:Evelyn",
-    "r3:gm": "resident:GM",
-    "r3:grace": "resident:Grace",
-    "r3:helen": "resident:Helen",
-    "r3:ingrid": "resident:Ingrid",
-    "r3:jessica": "resident:Jessica",
-    "r3:judy": "resident:Judy",
-    "r3:marie": "resident:Marie",
-    "r3:vicky": "resident:Vicky",
-}
+HR_PRINCIPAL_FIELD = "authority_principal"
+HR_ASSOCIATION_CLASSIFICATION = "confidential"
 
 
 def _validate_hr_resident_principal(principal):
+    import re
+
+    if not isinstance(principal, str) or not re.fullmatch(
+        r"resident:[A-Za-z0-9_.:-]+", principal
+    ):
+        raise HTTPException(422, "Invalid resident principal")
+
     if not HR_RESIDENT_DATABASE.is_file():
         raise HTTPException(503, "Canonical HR roster unavailable")
-
-    matching_ids = [
-        resident_id
-        for resident_id, mapped_principal in HR_PRINCIPAL_MAP.items()
-        if mapped_principal == principal
-    ]
-
-    if len(matching_ids) != 1:
-        raise HTTPException(403, "Resident is not approved for provisioning")
 
     try:
         with sqlite3.connect(
             "file:" + str(HR_RESIDENT_DATABASE) + "?mode=ro",
             uri=True,
         ) as db:
-            row = db.execute(
-                "SELECT resident_id FROM hr_records WHERE resident_id=?",
-                (matching_ids[0],),
-            ).fetchone()
+            rows = db.execute(
+                "SELECT resident_id, payload FROM hr_records"
+            ).fetchall()
     except sqlite3.Error as exc:
         raise HTTPException(503, "Canonical HR roster unavailable") from exc
 
-    if row is None:
+    matching_ids = []
+    for resident_id, payload in rows:
+        try:
+            record = json.loads(payload)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise HTTPException(503, "Canonical HR record is invalid") from exc
+
+        if not isinstance(record, dict) or record.get("resident_id") != resident_id:
+            raise HTTPException(503, "Canonical HR record is invalid")
+
+        # Principal links belong in a confidential extension so normal HR
+        # views cannot disclose protected resident identities.
+        locations = []
+        for container_name in ("fields", "extensions"):
+            container = record.get(container_name, {})
+            if not isinstance(container, dict):
+                raise HTTPException(503, "Canonical HR record is invalid")
+            if HR_PRINCIPAL_FIELD in container:
+                locations.append(container[HR_PRINCIPAL_FIELD])
+
+        if len(locations) > 1:
+            raise HTTPException(409, "Conflicting HR principal associations")
+        if not locations:
+            continue
+
+        association = locations[0]
+        if (
+            not isinstance(association, dict)
+            or association.get("classification") != HR_ASSOCIATION_CLASSIFICATION
+        ):
+            raise HTTPException(409, "Invalid HR principal association")
+        associated_principal = association.get("value")
+        if not isinstance(associated_principal, str) or not re.fullmatch(
+            r"resident:[A-Za-z0-9_.:-]+", associated_principal
+        ):
+            raise HTTPException(409, "Invalid HR principal association")
+        if associated_principal == principal:
+            matching_ids.append(resident_id)
+
+    if len(matching_ids) > 1:
+        raise HTTPException(409, "Duplicate HR principal association")
+    if not matching_ids:
         raise HTTPException(403, "Resident is not on the HR roster")
 
     return matching_ids[0]
