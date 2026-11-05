@@ -73,6 +73,40 @@ def hr_storage_status():
     return "ready" if Path(db_path).parent.is_dir() else "storage_unavailable"
 
 
+def resolve_recovery_caller(request: Request) -> str:
+    """Return the exact principal established by native Steward authentication.
+
+    Recovery callers must never synthesize an authority principal from a
+    resident name, email, or browser supplied identity header.
+    """
+    from r3_native_auth_api import authenticated_identity
+
+    identity = authenticated_identity(request, mutation=True)
+    if identity.get("role") != "steward":
+        raise HTTPException(403, "Steward authority required")
+    principal = identity.get("principal")
+    if not isinstance(principal, str) or not principal.strip():
+        raise HTTPException(503, "Authenticated recovery identity unavailable")
+    return principal
+
+
+def resume_blocked_activity(request: Request, inbox, authority, event_id: int,
+                            resolution_evidence: str) -> int:
+    """Bridge a CSRF-validated native Steward request to durable Grace recovery."""
+    principal = resolve_recovery_caller(request)
+    try:
+        return inbox.resume_blocked(
+            event_id,
+            authority=authority,
+            principal=principal,
+            resolution_evidence=resolution_evidence,
+        )
+    except PermissionError as exc:
+        raise HTTPException(403, "Blocked activity recovery is not authorized") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 def git(*args):
     p = subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True,
                        text=True, timeout=12, check=False)
