@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/resident_inference.py
 # Component: R3-RESIDENT-INFERENCE
-# File Revision: 1.3.4
+# File Revision: 1.3.5
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Reusable event-driven resident inference against an existing OpenAI-compatible endpoint.
@@ -17,14 +17,16 @@
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-003 | Block repeated no-progress continuation, preserving durable evidence.
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-004 | Include tool results observed during the active inference turn.
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-005 | Authority-referenced idempotent blocked activity resumption.\n# Supersedes: None
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-006 | Require canonical exact-grant authorization and audit for blocked activity resumption.
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; hints/engineering-test-policy.md
 # Tests: tests/test_inference_http_errors.py (permanent transport diagnostic contract).
 # Changed: 2026-11-02 UTC | R3-GRACE-005 | Preserve safe upstream HTTP error codes without leaking request content.
-# History/Predecessor: Git blob 1e433f2ddb10f439ef7599bf48a19c6fb11ea2c0
+# History/Predecessor: Git blob 1e433f2ddb10f439ef7599bf48a19c6fb11ea2c0; immediate predecessor blob 82761cbeb022e623295237b3aed3048694fe51cf.
 """Durable resident inbox and inference adapter; tool routing uses existing llama.cpp /tools adapter."""
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import sqlite3
 import time
@@ -79,12 +81,49 @@ class Inbox:
                 (json.dumps({**result, "continuation_event_id": cursor.lastrowid}), now, event_id))
         return int(cursor.lastrowid)
 
-    def resume_blocked(self, event_id: int, *, authority_ref: str, resolution_evidence: str) -> int:
-        """Queue a successor while preserving blocked evidence; caller validates authority."""
-        if not isinstance(authority_ref, str) or not authority_ref.strip():
-            raise ValueError("Resumption requires an authority reference")
+    def resume_blocked(self, event_id: int, *, authority, principal: str,
+                       resolution_evidence: str) -> int:
+        """Resume only under an effective exact R3 grant, preserving the blocked record."""
+        if not isinstance(principal, str) or not principal.strip():
+            raise ValueError("Resumption requires an authenticated authority principal")
         if not isinstance(resolution_evidence, str) or not resolution_evidence.strip():
             raise ValueError("Resumption requires dependency resolution evidence")
+        if (authority is None
+                or not callable(getattr(authority, "authorize", None))
+                or not callable(getattr(authority, "audit", None))):
+            raise ValueError("Audited canonical R3 authority is required for resumption")
+        row = self.db.execute(
+            "SELECT resident,event_type,payload,status,result FROM resident_inbox WHERE id=?",
+            (event_id,),
+        ).fetchone()
+        if row is None or row[3] != "BLOCKED" or row[1] != "RESIDENT_ACTIVITY":
+            raise ValueError("Resumption requires a BLOCKED resident activity")
+        payload = json.loads(row[2])
+        assignment_id = payload.get("assignment_id")
+        scope_ref = ("assignment:" + assignment_id
+                     if isinstance(assignment_id, str) and assignment_id.strip()
+                     else "resident-inbox-event:" + str(event_id))
+        grant = authority.authorize(
+            principal=principal,
+            action="resident.activity.resume",
+            scope_ref=scope_ref,
+            resource_id=scope_ref,
+            operation="write",
+        )
+        if not isinstance(grant, dict) or not isinstance(grant.get("grant_id"), str):
+            raise PermissionError("Canonical authority returned no grant identity")
+        grant_id = grant["grant_id"]
+        authority.audit({
+            "principal": principal,
+            "capability": "resident-inbox",
+            "action": "resident.activity.resume",
+            "scope_ref": scope_ref,
+            "correlation_id": "resident-inbox-resume:" + str(event_id),
+            "grant_id": grant_id,
+            "outcome": "AUTHORIZED",
+            "resource_ref": scope_ref,
+            "operation": "write",
+        })
         with self.db:
             row = self.db.execute(
                 "SELECT resident,event_type,payload,status,result FROM resident_inbox WHERE id=?",
@@ -99,7 +138,8 @@ class Inbox:
             ):
                 existing = json.loads(raw)
                 if existing.get("resumed_from_blocked_event_id") == event_id:
-                    if (existing.get("resumption_authority_ref") != authority_ref
+                    if (existing.get("resumption_grant_id") != grant_id
+                            or existing.get("resumption_principal") != principal
                             or existing.get("resumption_evidence") != resolution_evidence):
                         raise ValueError("Blocked activity already resumed with different evidence")
                     return int(successor_id)
@@ -108,13 +148,21 @@ class Inbox:
                 "previous_event_id": event_id,
                 "previous_result": json.loads(raw_result or "{}"),
                 "resumed_from_blocked_event_id": event_id,
-                "resumption_authority_ref": authority_ref,
+                "resumption_grant_id": grant_id,
+                "resumption_principal": principal,
+                "resumption_scope_ref": scope_ref,
                 "resumption_evidence": resolution_evidence,
             }
             now = time.time()
             cursor = self.db.execute(
                 "INSERT INTO resident_inbox(resident,event_type,payload,created_at,updated_at) VALUES (?,?,?,?,?)",
                 (resident, event_type, json.dumps(payload), now, now),
+            )
+            blocked_result = json.loads(raw_result or "{}")
+            blocked_result["resumed_event_id"] = int(cursor.lastrowid)
+            self.db.execute(
+                "UPDATE resident_inbox SET result=?,updated_at=? WHERE id=?",
+                (json.dumps(blocked_result), now, event_id),
             )
             return int(cursor.lastrowid)
 
@@ -257,7 +305,10 @@ class ResidentInference:
             definitions = [d["definition"] for d in descriptors]
             by_name = {d["tool"]: d for d in descriptors}
             while True:
-                result = await asyncio.to_thread(self.endpoint.complete, messages, definitions)
+                complete = self.endpoint.complete
+                result = (await complete(messages, definitions)
+                          if inspect.iscoroutinefunction(complete)
+                          else await asyncio.to_thread(complete, messages, definitions))
                 choices = result.get("choices") or []
                 if not choices or not isinstance(choices[0].get("message"), dict):
                     raise RuntimeError("Model returned no usable message")
