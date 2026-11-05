@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_activity_continuation.py
 # Component: R3-RESIDENT-CONTINUATION-TESTS
-# File Revision: 1.0.1
+# File Revision: 1.0.2
 # Created: Unknown (legacy; prior version lacked creation metadata)
 # Created By: Unknown (legacy)
 # Purpose: Permanent resident-neutral durable activity continuation regressions.
@@ -14,7 +14,7 @@
 # Superseded By: None
 # Contracts: hints/file-provenance.md; hints/development-governance.md
 # Tests: python -m unittest tests.test_activity_continuation -v
-# History/Predecessor: Git blob 1f0de33875c6bea13482fad65ab17d78fcd8a916
+# History/Predecessor: Git blob 6c080a0a9d7835d2dbe267c574ceca36a0322cab
 from __future__ import annotations
 import asyncio
 import json
