@@ -160,12 +160,14 @@ class ResidentInference:
 
     def __init__(self, inbox: Inbox, endpoint: InferenceEndpoint, *,
                  system_prompt: str, tools: LlamaTools | None = None,
-                 continuation_event_types: tuple[str, ...] = ()):
+                 continuation_event_types: tuple[str, ...] = (),
+                 conversation_store=None):
         self.inbox = inbox
         self.endpoint = endpoint
         self.system_prompt = system_prompt
         self.tools = tools
         self.continuation_event_types = frozenset(continuation_event_types)
+        self.conversation_store = conversation_store
 
     async def __call__(self, resident: str) -> None:
         event = self.inbox.next(resident)
@@ -183,10 +185,17 @@ class ResidentInference:
             "are supported by observed evidence; otherwise omit it or set false. "
             "Never invent a next action or repeat an ineffective step."
         ) if event_type in self.continuation_event_types else ""
-        messages = [
-            {"role": "system", "content": self.system_prompt + continuity_contract},
-            {"role": "user", "content": json.dumps({"event_type": event_type, "payload": payload})},
-        ]
+        if event_type == "CONVERSATION_MESSAGE":
+            if self.conversation_store is None:
+                raise RuntimeError("Conversation storage is not configured")
+            messages = [{"role": "system", "content": self.system_prompt}]
+            messages.extend(self.conversation_store.prompt_history(
+                payload["conversation_id"], payload["message_id"]))
+        else:
+            messages = [
+                {"role": "system", "content": self.system_prompt + continuity_contract},
+                {"role": "user", "content": json.dumps({"event_type": event_type, "payload": payload})},
+            ]
         try:
             history = self.inbox.history(event_id)
             pending = set()
@@ -256,10 +265,17 @@ class ResidentInference:
                                       review=review)
                     return
                 if not calls:
+                    if event_type == "CONVERSATION_MESSAGE":
+                        content = message.get("content")
+                        if not isinstance(content, str) or not content.strip():
+                            raise RuntimeError("Model returned an empty conversation reply")
                     self.inbox.finish(event_id, "COMPLETED", {
                         "message": message, "usage": result.get("usage"),
                         "model": result.get("model"),
                     })
+                    if event_type == "CONVERSATION_MESSAGE":
+                        self.conversation_store.complete_event(
+                            event_id, resident, str(message.get("content") or ""))
                     return
                 if not self.tools:
                     raise RuntimeError("Tool execution not configured")
@@ -290,4 +306,6 @@ class ResidentInference:
                     messages.append(tool_message)
         except Exception as exc:
             self.inbox.finish(event_id, "FAILED", {"error": repr(exc)})
+            if event_type == "CONVERSATION_MESSAGE" and self.conversation_store is not None:
+                self.conversation_store.fail_event(event_id, type(exc).__name__)
             raise
