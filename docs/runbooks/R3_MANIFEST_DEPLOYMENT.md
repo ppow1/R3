@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/runbooks/R3_MANIFEST_DEPLOYMENT.md
 Component: R3-MANIFEST-DEPLOY
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-05 UTC (exact time not independently verified)
 Created By: ChatGPT GPT-6
 Purpose: Document manifest-driven deployment workflow and exact operator commands
@@ -10,12 +10,13 @@ Execution Model: Documentation
 Observability: Git history and deployment reports
 Dependencies: scripts/deployment/ and hints/deployment.md
 Authority: Steward directive for R3 repository-owned deployment package
+Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-002 | ChatGPT GPT-6 | Specify isolated dependency provisioning and bounded regression contract
 Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-001 | ChatGPT GPT-6 | Initial documentation
 Supersedes: None
 Superseded By: None
 Contracts: hints/file-provenance.md
 Tests: Documentation review only; live deployment not run
-History/Predecessor: New file
+History/Predecessor: Git blob 5f7282dcc27e9bd22c249fb9e055a3e5e7711c92
 -->
 # R3 manifest-driven deployment — website first
 
@@ -51,6 +52,36 @@ Expected output includes `R3_DEPLOYMENT_PLAN_ONLY=TRUE`, `ACTIVATION=DISABLED_PE
 - `target.sshAlias`: configured SSH alias (historically `camrui`); `target.service`: currently only `website`; `target.port`: 1–65535.
 - `target.releaseRoot`, `activeSymlink`, `venvPath`, `entrypoint`, `healthPath`: required nonempty strings, currently **proposed values** in example, not proof of current production topology.
 - `verification.browserAcceptance`: `manual` in example; browser acceptance cannot be inferred from HTTP 200.
+
+### Dependency and regression-test contract
+
+The manifest declares:
+```json
+"dependencies": {
+  "manager": "pip",
+  "pythonVersion": "3.12",
+  "installMode": "locked",
+  "requirementsFile": "requirements-deploy.lock",
+  "hashesRequired": true
+},
+"tests": {
+  "profile": "website",
+  "timeoutSeconds": 300,
+  "onFailure": "abort-before-activation"
+}
+```
+
+**Important:** `requirements-deploy.lock` is a proposed name, not a verified existing lockfile. The exact Python version, dependency set, lockfile location, test command and required test extras must be established from the actual R3 source and latest deployment history before enabling activation. The example currently validates declaration syntax only; it does **not** check lockfile existence or install dependencies. Never claim dependency readiness from a plan-only pass.
+
+Production implementation must:
+1. Resolve the exact source and lockfile from the **same revision**, then verify the lockfile and package hashes. Never install unpinned latest versions during an ordinary deployment.
+2. Create/reuse an isolated environment for the **candidate release**, not mutate the active website's environment. Verify Python interpreter version and required import/package metadata; log dependency resolution failures.
+3. Provision any declared **test-only** dependencies in a separate candidate test environment, if necessary. Tests must use that environment explicitly; do not silently fall back to system Python or another service's virtualenv.
+4. Run only the specified, bounded website regression profile with a hard timeout, capture full stdout/stderr and exit status, and abort **before stopping the active website** on failures. No speculative new test suite or unrequested virtual environment experiments.
+5. Confirm the production candidate environment contains the required runtime packages; activate only after build and relevant regressions pass. Preserve environment/lockfile provenance in the deployment report.
+6. Keep `BUILD_PASS`, `REGRESSION_PASS`, `DEPLOY_PASS` and `ACCEPTANCE_PASS` independent. A successful dependency installation does not establish browser login or Grace autonomy acceptance.
+
+**No dependency list has been invented or installed.** Exact dependency discovery remains an evidence-gathering step, not permission to change production.
 
 ### Local-source example
 Copy the website example to a new JSON manifest, replace `source` with:
