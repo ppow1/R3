@@ -13,6 +13,7 @@
 # Changed: 2026-11-02 UTC | R3-GRACE-004 | Durable tool-call continuation with fail-closed recovery
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-005 | Atomically queue review on completion with explicit criteria.
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-006 | Preserve assignment metadata across activity continuation.
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-002 | Preserve evidence-backed blocked state as durable unresolved outcome.
 # Supersedes: None
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; hints/engineering-test-policy.md
 # Tests: tests/test_inference_http_errors.py (permanent transport diagnostic contract).
@@ -103,7 +104,7 @@ class Inbox:
             )
 
     def finish(self, event_id: int, status: str, result: dict, *, review: dict | None = None) -> None:
-        if status not in ("COMPLETED", "FAILED"):
+        if status not in ("COMPLETED", "FAILED", "BLOCKED"):
             raise ValueError("Invalid terminal inbox status")
         with self.db:
             if review is not None:
@@ -240,6 +241,19 @@ class ResidentInference:
                             "next_step": next_step,
                         }, {"decision": decision, "model": result.get("model")})
                         return
+                    if decision["state"] == "blocked":
+                        # Keep reported external dependencies distinct from tool/runtime errors.
+                        # A blocked activity has not met objective acceptance criteria.
+                        explanations = (
+                            decision.get("dependency"), decision.get("reason"),
+                            decision.get("evidence"),
+                        )
+                        if not any(
+                            (isinstance(item, str) and bool(item.strip()))
+                            or (isinstance(item, (dict, list)) and bool(item))
+                            for item in explanations
+                        ):
+                            raise RuntimeError("Blocked activity requires dependency evidence")
                     # An inbox turn is not the same thing as a verified objective.
                     # Keep objective status explicit in durable results so downstream
                     # observers cannot mistake a model's 'complete' for acceptance.
@@ -259,9 +273,14 @@ class ResidentInference:
                             "criteria": criteria,
                             "evidence": decision.get("evidence", {}),
                         }
-                    self.inbox.finish(event_id, "COMPLETED" if decision["state"] == "complete" else "FAILED",
+                    terminal = "BLOCKED" if decision["state"] == "blocked" else "COMPLETED"
+                    objective_status = (
+                        "BLOCKED" if terminal == "BLOCKED"
+                        else "REPORTED_VERIFIED" if objective_verified else "UNVERIFIED"
+                    )
+                    self.inbox.finish(event_id, terminal,
                                       {"decision": decision, "model": result.get("model"),
-                                       "objective_status": "REPORTED_VERIFIED" if objective_verified else "UNVERIFIED"},
+                                       "objective_status": objective_status},
                                       review=review)
                     return
                 if not calls:
