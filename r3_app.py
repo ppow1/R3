@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.10
+# File Revision: 1.0.11
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Initial shared read-only institutional API
@@ -11,6 +11,7 @@
 # Authority: R3 engineering guidance; approved charter prevails
 # Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Serve the fixed resident avatar frontend module
 # Changed: 2026-11-01 UTC | R3-PANEL-INTERACTION-002 | ChatGPT GPT-6 | Align snapshot anchors and report dragged Infrastructure marker
+# Changed: 2026-11-05 UTC | HR-010 | Initialize persistent HR capability inside R3 app lifecycle
 # Supersedes: None
 # Contracts: hints/file-provenance.md
 # Tests: Not run for this source change; module route and browser verification pending
@@ -40,6 +41,26 @@ ART = (ROOT / "assets" / "artwork").resolve()
 EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 app = FastAPI(title="R3 Institutional Capabilities", version="0.1.0")
 
+# The HR capability lives in this R/3 process. No separate HR service or MCP
+# dependency. Host-internal callers supply their already-established principal
+# and authorization callback; browser requests cannot select either.
+def get_hr_capability(principal, authorize):
+    from runtime.hr_capability import HRCapability, VerifiedPrincipal
+    from runtime.hr_store import HRStore
+    if not isinstance(principal, VerifiedPrincipal) or not principal.principal_id:
+        raise PermissionError("verified R3 principal required")
+    db_path = os.environ.get("R3_HR_DB_PATH")
+    if not db_path:
+        raise RuntimeError("R3_HR_DB_PATH is not configured")
+    return HRCapability(HRStore(db_path), authorize)
+
+def hr_storage_status():
+    db_path = os.environ.get("R3_HR_DB_PATH")
+    if not db_path:
+        return "unconfigured"
+    return "ready" if Path(db_path).parent.is_dir() else "storage_unavailable"
+
+
 def git(*args):
     p = subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True,
                        text=True, timeout=12, check=False)
@@ -50,7 +71,7 @@ def git(*args):
 @app.get("/api/v1/health")
 def health():
     return {"service": "r3", "status": "running", "repository_present": (ROOT / ".git").exists(),
-            "artwork_directory_present": ART.is_dir()}
+            "artwork_directory_present": ART.is_dir(), "hr_storage": hr_storage_status()}
 
 @app.get("/api/v1/engineering/branches")
 def branches():
