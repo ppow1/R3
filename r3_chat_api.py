@@ -135,8 +135,16 @@ def _runtime(cfg: dict[str, Any], principal: str, path: str, method: str = "GET"
     return JSONResponse(data_out, status_code=status, headers={"Cache-Control": "no-store"})
 
 
+def _runtime_resident_id(resident_id: str, cfg: dict[str, Any]) -> str:
+    """Translate the configured Grace display alias to the runtime's canonical ID."""
+    configured = str(cfg["resident_id"])
+    if resident_id.casefold() == configured.casefold():
+        return "grace"
+    return resident_id
+
+
 def _resident(cfg: dict[str, Any]) -> str:
-    return urllib.parse.quote(str(cfg["resident_id"]), safe="")
+    return urllib.parse.quote(_runtime_resident_id(str(cfg["resident_id"]), cfg), safe="")
 
 
 def build_chat_router() -> APIRouter:
@@ -255,13 +263,13 @@ def build_chat_router() -> APIRouter:
     def resident_capabilities(resident_id: str, request: Request):
         cfg = load_config(); _origin(request, cfg); principal = _principal(request, cfg)
         require_resident(resident_id)
-        return _runtime(cfg, principal, f"/v1/residents/{urllib.parse.quote(resident_id, safe='')}/capabilities")
+        return _runtime(cfg, principal, f"/v1/residents/{urllib.parse.quote(_runtime_resident_id(resident_id, cfg), safe='')}/capabilities")
 
     @router.get("/api/v1/chat/residents/{resident_id}/conversations")
     def resident_conversations(resident_id: str, request: Request):
         cfg = load_config(); _origin(request, cfg); principal = _principal(request, cfg)
         require_resident(resident_id)
-        return _runtime(cfg, principal, f"/v1/residents/{urllib.parse.quote(resident_id, safe='')}/conversations")
+        return _runtime(cfg, principal, f"/v1/residents/{urllib.parse.quote(_runtime_resident_id(resident_id, cfg), safe='')}/conversations")
 
     @router.post("/api/v1/chat/residents/{resident_id}/conversations")
     async def resident_create_conversation(resident_id: str, request: Request):
@@ -276,7 +284,7 @@ def build_chat_router() -> APIRouter:
             raise HTTPException(400, "Invalid conversation request") from exc
         if not isinstance(body, dict) or not isinstance(body.get("title", "Steward conversation"), str):
             raise HTTPException(400, "Conversation title must be text")
-        return _runtime(cfg, principal, f"/v1/residents/{urllib.parse.quote(resident_id, safe='')}/conversations", "POST", body)
+        return _runtime(cfg, principal, f"/v1/residents/{urllib.parse.quote(_runtime_resident_id(resident_id, cfg), safe='')}/conversations", "POST", body)
 
     @router.get("/api/v1/chat/capabilities")
     def capabilities(request: Request):
