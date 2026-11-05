@@ -14,10 +14,11 @@
   };
 
   window.r3ChatAdapter = {
-    listConversations: () => json('/conversations'),
-    capabilityManifest: () => json('/capabilities'),
+    residents: () => json('/residents'),
+    listConversations: (resident = 'grace') => json(`/residents/${encodeURIComponent(resident)}/conversations`),
+    capabilityManifest: (resident = 'grace') => json(`/residents/${encodeURIComponent(resident)}/capabilities`),
     messages: (id) => json(`/conversations/${encodeURIComponent(id)}/messages?after=0&limit=200`),
-    createConversation: (title) => json('/conversations', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({title}) }),
+    createConversation: (title, resident = 'grace') => json(`/residents/${encodeURIComponent(resident)}/conversations`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({title}) }),
     sendMessage: (id, content, client_message_id) => json(`/conversations/${encodeURIComponent(id)}/messages`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({content, client_message_id}) })
   };
 
@@ -47,7 +48,9 @@
     const list = el('div', {class:'r3-chat-list', role:'list'});
     const sideStatus = el('div', {class:'chat-status', id:'r3-chat-service-status', role:'status'});
     const noConversations = el('div', {class:'chat-empty'}, 'No conversations yet. Start one with +.');
-    sidebar.append(search, sideStatus, list, noConversations);
+    const residentSelect = el('select', {class:'r3-resident-select', 'aria-label':'Choose resident'});
+    residentSelect.append(el('option', {value:'grace'}, 'Grace'));
+    sidebar.append(residentSelect, search, sideStatus, list, noConversations);
 
     const status = el('div', {class:'r3-chat-status', role:'status', 'aria-live':'polite'});
     const messages = el('div', {class:'r3-chat-messages', 'aria-live':'polite'});
@@ -62,7 +65,8 @@
     if (conference) { conference.disabled = true; conference.title = 'Conference rooms are not available yet'; }
     const composer = form.elements.content;
     const sendButton = form.querySelector('button[type=submit]');
-    let activeId = sessionStorage.getItem('r3.chat.active') || '';
+    let residentId = 'grace';
+    let activeId = sessionStorage.getItem('r3.chat.active.grace') || '';
     let conversations = [];
     let pollTimer;
     let pending = null;
@@ -97,9 +101,9 @@
       messages.replaceChildren();
       empty.hidden = rows.length > 0;
       rows.forEach(item => {
-        const article = el('article', {class:`r3-chat-message ${item.sender === 'Grace' ? 'from-resident' : 'from-steward'}`});
+        const article = el('article', {class:`r3-chat-message ${item.sender_type === 'RESIDENT' || item.sender_type === 'ASSISTANT' || item.sender === 'Grace' ? 'from-resident' : 'from-steward'}`});
         const header = el('div', {class:'r3-chat-message-meta'});
-        header.append(el('strong', {}, item.sender || 'Message'));
+        header.append(el('strong', {}, item.sender || item.sender_id || (item.sender_type === 'STEWARD' ? 'Steward' : residentId)));
         if (item.created_at || item.timestamp) header.append(el('time', {}, item.created_at || item.timestamp));
         if (item.status || item.delivery_status) header.append(el('span', {class:'r3-chat-delivery'}, item.status || item.delivery_status));
         article.append(header, el('p', {}, item.content || ''));
@@ -113,19 +117,19 @@
       renderMessages(data.messages || []);
     }
     async function refreshList() {
-      const data = await window.r3ChatAdapter.listConversations();
+      const data = await window.r3ChatAdapter.listConversations(residentId);
       listRows(data.conversations || data.items || []);
       return conversations;
     }
     async function openConversation(id) {
       activeId = id;
-      sessionStorage.setItem('r3.chat.active', id);
+      sessionStorage.setItem(`r3.chat.active.${residentId}`, id);
       listRows(conversations);
       composer.disabled = false;
       sendButton.disabled = false;
       empty.hidden = true;
       messages.replaceChildren();
-      try { await loadMessages(); announce('Connected to Grace conversation service.'); }
+      try { await loadMessages(); announce('Conversation ready.'); }
       catch (error) { announce(`Could not load messages: ${error.message}`, true); }
       if (pollTimer) clearInterval(pollTimer);
       pollTimer = setInterval(() => loadMessages().catch(e => announce(`Refresh failed: ${e.message}`, true)), 2500);
@@ -136,6 +140,15 @@
       if (!session.authenticated && !identity.email) throw Object.assign(new Error('Sign in to use Chat.'), {status:401});
       displayLogin(false);
       announce(`Signed in as ${identity.email || 'Steward'}. Loading conversations…`);
+      const directory = await window.r3ChatAdapter.residents();
+      const residents = directory.residents || [];
+      residentSelect.replaceChildren();
+      residents.forEach(r => {
+        const option = el('option', {value:r.id}, r.name + ' · ' + r.position);
+        residentSelect.append(option);
+      });
+      if (!residents.some(r => r.id === residentId)) throw new Error('Grace is missing from resident directory');
+      residentSelect.value = residentId;
       await refreshList();
       const selected = conversations.find(row => idFor(row) === activeId) || conversations[0];
       if (selected) await openConversation(idFor(selected));
@@ -143,9 +156,23 @@
     }
 
     search.addEventListener('input', () => listRows(conversations));
+    residentSelect.addEventListener('change', async () => {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      residentId = residentSelect.value;
+      activeId = sessionStorage.getItem(`r3.chat.active.${residentId}`) || '';
+      composer.placeholder = 'Message ' + residentSelect.selectedOptions[0]?.textContent.split(' · ')[0];
+      composer.disabled = true; sendButton.disabled = true;
+      messages.replaceChildren(); conversations = []; listRows([]);
+      try {
+        await refreshList();
+        const selected = conversations.find(row => idFor(row) === activeId) || conversations[0];
+        if (selected) await openConversation(idFor(selected));
+        else { activeId = ''; announce('No conversations yet. Select + to start one.'); }
+      } catch (error) { announce('Resident Chat unavailable: ' + error.message, true); }
+    });
     newButton?.addEventListener('click', async () => {
       try {
-        const data = await window.r3ChatAdapter.createConversation('Steward conversation');
+        const data = await window.r3ChatAdapter.createConversation('Steward conversation', residentId);
         const row = data.conversation || data;
         const id = idFor(row);
         await refreshList();
@@ -168,7 +195,7 @@
       try {
         await window.r3ChatAdapter.sendMessage(activeId, content, pending.id);
         sessionStorage.removeItem(`r3.chat.pending.${activeId}`); pending = null; composer.value = ''; await loadMessages();
-        announce('Message submitted. Waiting for Grace…');
+        announce('Message submitted. Waiting for resident…');
       } catch (error) { announce(`Send failed. Retry safely: ${error.message}`, true); }
       finally { sendButton.disabled = false; }
     });
