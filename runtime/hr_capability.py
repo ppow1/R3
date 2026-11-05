@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/hr_capability.py
 # Component: HR-CAPABILITY
-# File Revision: 1.1.0
+# File Revision: 1.2.0
 # Created: 2026-11-05 UTC (date precision)
 # Created By: ChatGPT GPT-6
 # Purpose: Shared authenticated capability contract for HR adapters
@@ -14,6 +14,7 @@
 # Contracts: hints/architecture.md; runtime/hr_store.py
 # Tests: tests/test_hr_capability.py
 # Changed: 2026-11-05 UTC | HR-008 | Discover stored residents without caller-supplied IDs
+# Changed: 2026-11-05 UTC | HR-009 | Add reusable create/update capability
 # History/Predecessor: 4230ff21be26f1f078e8254bca4cfb1e1da575e0
 """One HR capability for HTTP, MCP, stdio and Python adapters.
 
@@ -25,6 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 from runtime.hr_store import HRStore
+from runtime.hr_records import ResidentHRRecord
 
 @dataclass(frozen=True)
 class VerifiedPrincipal:
@@ -56,6 +58,17 @@ class HRCapability:
         result = record.view(role=principal.role, approved_fields=allowed_fields)
         result["revision"] = revision
         return result
+
+    def save(self, principal: VerifiedPrincipal, record: ResidentHRRecord,
+             *, expected_revision: int | None = None) -> int:
+        """Create or revise an HR record with existing host authorization."""
+        if not isinstance(principal, VerifiedPrincipal) or not principal.principal_id:
+            raise PermissionError("verified principal required")
+        if not isinstance(record, ResidentHRRecord):
+            raise TypeError("HR record required")
+        if not self._authorize(principal, "hr.write", record.resident_id):
+            raise PermissionError("hr.write denied")
+        return self._store.put(record, expected_revision=expected_revision)
 
     def directory(self, principal: VerifiedPrincipal,
                   resident_ids: list[str] | None = None) -> list[dict]:
