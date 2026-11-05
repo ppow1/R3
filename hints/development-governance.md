@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/development-governance.md
 Component: ENG-DEV-GOVERNANCE
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-05 UTC (date only; exact time not independently verified)
 Created By: ChatGPT GPT-6
 Purpose: Initial R3 development lifecycle, Definition of Done and deployment-input contract
@@ -10,12 +10,13 @@ Execution Model: Documentation / development conversation initialization
 Observability: Git history and bootstrap readiness summary
 Dependencies: hints/development-bootstrap.md; hints/engineering.md; hints/deployment.md
 Authority: Steward direction, R3 charter, AI_HINTS.md
+Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-002 | ChatGPT GPT-6 | Require local-evidence-first gateway execution and PowerShell clipboard fallback
 Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-001 | ChatGPT GPT-6 | Initial bootstrap guidance
 Supersedes: None
 Superseded By: None
 Contracts: hints/file-provenance.md; docs/PROJECT_CHARTER_REVISION_2_REVIEW.md
 Tests: Link and content review; no runtime deployment
-History/Predecessor: New file; none
+History/Predecessor: Git blob e7d91615e2d713358401523db59feb8b33a4dfd4
 -->
 # R/3 Development Governance — Initial Working Standard
 
@@ -23,7 +24,7 @@ History/Predecessor: New file; none
 
 ## Development cycle
 
-1. **Initialize:** Run [R3 Bootstrap](development-bootstrap.md); inspect current baseline, relevant configuration, interfaces, and ownership.
+1. **Initialize:** Run [R3 Bootstrap](development-bootstrap.md) and [Development Execution](development-execution.md); use existing local evidence first, then authorized command gateway for live work, then PowerShell 7 clipboard fallback if necessary. Inspect current baseline, relevant configuration, interfaces, and ownership.
 2. **Define:** State objective, acceptance behavior and scope; distinguish requirements from optional hardening.
 3. **Implement:** Make focused changes in a feature branch/worktree, preserving shared capabilities and durable institutional state.
 4. **Check:** Run targeted functional tests and a bounded smoke check relevant to changed behavior. Comprehensive regression gates are deferred during accelerated development.
@@ -62,5 +63,6 @@ Teams can develop independently, but a shared-service deployment must reconcile 
 - Keep the root [AI_HINTS.md](../AI_HINTS.md) lightweight; detailed guidance lives in `hints/` or an authoritative document linked from it.
 - Every major component should have configuration owned by that component and validated at startup.
 - Prefer progress and clear evidence over exhaustive predeployment testing, elaborate rollback automation or speculative redesign.
+- Use AI_HINTS and its linked punch lists, parking lots and runbooks as a miniature knowledge base pending future consolidation; do not duplicate competing sources of truth.
 - Preserve the R/3 [file provenance](file-provenance.md) convention for all new/modified files.
 - Update this standard as the Steward approves new rules; do not silently elevate suggestions into binding policy.
