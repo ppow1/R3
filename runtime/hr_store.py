@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/hr_store.py
 # Component: HR-PERSISTENCE
-# File Revision: 1.0.0
+# File Revision: 1.1.0
 # Created: 2026-11-05 UTC (date precision)
 # Created By: ChatGPT GPT-6
 # Purpose: Local persistent, versioned, extensible R/3 personnel records
@@ -13,7 +13,8 @@
 # Supersedes: None
 # Contracts: runtime/hr_records.py; hints/file-provenance.md
 # Tests: tests/test_hr_store.py
-# History/Predecessor: New file
+# Changed: 2026-11-05 UTC | HR-008 | Discover stored residents without caller-supplied IDs
+# History/Predecessor: f13859dd677d8c665e5beca98624b9bcbebd3f3a
 """R/3-only local HR storage. No cross-institution dependencies or HTTP surface.
 
 Never place the database in a web-served directory or a Git checkout.
@@ -82,6 +83,11 @@ class HRStore:
             self._db.execute("UPDATE hr_records SET revision=?, payload=? WHERE resident_id=?",
                              (revision, encoded, record.resident_id))
             return revision
+
+    def resident_ids(self) -> list[str]:
+        """Discover all stored R/3 resident IDs without a fixed roster or limit."""
+        return [row[0] for row in self._db.execute(
+            "SELECT resident_id FROM hr_records ORDER BY resident_id")]
 
     def get(self, resident_id: str) -> tuple[ResidentHRRecord, int] | None:
         row = self._db.execute(
