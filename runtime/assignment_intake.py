@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/assignment_intake.py
 # Component: R3-STEWARD-ASSIGNMENT-INTAKE
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-03 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6 via GitHub API
 # Purpose: Authenticated loopback API for durable resident assignment submission and status.
@@ -10,10 +10,11 @@
 # Dependencies: Python standard library; runtime.resident_inference; runtime.verification.
 # Authority: Steward-approved R3 charter; loopback-only and bearer-token protected.
 # Changed: 2026-11-03 UTC | R3-ASSIGNMENT-INTAKE-001 | ChatGPT GPT-6 | Add opt-in durable assignment API.
+# Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-006 | Display blocked successors in assignment lineage without altering prior evidence.
 # Supersedes: None
 # Contracts: docs/r3-assignment-intake-contract.md; hints/engineering-test-policy.md
 # Tests: tests/test_assignment_intake.py
-# History/Predecessor: New file.
+# History/Predecessor: Git blob 7f4af75c30ab0176050d95802b261e19f2aaff53
 """Authenticated, loopback-only assignment ingress for the R3 resident runtime."""
 from __future__ import annotations
 
@@ -205,6 +206,22 @@ class AssignmentIntake:
                 events.append({"event_id": row[0], "event_type": row[1],
                                "status": row[2], "result": result})
                 next_id = result.get("continuation_event_id") if isinstance(result, dict) else None
+                if row[2] == "BLOCKED":
+                    # A blocked event remains immutable. Its independently authorized
+                    # successor points back to it rather than rewriting its result.
+                    successor_ids = []
+                    for successor_id, encoded in db.execute(
+                        "SELECT id,payload FROM resident_inbox "
+                        "WHERE resident=? AND event_type='RESIDENT_ACTIVITY' AND id>?",
+                        (resident, current_id),
+                    ):
+                        payload = json.loads(encoded)
+                        if payload.get("resumed_from_blocked_event_id") == current_id:
+                            successor_ids.append(successor_id)
+                    if len(successor_ids) > 1:
+                        raise IntakeError(409, "Conflicting blocked resumption lineage")
+                    if successor_ids:
+                        next_id = successor_ids[0]
                 if not isinstance(next_id, int):
                     break
                 current_id = next_id
