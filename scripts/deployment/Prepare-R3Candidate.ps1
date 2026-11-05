@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: scripts/deployment/Prepare-R3Candidate.ps1
 # Component: R3-MANIFEST-DEPLOY
-# File Revision: 1.0.4
+# File Revision: 1.0.5
 # Created: 2026-11-05 UTC (exact time not independently verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Explicit build-only Windows to Camrui candidate preparation
@@ -14,6 +14,7 @@
 # Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-013 | ChatGPT GPT-6 | Separate builder revision from release revision and fix SSH invocation
 # Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-014 | ChatGPT GPT-6 | Reject shell metacharacters and validate builder provenance before SSH
 # Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-016 | ChatGPT GPT-6 | Repair malformed candidate guard and remove duplicated script tail
+# Changed: 2026-11-04 UTC | R3-MANIFEST-DEPLOY-018 | ChatGPT GPT-6 | Bound remote fetch/build and fail SSH connections promptly
 # Supersedes: None
 # Superseded By: None
 # Contracts: docs/runbooks/R3_MANIFEST_DEPLOYMENT.md
@@ -64,20 +65,21 @@ try {
     $remote = @'
 set -eu
 cd /home/admin1/R3
-git fetch origin main --quiet
+timeout 30s git fetch origin main --quiet
 tmp=$(mktemp -d /tmp/r3-builder-XXXXXXXX)
 trap 'rm -rf "$tmp"' EXIT
 git show origin/main:scripts/deployment/prepare_candidate.py > "$tmp/prepare_candidate.py"
 echo '=== CANDIDATE BUILD ONLY ==='
 echo 'SOURCE_COMMIT=__COMMIT__'
-python3 "$tmp/prepare_candidate.py" --source /home/admin1/R3 --commit '__COMMIT__' --candidate-root '__TARGET__' --requirements '__REQUIREMENTS__' --timeout '__TIMEOUT__'
+timeout __BUILD_TIMEOUT__s python3 "$tmp/prepare_candidate.py" --source /home/admin1/R3 --commit '__COMMIT__' --candidate-root '__TARGET__' --requirements '__REQUIREMENTS__' --timeout '__TIMEOUT__'
 echo 'WEBSITE_ACTIVATION=NOT_RUN'
 '@
-    $remote = $remote.Replace('__COMMIT__', $commit).Replace('__TARGET__', $CandidateRoot).Replace('__REQUIREMENTS__', $req).Replace('__TIMEOUT__', [string]$timeout)
+    $buildTimeout = $timeout + 600 # bounded dependency installation + test allowance
+    $remote = $remote.Replace('__COMMIT__', $commit).Replace('__TARGET__', $CandidateRoot).Replace('__REQUIREMENTS__', $req).Replace('__TIMEOUT__', [string]$timeout).Replace('__BUILD_TIMEOUT__', [string]$buildTimeout)
     Emit 'R3_CANDIDATE_BUILD_ONLY=TRUE'
     Emit "SOURCE_COMMIT=$commit"
     Emit "CANDIDATE_ROOT=$CandidateRoot"
-    $result = @(($remote -replace "`r", "") | & ssh.exe -T $alias 'tr -d "\r" | bash -s' 2>&1)
+    $result = @(($remote -replace "`r", "") | & ssh.exe -T -o BatchMode=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 $alias 'tr -d "\r" | bash -s' 2>&1)
     foreach ($line in $result) { Emit ([string]$line) }
     $sshExit = $LASTEXITCODE
     Emit "SSH_EXIT_CODE=$sshExit"
