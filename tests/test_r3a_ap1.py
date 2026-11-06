@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.0.6
+File Revision: 1.0.7
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -16,10 +16,11 @@ Changed: 2026-11-06T18:07:40Z | R3A-019 | Codex GPT-6 | Extend the fixture to in
 Changed: 2026-11-06T18:26:37Z | R3A-019 | Codex GPT-6 | Handle preceding article phrases and preserve source-state precision.
 Changed: 2026-11-06T18:27:15Z | R3A-019 | Codex GPT-6 | Retain the knowledge source ID in the query fixture.
 Changed: 2026-11-06T18:54:42Z | R3A-019 | Codex GPT-6 | Assert transition successors arrive together for model grounding.
+Changed: 2026-11-06T19:01:13Z | R3A-019 | Codex GPT-6 | Cover the after-state wording used by notification events.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
-History/Predecessor: Git blob e6162806f293ffefd477108a8d529827847d56e4 at commit 612f591b77fef040e91e8d0d450a6b9f5fae0751.
+History/Predecessor: Git blob a65d7c7fcb8f28f1815d8f69e6bf2444e6dae364 at commit 81d33d631daaf35fa50091219ea0326a5373851f.
 """
 from __future__ import annotations
 
@@ -54,7 +55,7 @@ class KnowledgeRetrievalTests(unittest.TestCase):
                               '"transitions":{"RUNNING":["DEGRADED","STOPPING","FAILED","RESTARTING"]},'
                               '"owner":"CME"}', encoding="utf-8")
             results = retrieve(source, "knowledge.1",
-                               "From the process.lifecycle definition, report transitions from RUNNING")
+                               "List every state permitted immediately after RUNNING")
             self.assertTrue(results)
             self.assertEqual(len(results), 1)
             self.assertTrue(all(item["source_id"] == "knowledge.1" for item in results))
