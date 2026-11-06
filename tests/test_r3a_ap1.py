@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.0.9
+File Revision: 1.0.10
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -19,10 +19,11 @@ Changed: 2026-11-06T18:54:42Z | R3A-019 | Codex GPT-6 | Assert transition succes
 Changed: 2026-11-06T19:01:13Z | R3A-019 | Codex GPT-6 | Cover the after-state wording used by notification events.
 Changed: 2026-11-06T19:05:07Z | R3A-019 | Codex GPT-6 | Test evidence selection for knowledge-only and runtime objectives.
 Changed: 2026-11-06T19:14:04Z | R3A-019 | Codex GPT-6 | Check exhaustive transition answer completeness and truthful blockers.
+Changed: 2026-11-06T19:16:11Z | R3A-019 | Codex GPT-6 | Cover explicit transitions.STATE knowledge references.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
-History/Predecessor: Git blob 22e4ab5c0fbe4298bfd66bc16345e50bcf662bcd at commit 85c646b0a6c22cd4dbbe29a853a426dcbaa08d30.
+History/Predecessor: Git blob a1c2e1c4e3898fa967e6677429ec606a6dcfa4bb at commit 362510b7d32edd1eabdcb07c9677f1b6a47f2adf.
 """
 from __future__ import annotations
 
@@ -87,6 +88,9 @@ class KnowledgeRetrievalTests(unittest.TestCase):
             self.assertTrue(all(len(item["sha256"]) == 64 and len(item["source_sha256"]) == 64
                                 for item in results))
             self.assertFalse(any("owner" in item["source_path"] for item in results))
+            explicit = retrieve(source, "knowledge.1",
+                                "Name all destinations in the transitions.RUNNING knowledge fact")
+            self.assertEqual([item["source_path"] for item in explicit], ["transitions.RUNNING"])
 
     def test_unmatched_query_returns_no_knowledge_claim(self):
         with tempfile.TemporaryDirectory() as directory:
