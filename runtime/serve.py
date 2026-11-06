@@ -239,14 +239,22 @@ async def serve(db: Path, health_file: Path, config_dir: Path, credential_dir: P
             tool_connected = bool(tool_probes) and all(
                 not isinstance(result, BaseException) for result in tool_probes)
             status = institution.health()
+            inference_response_observed = journal.db.execute(
+                "SELECT EXISTS(SELECT 1 FROM resident_turns t "
+                "WHERE t.kind='ASSISTANT')"
+            ).fetchone()[0]
             status.update({
                 "service": "r3-institution",
+                "health_schema_version": 2,
                 "pid": os.getpid(),
                 "observed_at": time.time(),
                 "registered_residents": len(registered),
-                "resident_execution_connected": bool(registered),
-                "resident_inference_connected": bool(registered),
-                "resident_tool_execution_connected": tool_connected,
+                "resident_execution_configured": bool(registered),
+                "resident_active_executions": status["active"],
+                "resident_inference_configured": bool(registered),
+                "resident_inference_response_observed": bool(inference_response_observed),
+                "resident_tool_discovery_connected": tool_connected,
+                "resident_tool_execution_status": "unverified",
                 "resident_tool_execution_configured": bool(configured_tools),
                 "resident_inbox_pending": journal.db.execute(
                     "SELECT count(*) FROM resident_inbox WHERE status IN ('PENDING','PROCESSING')"
