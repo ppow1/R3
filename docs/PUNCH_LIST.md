@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/PUNCH_LIST.md
 Component: DOCS-PUNCH-LIST-MD
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: Unknown (legacy)
 Created By: Unknown (legacy)
 Purpose: R3 project governance and planning reference
@@ -10,11 +10,12 @@ Execution Model: N/A
 Observability: N/A
 Dependencies: R3 repository
 Authority: Existing document authority unchanged; see body
+Changed: 2026-11-06 UTC | R3-P025 | ChatGPT GPT-6.1 Sol | Record Steward-requested Undercurrents private-job workspace planning item
 Changed: 2026-11-01 UTC | R3-COMMS-003 | ChatGPT GPT-6 | Track dashboard Comms5 saturation and temporary restart recovery
 Supersedes: None (see body for substantive charter revisions)
 Contracts: hints/file-provenance.md
-Tests: Not run (metadata-only)
-History/Predecessor: Git blob 183a4b545824aec1b7c5138d15213336ff693d37
+Tests: Documentation review; no runtime changes
+History/Predecessor: Git blob 945d9ae6d76d569e1726bd9a6c212ba4122cbdce
 -->
 # R3 — Punch List
 
@@ -56,3 +57,5 @@ Status: initial working list; items are requirements or investigations, not veri
 | R3-P023 | P1 | R/3 configuration file inventory and ownership registry | Discover and inventory **all R/3 configuration files** across repositories, active releases, hosts, services and runtime/state directories (especially JSON, but include YAML, TOML, INI, environment files and other formats). Record canonical path, environment/host, purpose, consuming service/module, owner/maintainer, who needs read/change access, sensitivity/secrets references, source-of-truth versus generated/deployed copy, version/change history, validation and restart/reload requirements, and the authoritative location/procedure for changing each setting. Identify duplicates, obsolete configurations and drift without altering them. Design a searchable, maintainable registry with a future authenticated website configuration-management interface; **inventory and planning only for now, no configuration edits or website implementation.** | Open |
 
 | R3-P024 | P1 | Unified integration baseline, release registry, and modular deployment contracts | Establish an authoritative, machine-readable registry of each R/3 component's repository/commit, contract/API version, dependencies, tested integration baseline, immutable release artifact, active host/service, configuration reference, migration requirements, health/acceptance results, and rollback target. Allow independent feature branches but require integration compatibility gates before promotion; reconcile Grace/Chat, website, HR/native tools without discarding live uncommitted work. Consolidate effective systemd service ownership to prevent override-order regressions. Design modular release boundaries where feasible, publish a single approved deployment manifest, and document a repeatable promotion/rollback procedure. Derive requirements from the current integration incident; do not delay the Chat repair for speculative framework work. | Open |
+
+| R3-P025 | P1 | Undercurrents: private-job execution and secure temporary storage | Design an explicit private-job designation applied **before intake persistence**. Confine job inputs, prompts/conversation context, working files, outputs, and job-content records to an isolated encrypted workspace on a designated SSD; exclude them from ordinary Riverview chat/work-order history, knowledge/memory stores, historian, application logs, notifications, telemetry payloads, snapshots, indexing, sync and general backups. Account for temporary files, model caches, paging/swap and crash dumps across every participating host; private jobs must fail closed if an execution path cannot honor the boundary. Keep retained outputs inside the private workspace until explicit Steward export. Preserve existing authorization and execution controls; explicitly decide whether any content-free lifecycle/security metadata may remain outside the workspace rather than silently weakening audit requirements. Evaluate per-job encryption keys and cryptographic erasure, including all key/recovery copies; verify actual SSD sanitize/erase capabilities before claiming fast secure deletion. Define retention and explicit discard/export behavior, including failure/restart cleanup. Acceptance: a representative job completes and returns its output inside the boundary; inspection finds no job-content copies in ordinary storage/logs/backups; discard invalidates all required keys and reports verified completion or a truthful failure. Document the tested assurance limits; do not promise zero traces without evidence. **Planning item only; no implementation, logging changes, backup-policy changes or deletion authorized by this entry.** | Open |
