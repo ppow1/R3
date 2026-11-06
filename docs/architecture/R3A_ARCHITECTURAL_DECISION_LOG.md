@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_ARCHITECTURAL_DECISION_LOG.md
 Component: R3A-DECISION-LOG
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-06T03:39:05Z
 Created By: Codex GPT-6
 Purpose: Record R3A architectural decisions and distinguish directives from unresolved proposals.
@@ -13,10 +13,11 @@ Authority: Steward directive for confirmed R3A decisions; approved R3 Charter Re
 Changed: 2026-11-06T03:39:05Z | R3A-BASELINE-001 | Codex GPT-6 | Establish initial architectural decision log.
 Changed: 2026-11-06T04:57:50Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Record corrected roadmap priorities and mandatory governance.
 Changed: 2026-11-06T05:03:56Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Clarify corrected AP ownership and versioned exception tracking.
+Changed: 2026-11-06T05:18:48Z | AP0-M1-PLAN | Codex GPT-6 | Record bounded AP0-M1 technical selections without elevating them to Steward policy decisions.
 Supersedes: None.
 Contracts: R3A Architecture Charter; roadmap; AP0 specification; module and state contracts.
 Tests: Not run; documentation only.
-History/Predecessor: Git blob b44e2a30825c86074424469bd7d8481036edad46 at baseline commit eca8b73de0fe5bd67bdb0f0b8b0a92470b07b530.
+History/Predecessor: Git blob cb1fe6c4336c4623771df26b0a1c59afb11f9d90 at baseline commit f629a570d904719d1f13d2ceaddff7a2af2ce00d.
 -->
 # R3A Architectural Decision Log
 
@@ -45,21 +46,27 @@ History/Predecessor: Git blob b44e2a30825c86074424469bd7d8481036edad46 at baseli
 | AD-017 | Jessica character-development capability belongs in AP4, within broader institutional expansion. | DIRECTED — item 17 and corrected roadmap directive. | AP4 owns institutional expansion, including Jessica's capability; excluded from AP0. |
 | AD-018 | Spatial institution, avatars and Quest presentation belong in AP5 and cannot block functional interfaces. | DIRECTED — item 18 and corrected roadmap directive; Quest 2 direction inherited from R3 Charter Revision 2. | AP5 owns spatial presentation over common state; later AP6 capabilities do not gate AP5 or core functional interfaces. |
 | AD-019 | Existing R3 coding and provenance standards remain unless an explicit R3A supplement is approved. | DIRECTED — item 19. | `hints/file-provenance.md` governs this documentation. |
-| AD-020 | PostgreSQL is the intended foundation for R3 durable structured records/history. | INHERITED — Steward-approved R3 Charter Revision 2, §11. | AP0 shall align with PostgreSQL; deployment topology, schema and migration remain open. |
+| AD-020 | PostgreSQL is the intended foundation for R3 durable structured records/history. | INHERITED — Steward-approved R3 Charter Revision 2, §11. | AP0 shall align with PostgreSQL; AP0-M1 selects an isolated database/schema, ordered SQL migrations and CME-owned async pool. Host version/provisioning are preflight facts. |
 | AD-021 | Existing R/3 production services/data are not modified by R3A documentation or implementation work absent separate authorization. | DIRECTED — scope and development constraints. | Isolated development only; no production migration or deployment in this task. |
 | AD-022 | The Steward-approved, versioned Master Roadmap is authoritative for every R3A assignment; deviations require a versioned exception and explicit Steward approval before execution. | DIRECTED — R3A Baseline 1.0 Correction, §2. | Assignments identify approved revision, phase/milestone, requirement IDs, authorized scope, acceptance criteria and approved exception (or none). Until Roadmap Baseline 1.0 is approved, no implementation is authorized under it. |
 | AD-023 | Parallel Codex work is coordinated through a designated GitHub issue per active milestone, with explicit workstreams, stable contracts, named integration authority, checkpoints and controlled merge/verification. | DIRECTED — R3A Baseline 1.0 Correction, §3 (R3A-GOV-02). | AP0 remains primarily sequential; parallel work is allowed only when contracts are stable and each session remains roadmap-compliant. The issue cannot override Steward authority or the Master Roadmap. |
 
-## Specification proposals, not additional Steward decisions
+## AP0-M1 engineering selections, not additional Steward policy decisions
 
-| ID | Proposal | Why recorded | Decision needed |
+| ID | AP0-M1 engineering selection | Why recorded | Selection and remaining boundary |
 |---|---|---|---|
-| AD-P01 | Model Ring 0 and CME as separately observable process lifecycles, with Ring 0 supervising CME and CME owning module scheduling. | Directly realizes AD-001–003. | Approve process/host service ownership and Ring 0's own supervision boundary before implementation. |
-| AD-P02 | Keep state-machine definitions as versioned data consumed by both runtime and diagnostic/API projections. | Directly realizes AD-005. | Select encoding, compatibility policy and state-definition publication process. |
-| AD-P03 | Treat registry discovery, authorization, and execution as separate concerns. | Preserves existing R3 authority model and avoids implicit grants. | Confirm registry/auth interfaces and ownership. |
+| AD-P01 | Dedicated unprivileged systemd Ring 0 service; Ring 0 owns a CME child lifecycle; CME owns module scheduling. | Directly realizes AD-001–003 with existing single-host service operations; D1/D3 in AP0-M1 plan. | Selected for AP0-M1 planning; M1.0 verifies actual host support. Separate implementation authorization remains required. |
+| AD-P02 | Versioned immutable JSON state-machine definitions stored in PostgreSQL and consumed by transition validation and read-only diagnostics. | Directly realizes AD-005/006; D2/D4/D8 in AP0-M1 plan. | Encoding and AP0 compatibility behavior selected; data privacy/retention policy remains open. |
+| AD-P03 | Treat registry discovery, authorization and execution as separate concerns; CME is the sole lifecycle/observation registry writer. | Preserves R3 authority model; D5/D6 in AP0-M1 plan. | AP0 write/ownership boundary selected; Steward-owned authorization grants and policy remain unchanged. |
+| AD-P04 | Dedicated PostgreSQL database/schema, ordered transactional SQL migrations, and CME-owned async connection pool. | Aligns AP0 with AD-020 and AP0-004; D2. | Selected for isolated AP0-M1 planning; host version, role and peer auth are preflight facts. |
+| AD-P05 | At-least-once activity execution with stable idempotency keys, durable leases/checkpoints, transactional state+event updates, and explicit blocked outcome for uncertain external effects. | Satisfies AP0-004/006 without claiming impossible exactly-once semantics; D4. | Selected for generic AP0 activity contract; domain-specific effect reconciliation remains module responsibility. |
+| AD-P06 | Child-process modules over versioned local JSON-lines Unix socket; immutable local artifact manifest/digest; unknown compatibility denies activation. | Satisfies AD-004 and AP0-007 without dynamic in-process unload; D5. | Selected for AP0-M1; package signing/trust roots and general distribution remain later security decisions. |
+| AD-P07 | External validated bootstrap JSON plus immutable PostgreSQL operational config revisions; explicit safe-boundary activation; secret references only. | Satisfies AD-008/AP0-009 and accommodates AP3 Bitwarden; D7. | Selected for AP0-M1; Bitwarden machine-auth and secret lifecycle policy remain open for AP3. |
+| AD-P08 | Local read-only diagnostics CLI/socket with separate operator group and read-only DB access; stale/unavailable are first-class. | Satisfies AD-009/AP0-010; D8. | Selected for AP0; external transport/auth remains AP3. |
+| AD-P09 | Operator-invoked `pg_dump` plus non-secret config references, restored to a separate isolated DB. | Satisfies AP0-013 with bounded AP0 recovery scope; D9. | Selected for basic AP0 provision; mature backup schedule, retention and off-host DR remain AP6. |
 
 ## Open decisions
 
 The AP phase sequencing in this revision follows the Steward's correction. The prior roadmap revision assigned remote Steward access to AP1 and escalated reasoning to AP3; those phase placements are superseded for roadmap ownership by this correction, with remote Steward/mobile access in AP3 and escalated reasoning in AP2. No technical conflict preventing the corrected ordering was identified. AP3 work may run in parallel with AP1/AP2 only where dependencies permit.
 
-See [R3A Punch List and Parking Lot](R3A_PUNCH_LIST_AND_PARKING_LOT.md#parking-lot--unresolved-not-rejected) for remaining technical decisions, including database deployment/migrations; process manager; scheduling/resource policy; module artifact trust/compatibility; configuration reload/secrets; event retention/privacy/erasure; diagnostics transport/auth; and recovery/idempotency semantics. See the [roadmap exception register](R3A_ROADMAP_EXCEPTION_REGISTER.md) for versioned deviations; none is currently approved.
+AP0-M1 implementation choices are detailed in [First Living Water Wheel Technical Plan](R3A_AP0_M1_FIRST_LIVING_WATER_WHEEL_PLAN.md). They are engineering selections for planning and do not claim Steward approval of security/privacy policy, production use or deployment. The parking lot now distinguishes selected AP0 details from genuinely deferred authority/policy decisions. See the [roadmap exception register](R3A_ROADMAP_EXCEPTION_REGISTER.md) for deviations; none is proposed or approved.

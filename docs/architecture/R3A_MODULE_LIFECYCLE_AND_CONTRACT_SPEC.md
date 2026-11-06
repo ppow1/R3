@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_MODULE_LIFECYCLE_AND_CONTRACT_SPEC.md
 Component: R3A-MODULE-CONTRACT
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-06T03:39:05Z
 Created By: Codex GPT-6
 Purpose: Specify module discovery, versioning and runtime lifecycle requirements for R3A.
@@ -11,14 +11,15 @@ Observability: Registry state and lifecycle event lineage.
 Dependencies: R3A Architecture Charter; AP0 Technical Specification; State Machine and Diagnostic Contract.
 Authority: Steward directive; field encoding and artifact trust choices remain open unless explicitly specified here.
 Changed: 2026-11-06T03:39:05Z | R3A-BASELINE-001 | Codex GPT-6 | Establish initial module contract specification.
+Changed: 2026-11-06T05:18:48Z | AP0-M1-PLAN | Codex GPT-6 | Select AP0 module process binding and minimum manifest/RPC compatibility profile.
 Supersedes: None.
 Contracts: AD-004 through AD-008; AP0-007/AP0-008.
 Tests: Not run; documentation only.
-History/Predecessor: New document; initial publication recorded in Git.
+History/Predecessor: Git blob b77d4f50fd6e187b8cf7d9a7a301ba60256be15c at baseline commit f629a570d904719d1f13d2ceaddff7a2af2ce00d.
 -->
 # Module Lifecycle and Contract Specification
 
-**Status:** Planned contract. The lifecycle capabilities are directed; serialization, package format and compatibility policy are unresolved implementation decisions.
+**Status:** Planned contract. The lifecycle capabilities are directed. AP0-M1 selects the local process binding and minimum compatibility shape below; installation trust, distribution and later promotion remain open.
 
 ## Contract principles
 
@@ -45,15 +46,15 @@ The machine-readable representation must carry, at minimum:
 | `module_version` | Immutable implementation release identifier. |
 | `contract_id`, `contract_version` | Contract and supported major/minor version range. |
 | `owner` | Institutional role/team accountable for module behavior and data. |
-| `entrypoint` / `binding` | How CME invokes or supervises the module; exact mechanism TBD. |
+| `entrypoint` / `binding` | AP0-M1: executable entry point in a locally staged immutable artifact, launched as a CME-supervised child process. |
 | `dependencies` | Required contract/provider identities and version ranges. |
 | `configuration_schema` and `configuration_ref` | Validated schema identity and external configuration location/reference. |
 | `capability_refs` | Required capability/resource identities; does not grant access. |
 | `state_namespace` and `migration_contract` | Module-owned durable state and upgrade compatibility. |
 | `lifecycle_state`, `health`, `diagnostic_ref` | Current observed lifecycle, health and diagnostic location. |
-| `artifact_ref`, `artifact_digest` | Immutable implementation location and integrity reference; trust/signature format TBD. |
+| `artifact_ref`, `artifact_digest` | Immutable local implementation location and content digest; signing/trust format remains deferred. |
 
-Field names are illustrative until the Steward approves an encoding/schema. The required information categories are specification constraints.
+Field names are the AP0-M1 planning vocabulary; implementation may map them to repository-conforming identifiers while preserving the required semantics and versioned manifest profile. This plan does not require another Steward design approval.
 
 ## Lifecycle semantics
 
@@ -79,6 +80,14 @@ Registry entries describe identity, kind, contract/version, owner, provider/bind
 
 The compatibility evaluator MUST distinguish compatible, incompatible and unknown. Unknown is not silently compatible. A module replacement preserves prior version identity and event lineage. It records the initiating operation, actor/authority reference, old/new versions, drain/checkpoint outcome, migration result, readiness checks and effective version. Recovery can resume or leave a visible blocked operation; it must not present partial replacement as complete.
 
-## Open decisions
+## AP0-M1 binding and protocol profile
 
-Package/artifact format; signing/trust roots; module process versus in-process binding; compatibility range semantics; state migration transactionality; drain deadlines and resource constraints; rollback/forward-recovery policy; config reload and secret provider APIs; registry write ownership; deployment promotion and activation authority remain OPEN in the R3A parking lot.
+AP0-M1 modules run in separate unprivileged child processes supervised by CME. CME communicates over a private Unix domain socket using UTF-8 JSON-lines messages. Every message carries `protocol_version`, `module_id`, immutable `module_version`, `request_id` and correlation ID; responses carry the same IDs plus explicit result/error and observation time. The minimum calls are `hello`, `health`, `prepare`, `activate`, `execute`, `checkpoint` and `stop`. Module processes do not connect directly to the institutional database; CME persists authoritative state and module output through the contract. Control requests are idempotent by request ID or return the existing correlated operation.
+
+For AP0, compatibility requires matching protocol major version and a declared supported minor range containing the host minor version. A missing/unknown declaration is incompatible. The manifest is locally staged and immutable after registration; its digest is checked before launch. No general dependency solver or remote installer is included. AP0 may register a test/observer artifact from a local path explicitly listed by configuration; unlisted paths are rejected. This local digest check is integrity identification, not a claim of signed provenance or a complete trust policy.
+
+CME is the sole writer of module lifecycle records. Module readiness is observed through process health and successful contract handshake. Replacement closes admission, checkpoints/drains when supported, starts and validates the new version, then records the effective version. If readiness or recovery is uncertain, the operation remains visibly blocked/degraded and the old artifact/state lineage stays attributable; there is no destructive automatic rollback that discards state.
+
+## Remaining decisions outside the AP0-M1 minimum
+
+Artifact signing/trust roots and distribution/promotion authority; domain-specific state migration; privacy classification/retention; emergency lockdown; AP3 secret provider and remote authentication; and capability-specific grant policy remain open as recorded in the parking lot. None changes the selected AP0 process boundary or authorizes invocation from registry presence.

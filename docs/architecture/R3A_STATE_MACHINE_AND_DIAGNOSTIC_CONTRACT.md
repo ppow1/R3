@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_STATE_MACHINE_AND_DIAGNOSTIC_CONTRACT.md
 Component: R3A-STATE-DIAGNOSTIC-CONTRACT
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-06T03:39:05Z
 Created By: Codex GPT-6
 Purpose: Define the shared versioned state-machine and truthful diagnostic contract.
@@ -11,14 +11,15 @@ Observability: Structured state catalogs, durable transitions and diagnostic pro
 Dependencies: R3A Architecture Charter; AP0 Technical Specification; Module Lifecycle and Contract Specification.
 Authority: Steward directive; encoding, retention and transport choices remain open where noted.
 Changed: 2026-11-06T03:39:05Z | R3A-BASELINE-001 | Codex GPT-6 | Establish initial state and diagnostic contract.
+Changed: 2026-11-06T05:18:48Z | AP0-M1-PLAN | Codex GPT-6 | Select AP0 PostgreSQL definition/event representation and local diagnostic transport/freshness profile.
 Supersedes: None.
 Contracts: AD-005, AD-006, AD-009, AD-010; AP0-004 through AP0-006/AP0-010.
 Tests: Not run; documentation only.
-History/Predecessor: New document; initial publication recorded in Git.
+History/Predecessor: Git blob 62980baad930e9c4151685a0b1c52b4849a57111 at baseline commit f629a570d904719d1f13d2ceaddff7a2af2ce00d.
 -->
 # State Machine and Diagnostic Contract
 
-**Status:** Planned. This specifies the required shape and semantics; the physical schema, serialization and API transport are open decisions.
+**Status:** Planned. The required shape and semantics are normative. AP0-M1 selects the PostgreSQL/JSONB and local read-only API profile below; privacy retention and remote API authorization remain open.
 
 ## Normative requirements
 
@@ -74,6 +75,14 @@ The HMI MUST distinguish:
 - **progress** (timestamped work evidence, not an animation),
 - **completion** (terminal result with deliverable/evidence), and
 - **acceptance** (independent substantive evaluation where required).
+
+## AP0-M1 storage and diagnostic profile
+
+AP0-M1 stores immutable machine definitions as versioned JSONB records keyed by machine ID/version and digest. Runtime transition validation and the diagnostics catalog load the same immutable definition; a definition used by events is retained for historical interpretation. Each accepted transition and its current-state projection update are in the same PostgreSQL transaction as an append-only, uniquely identified event row. Event delivery/retries are deduplicated by stable event ID; execution with external effects is at-least-once and follows the idempotency/recovery requirements in the [AP0-M1 plan](R3A_AP0_M1_FIRST_LIVING_WATER_WHEEL_PLAN.md).
+
+The initial diagnostics interface is a local read-only CLI over a Unix domain socket, restricted to the R3A operator group, backed by read-only database views and live process probes. The control socket is separate. Each observation includes observed-at time and configured freshness threshold. Expired or unavailable sources return `stale`, `unknown` or `unavailable`; no last-known healthy value is represented as current. AP3 may provide a remote authenticated gateway later without changing the diagnostic payload contract.
+
+Payload classification, retention/deletion, cryptographic erasure and operator identity policy remain subject to Steward decisions. AP0 minimizes persisted content and uses references for larger/classified evidence.
 
 ## Acceptance checks
 

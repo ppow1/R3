@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_AP0_TECHNICAL_SPECIFICATION.md
 Component: R3A-AP0-SPECIFICATION
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-06T03:39:05Z
 Created By: Codex GPT-6
 Purpose: Bound the AP0 institutional foundation and state its functional acceptance requirements.
@@ -12,14 +12,15 @@ Dependencies: R3A Architecture Charter; Module Lifecycle and Contract Specificat
 Authority: Steward directive authorizes AP0 specification only; implementation requires further Steward authorization.
 Changed: 2026-11-06T03:39:05Z | R3A-BASELINE-001 | Codex GPT-6 | Establish initial AP0 specification.
 Changed: 2026-11-06T04:57:50Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Add AP0 basic backup/restore provision and traceability.
+Changed: 2026-11-06T05:18:48Z | AP0-M1-PLAN | Codex GPT-6 | Link approved-scope AP0-M1 decision and implementation plan; keep requirements planned.
 Supersedes: None.
-Contracts: R3A architectural decisions AD-001–AD-009, AD-021.
+Contracts: R3A architectural decisions AD-001–AD-010, AD-020–AD-021.
 Tests: Not run; documentation only.
-History/Predecessor: Git blob 46f8b61035b874abf2505006a2ba154e913d40d6 at baseline commit eca8b73de0fe5bd67bdb0f0b8b0a92470b07b530.
+History/Predecessor: Git blob 5dce5a5195fa3883a9c3f2ccffc3ae968770db59 at baseline commit f629a570d904719d1f13d2ceaddff7a2af2ce00d.
 -->
 # AP0 Technical Specification
 
-**Status:** PLANNED — specification only. The Steward has not authorized runtime implementation.
+**Status:** PLANNED — specification and implementation planning only. The Steward has not authorized runtime implementation.
 **Objective:** Establish the smallest functioning institutional foundation with independently supervised CME, durable truthful operation, and a viable module/capability lifecycle.
 
 ## Scope boundary
@@ -72,21 +73,13 @@ Full Engineering work management/execution; Jessica or resident character develo
 
 ## Persistence and configuration constraints
 
-The approved R3 Charter Revision 2 specifies PostgreSQL as the institutional structured-record/history foundation; AP0 shall align with that direction. The audit and Phase 0A investigation describe the current R3 institutional runtime's SQLite prototype. Do not treat that prototype as an approved R3A backend decision or silently migrate its data. PostgreSQL host/topology, schema namespaces, migrations, pooling, backup, event retention and data classification remain open decisions.
+The approved R3 Charter Revision 2 specifies PostgreSQL as the institutional structured-record/history foundation; AP0 aligns with that direction. The audit and Phase 0A investigation describe the current R3 institutional runtime's SQLite prototype. Do not treat that prototype as an approved R3A backend decision or silently migrate its data. AP0-M1 selects an isolated PostgreSQL database/schema, ordered SQL migrations, CME-owned async pool, and a basic `pg_dump`/separate-target restore path; host support and provisioning are preflight facts. Event payload classification, retention/deletion and cryptographic erasure remain policy decisions.
 
-Runtime behavior SHALL be configured outside executable source. R3 bootstrap currently calls for documented validated JSON configuration; AP0 should conform unless a Steward-approved R3A supplement selects otherwise. The database SHALL record each applied configuration revision, effective non-secret values or protected references, provenance and activation time; configuration transport/source-of-truth and reload semantics remain OPEN. Configuration identifies component versions, database/secret references, resource policy and diagnostic settings, but MUST NOT contain plaintext secrets or grant authority by listing a capability.
+Runtime behavior SHALL be configured outside executable source. AP0-M1 selects strict external JSON bootstrap configuration, immutable PostgreSQL operational configuration revisions, and explicit validated activation at safe boundaries. The database SHALL record each applied configuration revision, effective non-secret values or protected references, provenance and activation time. Configuration identifies component versions, database/secret references, resource policy and diagnostic settings, but MUST NOT contain plaintext secrets or grant authority by listing a capability. Bitwarden provider authentication remains AP3 work.
 
-## Proposed AP0-M1 implementation sequence (not authorized)
+## AP0-M1 implementation plan (not authorized)
 
-This is a dependency-ordered proposal for subsequent review; no step may begin until the Steward authorizes implementation.
-
-1. Resolve the AP0 blocking decisions (process owner, PostgreSQL topology/schema/migrations, config source and reload, CME restart policy, resource dimensions/limits, secret references, diagnostic transport/auth, and recovery/idempotency).
-2. Implement isolated external configuration validation and database schema/migration foundations; capture effective config and schema revisions; establish the basic AP0 backup/restore path before accepting durable state.
-3. Implement Ring 0 health/lifecycle supervision and a separately startable/stoppable CME child component; prove CME restart leaves Ring 0 alive.
-4. Implement durable versioned state-machine definitions, events and generic activity continuation/reconciliation; prove valid/invalid transitions and crash recovery.
-5. Implement minimal module and capability/resource registries with discovery separated from authorization; exercise install/activate/stop/replace without Ring 0 restart.
-6. Implement truthful diagnostic projections directly from state definitions and durable records; verify staleness and exceptions.
-7. Run only the bounded acceptance scenarios in the policy on disposable isolated state; produce evidence and unresolved-gap report before any operational acceptance request.
+The detailed decision matrix, interface boundaries, implementation dependencies, bounded verification gates, first running milestone and explicit residual questions are in [AP0-M1 First Living Water Wheel Technical Plan](R3A_AP0_M1_FIRST_LIVING_WATER_WHEEL_PLAN.md). Its dependency order is preflight; contracts/configuration; PostgreSQL schema/migrations and basic backup; Ring 0/CME; durable scheduler/recovery; module lifecycle/registries; truthful diagnostics; then the integrated First Living Water Wheel evidence run. The choices resolve AP0 engineering details without changing these requirements or granting implementation authority. AP0 remains PLANNED until separately authorized implementation produces evidence.
 
 ## AP0 exit condition
 
