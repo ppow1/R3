@@ -18,6 +18,7 @@ REGISTER_ANCHOR = '''        register_hr_governed_tools(
             "/home/admin1/.local/share/r3/hr/residents.sqlite3",
         )
 '''
+REGISTER_OVERLAY_EXPECTATION = '            str(args.hr_database),\n'
 
 
 class NativeBrokerComposerTests(unittest.TestCase):
@@ -45,6 +46,7 @@ class NativeBrokerComposerTests(unittest.TestCase):
             server = (target / "runtime" / "tool_server.py").read_text()
             self.assertIn("register_grace_operational_tools(gateway, evidence_journal=evidence)", server)
             self.assertIn("register_hr_governed_tools(", server)
+            self.assertIn(REGISTER_OVERLAY_EXPECTATION, server)
             self.assertIn("register_internal_proposal_tools(gateway, proposal_client)", server)
             self.assertIn("--institutional-proposal-credential-file", server)
             self.assertEqual(manifest["added_capabilities"],

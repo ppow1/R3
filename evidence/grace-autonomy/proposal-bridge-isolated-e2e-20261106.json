@@ -1,0 +1,59 @@
+{
+  "test": "Grace native proposal bridge to Riverview institutional registry",
+  "result": "PASS",
+  "observed_at": "2026-11-06",
+  "r3_worktree_branch": "engineering/grace-autonomy-recovery-20261106",
+  "r3_composer_commit": "bd6e3daa92838268889fdfacb707913b386c51cf",
+  "r3_native_broker_base": {
+    "release": "hr-native-010c2d971828",
+    "tool_server_sha256": "dd0a8758be94e4c8bd04c83e1b206e5a8e3faf2b9bfd4b5816378f55949f181c"
+  },
+  "staged_additive_broker": {
+    "release": "grace-proposal-native-2564ad11fd31047d727ccc66f082e6c4c5f4fa202cadcbd690ef5a09d86aa3c8",
+    "tool_server_sha256": "2564ad11fd31047d727ccc66f082e6c4c5f4fa202cadcbd690ef5a09d86aa3c8",
+    "added_tools": ["r3.proposal.submit", "r3.proposal.status"],
+    "preserved_tools": [
+      "r3.status",
+      "r3.host.uptime",
+      "r3.resources.local_snapshot",
+      "r3.resources.assess_gpu_capacity",
+      "r3.evidence.record",
+      "hr.directory",
+      "hr.read",
+      "hr.save"
+    ]
+  },
+  "riverview_endpoint_source": {
+    "branch": "engineering/grace-internal-proposal-capability-20261106",
+    "commit": "b52d891f58b6667bdddaf6608e8c2cadedaeed5d",
+    "package_sha256": "994643294f4933cb6391c0f8834d6d888c690cd21f35ec02492b1ab5e724e67d",
+    "focused_endpoint_suite": "11 passed, 1 skipped"
+  },
+  "integrated_run": {
+    "transport": "actual staged native broker HTTP process to actual DashboardHTTPServer resident proposal endpoint",
+    "authorization": "temporary R3Authority exact grants and resident credential; temporary Riverview principal credential and exact grants",
+    "database": "disposable PostgreSQL schema; dropped after test",
+    "proposal_id": "proposal:cba2c354-30e5-4430-83a7-1aa91bc56614",
+    "revision": 1,
+    "content_sha256": "ebef4b794b76f2c83220284bab9e05dcc2e737af5601ae5a51042e8f412b02ee",
+    "correlation_id": "clock-0ceb6a078a1e4a3e897cb8494fef484b",
+    "author_principal": "resident:grace",
+    "lifecycle_status": "DRAFT",
+    "steward_decision_required": true,
+    "approval_granted": false,
+    "readback_verified": true,
+    "engineering_work_order_created": false,
+    "website_change_performed": false
+  },
+  "production": {
+    "deployed": false,
+    "live_grace_inference": false,
+    "production_records_changed": false,
+    "reason_not_activated": [
+      "Active R3 broker identity is resident:Grace while the institutional registry principal is resident:grace.",
+      "No effective exact R3 draft-submit or status-read grants exist for either case variant.",
+      "The active production institutional dashboard does not contain the resident proposal endpoint."
+    ]
+  },
+  "secrets_recorded": false
+}

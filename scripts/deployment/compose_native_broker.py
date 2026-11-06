@@ -20,12 +20,15 @@ BASE_RELEASE = Path("/home/admin1/.local/share/r3/releases/hr-native-010c2d97182
 BASE_TOOL_SERVER_SHA256 = "dd0a8758be94e4c8bd04c83e1b206e5a8e3faf2b9bfd4b5816378f55949f181c"
 
 _ARGS_ANCHOR = '    parser.add_argument("--institution-db", type=Path, help="Existing R3 institution journal for governed evidence writes")\n'
+_HR_PATH_ANCHOR = '            "/home/admin1/.local/share/r3/hr/residents.sqlite3",\n'
 _REGISTER_ANCHOR = '''        register_hr_governed_tools(
             gateway,
             "/home/admin1/.local/share/r3/hr/residents.sqlite3",
         )
 '''
 _ARGS_OVERLAY = '''    parser.add_argument("--institutional-proposal-url")
+    parser.add_argument("--hr-database", type=Path,
+                        default=Path("/home/admin1/.local/share/r3/hr/residents.sqlite3"))
     parser.add_argument("--institutional-proposal-credential-file", type=Path)
 '''
 _REGISTER_OVERLAY = '''
@@ -70,11 +73,13 @@ def compose(base_release: Path, destination: Path, *, expected_sha256: str = BAS
     shutil.copytree(runtime_dir, destination / "runtime", symlinks=False)
     staged_server = destination / "runtime" / "tool_server.py"
     text = staged_server.read_text(encoding="utf-8")
-    if text.count(_ARGS_ANCHOR) != 1 or text.count(_REGISTER_ANCHOR) != 1:
+    if (text.count(_ARGS_ANCHOR) != 1 or text.count(_REGISTER_ANCHOR) != 1
+            or text.count(_HR_PATH_ANCHOR) != 1):
         shutil.rmtree(destination)
         raise CompositionError("native broker overlay anchors are absent or ambiguous")
     text = text.replace(_ARGS_ANCHOR, _ARGS_ANCHOR + _ARGS_OVERLAY, 1)
     text = text.replace(_REGISTER_ANCHOR, _REGISTER_ANCHOR + _REGISTER_OVERLAY, 1)
+    text = text.replace(_HR_PATH_ANCHOR, "            str(args.hr_database),\n", 1)
     staged_server.write_text(text, encoding="utf-8")
     repository_root = Path(__file__).resolve().parents[2]
     shutil.copy2(repository_root / "runtime" / "institutional_proposals.py",
