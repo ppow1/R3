@@ -32,6 +32,8 @@ _ARGS_OVERLAY = '''    parser.add_argument("--institutional-proposal-url")
     parser.add_argument("--institutional-proposal-credential-file", type=Path)
 '''
 _REGISTER_OVERLAY = '''
+        from runtime.hr_identity_association import register_hr_identity_association
+        register_hr_identity_association(gateway, args.hr_database)
         if (args.institutional_proposal_url is None) != (args.institutional_proposal_credential_file is None):
             parser.error("internal proposal integration requires both endpoint and credential file")
         if args.institutional_proposal_url is not None:
@@ -45,7 +47,8 @@ _REGISTER_OVERLAY = '''
                 args.institutional_proposal_url,
                 read_resident_credential(args.institutional_proposal_credential_file),
             )
-            register_internal_proposal_tools(gateway, proposal_client)
+            register_internal_proposal_tools(
+                gateway, proposal_client, hr_database=args.hr_database)
 '''
 _EXPIRY_OVERLAY = '''
         from runtime.grant_expiry_monitor import start_monitor
@@ -170,12 +173,15 @@ def compose(base_release: Path, destination: Path, *, expected_sha256: str = BAS
                  destination / "runtime" / "institutional_proposals.py")
     shutil.copy2(repository_root / "runtime" / "proposal_gateway_adapter.py",
                  destination / "runtime" / "proposal_gateway_adapter.py")
+    shutil.copy2(repository_root / "runtime" / "hr_identity_association.py",
+                 destination / "runtime" / "hr_identity_association.py")
     manifest = {
         "format": "r3-native-broker-additive-overlay/v1",
         "base_release": str(base_release),
         "base_tool_server_sha256": expected_sha256,
         "staged_tool_server_sha256": _sha256(staged_server),
         "added_capabilities": ["r3.proposal.submit", "r3.proposal.status"],
+        "added_hr_operation": "hr.associate_principal",
         "preserved_registrations": ["register_grace_operational_tools", "register_hr_governed_tools"],
         "authorization_expiry_diagnostics": "/v1/diagnostics/authorization",
         "authorization_expiry_warning_seconds": 180000,

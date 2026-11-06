@@ -28,7 +28,7 @@ def _scope_property() -> dict:
     return {"type": "string", "enum": [SCOPE]}
 
 
-def register_internal_proposal_tools(gateway, client) -> None:
+def register_internal_proposal_tools(gateway, client, *, hr_database=None) -> None:
     """Register exactly draft-write and proposal-read; issue no grants."""
     content_fields = {
         "title": {"type": "string", "minLength": 1, "maxLength": 200},
@@ -44,7 +44,11 @@ def register_internal_proposal_tools(gateway, client) -> None:
     def submit(params, context):
         if set(params) != {"scope_ref", "content"} or params["scope_ref"] != SCOPE:
             raise ValueError("Proposal draft scope or parameters are invalid")
-        return client.submit(params["content"], principal=context.principal,
+        principal = context.principal
+        if hr_database is not None:
+            from runtime.hr_identity_association import resolve_authority_principal
+            principal = resolve_authority_principal(hr_database, context.principal)
+        return client.submit(params["content"], principal=principal,
                              correlation_id=context.correlation_id)
 
     def read(params, context):

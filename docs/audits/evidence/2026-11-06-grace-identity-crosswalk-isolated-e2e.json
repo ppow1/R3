@@ -1,0 +1,59 @@
+{
+  "evidence": "isolated R3 HR identity crosswalk to institutional proposal flow",
+  "observed_at_utc": "2026-11-06",
+  "repository": "ppow1/R3",
+  "branch": "engineering/grace-autonomy-recovery-20261106",
+  "production_or_live_state_touched": false,
+  "release": {
+    "path": "/home/admin1/.local/share/r3/releases/grace-proposal-native-identity-20261106-r1",
+    "based_on": "/home/admin1/.local/share/r3/releases/hr-native-010c2d971828",
+    "activated": false,
+    "staged_module_sha256": {
+      "tool_server.py": "3599309a418f52eb15e6853919f4bec10f421dcc83498be3e6b73acc88252b05",
+      "governed_tools.py": "6bc61b69d7a3a1adaa2a67a439dd06e1a7f8c7a44219807993f25be40f2f45ed",
+      "hr_identity_association.py": "411ab94b51ef49bce7bb3a8acafa7ebbb3e61733ec89930fc464452e2bde0d81",
+      "proposal_gateway_adapter.py": "a69d71043ce60ccc99d02c24da13f3f81255d69c9181451e7af8e860a5124577",
+      "capability_authority.py": "479f42758d83b95a526cd767a04b5fbdb4e2c5abdb934e7d271af0822a2de916",
+      "capabilities.py": "ae2523678e17fc340a02f653ee8ff33199631aeec2474f5c9016ea091482271f",
+      "grant_expiry_monitor.py": "465a8386df102fab5b835f5fd64efd4b74b4e9779490e276a875a30c8e3d59a7"
+    },
+    "added_tools": ["hr.associate_principal", "r3.proposal.submit", "r3.proposal.status"],
+    "preserved_existing_tools": [
+      "r3.status", "r3.host.uptime", "r3.resources.local_snapshot",
+      "r3.resources.assess_gpu_capacity", "r3.evidence.record",
+      "hr.directory", "hr.read", "hr.save"
+    ]
+  },
+  "isolated_execution": {
+    "identity": "resident:Grace",
+    "authority_records": "temporary exact test grants in a temporary R3 authority database",
+    "hr_record_id": "r3:grace",
+    "hr_revision_before": 1,
+    "hr_revision_after": 2,
+    "confidential_crosswalk": {
+      "r3_principal": "resident:Grace",
+      "authority_principal": "resident:grace"
+    },
+    "association_retry_idempotent": true,
+    "proposal_id": "proposal:ac865f0e-4939-425e-becb-b1c1bb5212b3",
+    "proposal_revision": 1,
+    "proposal_digest": "2cabb84998831b05adc48c37c1117fa2df943fc58efac1b29f6a0417327849b7",
+    "proposal_author": "resident:grace",
+    "proposal_status": "DRAFT",
+    "durable_registry_rows": 1,
+    "service_interfaces": [
+      "R3 /v1/tools discovery and /v1/tools/invoke",
+      "Composed R3 HRStore and exact GrantAuthority",
+      "Local HTTP implementation of the existing resident-proposal POST/GET contract"
+    ],
+    "live_model_inference": false,
+    "website_or_engineering_side_effect": false
+  },
+  "production_status": {
+    "identity_association_performed": false,
+    "proposal_grants_issued": false,
+    "broker_activated": false,
+    "live_grace_assignment_run": false,
+    "blocker": "Authenticated Steward authority API returned HTTP 401 in this execution; current broker lacks the association operation until the staged additive release is activated."
+  }
+}

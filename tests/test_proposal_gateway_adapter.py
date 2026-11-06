@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import unittest
+import sys
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from runtime.proposal_gateway_adapter import (
     RESOURCE,
@@ -61,6 +63,24 @@ class ProposalGatewayAdapterTests(unittest.TestCase):
         self.assertEqual(result, {"status": "persisted"})
         self.assertEqual(self.client.calls, [
             ("submit", content, "resident:grace", "assignment-42")])
+
+    def test_composed_production_path_resolves_institutional_identity_from_hr(self):
+        content = {key: "value" for key in
+                   self.gateway.capabilities["r3.proposal.submit"].parameters[
+                       "properties"]["content"]["required"]}
+        identity_map = SimpleNamespace(resolve_authority_principal=
+            lambda _database, principal: "resident:grace" if principal == "resident:Grace"
+            else (_ for _ in ()).throw(ValueError("association not found")))
+        with patch.dict(sys.modules,
+                {"runtime.hr_identity_association": identity_map}):
+            gateway = RecordingGateway()
+            register_internal_proposal_tools(gateway, self.client,
+                                             hr_database="/var/lib/r3/hr.sqlite3")
+            submit = gateway.capabilities["r3.proposal.submit"]
+            submit.executor({"scope_ref": SCOPE, "content": content},
+                SimpleNamespace(principal="resident:Grace", correlation_id="assignment-43"))
+        self.assertEqual(self.client.calls[-1],
+            ("submit", content, "resident:grace", "assignment-43"))
 
     def test_wrong_scope_is_rejected_before_client_call(self):
         capability = self.gateway.capabilities["r3.proposal.submit"]

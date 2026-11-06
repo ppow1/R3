@@ -24,3 +24,9 @@ After expiration, proposal calls must stop with `AUTHORIZATION_EXPIRED`, identif
 - Before live Grace acceptance, confirm the four exact grants are active and record each grant's issue and expiry timestamps above and in the operational evidence log.
 - If any required grant is missing or expired, leave the website-clock proposal unsubmitted and escalate the exact grant ID and renewal request to the Steward.
 - Proposal approval and Engineering execution remain Steward-controlled.
+
+## R3-to-institutional identity crosswalk
+
+The R/3 resident credential principal and Riverview institutional principal are separate identities. The broker must not lowercase, case-fold, or infer one from the other. The exact crosswalk is stored as confidential `r3_principal` and `authority_principal` extensions on the authoritative HR record. Proposal submission resolves the institutional principal from that record at invocation time.
+
+When no association operation exists in the active broker, the additive broker exposes `hr.associate_principal`. Its authority is `resource=r3:hr`, `action=hr.associate_principal`, `operation=write`, and a scope bound to the exact record and both principals: `r3:hr:identity-association/{resident_id}/{r3_principal}/{authority_principal}`. For the currently authorized association, the exact scope is `r3:hr:identity-association/r3:grace/resident:Grace/resident:grace`. The request must use expected HR revision 1. It preserves other HR fields, credential records, and grants; it refuses a partial or conflicting mapping and is idempotent when the exact mapping already exists. This tool issues no grant and must remain unusable until its exact Steward-controlled authorization is active.
