@@ -7,14 +7,15 @@
 # Purpose: Independent R3 tool router, exact-grant capabilities, and durable audit.
 # Execution Model: Loopback HTTP server with fail-closed resident authentication and capability authorization.
 # Observability: tool_audit and canonical authority audit; no credentials or proposal payloads logged.
-# Dependencies: runtime.capabilities; runtime.capability_authority; optional Comms5 MCP SDK client.
-# Authority: R3 exact-grant contract; narrow Comms5 draft submission requires a separate authenticated Comms5 transport.
+# Dependencies: runtime.capabilities; runtime.capability_authority; internal Riverview proposal API.
+# Authority: R3 exact-grant contract; internal proposal submission also requires Riverview's exact resident grants.
 # Changed: 2026-11-06T01:39:36Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Add opt-in, single-operation Comms5 proposal adapter.
 # Changed: 2026-11-06T01:48:39Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Report authorized backend failures separately from authorization denials.
 # Changed: 2026-11-06T02:15:00Z | GRACE-AUTONOMY-P2 | Codex GPT-6 | Add exact-grant Comms5 proposal and objective status reads.
+# Changed: 2026-11-06T15:30:00Z | GRACE-INTERNAL-PROPOSAL | Codex GPT-6 | Route proposal submit/read through Riverview's internal registry endpoint.
 # Supersedes: Revision 1.2.1; preserves existing routes and write capability.
-# Contracts: docs/r3-native-tool-contract.md; riverview-comms-contract:5.0
-# Tests: tests/test_tool_server.py; tests/test_proposal_submission_integration.py
+# Contracts: docs/r3-native-tool-contract.md; /api/v1/internal/resident-proposals
+# Tests: tests/test_tool_server.py; tests/test_internal_proposal_tool_integration.py
 # History/Predecessor: Git blob 36e9f176584d51b98f86ff3c88c30582712687e0
 """R3 native tool server: initial read-only status capability."""
 from __future__ import annotations
@@ -163,29 +164,26 @@ def handler_for(router):
 
 
 def build_router(*, audit_db, catalog=None, hosts=None, authority_db=None,
-                 comms5_proposal_url=None, comms5_proposal_token_file=None,
-                 comms5_proposal_classification="internal"):
+                 institutional_proposal_url=None, institutional_proposal_credential_file=None):
     if hosts is not None and catalog is None:
         raise ValueError("Hosts require a catalog")
-    if (comms5_proposal_url is None) != (comms5_proposal_token_file is None):
-        raise ValueError("Comms5 proposal integration requires both endpoint and credential file")
+    if (institutional_proposal_url is None) != (institutional_proposal_credential_file is None):
+        raise ValueError("Internal proposal integration requires both endpoint and credential file")
     authority = R3Authority(authority_db) if authority_db is not None else None
     executor = HostExecutor(catalog, hosts) if catalog else None
     capabilities = ()
-    if comms5_proposal_url is not None:
-        from runtime.comms5_proposals import (
-            Comms5DraftClient, objective_status_capability,
-            proposal_status_capability, proposal_submission_capability, read_bearer_token,
+    if institutional_proposal_url is not None:
+        from runtime.institutional_proposals import (
+            InstitutionalProposalClient, proposal_status_capability,
+            proposal_submission_capability, read_resident_credential,
         )
-        client = Comms5DraftClient(
-            comms5_proposal_url,
-            read_bearer_token(comms5_proposal_token_file),
-            classification=comms5_proposal_classification,
+        client = InstitutionalProposalClient(
+            institutional_proposal_url,
+            read_resident_credential(institutional_proposal_credential_file),
         )
         capabilities = (
             proposal_submission_capability(client),
             proposal_status_capability(client),
-            objective_status_capability(client),
         )
     return ToolRouter(audit_db, executor, authority=authority, capabilities=capabilities)
 
@@ -196,10 +194,8 @@ def main():
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--audit-db", type=Path, required=True)
     parser.add_argument("--authority-db", type=Path)
-    parser.add_argument("--comms5-proposal-url")
-    parser.add_argument("--comms5-proposal-token-file", type=Path)
-    parser.add_argument("--comms5-proposal-classification", choices=("internal", "river"),
-                        default="internal")
+    parser.add_argument("--institutional-proposal-url")
+    parser.add_argument("--institutional-proposal-credential-file", type=Path)
     parser.add_argument("--catalog", type=Path)
     parser.add_argument("--hosts", type=Path)
     args = parser.parse_args()
@@ -212,9 +208,8 @@ def main():
         catalog=args.catalog,
         hosts=args.hosts,
         authority_db=args.authority_db,
-        comms5_proposal_url=args.comms5_proposal_url,
-        comms5_proposal_token_file=args.comms5_proposal_token_file,
-        comms5_proposal_classification=args.comms5_proposal_classification,
+        institutional_proposal_url=args.institutional_proposal_url,
+        institutional_proposal_credential_file=args.institutional_proposal_credential_file,
     )
     ThreadingHTTPServer((args.host, args.port), handler_for(router)).serve_forever()
 
