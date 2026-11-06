@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_ARCHITECTURAL_DECISION_LOG.md
 Component: R3A-DECISION-LOG
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-06T03:39:05Z
 Created By: Codex GPT-6
 Purpose: Record R3A architectural decisions and distinguish directives from unresolved proposals.
@@ -11,10 +11,12 @@ Observability: Git history and decision status.
 Dependencies: Steward Directive — R3A Architecture Baseline and AP0 Specification; R3 Charter Revision 2; Phase 0A investigation; modular architecture audit commit 7e6d8d0.
 Authority: Steward directive for confirmed R3A decisions; approved R3 Charter Revision 2 for inherited institutional requirements.
 Changed: 2026-11-06T03:39:05Z | R3A-BASELINE-001 | Codex GPT-6 | Establish initial architectural decision log.
+Changed: 2026-11-06T04:57:50Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Record corrected roadmap priorities and mandatory governance.
+Changed: 2026-11-06T05:03:56Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Clarify corrected AP ownership and versioned exception tracking.
 Supersedes: None.
 Contracts: R3A Architecture Charter; roadmap; AP0 specification; module and state contracts.
 Tests: Not run; documentation only.
-History/Predecessor: New document; initial publication recorded in Git.
+History/Predecessor: Git blob b44e2a30825c86074424469bd7d8481036edad46 at baseline commit eca8b73de0fe5bd67bdb0f0b8b0a92470b07b530.
 -->
 # R3A Architectural Decision Log
 
@@ -36,15 +38,17 @@ History/Predecessor: New document; initial publication recorded in Git.
 | AD-010 | Autonomy is primary; recoverable blockages do not silently terminate activities. | DIRECTED — item 10; consistent with R3 bootstrap. | Preserve continuation and evidence-backed block outcomes within authority. |
 | AD-011 | Completion needs actual deliverable evidence; demos/mocks do not establish operational completion. | DIRECTED — item 11; consistent with R3 governance. | Use substantive acceptance and exact revision/environment evidence. |
 | AD-012 | Testing is risk-based, bounded and proportional. | DIRECTED — item 12. | Do not turn validation into blanket gates or expand tests in this documentation task. |
-| AD-013 | Engineering and escalated reasoning are early institutional priorities. | DIRECTED — item 13; Engineering is a principal output in R3 Charter Revision 2. | AP2/AP3 are early after AP0, subject to dependencies and evidence. |
-| AD-014 | Secure remote Steward operation is an early requirement. | DIRECTED — item 14; inherited remote-access direction in R3 Charter Revision 2. | AP1 is early; avoid exposing internal services directly. |
+| AD-013 | Engineering and escalated reasoning are early institutional priorities. | DIRECTED — item 13; Engineering is a principal output in R3 Charter Revision 2. | Grace autonomy/event continuity is AP1; Engineering, independent verification and escalated reasoning are AP2. |
+| AD-014 | Secure remote Steward operation is an early requirement; mobile access and authentication are included. | DIRECTED — item 14 and corrected roadmap directive; inherited remote-access direction in R3 Charter Revision 2. | Assigned to AP3; may proceed alongside AP1/AP2 when dependencies permit. Avoid exposing internal services directly. |
 | AD-015 | Secrets management uses Bitwarden; future TOTP/YubiKey must be accommodated. | DIRECTED — item 15. | Integration/provider and machine-auth details remain open. |
-| AD-016 | Architecture accommodates backup, privacy, emergency lockdown and cryptographic erasure. | DIRECTED — item 16; backup/privacy direction inherited from R3 Charter Revision 2. | Design constraints begin in AP0; full capabilities are later work. |
-| AD-017 | Jessica character-development capability belongs in AP4. | DIRECTED — item 17. | Excluded from AP0. |
-| AD-018 | Spatial/Quest presentation belongs in AP5 and cannot block functional interfaces. | DIRECTED — item 18; Quest 2 direction inherited from R3 Charter Revision 2. | Spatial is a later client over common state. |
+| AD-016 | Architecture accommodates backup, privacy, emergency lockdown and cryptographic erasure. | DIRECTED — item 16; corrected roadmap directive; backup/privacy direction inherited from R3 Charter Revision 2. | Basic recovery and backup provisions are AP0; mature backup, privacy lifecycle, lockdown and cryptographic erasure are AP6; design constraints apply from AP0. |
+| AD-017 | Jessica character-development capability belongs in AP4, within broader institutional expansion. | DIRECTED — item 17 and corrected roadmap directive. | AP4 owns institutional expansion, including Jessica's capability; excluded from AP0. |
+| AD-018 | Spatial institution, avatars and Quest presentation belong in AP5 and cannot block functional interfaces. | DIRECTED — item 18 and corrected roadmap directive; Quest 2 direction inherited from R3 Charter Revision 2. | AP5 owns spatial presentation over common state; later AP6 capabilities do not gate AP5 or core functional interfaces. |
 | AD-019 | Existing R3 coding and provenance standards remain unless an explicit R3A supplement is approved. | DIRECTED — item 19. | `hints/file-provenance.md` governs this documentation. |
 | AD-020 | PostgreSQL is the intended foundation for R3 durable structured records/history. | INHERITED — Steward-approved R3 Charter Revision 2, §11. | AP0 shall align with PostgreSQL; deployment topology, schema and migration remain open. |
 | AD-021 | Existing R/3 production services/data are not modified by R3A documentation or implementation work absent separate authorization. | DIRECTED — scope and development constraints. | Isolated development only; no production migration or deployment in this task. |
+| AD-022 | The Steward-approved, versioned Master Roadmap is authoritative for every R3A assignment; deviations require a versioned exception and explicit Steward approval before execution. | DIRECTED — R3A Baseline 1.0 Correction, §2. | Assignments identify approved revision, phase/milestone, requirement IDs, authorized scope, acceptance criteria and approved exception (or none). Until Roadmap Baseline 1.0 is approved, no implementation is authorized under it. |
+| AD-023 | Parallel Codex work is coordinated through a designated GitHub issue per active milestone, with explicit workstreams, stable contracts, named integration authority, checkpoints and controlled merge/verification. | DIRECTED — R3A Baseline 1.0 Correction, §3 (R3A-GOV-02). | AP0 remains primarily sequential; parallel work is allowed only when contracts are stable and each session remains roadmap-compliant. The issue cannot override Steward authority or the Master Roadmap. |
 
 ## Specification proposals, not additional Steward decisions
 
@@ -56,4 +60,6 @@ History/Predecessor: New document; initial publication recorded in Git.
 
 ## Open decisions
 
-See [R3A Punch List and Parking Lot](R3A_PUNCH_LIST_AND_PARKING_LOT.md#parking-lot--unresolved-not-rejected). In particular, database deployment/migrations; process manager; scheduling and resource policy; module artifact trust and compatibility; configuration reload/secrets; event retention/privacy/erasure; diagnostics transport/auth; and recovery/idempotency semantics remain unsettled. This log records no decision on those matters.
+The AP phase sequencing in this revision follows the Steward's correction. The prior roadmap revision assigned remote Steward access to AP1 and escalated reasoning to AP3; those phase placements are superseded for roadmap ownership by this correction, with remote Steward/mobile access in AP3 and escalated reasoning in AP2. No technical conflict preventing the corrected ordering was identified. AP3 work may run in parallel with AP1/AP2 only where dependencies permit.
+
+See [R3A Punch List and Parking Lot](R3A_PUNCH_LIST_AND_PARKING_LOT.md#parking-lot--unresolved-not-rejected) for remaining technical decisions, including database deployment/migrations; process manager; scheduling/resource policy; module artifact trust/compatibility; configuration reload/secrets; event retention/privacy/erasure; diagnostics transport/auth; and recovery/idempotency semantics. See the [roadmap exception register](R3A_ROADMAP_EXCEPTION_REGISTER.md) for versioned deviations; none is currently approved.

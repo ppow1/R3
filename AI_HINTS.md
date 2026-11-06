@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.0.7
+File Revision: 1.0.8
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -13,6 +13,7 @@ Authority: R3 engineering navigation, subordinate to approved charter
 Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-001 | ChatGPT GPT-6 | Add concise development bootstrap pointer
 Changed: 2026-11-06T03:39:05Z | R3A-BASELINE-001 | Codex GPT-6 | Add the R3A architecture baseline index.
 Changed: 2026-11-06T03:49:54Z | R3A-BASELINE-001 | Codex GPT-6 | Record documentation review scope accurately.
+Changed: 2026-11-06T05:02:18Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Require R3A roadmap compliance in engineering session bootstrap.
 Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-001 | ChatGPT GPT-6 | Index manifest-driven deployment runbook and scripts
 Changed: 2026-11-04 UTC | R3-GRANT-RUNBOOK-MIGRATION | ChatGPT GPT-6 | Direct all new grant/delegation runbooks to R3
 Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Index resident avatar implementation notes
@@ -20,7 +21,7 @@ Changed: 2026-10-31 UTC | R3-COMMS-001 | ChatGPT GPT-6 | Index mandatory Comms i
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Manual source/index review; no automated tests run.
-History/Predecessor: Git blob c434f7feb31931f1ef57658ac4e55ed1bee09675
+History/Predecessor: Git blob 7747ef612528c990621bfb9e907473ac68da925a
 -->
 # AI_HINTS.md — Riverview 3
 
@@ -44,6 +45,7 @@ Start with [the hints index](hints/README.md). Keep this root file short; put de
 - Preserve authorization, audit, recovery, substantive verification, and truthful UI status without unnecessary bureaucracy.
 - Do not migrate Riverview 2 wholesale or modify production/backups without explicit authorization.
 - Favor small, testable changes and verified outcomes.
+- For R3A engineering assignments, follow the mandatory approved-roadmap and coordination gates in [Development Bootstrap](hints/development-bootstrap.md) and [Development Governance](hints/development-governance.md). An unapproved roadmap revision does not authorize implementation.
 
 ## First-level references
 

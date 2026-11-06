@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_ARCHITECTURE_CHARTER.md
 Component: R3A-ARCHITECTURE-CHARTER
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-06T03:39:05Z
 Created By: Codex GPT-6
 Purpose: Establish the authorized R3A architecture baseline and requirement vocabulary.
@@ -11,10 +11,12 @@ Observability: Git revision and linked evidence documents.
 Dependencies: Steward Directive — R3A Architecture Baseline and AP0 Specification; approved R3 Charter Revision 2; AI_HINTS.md; hints/file-provenance.md.
 Authority: Steward directive; this document supplements rather than silently supersedes the approved R3 Charter Revision 2.
 Changed: 2026-11-06T03:39:05Z | R3A-BASELINE-001 | Codex GPT-6 | Establish initial R3A baseline.
+Changed: 2026-11-06T05:02:18Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Index the versioned roadmap exception register.
+Changed: 2026-11-06T05:03:56Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Record roadmap correction provenance in the baseline index.
 Supersedes: None.
 Contracts: R3A master roadmap, AP0 specification, module lifecycle and contract specification, state machine and diagnostic contract, bounded testing and acceptance policy.
 Tests: Not run; documentation only.
-History/Predecessor: New document; initial publication recorded in Git.
+History/Predecessor: Git blob 5d328ef48b340bbd7914fcd4c356c4a0afe75a6c at baseline commit eca8b73de0fe5bd67bdb0f0b8b0a92470b07b530.
 -->
 # R3A Architecture Charter
 
@@ -94,6 +96,7 @@ Documentation delivery does not advance an executable requirement beyond PLANNED
 - [Master Roadmap AP0–AP6](R3A_MASTER_ROADMAP_AP0_AP6.md)
 - [R3A Punch List and Parking Lot](R3A_PUNCH_LIST_AND_PARKING_LOT.md)
 - [Architectural Decision Log](R3A_ARCHITECTURAL_DECISION_LOG.md)
+- [Roadmap Exception Register](R3A_ROADMAP_EXCEPTION_REGISTER.md) — versioned deviations; proposals require recorded Steward approval before execution.
 - [AP0 Technical Specification](R3A_AP0_TECHNICAL_SPECIFICATION.md)
 - [Module Lifecycle and Contract Specification](R3A_MODULE_LIFECYCLE_AND_CONTRACT_SPEC.md)
 - [State Machine and Diagnostic Contract](R3A_STATE_MACHINE_AND_DIAGNOSTIC_CONTRACT.md)

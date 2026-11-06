@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_AP0_TECHNICAL_SPECIFICATION.md
 Component: R3A-AP0-SPECIFICATION
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-06T03:39:05Z
 Created By: Codex GPT-6
 Purpose: Bound the AP0 institutional foundation and state its functional acceptance requirements.
@@ -11,10 +11,11 @@ Observability: Acceptance evidence linked to AP0 requirement IDs at a named revi
 Dependencies: R3A Architecture Charter; Module Lifecycle and Contract Specification; State Machine and Diagnostic Contract; Bounded Testing and Acceptance Policy.
 Authority: Steward directive authorizes AP0 specification only; implementation requires further Steward authorization.
 Changed: 2026-11-06T03:39:05Z | R3A-BASELINE-001 | Codex GPT-6 | Establish initial AP0 specification.
+Changed: 2026-11-06T04:57:50Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Add AP0 basic backup/restore provision and traceability.
 Supersedes: None.
 Contracts: R3A architectural decisions AD-001–AD-009, AD-021.
 Tests: Not run; documentation only.
-History/Predecessor: New document; initial publication recorded in Git.
+History/Predecessor: Git blob 46f8b61035b874abf2505006a2ba154e913d40d6 at baseline commit eca8b73de0fe5bd67bdb0f0b8b0a92470b07b530.
 -->
 # AP0 Technical Specification
 
@@ -33,6 +34,7 @@ History/Predecessor: New document; initial publication recorded in Git.
 - Validated external configuration.
 - Actual health, lifecycle, transition, timing, progress and exception diagnostics.
 - Restart/recovery behavior for Ring 0/CME and in-flight generic activities.
+- Basic database/configuration backup and restore provisions; mature backup infrastructure remains AP6.
 - Bounded, risk-based validation with evidence.
 
 ### Excluded
@@ -66,6 +68,7 @@ Full Engineering work management/execution; Jessica or resident character develo
 | AP0-010 | Diagnostics SHALL expose actual process, module, activity and resource lifecycle, timestamps/durations, progress, exceptions, freshness and evidence references. | AP0-004/005; interface/auth decision. | Compare diagnostic output to durable records through healthy, failed, restarting and stale/unavailable states; no synthetic status. |
 | AP0-011 | AP0 SHALL preserve external process and data separation from production R/3. | Isolated Camrui worktree/dev deployment plan; credentials/data decision. | Evidence shows dev-only paths/service/process/database; no production service/config/database touched. |
 | AP0-012 | AP0 validation SHALL be bounded, risk-based and proportional without relaxing substantive acceptance. | Testing and Acceptance Policy. | Evidence bundle includes named revision, scenarios, actual results, residual gaps and reviewer/acceptance status; no suite expansion unless separately authorized. |
+| AP0-013 | AP0 SHALL provide a basic, usable backup and restore path for its own database and effective non-secret configuration/references. | AP0-004/009; PostgreSQL backup/restore and protected-reference decisions. | On isolated disposable state, create a consistent backup, restore it to a separate target, verify schema/config revision, activity/event lineage and diagnostic health. Record artifacts and results; do not use production state. |
 
 ## Persistence and configuration constraints
 
@@ -78,7 +81,7 @@ Runtime behavior SHALL be configured outside executable source. R3 bootstrap cur
 This is a dependency-ordered proposal for subsequent review; no step may begin until the Steward authorizes implementation.
 
 1. Resolve the AP0 blocking decisions (process owner, PostgreSQL topology/schema/migrations, config source and reload, CME restart policy, resource dimensions/limits, secret references, diagnostic transport/auth, and recovery/idempotency).
-2. Implement isolated external configuration validation and database schema/migration foundations; capture effective config and schema revisions.
+2. Implement isolated external configuration validation and database schema/migration foundations; capture effective config and schema revisions; establish the basic AP0 backup/restore path before accepting durable state.
 3. Implement Ring 0 health/lifecycle supervision and a separately startable/stoppable CME child component; prove CME restart leaves Ring 0 alive.
 4. Implement durable versioned state-machine definitions, events and generic activity continuation/reconciliation; prove valid/invalid transitions and crash recovery.
 5. Implement minimal module and capability/resource registries with discovery separated from authorization; exercise install/activate/stop/replace without Ring 0 restart.
@@ -87,4 +90,4 @@ This is a dependency-ordered proposal for subsequent review; no step may begin u
 
 ## AP0 exit condition
 
-AP0 is ready for independent acceptance only when every AP0 acceptance row has evidence for the same named integration revision in the isolated target, the failure/restart/recovery path is exercised, diagnostics match the authoritative state/event data, production remains untouched, and a reviewer can distinguish verified behavior from remaining limitations. AP0 does not prove Engineering completion, resident autonomy, remote production access, or production readiness.
+AP0 is ready for independent acceptance only when every AP0 acceptance row has evidence for the same named integration revision in the isolated target, the failure/restart/recovery path and basic backup restore are exercised, diagnostics match the authoritative state/event data, production remains untouched, and a reviewer can distinguish verified behavior from remaining limitations. AP0 does not prove Engineering completion, resident autonomy, remote production access, mature backup infrastructure, or production readiness.

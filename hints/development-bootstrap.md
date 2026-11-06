@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/development-bootstrap.md
 Component: ENG-DEV-BOOTSTRAP
-File Revision: 1.0.7
+File Revision: 1.0.8
 Created: 2026-11-05 UTC (date only; exact time not independently verified)
 Created By: ChatGPT GPT-6
 Purpose: Standardize the start of new R3 feature-development conversations
@@ -18,11 +18,13 @@ Changed: 2026-11-05 UTC | R3-DEPLOY-BOOTSTRAP-005 | ChatGPT GPT-6 | Require veri
 Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-003 | ChatGPT GPT-6 | Require dated cited evidence correction
 Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-002 | ChatGPT GPT-6 | Require local-evidence-first gateway execution and PowerShell clipboard fallback
 Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-001 | ChatGPT GPT-6 | Initial bootstrap guidance
+Changed: 2026-11-06T04:57:50Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Require R3A roadmap traceability and coordination governance at startup.
+Changed: 2026-11-06T05:03:56Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Link exact roadmap gate and strengthen mandatory coordination startup checks.
 Supersedes: None
 Superseded By: None
 Contracts: hints/file-provenance.md; hints/development-governance.md
 Tests: Link and content review; no runtime deployment
-History/Predecessor: Git blob d136a4ddf31f199615670b4c91856f5fd22a11b1
+History/Predecessor: Git blob 69ec35665ad76479a6e3ddd7747b0c5627e6d027
 -->
 # R/3 Development Bootstrap
 
@@ -38,6 +40,14 @@ History/Predecessor: Git blob d136a4ddf31f199615670b4c91856f5fd22a11b1
 6. Before coding, state the feature objective, proposed minimal change, affected interfaces/configuration, baseline, and **proportionate Definition of Done** from [development governance](development-governance.md). Ask only for genuinely missing authorization or requirements.
 7. **Use authorized Riverview Comms 1.1 / command gateway first** when machine queries, code writing, execution, deployment or testing are needed. Discover capabilities and grants; if unavailable or blocked, use the documented PowerShell 7 clipboard fallback: `Clear-Host`, capture stdout/stderr/exit status in variables, display consolidated `$result`, and `Set-Clipboard -Value $result`. Do not repeat expensive tests when reliable evidence already exists.
 8. Implement and produce the standard delivery summary: source branch and exact commit, changed files, configuration/interface changes, targeted checks and results, backup confirmation if deploying, observed deployment status, and any unresolved issues. Do not claim completion without evidence.
+
+## R3A roadmap compliance — mandatory
+
+For any R3A engineering assignment, read the [Master Roadmap (use only a Steward-approved revision)](../docs/architecture/R3A_MASTER_ROADMAP_AP0_AP6.md), [R3A-GOV-01](../docs/architecture/R3A_MASTER_ROADMAP_AP0_AP6.md#roadmap-governance--r3a-gov-01), the [versioned exception register](../docs/architecture/R3A_ROADMAP_EXCEPTION_REGISTER.md), and [R3A development governance](development-governance.md). Record in the assignment before implementation: approved roadmap revision; AP phase and milestone; requirement IDs; authorized scope; acceptance criteria; applicable approved exception ID or `None`.
+
+If the Master Roadmap revision is not yet Steward-approved, or any required assignment field is missing, do not begin R3A implementation; report the missing approval/assignment information. Do not infer phase, scope or acceptance requirements from a branch, issue, prior session or architecture proposal. Any proposed deviation requires a versioned exception and explicit Steward approval recorded before the deviation is executed. Codex sessions, residents and engineering coordinators may not independently reprioritize or change acceptance criteria. A Steward-authorized documentation correction may update the proposed roadmap without authorizing implementation.
+
+For simultaneous workstreams, follow **R3A-GOV-02** in [development governance](development-governance.md): use one designated GitHub coordination issue per active milestone and the specified ownership, stable-contract, checkpoint and integration rules. The issue coordinates execution; it does not override the approved roadmap or Steward authority.
 
 ## Production activation readiness
 

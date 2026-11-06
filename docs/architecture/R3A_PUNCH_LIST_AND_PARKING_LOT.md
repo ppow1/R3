@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_PUNCH_LIST_AND_PARKING_LOT.md
 Component: R3A-PUNCH-LIST
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-06T03:39:05Z
 Created By: Codex GPT-6
 Purpose: Track R3A requirements, dependencies, acceptance and intentionally unresolved decisions.
@@ -11,10 +11,12 @@ Observability: Git history; requirement status and linked evidence.
 Dependencies: R3A Architecture Charter; Master Roadmap; AP0 Technical Specification.
 Authority: Steward directive; no implementation authorized.
 Changed: 2026-11-06T03:39:05Z | R3A-BASELINE-001 | Codex GPT-6 | Establish initial punch list and parking lot.
+Changed: 2026-11-06T04:57:50Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Align phase ownership and add roadmap/coordination governance requirements.
+Changed: 2026-11-06T05:03:56Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Record milestone issue/integration authority prerequisite.
 Supersedes: None; supplements rather than closes docs/PUNCH_LIST.md and docs/PARKING_LOT.md.
 Contracts: R3A Architecture Charter; State Machine and Diagnostic Contract; Bounded Testing and Acceptance Policy.
 Tests: Not run; documentation only.
-History/Predecessor: New document; initial publication recorded in Git.
+History/Predecessor: Git blob 7df2214eea70ee5be08a42466641fc1956d86307 at baseline commit eca8b73de0fe5bd67bdb0f0b8b0a92470b07b530.
 -->
 # R3A Punch List and Parking Lot
 
@@ -33,14 +35,20 @@ History/Predecessor: New document; initial publication recorded in Git.
 | R3A-007 | P0 | Expose actual state, transitions, timing, progress and exceptions. | R3A-003/004; diagnostic contract. | HMI/diagnostic API matches durable records and explicitly marks unknown, stale and unavailable readings. | PLANNED |
 | R3A-008 | P0 | Recover CME/process interruptions and preserve recoverable work. | R3A-002/003/004; idempotency/side-effect decisions. | Restart produces a durable recovery decision; recoverable work remains open and resumable; no false completion or silent termination. | PLANNED |
 | R3A-009 | P0 | Validate AP0 with bounded evidence. | Acceptance policy; isolated runtime and data. | Contract, failure/restart and operational acceptance evidence is captured for the exact revision; production R/3 remains untouched. | PLANNED |
-| R3A-010 | P1 | Provide secure remote Steward operation early. | AP0 truthful diagnostics; auth/gateway and secret decisions. | Authenticated encrypted remote use supports only authorized operations and exposes real status without leaking secrets. | PLANNED |
-| R3A-011 | P1 | Deliver genuine Engineering execution led operationally by Grace. | AP0; capability registry; work-order and evidence contracts. | Real authorized objectives continue through interruption to verified deliverable or explicit evidence-backed block. | PLANNED |
-| R3A-012 | P1 | Support auditable escalated reasoning. | AP0 activity/evidence continuity; provider/privacy policy. | Escalation and return preserve activity identity, evidence, authorization and failure recovery. | PLANNED |
-| R3A-013 | P1 | Integrate Bitwarden secrets management; reserve future TOTP/YubiKey support. | Auth/provider and machine identity decisions. | Secret values are obtained through the approved integration and never committed or emitted in diagnostics; future factors have an approved compatible path. | PLANNED |
-| R3A-014 | P1 | Accommodate backup, privacy, lockdown and cryptographic erasure. | Database/key/retention ownership decisions. | Data model and interfaces preserve the ability to implement approved backup/restore, access restriction, emergency lockdown and crypto-erasure policies. | PLANNED |
+| R3A-010 | P1 | Provide secure remote Steward and mobile operations in AP3; may proceed alongside AP1/AP2 where dependencies permit. | AP0 actual diagnostics/API; AP3 auth/gateway and privacy decisions. | Authenticated, encrypted remote/mobile use supports only authorized operations, exposes real status and protects private data/secrets. | PLANNED — AP3 |
+| R3A-011 | P1 | Deliver genuine Engineering execution led operationally by Grace. | AP0; AP1 Grace autonomy/continuity; capability, work-order and evidence contracts. | Real authorized objectives continue through interruption to independently verified deliverable or explicit evidence-backed block. | PLANNED — AP2 |
+| R3A-012 | P1 | Support auditable escalated reasoning. | AP0 activity/evidence continuity; AP1 continuation; AP2 work/evidence contracts; provider/privacy policy. | Escalation and return preserve activity identity, evidence, authorization and failure recovery. | PLANNED — AP2 |
+| R3A-013 | P1 | Integrate Bitwarden secrets management; reserve future TOTP/YubiKey support. | AP3 auth/provider and machine identity decisions. | Secret values are obtained through approved Bitwarden integration and never committed or emitted in diagnostics; future factors have an approved compatible path. | PLANNED — AP3 |
+| R3A-014 | P1 | Deliver mature backup/restore, privacy lifecycle, emergency lockdown and cryptographic erasure; AP0 basic provisions are separate. | AP0 basic backup/recovery; database/key/retention ownership and Steward policy decisions. | Mature operation is recoverable and evidenced; privacy/lockdown/erasure follow approved policy and key lifecycle. | PLANNED — AP6 |
 | R3A-015 | P2 | Place Jessica's character-development capability in AP4. | AP0 module/identity contract; HR/privacy decisions. | Jessica's capability is a separately versioned module with authorized, provenance-preserving personnel/canon interactions. | DEFERRED — AP4 |
-| R3A-016 | P2 | Place spatial/Quest presentation in AP5. | AP0 APIs; actual hardware/runtime inventory. | A spatial client presents shared actual state and cannot gate desktop/mobile functionality. | DEFERRED — AP5 |
+| R3A-016 | P2 | Place spatial institution, avatars and Quest integration in AP5. | AP0 APIs; actual hardware/runtime and avatar inventory. | Spatial clients present shared actual state and cannot gate desktop/mobile functionality. | DEFERRED — AP5 |
 | R3A-017 | P0 | Preserve R3 provenance and coding standards. | `hints/file-provenance.md`; explicit R3A supplement approval for any change. | All controlled files meet headers/predecessor/version requirements; no silent policy relaxation. | PLANNED |
+| R3A-018 | P0 | Establish basic AP0 database/configuration backup and restore provisions alongside recovery. | AP0 database/config ownership; isolated storage and restore procedure decisions. | A consistent backup of disposable AP0 state/config references can be restored and reconciled; evidence records source revision/schema/config and restore result. No production state is used. | PLANNED — AP0 |
+| R3A-019 | P1 | Establish Grace autonomy, event-driven continuation, model routing, knowledge use and notifications. | AP0 module/event/recovery/registry contracts; model, knowledge and notification source inventory. | Grace repeatedly receives real events, continues authorized work across interruption, routes models and grounds knowledge through configured providers, and observes notification outcomes or explicit blockers. | PLANNED — AP1 |
+| R3A-021 | P2 | Support institutional expansion, onboarding and resident responsibilities, including Jessica's character-development role. | AP0 module/identity; AP1 continuity; HR/personnel and privacy ownership. | Additional institutional responsibilities enter through versioned contracts with verified ownership, authorization and provenance. | PLANNED — AP4 |
+| R3A-023 | P3 | Advance future capabilities, mature resilience and approved deferred enhancements. | AP0–AP5 durable contracts; Steward decisions for each deferred capability. | Each addition preserves compatibility, recoverability and truthful status; acceptance is defined per approved work item. | DEFERRED — AP6 |
+| R3A-GOV-01 | P0 | Enforce approved roadmap traceability and deviation control. | Steward-approved roadmap revision; exception register. | Every assignment cites the required roadmap fields; no deviation executes until its versioned exception has explicit Steward approval. | PLANNED — governance |
+| R3A-GOV-02 | P0 | Coordinate parallel Codex engineering through one milestone GitHub issue and a designated integration authority. | Assignment scope; stable contracts; separate worktrees/branches; Steward roadmap governance. | Each concurrent stream has owner/boundaries, progress/dependency/blocker/handoff reports and issue checkpoints; integration authority controls merge/verification; all work remains roadmap-compliant. | PLANNED — governance |
 
 ## Parking lot — unresolved, not rejected
 
@@ -58,4 +66,5 @@ History/Predecessor: New document; initial publication recorded in Git.
 | R3A-L010 | CME resource supervision scope versus host/container/orchestrator responsibilities. | AP0 resource contract. | Steward / platform owner. | OPEN |
 | R3A-L011 | Emergency lockdown semantics, emergency authority, unlock path and operator continuity. | Security design before external/production operation. | Steward. | OPEN |
 | R3A-L012 | Cryptographic erasure key ownership, key rotation, backups and residual metadata policy. | AP6 detailed design. | Steward / privacy and security owners. | OPEN |
-| R3A-L013 | Future TOTP/YubiKey factors and account recovery policy. | AP1/AP6 implementation. | Steward. | OPEN |
+| R3A-L013 | Future TOTP/YubiKey factors and account recovery policy. | AP3/AP6 implementation. | Steward. | OPEN |
+| R3A-L014 | Name one GitHub coordination issue and one integration authority for each authorized active milestone; no active milestone issue/authority is designated while Roadmap Baseline 1.0 awaits approval. | Before milestone work, and before any parallel stream. | Milestone coordinator / Steward for roadmap authority. | OPEN |
