@@ -2,20 +2,21 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cli.py
 Component: R3A-OPERATOR-CLI
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Expose operator-invoked AP0 diagnostics, CME controls and isolated backup actions.
 Execution Model: Local command line using Unix sockets and PostgreSQL client utilities.
 Observability: JSON responses with explicit operation results and source revisions.
 Dependencies: r3a_runtime.config/control/diagnostics/backup.
-Authority: AP0-M1 authorized in Issue #42; AP1-M1 authorized in Issue #43; isolated R3A only.
+Authority: AP1 / R3A-019 authorized by Steward; isolated R3A only.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Finalize local diagnostics, lifecycle and backup CLI.
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Add durable idempotent Grace objective submission.
+Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Expose durable notification intake and configured model route selection.
 Supersedes: None.
 Contracts: AP0-007/010/013; R3A-019; AP0-M1 D8/D9.
-Tests: Live AP1-M1 objective submission and duplicate-key verification.
-History/Predecessor: New file; initial publication recorded in Git.
+Tests: tests/test_r3a_ap1.py; live AP1 event and model evidence pending this revision.
+History/Predecessor: Git blob 1cd6fc7497666483fd6da0d8ecdaaedae07a827f at commit cdcb63ce1fa33975ce4468d5121e4bfef5429f92.
 """
 from __future__ import annotations
 
@@ -60,7 +61,9 @@ async def _run(args: argparse.Namespace) -> Any:
         payload = {"module_id": args.module_id, "capability_id": args.capability_id,
                    "reason": args.reason}
     elif args.command == "grace-objective-submit":
-        payload = {"objective": args.objective}
+        payload = {"objective": args.objective, "event_kind": args.event_kind}
+        if args.route_id:
+            payload["route_id"] = args.route_id
     elif args.command == "config-reload":
         operation = "config.reload"
     return await control_request(settings.control_socket, operation, payload,
@@ -76,6 +79,9 @@ def main() -> None:
     objective = commands.add_parser("grace-objective-submit",
                                     help="Durably submit a read-only objective to the configured Grace resident")
     objective.add_argument("--objective", required=True)
+    objective.add_argument("--event-kind", choices=("objective", "notification"), default="objective",
+                           help="Durably classify this incoming event for Grace")
+    objective.add_argument("--route-id", help="Configured Grace model route; defaults to bootstrap policy")
     objective.add_argument("--idempotency-key", required=True)
     for name in ("module-install", "module-activate", "module-replace"):
         cmd = commands.add_parser(name)

@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -13,10 +13,11 @@ Authority: AP0-M1 authorized by Steward in Issue #42; AP1-M1 authorized in Issue
 Changed: 2026-11-06T15:06:00Z | R3A-AP0-M1 | Codex GPT-6 | Add durable PostgreSQL store.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Add validated machine definitions, idempotent grants/lifecycle, retry-safe leases and guarded state/event commits.
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Persist Grace objective inputs/results, deduplicate intake and renew activity/resource leases.
+Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Persist idempotent objective and notification event metadata in the existing activity ledger.
 Supersedes: None.
 Contracts: AP0-004/005/006/008/009/010/013; R3A-019; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007.
-Tests: Live AP1-M1 intake, deduplication, and CME recovery evidence in Issue #43.
-History/Predecessor: New file; initial publication recorded in Git.
+Tests: tests/test_r3a_ap1.py; live AP1 event and recovery evidence pending this revision.
+History/Predecessor: Git blob c7a1be0806f1e5ac5a7c2400364d5cef9dab2943 at commit cdcb63ce1fa33975ce4468d5121e4bfef5429f92.
 """
 from __future__ import annotations
 
@@ -445,19 +446,30 @@ class Store:
             if not accepted:
                 raise InvalidTransition("Observer activity could not enter QUEUED")
 
-    async def submit_grace_objective(self, objective: str, idempotency_key: str) -> dict[str, Any]:
-        """Durably enqueue one read-only Grace objective; duplicate keys return the same activity."""
+    async def submit_grace_objective(self, objective: str, idempotency_key: str,
+                                     event_kind: str = "objective",
+                                     route_id: str | None = None) -> dict[str, Any]:
+        """Durably enqueue one objective/notification; duplicate keys return the same activity."""
         if not objective.strip() or len(objective) > 4000:
-            raise ValueError("objective must contain 1 to 4000 characters")
+            raise ValueError("event content must contain 1 to 4000 characters")
         if not idempotency_key.strip() or len(idempotency_key) > 200:
             raise ValueError("idempotency_key must contain 1 to 200 characters")
+        if event_kind not in {"objective", "notification"}:
+            raise ValueError("event_kind must be objective or notification")
+        selected_route = self.settings.model_route(route_id)
+        event_input = {"objective": objective, "event_kind": event_kind,
+                       "route_id": selected_route.route_id,
+                       "authorized_capability": "institution.knowledge.read"}
         async with self.pool.connection() as conn, conn.transaction():
             existing = await (await conn.execute(
                 "SELECT activity_id,state,activity_type,idempotency_key,input,attempt_count "
                 "FROM r3a.activities WHERE idempotency_key=%s FOR UPDATE", (idempotency_key,)
             )).fetchone()
             if existing:
-                if existing["activity_type"] != "grace.objective" or existing["input"].get("objective") != objective:
+                prior_input = dict(existing["input"] or {})
+                prior_input.setdefault("event_kind", "objective")
+                prior_input.setdefault("route_id", self.settings.default_model_route)
+                if existing["activity_type"] != "grace.objective" or prior_input != event_input:
                     raise ValueError("idempotency key already belongs to a different request")
                 return {**existing, "duplicate": True}
             activity_id = uuid.uuid4()
@@ -470,16 +482,19 @@ class Store:
                 "available_at,recovery_policy,config_revision,input) "
                 "VALUES (%s,'grace.objective',%s,'activity.generic',1,'QUEUED',clock_timestamp(),'idempotent',%s,%s)",
                 (activity_id, idempotency_key, config["revision_id"] if config else None,
-                 json.dumps({"objective": objective, "authorized_capability": "institution.knowledge.read"})),
+                 json.dumps(event_input)),
             )
-            event_id = await self._event(conn, "grace.objective.received", "activity", str(activity_id),
-                                         "activity.generic", 1, None, "QUEUED", "objective accepted into durable inbox",
+            event_type = ("grace.notification.received" if event_kind == "notification"
+                          else "grace.objective.received")
+            event_id = await self._event(conn, event_type, "activity", str(activity_id),
+                                         "activity.generic", 1, None, "QUEUED", f"Grace {event_kind} accepted into durable inbox",
                                          {"idempotency_key": idempotency_key, "objective_sha256": hashlib.sha256(objective.encode()).hexdigest(),
+                                          "event_kind": event_kind, "route_id": selected_route.route_id,
                                           "authorized_capability": "institution.knowledge.read"},
                                          correlation_id=correlation_id)
             accepted = await self._transition_on_conn(conn, "activity", str(activity_id),
                                                        "activity.generic", 1, "QUEUED",
-                                                       "Grace objective durably accepted",
+                                                       f"Grace {event_kind} durably accepted",
                                                        {"idempotency_key": idempotency_key,
                                                         "received_event_id": str(event_id)}, initial=True)
             if not accepted:
@@ -488,6 +503,7 @@ class Store:
                                (event_id, activity_id))
             return {"activity_id": activity_id, "state": "QUEUED", "activity_type": "grace.objective",
                     "idempotency_key": idempotency_key, "attempt_count": 0, "duplicate": False,
+                    "event_kind": event_kind, "route_id": selected_route.route_id,
                     "received_event_id": event_id}
 
     async def requeue_blocked_activities(self) -> int:

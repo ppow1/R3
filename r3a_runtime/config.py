@@ -2,21 +2,22 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/config.py
 Component: R3A-BOOTSTRAP-CONFIG
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-06T15:04:00Z
 Created By: Codex GPT-6
 Purpose: Strictly validate external R3A AP0-M1 bootstrap and operating settings.
 Execution Model: Shared synchronous configuration parser.
 Observability: Configuration revision digest and validation errors.
 Dependencies: Python 3.12 standard library.
-Authority: AP0-M1 authorized by Steward in Issue #42; AP1-M1 authorized in Issue #43; isolated R3A only.
+Authority: AP1 / R3A-019 authorized by Steward; isolated R3A only.
 Changed: 2026-11-06T15:04:00Z | R3A-AP0-M1 | Codex GPT-6 | Add fail-closed external configuration parser.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Restrict observer capabilities to the two AP0 read-only contracts.
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Validate Grace model, capability, and allowlisted knowledge configuration.
+Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Add external model routes while retaining legacy single-route config compatibility.
 Supersedes: None.
 Contracts: AP0-001/009; R3A-019; AP0-M1 D7; hints/file-provenance.md.
-Tests: Live AP1-M1 model configuration preflight and operation.
-History/Predecessor: New file; initial publication recorded in Git.
+Tests: tests/test_r3a_ap1.py; live route configuration validation pending this revision.
+History/Predecessor: Git blob 5a97b00eda944fbb46ab22767c65ceadccda99c9 at commit cdcb63ce1fa33975ce4468d5121e4bfef5429f92.
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ import hashlib
 import json
 import math
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -31,6 +33,25 @@ from typing import Any
 
 class ConfigurationError(ValueError):
     """A bootstrap file is missing, malformed, or outside its contract."""
+
+
+@dataclass(frozen=True)
+class ModelRoute:
+    route_id: str
+    provider: str
+    endpoint: str
+    model: str
+    timeout_seconds: float
+    max_tokens: int
+
+
+def resolve_model_route(routes: tuple[ModelRoute, ...], default_route: str,
+                        requested_route: str | None = None) -> ModelRoute:
+    selected = requested_route or default_route
+    for route in routes:
+        if route.route_id == selected:
+            return route
+    raise ConfigurationError(f"Unknown configured Grace model route: {selected}")
 
 
 def _object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -110,7 +131,12 @@ class Settings:
     model_name: str | None
     model_timeout_seconds: float
     model_max_tokens: int
+    model_routes: tuple[ModelRoute, ...]
+    default_model_route: str
     knowledge_sources: tuple[Path, ...]
+
+    def model_route(self, route_id: str | None = None) -> ModelRoute:
+        return resolve_model_route(self.model_routes, self.default_model_route, route_id)
 
     @property
     def connection_info(self) -> dict[str, Any]:
@@ -225,22 +251,55 @@ def load_settings(path: str | Path) -> Settings:
     model_provider = model_endpoint = model_name = None
     model_timeout_seconds = 120.0
     model_max_tokens = 192
+    model_routes: tuple[ModelRoute, ...] = ()
+    default_model_route = "default"
     knowledge_sources: tuple[Path, ...] = ()
     if entrypoint == "r3a_runtime.grace_module" or grace is not None:
         if not isinstance(grace, dict):
             raise ConfigurationError("grace must be an object when the Grace resident is configured")
-        _keys(grace, {"provider", "endpoint", "model", "timeout_seconds", "max_tokens", "knowledge_sources"}, "grace")
-        model_provider = _text(grace["provider"], "grace.provider")
-        if model_provider != "openai-compatible":
-            raise ConfigurationError("grace.provider must equal openai-compatible")
-        model_endpoint = _text(grace["endpoint"], "grace.endpoint")
-        if not model_endpoint.startswith(("http://127.0.0.1:", "http://localhost:", "https://")):
-            raise ConfigurationError("grace.endpoint must use loopback HTTP or HTTPS")
-        model_name = _text(grace["model"], "grace.model")
-        model_timeout_seconds = _positive(grace["timeout_seconds"], "grace.timeout_seconds")
-        model_max_tokens = grace["max_tokens"]
-        if isinstance(model_max_tokens, bool) or not isinstance(model_max_tokens, int) or not 64 <= model_max_tokens <= 512:
-            raise ConfigurationError("grace.max_tokens must be an integer from 64 through 512")
+        legacy_keys = {"provider", "endpoint", "model", "timeout_seconds", "max_tokens", "knowledge_sources"}
+        route_keys = {"routes", "default_route", "knowledge_sources"}
+        if set(grace) == legacy_keys:
+            route_data = [{"route_id": "default", "provider": grace["provider"],
+                           "endpoint": grace["endpoint"], "model": grace["model"],
+                           "timeout_seconds": grace["timeout_seconds"], "max_tokens": grace["max_tokens"]}]
+            default_model_route = "default"
+        elif set(grace) == route_keys:
+            route_data = grace["routes"]
+            default_model_route = _text(grace["default_route"], "grace.default_route")
+        else:
+            raise ConfigurationError("grace must use the legacy single-route or configured routes schema")
+        if not isinstance(route_data, list) or not route_data:
+            raise ConfigurationError("grace.routes must be a nonempty list")
+        parsed_routes = []
+        route_ids: set[str] = set()
+        for index, item in enumerate(route_data):
+            where = f"grace.routes[{index}]"
+            if not isinstance(item, dict):
+                raise ConfigurationError(f"{where} must be an object")
+            _keys(item, {"route_id", "provider", "endpoint", "model", "timeout_seconds", "max_tokens"}, where)
+            route_id = _text(item["route_id"], f"{where}.route_id")
+            if not re.fullmatch(r"[A-Za-z0-9._-]+", route_id) or route_id in route_ids:
+                raise ConfigurationError(f"{where}.route_id must be unique and use letters, numbers, dot, underscore or hyphen")
+            route_ids.add(route_id)
+            provider = _text(item["provider"], f"{where}.provider")
+            if provider != "openai-compatible":
+                raise ConfigurationError(f"{where}.provider must equal openai-compatible")
+            endpoint = _text(item["endpoint"], f"{where}.endpoint")
+            if not endpoint.startswith(("http://127.0.0.1:", "http://localhost:", "https://")):
+                raise ConfigurationError(f"{where}.endpoint must use loopback HTTP or HTTPS")
+            model = _text(item["model"], f"{where}.model")
+            timeout = _positive(item["timeout_seconds"], f"{where}.timeout_seconds")
+            max_tokens = item["max_tokens"]
+            if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or not 64 <= max_tokens <= 512:
+                raise ConfigurationError(f"{where}.max_tokens must be an integer from 64 through 512")
+            parsed_routes.append(ModelRoute(route_id, provider, endpoint, model, timeout, max_tokens))
+        if default_model_route not in route_ids:
+            raise ConfigurationError("grace.default_route must identify a configured route")
+        model_routes = tuple(parsed_routes)
+        default_route = next(item for item in model_routes if item.route_id == default_model_route)
+        model_provider, model_endpoint, model_name = default_route.provider, default_route.endpoint, default_route.model
+        model_timeout_seconds, model_max_tokens = default_route.timeout_seconds, default_route.max_tokens
         sources = grace["knowledge_sources"]
         if (not isinstance(sources, list) or not sources or
                 any(not isinstance(item, str) for item in sources) or len(set(sources)) != len(sources)):
@@ -305,6 +364,8 @@ def load_settings(path: str | Path) -> Settings:
         model_name=model_name,
         model_timeout_seconds=model_timeout_seconds,
         model_max_tokens=model_max_tokens,
+        model_routes=model_routes,
+        default_model_route=default_model_route,
         knowledge_sources=knowledge_sources,
     )
 
@@ -324,9 +385,11 @@ def sanitized_config(settings: Settings) -> dict[str, Any]:
                    "capabilities": list(settings.module_capabilities), "owner": settings.module_owner,
                    "entrypoint": settings.module_entrypoint, "source": str(settings.module_source),
                    "sha256": settings.module_digest},
-        "grace": ({"provider": settings.model_provider, "endpoint": settings.model_endpoint,
-                   "model": settings.model_name, "timeout_seconds": settings.model_timeout_seconds,
-                   "max_tokens": settings.model_max_tokens,
+        "grace": ({"default_route": settings.default_model_route,
+                   "routes": [{"route_id": route.route_id, "provider": route.provider,
+                               "endpoint": route.endpoint, "model": route.model,
+                               "timeout_seconds": route.timeout_seconds, "max_tokens": route.max_tokens}
+                              for route in settings.model_routes],
                    "knowledge_sources": [str(path) for path in settings.knowledge_sources]}
                   if settings.model_endpoint else None),
         "timing": {"observer_interval_seconds": settings.observer_interval_seconds,

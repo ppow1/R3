@@ -2,21 +2,22 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
 Execution Model: Async PostgreSQL-backed process supervised by Ring 0.
 Observability: Durable process/activity/module/resource/event state and local diagnostics socket.
 Dependencies: PostgreSQL; psycopg 3 pool; r3a_runtime.config/db/protocol/control/diagnostics.
-Authority: AP0-M1 authorized by Steward in Issue #42; AP1-M1 authorized in Issue #43; isolated R3A only.
+Authority: AP1 / R3A-019 authorized by Steward; isolated R3A only.
 Changed: 2026-11-06T15:22:00Z | R3A-AP0-M1 | Codex GPT-6 | Implement CME process, scheduler, module worker and control plane.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Reconcile orphaned module processes, record live health and correct replacement status.
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Dispatch durable Grace objectives, authorize bounded evidence reads and renew long-running leases.
+Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007.
-Tests: Live AP1-M1 objective, inference, and restart evidence recorded in Issue #43.
-History/Predecessor: New file; initial publication recorded in Git.
+Tests: tests/test_r3a_ap1.py; live inference/recovery evidence pending this revision.
+History/Predecessor: Git blob 0d1ba7366f6ab6009ec3d7ae279e113ca19599ca at commit cdcb63ce1fa33975ce4468d5121e4bfef5429f92.
 """
 from __future__ import annotations
 
@@ -36,6 +37,7 @@ from .config import ConfigurationError, Settings, load_settings, sanitized_confi
 from .control import ControlServer, control_request, process_alive
 from .db import InvalidTransition, Store, utcnow
 from .diagnostics import make_server
+from .knowledge import retrieve
 from .protocol import PROTOCOL_MAJOR, PROTOCOL_MINOR, request as module_request
 
 
@@ -374,8 +376,10 @@ class CME:
         if operation == "grace.objective.submit":
             if self.settings.module_id != "resident.grace":
                 raise RuntimeError("The configured module is not the AP1 Grace resident")
-            return await self.store.submit_grace_objective(str(payload.get("objective", "")),
-                                                           idempotency_key)
+            return await self.store.submit_grace_objective(
+                str(payload.get("objective", "")), idempotency_key,
+                str(payload.get("event_kind", "objective")),
+                str(payload["route_id"]) if payload.get("route_id") is not None else None)
         if operation == "config.reload":
             if any(not task.done() for task in self.active_activities.values()):
                 raise RuntimeError("Config reload waits for in-flight activity to reach a safe boundary")
@@ -477,15 +481,21 @@ class CME:
                      "content": {**db[0], "ready": True, "observed_at": db[0]["observed_at"].isoformat()}}]
         evidence.append({"source_id": "runtime.modules", "sha256": hashlib.sha256(
             json.dumps(live_modules, sort_keys=True).encode()).hexdigest(), "content": live_modules})
+        event_input = activity["input"]
+        objective = event_input["objective"]
         for index, path in enumerate(self.settings.knowledge_sources):
-            content = path.read_text(encoding="utf-8")[:4000]
-            evidence.append({"source_id": f"knowledge.{index+1}",
-                             "sha256": hashlib.sha256(content.encode()).hexdigest(),
-                             "content": content, "source": path.name})
+            evidence.extend(retrieve(path, f"knowledge.{index+1}", objective))
         request_ref = str(uuid.uuid4())
+        route = self.settings.model_route(event_input.get("route_id"))
         return {"activity_type": "grace.objective", "activity_id": str(activity["activity_id"]),
                 "attempt_id": str(activity["attempt_id"]),
-                "objective": activity["input"]["objective"], "evidence": evidence,
+                "objective": objective, "event_kind": event_input.get("event_kind", "objective"),
+                "route_id": route.route_id,
+                "model_route": {"route_id": route.route_id, "provider": route.provider,
+                                "model": route.model, "endpoint": route.endpoint,
+                                "timeout_seconds": route.timeout_seconds,
+                                "max_tokens": route.max_tokens},
+                "evidence": evidence,
                 "request_ref": request_ref, "config_revision": self.settings.source_digest}
 
     async def _lease_heartbeat(self, activity: dict[str, Any]) -> None:
@@ -502,12 +512,18 @@ class CME:
             context = (await self._objective_context(activity) if activity["activity_type"] == "grace.objective"
                        else await self._observer_context(activity))
             if activity["activity_type"] == "grace.objective":
+                model_route = context["model_route"]
                 await self.store.record_progress(activity,
                     {"phase": "model.requested", "at": utcnow().isoformat(),
-                     "provider": self.settings.model_provider, "model": self.settings.model_name,
+                     "route_id": model_route["route_id"],
+                     "provider": model_route["provider"], "model": model_route["model"],
                      "request_ref": context["request_ref"], "objective_sha256": hashlib.sha256(
                          activity["input"]["objective"].encode()).hexdigest()},
-                    {"activity_input": activity["input"], "evidence_refs": [item["source_id"] for item in context["evidence"]]})
+                    {"activity_input": activity["input"], "model_route": model_route,
+                     "evidence": context["evidence"], "evidence_refs": [
+                         {"source_id": item["source_id"], "source_path": item.get("source_path"),
+                          "sha256": item["sha256"], "source_sha256": item.get("source_sha256")}
+                         for item in context["evidence"]]})
                 lease_task = asyncio.create_task(self._lease_heartbeat(activity),
                                                  name=f"lease-heartbeat:{activity['activity_id']}")
             else:
@@ -515,7 +531,8 @@ class CME:
                     {"phase": "capabilities_read", "at": utcnow().isoformat()},
                                              {"capability_observations": context})
             result = await self._module_call("execute", context,
-                timeout=self.settings.model_timeout_seconds + 15 if activity["activity_type"] == "grace.objective" else 5.0)
+                timeout=context["model_route"]["timeout_seconds"] + 15
+                if activity["activity_type"] == "grace.objective" else 5.0)
             observations = result["result"]
             await self.store.finish_activity(activity, observations)
         except PermissionError as exc:

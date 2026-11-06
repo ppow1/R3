@@ -2,19 +2,20 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
 Purpose: Execute bounded read-only Grace objectives with the configured real model and supplied authorized evidence.
 Execution Model: Versioned JSON-lines resident module process supervised by CME.
 Observability: Provider/model, request/result references and digests, citations, and failures are returned to durable activity state.
 Dependencies: Python standard library; explicitly configured OpenAI-compatible model endpoint.
-Authority: AP1-M1 authorized by Steward in GitHub Issue #43; read-only Grace objectives only.
+Authority: AP1 / R3A-019 authorized by Steward; assigned authority and read-only configured capabilities are enforced.
 Changed: 2026-11-06 | AP1-M1 | Codex GPT-6 | Implement local inference and read-only objective execution.
 Changed: 2026-11-06 | AP1-M1 | Codex GPT-6 | Constrain JSON output and retain model response references on validation failure.
+Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Execute selected configured model route and retain event/evidence lineage.
 Supersedes: None.
 Contracts: R3A-019; AP1-M1 Issue #43 acceptance.
-Tests: Live model-backed objective and CME interruption evidence.
+Tests: tests/test_r3a_ap1.py; live model-backed objective evidence pending this revision.
 History/Predecessor: New AP1-M1 resident module.
 """
 from __future__ import annotations
@@ -45,14 +46,15 @@ class GraceResident:
         self.last_activity: dict[str, Any] | None = None
         self.stopping = asyncio.Event()
 
-    async def _model_request(self, request: dict[str, Any]) -> dict[str, Any]:
+    async def _model_request(self, endpoint: str, timeout_seconds: float,
+                             request: dict[str, Any]) -> dict[str, Any]:
         body = json.dumps(request, separators=(",", ":")).encode()
-        req = urllib.request.Request(self.settings.model_endpoint, data=body,
+        req = urllib.request.Request(endpoint, data=body,
                                      headers={"Content-Type": "application/json"}, method="POST")
 
         def invoke() -> dict[str, Any]:
             try:
-                with urllib.request.urlopen(req, timeout=self.settings.model_timeout_seconds) as response:
+                with urllib.request.urlopen(req, timeout=timeout_seconds) as response:
                     if response.status != 200:
                         raise RuntimeError(f"model HTTP status {response.status}")
                     raw = response.read(1_000_000)
@@ -94,26 +96,29 @@ class GraceResident:
             if not isinstance(objective, str) or not objective.strip() or not isinstance(evidence, list) or not evidence:
                 raise ValueError("objective and authorized evidence are required")
             request_ref = str(payload["request_ref"])
+            route = self.settings.model_route(payload.get("route_id"))
             evidence_ids = {item["source_id"] for item in evidence}
             request = {
-                "model": self.settings.model_name,
+                "model": route.model,
                 "temperature": 0,
-                "max_tokens": self.settings.model_max_tokens,
+                "max_tokens": route.max_tokens,
                 "chat_template_kwargs": {"enable_thinking": False},
                 "messages": [
                     {"role": "system", "content": (
                         "You are Grace. Use only evidence. Return one compact JSON object exactly shaped as "
                         "{\"assessment\":\"short\",\"status\":\"healthy|degraded|blocked\","
                         "\"evidence_refs\":[\"source_id\"],\"recommended_action\":\"short\"}. "
-                        "Use only supplied source IDs; missing facts => blocked. Keep under 70 tokens." )},
-                    {"role": "user", "content": json.dumps({"objective": objective, "evidence": evidence}, separators=(",", ":"))},
+                        "Use only supplied source IDs; missing facts => blocked. For notifications, record an assessment and recommended next action; do not claim an external delivery. Keep under 70 tokens." )},
+                    {"role": "user", "content": json.dumps({"event_kind": payload.get("event_kind", "objective"),
+                                                                  "objective": objective, "evidence": evidence},
+                                                                 separators=(",", ":"))},
                 ],
             }
             request_hash = hashlib.sha256(json.dumps(request, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
             response: dict[str, Any] | None = None
             choice = ""
             try:
-                response = await self._model_request(request)
+                response = await self._model_request(route.endpoint, route.timeout_seconds, request)
                 choice = response["choices"][0]["message"]["content"]
                 if not isinstance(choice, str) or not choice.strip():
                     raise ValueError("configured model returned empty content")
@@ -139,8 +144,9 @@ class GraceResident:
                 result_hash = hashlib.sha256(choice.encode()).hexdigest()
                 self.last_activity = {
                     "activity_id": payload["activity_id"], "attempt_id": payload["attempt_id"],
-                    "objective": objective, "decision": decision,
-                    "model": {"provider": self.settings.model_provider, "name": self.settings.model_name,
+                    "objective": objective, "event_kind": payload.get("event_kind", "objective"),
+                    "decision": decision,
+                    "model": {"route_id": route.route_id, "provider": route.provider, "name": route.model,
                               "request_ref": request_ref, "request_sha256": request_hash,
                               "result_ref": result_ref, "result_sha256": result_hash,
                               "usage": response.get("usage"), "finish_reason": finish_reason},
@@ -153,7 +159,7 @@ class GraceResident:
                 result_ref = response.get("id") if isinstance(response, dict) else None
                 finish = (response.get("choices") or [{}])[0].get("finish_reason") if isinstance(response, dict) else None
                 result_hash = hashlib.sha256(choice.encode()).hexdigest() if isinstance(choice, str) and choice else None
-                raise RuntimeError(f"Grace model execution failed provider={self.settings.model_provider} model={self.settings.model_name} request_ref={request_ref} result_ref={result_ref} finish_reason={finish} result_sha256={result_hash}: {type(exc).__name__}: {str(exc)[:1000]}") from exc
+                raise RuntimeError(f"Grace model execution failed route={route.route_id} provider={route.provider} model={route.model} request_ref={request_ref} result_ref={result_ref} finish_reason={finish} result_sha256={result_hash}: {type(exc).__name__}: {str(exc)[:1000]}") from exc
         if operation == "checkpoint":
             return {"state": self.state, "last_activity": self.last_activity}
         if operation == "stop":
