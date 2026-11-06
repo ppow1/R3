@@ -2,23 +2,26 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.0.3
+File Revision: 1.1.0
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
 Execution Model: Async Psycopg 3 connection pool.
 Observability: PostgreSQL current-state projections, append-only events, migrations, and activity lineage.
 Dependencies: psycopg 3; PostgreSQL; r3a_runtime.config.
-Authority: AP0-M1 authorized by Steward in Issue #42; AP1-M1 authorized in Issue #43; R3A database only.
+Authority: AP0-M1 Issue #42, AP1-M1 Issue #43, and AP1 Slice 1 Issue #45 authorized by Steward; R3A database only.
 Changed: 2026-11-06T15:06:00Z | R3A-AP0-M1 | Codex GPT-6 | Add durable PostgreSQL store.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Add validated machine definitions, idempotent grants/lifecycle, retry-safe leases and guarded state/event commits.
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Persist Grace objective inputs/results, deduplicate intake and renew activity/resource leases.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Persist idempotent objective and notification event metadata in the existing activity ledger.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Return the durable activity checkpoint to recovered workers.
+Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Persist model-role observations and use existing WAITING lifecycle for durable role deferral.
+Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Preserve role readiness in existing registries and atomically requeue or block deferred activities.
+Changed: 2026-11-06T23:46:49Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Consolidate model-role deferral operations into one durable state-transition method.
 Supersedes: None.
-Contracts: AP0-004/005/006/008/009/010/013; R3A-019; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007.
-Tests: tests/test_r3a_ap1.py; live AP1 event and recovery evidence pending this revision.
-History/Predecessor: Git blob b7f6cb56c22d8e11258a58ff40fe336183572e9e at commit 600bbd218d9c53620b9938aa1c8fd4ace801f396.
+Contracts: AP0-003–010; R3A-019; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1.
+Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py.
+History/Predecessor: Git blob c3e74492248912e590ffabe6be2ab624132dd021 at commit cc7f662c04a4ba8eb327edd134e2ded92ef9786c.
 """
 from __future__ import annotations
 
@@ -35,6 +38,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from .config import Settings, sanitized_config
+from .contracts import ReadinessObservation, parse_timestamp
 
 
 IMPLEMENTATION_REVISION = os.environ.get("R3A_IMPLEMENTATION_REVISION", "working-tree")
@@ -347,13 +351,154 @@ class Store:
                 (resource_id, owner, capacity),
             )
 
-    async def audit_capability_invocation(self, module_id: str, capability_id: str,
-                                          result: str, details: dict[str, Any] | None = None) -> None:
+    async def register_model_role(self, role: Any, config_revision: str,
+                                  resident_id: str) -> None:
+        """Persist a configured role in the existing resource registry, initially unknown."""
+        resource_id = f"model-role:{role.role_id}"
+        metadata = {"registry_contract": "r3a.model-role.v1", "resident_id": resident_id,
+                    "role_id": role.role_id,
+                    "route_id": role.route_id, "capabilities": list(role.capabilities),
+                    "modalities": list(role.modalities), "fallback_roles": list(role.fallback_roles),
+                    "readiness_max_age_seconds": role.readiness_max_age_seconds,
+                    "unavailable_action": role.unavailable_action,
+                    "deferral_seconds": role.deferral_seconds,
+                    "config_revision": config_revision}
         async with self.pool.connection() as conn, conn.transaction():
-            await self._event(conn, "capability.invoked", "capability", capability_id,
-                              None, None, None, result, "capability invocation audited",
-                              {"module_id": module_id, "result": result, **(details or {})},
-                              outcome="accepted" if result == "allowed" else "denied")
+            await conn.execute(
+                "INSERT INTO r3a.resource_registry(resource_id,contract_version,owner,capacity,health,observed_at,metadata) "
+                "VALUES (%s,'1.0.0',%s,%s,'unknown',clock_timestamp(),%s) "
+                "ON CONFLICT(resource_id) DO UPDATE SET contract_version=EXCLUDED.contract_version,"
+                "owner=EXCLUDED.owner,capacity=EXCLUDED.capacity,"
+                "health=CASE WHEN r3a.resource_registry.metadata->>'config_revision'=EXCLUDED.metadata->>'config_revision' "
+                "THEN r3a.resource_registry.health ELSE 'unknown' END,"
+                "observed_at=CASE WHEN r3a.resource_registry.metadata->>'config_revision'=EXCLUDED.metadata->>'config_revision' "
+                "THEN r3a.resource_registry.observed_at ELSE clock_timestamp() END,"
+                "metadata=CASE WHEN r3a.resource_registry.metadata->>'config_revision'=EXCLUDED.metadata->>'config_revision' "
+                "THEN r3a.resource_registry.metadata || EXCLUDED.metadata "
+                "ELSE (r3a.resource_registry.metadata - 'readiness') || EXCLUDED.metadata END",
+                (resource_id, resident_id, role.concurrency, json.dumps(metadata)),
+            )
+
+    async def model_role_observations(self, role_ids: tuple[str, ...]) -> dict[str, dict[str, Any]]:
+        if not role_ids:
+            return {}
+        async with self.pool.connection() as conn:
+            rows = await (await conn.execute(
+                "SELECT resource_id,health,observed_at,metadata FROM r3a.resource_registry "
+                "WHERE resource_id = ANY(%s)",
+                ([f"model-role:{role_id}" for role_id in role_ids],),
+            )).fetchall()
+        observations = {}
+        for row in rows:
+            metadata = row["metadata"] if isinstance(row["metadata"], dict) else {}
+            readiness = metadata.get("readiness", {})
+            role_id = metadata.get("role_id")
+            if role_id:
+                valid = (isinstance(readiness, dict)
+                         and readiness.get("source") in {"provider_model", "model_protocol"}
+                         and readiness.get("model_id")
+                         and readiness.get("evidence_ref")
+                         and readiness.get("evidence_ref")
+                         and readiness.get("observed_at")
+                         and readiness.get("config_revision"))
+                observations[role_id] = ({**readiness, "status": row["health"]}
+                                         if valid else {"status": "unknown"})
+        return observations
+
+    async def observe_model_role(self, observation: ReadinessObservation) -> int:
+        resource_id = f"model-role:{observation.role_id}"
+        readiness = observation.to_dict()
+        async with self.pool.connection() as conn, conn.transaction():
+            updated = await conn.execute(
+                "UPDATE r3a.resource_registry SET health=%s,observed_at=%s,"
+                "metadata=metadata || jsonb_build_object('readiness',%s::jsonb) "
+                "WHERE resource_id=%s AND metadata->>'config_revision'=%s",
+                (observation.status, parse_timestamp(observation.observed_at), json.dumps(readiness),
+                 resource_id, observation.config_revision),
+            )
+            if updated.rowcount != 1:
+                raise ValueError("model role is not registered for this configuration revision")
+            await self._event(conn, "model.role.readiness.observed", "resource", resource_id,
+                              None, None, None, observation.status,
+                              "provider-level model readiness observation recorded",
+                              readiness, correlation_id=uuid.UUID(observation.observation_id))
+        return 0
+
+    async def waiting_model_activities(self) -> list[dict[str, Any]]:
+        async with self.pool.connection() as conn:
+            return await (await conn.execute(
+                "SELECT activity_id,input FROM r3a.activities WHERE state='WAITING' "
+                "AND activity_type='grace.objective' AND input ? 'role_id' "
+                "AND available_at<=clock_timestamp() ORDER BY available_at,created_at"
+            )).fetchall()
+
+    async def requeue_model_activity(self, activity_id: uuid.UUID, role_id: str,
+                                     selected_role_id: str,
+                                     causation_id: str | None = None) -> bool:
+        async with self.pool.connection() as conn, conn.transaction():
+            row = await (await conn.execute(
+                "SELECT activity_id,machine_id,machine_version FROM r3a.activities "
+                "WHERE activity_id=%s AND state='WAITING' AND available_at<=clock_timestamp() "
+                "FOR UPDATE SKIP LOCKED", (activity_id,)
+            )).fetchone()
+            if row is None:
+                return False
+            await conn.execute(
+                "UPDATE r3a.activities SET state='QUEUED',available_at=clock_timestamp(),"
+                "exception=NULL,updated_at=clock_timestamp() WHERE activity_id=%s",
+                (row["activity_id"],),
+            )
+            evidence = {"requested_role_id": role_id, "selected_role_id": selected_role_id}
+            event_id = await self._event(
+                conn, "activity.model_role_available", "activity", str(row["activity_id"]),
+                row["machine_id"], row["machine_version"], "WAITING", "QUEUED",
+                "configured model role became eligible", evidence,
+                causation_id=uuid.UUID(causation_id) if causation_id else None)
+            accepted = await self._transition_on_conn(
+                conn, "activity", str(row["activity_id"]), row["machine_id"],
+                row["machine_version"], "QUEUED", "configured model role became eligible",
+                evidence, event_id=event_id)
+            if not accepted:
+                raise InvalidTransition(f"Cannot requeue activity {row['activity_id']}")
+            await conn.execute("UPDATE r3a.activities SET latest_event_id=%s WHERE activity_id=%s",
+                               (event_id, row["activity_id"]))
+            return True
+
+    async def block_waiting_model_activity(self, activity_id: uuid.UUID, reason: str,
+                                           details: dict[str, Any]) -> bool:
+        async with self.pool.connection() as conn, conn.transaction():
+            row = await (await conn.execute(
+                "SELECT activity_id,machine_id,machine_version FROM r3a.activities "
+                "WHERE activity_id=%s AND state='WAITING' FOR UPDATE SKIP LOCKED",
+                (activity_id,),
+            )).fetchone()
+            if row is None:
+                return False
+            await conn.execute(
+                "UPDATE r3a.activities SET state='BLOCKED',lease_owner=NULL,lease_until=NULL,"
+                "exception=%s,updated_at=clock_timestamp() WHERE activity_id=%s",
+                (json.dumps({"reason": reason, **details}), row["activity_id"]),
+            )
+            event_id = await self._event(
+                conn, "activity.blocked", "activity", str(row["activity_id"]),
+                row["machine_id"], row["machine_version"], "WAITING", "BLOCKED",
+                reason, details)
+            accepted = await self._transition_on_conn(
+                conn, "activity", str(row["activity_id"]), row["machine_id"],
+                row["machine_version"], "BLOCKED", reason, details, event_id=event_id)
+            if not accepted:
+                raise InvalidTransition(f"Cannot block activity {row['activity_id']}")
+            await conn.execute("UPDATE r3a.activities SET latest_event_id=%s WHERE activity_id=%s",
+                               (event_id, row["activity_id"]))
+            return True
+
+    async def audit_capability_invocation(self, module_id: str, capability_id: str,
+                                          result: str, details: dict[str, Any] | None = None) -> uuid.UUID:
+        async with self.pool.connection() as conn, conn.transaction():
+            return await self._event(conn, "capability.invoked", "capability", capability_id,
+                                     None, None, None, result, "capability invocation audited",
+                                     {"module_id": module_id, "result": result, **(details or {})},
+                                     outcome="accepted" if result == "allowed" else "denied")
 
     async def register_module(self, manifest: dict[str, Any], lifecycle: str = "INSTALLED",
                               health: str = "unknown", diagnostic: dict[str, Any] | None = None) -> None:
@@ -449,7 +594,10 @@ class Store:
 
     async def submit_grace_objective(self, objective: str, idempotency_key: str,
                                      event_kind: str = "objective",
-                                     route_id: str | None = None) -> dict[str, Any]:
+                                     route_id: str | None = None,
+                                     role_id: str | None = None,
+                                     required_capabilities: tuple[str, ...] = (),
+                                     required_modalities: tuple[str, ...] = ()) -> dict[str, Any]:
         """Durably enqueue one objective/notification; duplicate keys return the same activity."""
         if not objective.strip() or len(objective) > 4000:
             raise ValueError("event content must contain 1 to 4000 characters")
@@ -457,10 +605,41 @@ class Store:
             raise ValueError("idempotency_key must contain 1 to 200 characters")
         if event_kind not in {"objective", "notification"}:
             raise ValueError("event_kind must be objective or notification")
-        selected_route = self.settings.model_route(route_id)
+        if not isinstance(required_capabilities, (tuple, list)) or any(
+                not isinstance(item, str) or not item.strip() for item in required_capabilities):
+            raise ValueError("required_capabilities must be capability identifiers")
+        if len(set(required_capabilities)) != len(required_capabilities):
+            raise ValueError("required_capabilities must be unique")
+        if not isinstance(required_modalities, (tuple, list)) or any(
+                not isinstance(item, str) or not item.strip() for item in required_modalities):
+            raise ValueError("required_modalities must be modality identifiers")
+        if len(set(required_modalities)) != len(required_modalities):
+            raise ValueError("required_modalities must be unique")
+        if role_id is None and self.settings.model_roles:
+            if route_id is None:
+                role_id = self.settings.default_model_role
+            else:
+                matching_roles = [entry for entry in self.settings.model_roles if entry.route_id == route_id]
+                if len(matching_roles) != 1:
+                    raise ValueError("an explicit route must resolve to exactly one configured model role")
+                role_id = matching_roles[0].role_id
+        if role_id is not None:
+            role = next((entry for entry in self.settings.model_roles if entry.role_id == role_id), None)
+            if role is None:
+                raise ValueError("requested model role is not configured")
+            if route_id is not None and route_id != role.route_id:
+                raise ValueError("route_id must match the configured route for the requested role")
+            selected_route_id = role.route_id
+            selected_role_id = role.role_id
+        else:
+            selected_route_id = self.settings.model_route(route_id).route_id
+            selected_role_id = None
         event_input = {"objective": objective, "event_kind": event_kind,
-                       "route_id": selected_route.route_id,
-                       "authorized_capability": "institution.knowledge.read"}
+                       "route_id": selected_route_id if selected_role_id is None else None,
+                       "role_id": selected_role_id,
+                       "required_capabilities": list(required_capabilities),
+                       "required_modalities": list(required_modalities),
+                       "role_config_revision": self.settings.source_digest if selected_role_id else None}
         async with self.pool.connection() as conn, conn.transaction():
             existing = await (await conn.execute(
                 "SELECT activity_id,state,activity_type,idempotency_key,input,attempt_count "
@@ -470,6 +649,11 @@ class Store:
                 prior_input = dict(existing["input"] or {})
                 prior_input.setdefault("event_kind", "objective")
                 prior_input.setdefault("route_id", self.settings.default_model_route)
+                prior_input.setdefault("role_id", None)
+                prior_input.setdefault("required_capabilities", [])
+                prior_input.setdefault("required_modalities", [])
+                prior_input.setdefault("role_config_revision", None)
+                prior_input.pop("authorized_capability", None)
                 if existing["activity_type"] != "grace.objective" or prior_input != event_input:
                     raise ValueError("idempotency key already belongs to a different request")
                 return {**existing, "duplicate": True}
@@ -490,8 +674,10 @@ class Store:
             event_id = await self._event(conn, event_type, "activity", str(activity_id),
                                          "activity.generic", 1, None, "QUEUED", f"Grace {event_kind} accepted into durable inbox",
                                          {"idempotency_key": idempotency_key, "objective_sha256": hashlib.sha256(objective.encode()).hexdigest(),
-                                          "event_kind": event_kind, "route_id": selected_route.route_id,
-                                          "authorized_capability": "institution.knowledge.read"},
+                                          "event_kind": event_kind, "route_id": selected_route_id,
+                                          "role_id": selected_role_id,
+                                          "required_capabilities": list(required_capabilities),
+                                          "required_modalities": list(required_modalities)},
                                          correlation_id=correlation_id)
             accepted = await self._transition_on_conn(conn, "activity", str(activity_id),
                                                        "activity.generic", 1, "QUEUED",
@@ -546,6 +732,38 @@ class Store:
                                                       "activity.generic", 1, "BLOCKED", reason, details)
             if not accepted:
                 raise InvalidTransition(f"Cannot block activity {activity['activity_id']}")
+
+    async def defer_activity(self, activity: dict[str, Any], reason: str,
+                             retry_after_seconds: float, details: dict[str, Any] | None = None) -> None:
+        evidence = {"reason": reason, "retryable": True, **(details or {})}
+        async with self.pool.connection() as conn, conn.transaction():
+            updated = await conn.execute(
+                "UPDATE r3a.activities SET state='WAITING',available_at=clock_timestamp()+(%s * interval '1 second'),"
+                "lease_owner=NULL,lease_until=NULL,exception=%s,updated_at=clock_timestamp() "
+                "WHERE activity_id=%s AND attempt_id=%s AND state='RUNNING'",
+                (retry_after_seconds, json.dumps(evidence), activity["activity_id"], activity["attempt_id"]),
+            )
+            if updated.rowcount != 1:
+                raise RuntimeError("Activity lease was lost before deferral")
+            released = await conn.execute(
+                "UPDATE r3a.resource_leases SET released_at=clock_timestamp() WHERE lease_id=%s AND released_at IS NULL",
+                (activity["lease_id"],),
+            )
+            if released.rowcount:
+                await conn.execute(
+                    "UPDATE r3a.resource_registry SET allocated=GREATEST(0,allocated-1),observed_at=clock_timestamp() "
+                    "WHERE resource_id=%s", (activity["resource_id"],))
+            accepted = await self._transition_on_conn(
+                conn, "activity", str(activity["activity_id"]), "activity.generic", 1,
+                "WAITING", reason, evidence)
+            if not accepted:
+                raise InvalidTransition(f"Cannot defer activity {activity['activity_id']}")
+            event_id = await self._event(
+                conn, "activity.deferred", "activity", str(activity["activity_id"]),
+                "activity.generic", 1, "RUNNING", "WAITING", reason, evidence,
+                causation_id=activity["attempt_id"])
+            await conn.execute("UPDATE r3a.activities SET latest_event_id=%s WHERE activity_id=%s",
+                               (event_id, activity["activity_id"]))
 
     async def claim_activity(self, owner: str, lease_seconds: float,
                              resource_id: str = "foundation.observer") -> dict[str, Any] | None:

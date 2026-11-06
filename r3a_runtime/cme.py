@@ -2,14 +2,14 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.0.7
+File Revision: 1.1.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
 Execution Model: Async PostgreSQL-backed process supervised by Ring 0.
 Observability: Durable process/activity/module/resource/event state and local diagnostics socket.
 Dependencies: PostgreSQL; psycopg 3 pool; r3a_runtime.config/db/protocol/control/diagnostics.
-Authority: AP1 / R3A-019 authorized by Steward; isolated R3A only.
+Authority: AP1 / R3A-019 and AP1 Slice 1 authorized by Steward; isolated R3A only.
 Changed: 2026-11-06T15:22:00Z | R3A-AP0-M1 | Codex GPT-6 | Implement CME process, scheduler, module worker and control plane.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Reconcile orphaned module processes, record live health and correct replacement status.
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Dispatch durable Grace objectives, authorize bounded evidence reads and renew long-running leases.
@@ -19,10 +19,12 @@ Changed: 2026-11-06T18:16:39Z | R3A-019 | Codex GPT-6 | Bound module-child termi
 Changed: 2026-11-06T18:21:00Z | R3A-019 | Codex GPT-6 | Persist required knowledge citations and restore them on activity recovery.
 Changed: 2026-11-06T19:05:07Z | R3A-019 | Codex GPT-6 | Exclude unrelated runtime observations from knowledge-only model context.
 Changed: 2026-11-06T19:14:04Z | R3A-019 | Codex GPT-6 | Verify exhaustive transition answers before durable completion.
+Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add versioned resident envelopes, configurable model-role readiness routing, and pluggable authorization provider use.
+Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Enforce role configuration pinning, freshness-aware deferral, and typed outcomes.
 Supersedes: None.
-Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007.
-Tests: tests/test_r3a_ap1.py; live inference/recovery evidence pending this revision.
-History/Predecessor: Git blob e26efb365567dfa17559044fc61fcb06022c8e8e at commit 85c646b0a6c22cd4dbbe29a853a426dcbaa08d30.
+Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1.
+Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; no model inference in this slice.
+History/Predecessor: Git blob 92c8ba177e341e21e38fb341b60de414697512fb at commit cc7f662c04a4ba8eb327edd134e2ded92ef9786c.
 """
 from __future__ import annotations
 
@@ -39,8 +41,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .config import ConfigurationError, Settings, load_settings, sanitized_config
+from .config import Settings, load_settings, sanitized_config
+from .authorization import AuthorizationRequest, AuthorizationProvider, create_authorization_provider
 from .control import ControlServer, control_request, process_alive
+from .contracts import (ContractEnvelope, ContractOutcome, ReadinessObservation, RouteDecision, resolve_role,
+                        )
 from .db import InvalidTransition, Store, utcnow
 from .diagnostics import make_server
 from .knowledge import retrieve
@@ -83,10 +88,21 @@ def _knowledge_answer_issues(objective: str, evidence: list[dict[str, Any]],
     return sorted(set(missing))
 
 
+class ModelRoleUnavailable(RuntimeError):
+    def __init__(self, decision, retry_after_seconds: float):
+        super().__init__(decision.reason)
+        self.decision = decision
+        self.retry_after_seconds = retry_after_seconds
+
+
 class CME:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings,
+                 authorization_provider: AuthorizationProvider | None = None):
         self.settings = settings
         self.store = Store(settings)
+        self.authorization_provider = authorization_provider or create_authorization_provider(
+            settings.authorization_provider.provider_id, settings.authorization_provider.options,
+            settings.source_digest, self.store)
         self.control: ControlServer | None = None
         self.diagnostics: ControlServer | None = None
         self.shutdown = asyncio.Event()
@@ -140,6 +156,9 @@ class CME:
                                              metadata={"description": "Read current durable process and database observations"})
         await self.store.register_resource("foundation.observer", self.settings.worker_concurrency,
                                            owner="R3A-CME")
+        for role in self.settings.model_roles:
+            await self.store.register_model_role(role, self.settings.source_digest,
+                                                 self.settings.module_id)
         await self._recover_startup()
         await self._ensure_registered_module()
         self.control = ControlServer(self.settings.control_socket, self._control_request, mode=0o600)
@@ -226,8 +245,40 @@ class CME:
 
     async def _module_call(self, operation: str, payload: dict[str, Any] | None = None,
                            timeout: float = 5.0) -> dict[str, Any]:
+        payload = dict(payload or {})
+        if operation == "execute" and payload.get("activity_type") == "grace.objective":
+            payload["contract_envelope"] = ContractEnvelope(
+                "r3a.resident.execution", "1.0.0", str(uuid.uuid4()),
+                str(payload["activity_id"]), str(payload["attempt_id"]),
+                str(payload.get("correlation_id") or payload["activity_id"]),
+                self.module_id, str(payload["config_revision"]), utcnow().isoformat(),
+                {"operation": "execute", "continuation_ref": payload.get("continuation_ref")}).to_dict()
         return await module_request(self.settings.module_socket, self.module_id, self.module_version,
                                     operation, payload, timeout=timeout)
+
+    async def _authorize_capability(self, capability_id: str, *, activity_id: str | None = None,
+                                    attempt_id: str | None = None,
+                                    request_id: str | None = None,
+                                    context: dict[str, Any] | None = None,
+                                    resident_id: str | None = None) -> dict[str, Any]:
+        request_id = request_id or str(uuid.uuid4())
+        request = AuthorizationRequest(
+            contract_id="r3a.authorization-decision", contract_version="1.0.0",
+            request_id=request_id, correlation_id=request_id,
+            resident_id=resident_id or self.module_id,
+            capability_id=capability_id, activity_id=activity_id, attempt_id=attempt_id,
+            config_revision=self.settings.source_digest, created_at=utcnow().isoformat(),
+            context=context or {})
+        decision = await self.authorization_provider.authorize(request)
+        if not decision.allowed:
+            raise PermissionError(decision.reason)
+        return {"provider_id": decision.provider_id,
+                "contract_id": decision.contract_id,
+                "contract_version": decision.contract_version,
+                "policy_revision": decision.policy_revision,
+                "config_revision": decision.config_revision,
+                "observed_at": decision.observed_at,
+                "audit_event_id": decision.audit_event_id}
 
     async def _activate_configured_module(self) -> None:
         await self._activate_module(self.module_id, self.module_version)
@@ -414,22 +465,53 @@ class CME:
         if operation == "capability.check":
             module_id, capability_id = str(payload["module_id"]), str(payload["capability_id"])
             try:
-                await self.store.require_capability(module_id, capability_id)
+                provider = await self._authorize_capability(
+                    capability_id, request_id=idempotency_key,
+                    context={"request_idempotency_key": idempotency_key}, resident_id=module_id)
                 allowed = True
-            except PermissionError:
+            except PermissionError as exc:
+                provider = {"provider_id": self.authorization_provider.provider_id,
+                            "contract_id": "r3a.authorization-decision", "contract_version": "1.0.0"}
                 allowed = False
-            await self.store.audit_capability_invocation(module_id, capability_id,
-                                                         "allowed" if allowed else "denied",
-                                                         {"request_idempotency_key": idempotency_key})
+                reason = str(exc)
             return {"module_id": module_id, "capability_id": capability_id,
-                    "authorized": allowed, "effect": "none; discovery/check is read-only"}
+                    "authorized": allowed, "reason": None if allowed else reason,
+                    "authorization": provider,
+                    "effect": "none; discovery/check is read-only"}
+        if operation == "model.readiness.report":
+            observation = ReadinessObservation(**payload)
+            role = next((entry for entry in self.settings.model_roles
+                         if entry.role_id == observation.role_id), None)
+            if role is None:
+                raise ValueError("model readiness references an unconfigured role")
+            if observation.resident_id != self.module_id:
+                raise ValueError("model readiness resident identity does not match the configured module")
+            route = self.settings.model_route(role.route_id)
+            if observation.model_id != route.model:
+                raise ValueError("model readiness identity does not match the configured route")
+            if observation.config_revision != self.settings.source_digest:
+                raise ValueError("model readiness configuration revision is stale")
+            await self.store.observe_model_role(observation)
+            queued = await self._requeue_ready_model_activities(observation.observation_id)
+            return {"role_id": role.role_id, "status": observation.status,
+                    "config_revision": observation.config_revision,
+                    "deferred_activities_requeued": queued,
+                    "contract_outcome": ContractOutcome(
+                        "r3a.model-readiness", "1.0.0", idempotency_key,
+                        observation.observation_id, self.module_id,
+                        self.settings.source_digest, utcnow().isoformat(), "succeeded", False,
+                        result={"role_id": role.role_id, "status": observation.status,
+                                "deferred_activities_requeued": queued}).to_dict()}
         if operation == "grace.objective.submit":
             if self.settings.module_id != "resident.grace":
                 raise RuntimeError("The configured module is not the AP1 Grace resident")
             return await self.store.submit_grace_objective(
                 str(payload.get("objective", "")), idempotency_key,
                 str(payload.get("event_kind", "objective")),
-                str(payload["route_id"]) if payload.get("route_id") is not None else None)
+                str(payload["route_id"]) if payload.get("route_id") is not None else None,
+                str(payload["role_id"]) if payload.get("role_id") is not None else None,
+                tuple(payload.get("required_capabilities", ())),
+                tuple(payload.get("required_modalities", ())))
         if operation == "config.reload":
             if any(not task.done() for task in self.active_activities.values()):
                 raise RuntimeError("Config reload waits for in-flight activity to reach a safe boundary")
@@ -444,26 +526,67 @@ class CME:
                        self.settings.module_socket)
             if immutable != current:
                 raise RuntimeError("Bootstrap identity/socket/database changes require process restart")
+            new_provider = create_authorization_provider(
+                new_settings.authorization_provider.provider_id,
+                new_settings.authorization_provider.options, new_settings.source_digest, self.store)
             self.settings = new_settings
             self.store.settings = new_settings
+            self.authorization_provider = new_provider
             revision = await self.store.activate_config()
             await self.store.register_resource("foundation.observer", new_settings.worker_concurrency,
                                                owner="R3A-CME")
+            for role in new_settings.model_roles:
+                await self.store.register_model_role(role, new_settings.source_digest,
+                                                     new_settings.module_id)
             return {"activated": True, "config_revision": revision,
                     "source_digest": new_settings.source_digest}
         raise ValueError(f"Unsupported CME control operation: {operation}")
 
+    async def _requeue_ready_model_activities(self, causation_id: str | None = None) -> int:
+        roles = self.settings.model_roles
+        if not roles:
+            return 0
+        observations = await self._model_readiness_observations()
+        requeued = 0
+        for activity in await self.store.waiting_model_activities():
+            event_input = activity["input"] or {}
+            requested_role = event_input.get("role_id")
+            if not requested_role:
+                continue
+            if event_input.get("role_config_revision") != self.settings.source_digest:
+                await self.store.block_waiting_model_activity(
+                    activity["activity_id"], "role_configuration_revision_changed",
+                    {"role_id": requested_role,
+                     "activity_config_revision": event_input.get("role_config_revision"),
+                     "current_config_revision": self.settings.source_digest})
+                continue
+            decision = resolve_role(
+                roles, requested_role, set(event_input.get("required_capabilities", [])),
+                observations, config_revision=self.settings.source_digest,
+                required_modalities=set(event_input.get("required_modalities", [])))
+            if decision.action == "route" and decision.selected_role_id:
+                if await self.store.requeue_model_activity(
+                        activity["activity_id"], requested_role,
+                        decision.selected_role_id, causation_id):
+                    requeued += 1
+        return requeued
+
+    async def _model_readiness_observations(self) -> dict[str, dict[str, Any]]:
+        roles = self.settings.model_roles
+        observations = await self.store.model_role_observations(tuple(role.role_id for role in roles))
+        for role in roles:
+            observation = observations.get(role.role_id, {"status": "unknown"})
+            route = self.settings.model_route(role.route_id)
+            if (observation.get("model_id") != route.model
+                    or observation.get("config_revision") != self.settings.source_digest
+                    or observation.get("source") not in {"provider_model", "model_protocol"}):
+                observations[role.role_id] = {"status": "unknown"}
+        return observations
+
     async def _observer_context(self, activity: dict[str, Any]) -> dict[str, Any]:
-        module_id = self.module_id
         for capability_id in self.settings.module_capabilities:
-            try:
-                await self.store.require_capability(module_id, capability_id)
-            except PermissionError:
-                await self.store.audit_capability_invocation(module_id, capability_id, "denied",
-                                                             {"activity_id": str(activity["activity_id"])})
-                raise
-            await self.store.audit_capability_invocation(module_id, capability_id, "allowed",
-                                                         {"activity_id": str(activity["activity_id"])})
+            await self._authorize_capability(capability_id, activity_id=str(activity["activity_id"]),
+                                              attempt_id=str(activity["attempt_id"]))
         processes = await self.store.rows(
             "SELECT component_id,pid,state,health,heartbeat_at FROM r3a.process_observations "
             "WHERE component_id IN ('ring0','cme') ORDER BY component_id"
@@ -490,20 +613,54 @@ class CME:
                 "config_revision": self.settings.source_digest}
 
     async def _objective_context(self, activity: dict[str, Any]) -> dict[str, Any]:
-        module_id = self.module_id
         for capability_id in self.settings.module_capabilities:
-            try:
-                await self.store.require_capability(module_id, capability_id)
-            except PermissionError:
-                await self.store.audit_capability_invocation(module_id, capability_id, "denied",
-                                                             {"activity_id": str(activity["activity_id"])})
-                raise
-            await self.store.audit_capability_invocation(module_id, capability_id, "allowed",
-                                                         {"activity_id": str(activity["activity_id"])})
+            await self._authorize_capability(capability_id, activity_id=str(activity["activity_id"]),
+                                              attempt_id=str(activity["attempt_id"]))
         event_input = activity["input"]
         saved = activity.get("checkpoint") or {}
+        route_id = event_input.get("route_id")
+        selected_role_id = event_input.get("role_id")
+        if selected_role_id:
+            roles = self.settings.model_roles
+            if event_input.get("role_config_revision") != self.settings.source_digest:
+                raise ModelRoleUnavailable(
+                    RouteDecision("block", selected_role_id, None, None,
+                                  "role_configuration_revision_changed", False,
+                                  self.settings.source_digest,
+                                  request_id=str(uuid.uuid4()),
+                                  activity_id=str(activity["activity_id"]),
+                                  attempt_id=str(activity["attempt_id"]),
+                                  correlation_id=str(activity["activity_id"]),
+                                  resident_id=self.module_id,
+                                  evaluated_at=utcnow().isoformat()), 0)
+            observations = await self._model_readiness_observations()
+            decision_role_id = saved.get("selected_role_id") or event_input["role_id"]
+            decision = resolve_role(
+                roles, decision_role_id, set(event_input.get("required_capabilities", [])),
+                observations, config_revision=self.settings.source_digest,
+                permit_fallback=not bool(saved.get("selected_role_id")),
+                request_id=str(uuid.uuid4()), activity_id=str(activity["activity_id"]),
+                attempt_id=str(activity["attempt_id"]),
+                correlation_id=str(activity["activity_id"]), resident_id=self.module_id,
+                required_modalities=set(event_input.get("required_modalities", [])))
+            if decision.action != "route":
+                raise ModelRoleUnavailable(decision, next(
+                    role.deferral_seconds for role in roles if role.role_id == decision_role_id))
+            selected_role_id = decision.selected_role_id
+            route_id = decision.route_id
+            if saved.get("selected_role_id") and saved["selected_role_id"] != selected_role_id:
+                raise ModelRoleUnavailable(
+                    RouteDecision("defer", event_input["role_id"], None, None,
+                                  "continuation_role_changed", True, self.settings.source_digest,
+                                  request_id=decision.request_id,
+                                  activity_id=decision.activity_id,
+                                  attempt_id=decision.attempt_id,
+                                  correlation_id=decision.correlation_id,
+                                  resident_id=decision.resident_id,
+                                  evaluated_at=utcnow().isoformat()),
+                    next(role.deferral_seconds for role in roles if role.role_id == event_input["role_id"]))
         if saved.get("evidence_format") == "r3a.knowledge-evidence.v1":
-            route = self.settings.model_route(event_input.get("route_id"))
+            route = self.settings.model_route(route_id)
             saved_route = saved["model_route"]
             effective_route = {"route_id": route.route_id, "provider": route.provider,
                                "model": route.model, "endpoint": route.endpoint,
@@ -514,6 +671,9 @@ class CME:
                     "attempt_id": str(activity["attempt_id"]), "objective": event_input["objective"],
                     "event_kind": event_input.get("event_kind", "objective"),
                     "route_id": route.route_id, "model_route": saved_route,
+                    "role_id": selected_role_id or saved.get("selected_role_id"),
+                    "route_decision": decision.__dict__ if selected_role_id else
+                                      saved.get("route_decision"),
                     "evidence": saved["evidence"], "evidence_format": saved["evidence_format"],
                     "required_evidence_refs": saved.get(
                         "required_evidence_refs", sorted({item["source_id"] for item in saved["evidence"]
@@ -560,7 +720,7 @@ class CME:
         else:
             evidence = runtime_evidence + knowledge_evidence
         request_ref = str(uuid.uuid4())
-        route = self.settings.model_route(event_input.get("route_id"))
+        route = self.settings.model_route(route_id)
         return {"activity_type": "grace.objective", "activity_id": str(activity["activity_id"]),
                 "attempt_id": str(activity["attempt_id"]),
                 "objective": objective, "event_kind": event_input.get("event_kind", "objective"),
@@ -572,6 +732,8 @@ class CME:
                 "evidence_format": "r3a.knowledge-evidence.v1",
                 "required_evidence_refs": sorted({item["source_id"] for item in evidence
                                                    if item["source_id"].startswith("knowledge.")}),
+                "selected_role_id": selected_role_id,
+                "route_decision": decision.__dict__ if selected_role_id else None,
                 "evidence": evidence,
                 "request_ref": request_ref, "config_revision": self.settings.source_digest}
 
@@ -600,6 +762,7 @@ class CME:
                      "evidence_format": context["evidence_format"],
                      "required_evidence_refs": context["required_evidence_refs"],
                      "config_revision": context["config_revision"],
+                     "selected_role_id": context.get("selected_role_id"),
                      "evidence": context["evidence"], "evidence_refs": [
                          {"source_id": item["source_id"], "source_path": item.get("source_path"),
                           "sha256": item["sha256"], "source_sha256": item.get("source_sha256")}
@@ -627,6 +790,33 @@ class CME:
                 await self.store.finish_activity(activity, observations)
         except PermissionError as exc:
             await self.store.block_activity(activity, "capability grant required", {"error": str(exc)})
+        except ModelRoleUnavailable as exc:
+            details = {"role_id": exc.decision.requested_role_id,
+                       "decision": exc.decision.__dict__,
+                       "config_revision": self.settings.source_digest}
+            if exc.decision.action == "defer":
+                details["contract_outcome"] = ContractOutcome(
+                    "r3a.model-route-decision", "1.0.0",
+                    exc.decision.request_id or str(uuid.uuid4()),
+                    exc.decision.correlation_id or str(activity["activity_id"]),
+                    self.module_id, self.settings.source_digest, utcnow().isoformat(),
+                    "deferred", True, reason_code=exc.decision.reason,
+                    retry_after_seconds=exc.retry_after_seconds,
+                    activity_id=str(activity["activity_id"]),
+                    attempt_id=str(activity["attempt_id"])).to_dict()
+                await self.store.defer_activity(activity, exc.decision.reason,
+                                                exc.retry_after_seconds, details)
+            else:
+                details["contract_outcome"] = ContractOutcome(
+                    "r3a.model-route-decision", "1.0.0",
+                    exc.decision.request_id or str(uuid.uuid4()),
+                    exc.decision.correlation_id or str(activity["activity_id"]),
+                    self.module_id, self.settings.source_digest, utcnow().isoformat(),
+                    "blocked", False, reason_code=exc.decision.reason,
+                    error={"code": exc.decision.reason},
+                    activity_id=str(activity["activity_id"]),
+                    attempt_id=str(activity["attempt_id"])).to_dict()
+                await self.store.block_activity(activity, exc.decision.reason, details)
         except asyncio.CancelledError:
             await self.store.fail_activity(activity, RuntimeError("CME shutdown interrupted idempotent observer"), 0)
             raise
@@ -645,6 +835,7 @@ class CME:
             self.scheduler_tick = asyncio.get_running_loop().time()
             await self.store.ensure_observer_activity()
             await self.store.recover_expired_activities()
+            await self._requeue_ready_model_activities()
             while len(self.active_activities) < self.settings.worker_concurrency:
                 activity = await self.store.claim_activity(f"cme:{os.getpid()}", self.settings.lease_seconds)
                 if activity is None:

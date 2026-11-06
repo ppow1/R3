@@ -2,22 +2,25 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/diagnostics.py
 Component: R3A-TRUTHFUL-DIAGNOSTICS
-File Revision: 1.0.2
+File Revision: 1.1.0
 Created: 2026-11-06T15:18:00Z
 Created By: Codex GPT-6
 Purpose: Serve read-only process, activity, registry, event and machine diagnostics from PostgreSQL.
 Execution Model: Async local Unix socket projection.
 Observability: Durable snapshot with source timestamps and explicit freshness.
 Dependencies: r3a_runtime.db; r3a_runtime.control.
-Authority: AP1 / R3A-019 authorized by Steward; local read-only diagnostics only.
+Authority: AP1 / R3A-019 and AP1 Slice 1 authorized by Steward; local read-only diagnostics only.
 Changed: 2026-11-06T15:18:00Z | R3A-AP0-M1 | Codex GPT-6 | Add truthful diagnostic projection.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Bound status payload and report module/process freshness from live observations.
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Expose objective progress, model references, completed decisions and failure diagnostics.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Expose event input kind and route in activity diagnostics.
+Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Project model-role readiness using provider evidence, configuration revision, and freshness.
+Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Ensure stale or unverified role observations do not appear healthy in diagnostics.
+Changed: 2026-11-06T23:46:49Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Correct predecessor provenance to the exact starting-branch blob.
 Supersedes: None.
-Contracts: AP0-010; R3A-019; AP0-M1 D8; STM-006.
-Tests: tests/test_r3a_ap1.py; live AP1 diagnostics evidence pending this revision.
-History/Predecessor: Git blob 546ac5d442cedca0fb3d7ab919b0929233b39b01 at commit cdcb63ce1fa33975ce4468d5121e4bfef5429f92.
+Contracts: AP0-010; R3A-019; AP0-M1 D8; STM-006; r3a.model-readiness.v1.
+Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py.
+History/Predecessor: Git blob 68318dcd759050f0d863b35bb80e66b1780b08d6 at commit cc7f662c04a4ba8eb327edd134e2ded92ef9786c.
 """
 from __future__ import annotations
 
@@ -28,6 +31,7 @@ from typing import Any
 
 from .config import Settings
 from .control import ControlServer
+from .contracts import ContractValidationError, parse_timestamp
 from .db import Store
 
 
@@ -37,6 +41,37 @@ def _json_default(value: Any) -> Any:
     if hasattr(value, "hex"):
         return str(value)
     raise TypeError(f"Cannot encode {type(value).__name__}")
+
+
+def project_resource_readiness(row: dict[str, Any], now: datetime,
+                               config_revision: str | None) -> dict[str, Any]:
+    """Never project model-role ready without a fresh provider-level observation."""
+    projected = dict(row)
+    metadata = projected.get("metadata")
+    if not isinstance(metadata, dict) or metadata.get("registry_contract") != "r3a.model-role.v1":
+        return projected
+    observation = metadata.get("readiness")
+    freshness = "unknown"
+    age = None
+    if isinstance(observation, dict):
+        try:
+            timestamp = parse_timestamp(observation.get("observed_at"), "observed_at")
+            age = (now - timestamp).total_seconds()
+            max_age = float(metadata["readiness_max_age_seconds"])
+            valid = (observation.get("source") in {"provider_model", "model_protocol"}
+                     and bool(observation.get("model_id"))
+                     and bool(observation.get("evidence_ref"))
+                     and observation.get("config_revision") == config_revision
+                     and metadata.get("config_revision") == config_revision
+                     and 0 <= age <= max_age)
+            freshness = "fresh" if valid else "stale"
+        except (KeyError, TypeError, ValueError, ContractValidationError):
+            freshness = "unknown"
+    projected["readiness_freshness"] = freshness
+    projected["readiness_age_seconds"] = age
+    if freshness != "fresh":
+        projected["health"] = freshness
+    return projected
 
 
 class DiagnosticProjection:
@@ -90,10 +125,14 @@ class DiagnosticProjection:
             for row in snapshot["activities"][:10]]
         machines = [{key: row[key] for key in ("machine_id", "machine_version", "digest")}
                     for row in snapshot["state_machines"]]
+        resources = [project_resource_readiness(row, now,
+                                                 snapshot["configuration"].get("revision_id")
+                                                 if snapshot["configuration"] else None)
+                     for row in snapshot["resources"]]
         return {"observed_at": now.isoformat(), "instance_id": self.settings.instance_id,
                 "source": "postgresql", "source_freshness": "fresh",
                 "configuration": snapshot["configuration"], "processes": processes,
-                "modules": module_health, "resources": snapshot["resources"],
+                "modules": module_health, "resources": resources,
                 "activities": activities, "event_summary": event_summary[0],
                 "state_machines": machines}
 

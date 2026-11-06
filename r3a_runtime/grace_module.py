@@ -2,14 +2,14 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.0.6
+File Revision: 1.1.0
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
 Purpose: Execute bounded read-only Grace objectives with the configured real model and supplied authorized evidence.
 Execution Model: Versioned JSON-lines resident module process supervised by CME.
 Observability: Provider/model, request/result references and digests, citations, and failures are returned to durable activity state.
 Dependencies: Python standard library; explicitly configured OpenAI-compatible model endpoint.
-Authority: AP1 / R3A-019 authorized by Steward; assigned authority and read-only configured capabilities are enforced.
+Authority: AP1 / R3A-019 and AP1 Slice 1 authorized by Steward; assigned authority and read-only configured capabilities are enforced.
 Changed: 2026-11-06 | AP1-M1 | Codex GPT-6 | Implement local inference and read-only objective execution.
 Changed: 2026-11-06 | AP1-M1 | Codex GPT-6 | Constrain JSON output and retain model response references on validation failure.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Execute selected configured model route and retain event/evidence lineage.
@@ -17,10 +17,12 @@ Changed: 2026-11-06T18:13:55Z | R3A-019 | Codex GPT-6 | Send only cited evidence
 Changed: 2026-11-06T18:21:00Z | R3A-019 | Codex GPT-6 | Require model decisions to cite retrieved knowledge evidence.
 Changed: 2026-11-06T18:31:45Z | R3A-019 | Codex GPT-6 | Clarify that model assessments answer objectives and reserve blocked for missing evidence.
 Changed: 2026-11-06T18:38:00Z | R3A-019 | Codex GPT-6 | Request schema-constrained JSON and report missing decision fields precisely.
+Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Validate optional versioned execution envelopes and retain selected role provenance.
+Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Complete execution envelope identity checks and role provenance propagation.
 Supersedes: None.
-Contracts: R3A-019; AP1-M1 Issue #43 acceptance.
-Tests: tests/test_r3a_ap1.py; live model-backed objective evidence pending this revision.
-History/Predecessor: New AP1-M1 resident module.
+Contracts: R3A-019; AP1-M1 Issue #43 acceptance; r3a.resident.execution.v1.
+Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; no model inference in this slice.
+History/Predecessor: Git blob 90399a473bb6c7f88d5200e4d18fef004fcbbcbb at commit cc7f662c04a4ba8eb327edd134e2ded92ef9786c.
 """
 from __future__ import annotations
 
@@ -35,6 +37,7 @@ import urllib.request
 import uuid
 from typing import Any
 
+from .contracts import ContractEnvelope, ContractValidationError
 from .config import load_settings
 from .protocol import ModuleProtocolServer
 
@@ -102,6 +105,17 @@ class GraceResident:
         if operation == "execute":
             if self.state != "ACTIVE":
                 raise RuntimeError("Grace resident is not active")
+            envelope_value = payload.get("contract_envelope")
+            if envelope_value is not None:
+                envelope = ContractEnvelope.from_dict(
+                    envelope_value, expected_contract="r3a.resident.execution")
+                if envelope.resident_id != self.module_id:
+                    raise ContractValidationError("resident identity mismatch")
+                if envelope.activity_id != str(payload.get("activity_id")) or \
+                        envelope.attempt_id != str(payload.get("attempt_id")):
+                    raise ContractValidationError("activity/attempt identity mismatch")
+                if envelope.config_revision != str(payload.get("config_revision")):
+                    raise ContractValidationError("configuration revision mismatch")
             if payload.get("activity_type") == "foundation.observe":
                 required = {"activity_id", "attempt_id", "processes", "postgres"}
                 if not required.issubset(payload):
@@ -184,6 +198,7 @@ class GraceResident:
                     "objective": objective, "event_kind": payload.get("event_kind", "objective"),
                     "decision": decision,
                     "model": {"route_id": route.route_id, "provider": route.provider, "name": route.model,
+                              "role_id": payload.get("selected_role_id"),
                               "request_ref": request_ref, "request_sha256": request_hash,
                               "result_ref": result_ref, "result_sha256": result_hash,
                               "usage": response.get("usage"), "finish_reason": finish_reason},

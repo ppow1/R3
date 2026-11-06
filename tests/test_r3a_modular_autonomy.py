@@ -1,0 +1,378 @@
+"""
+R3 CONTROLLED SOURCE
+File: tests/test_r3a_modular_autonomy.py
+Component: R3A-AP1-MODULAR-AUTONOMY-REGRESSION
+File Revision: 1.0.0
+Created: 2026-11-06T23:19:46Z
+Created By: Codex GPT-6
+Purpose: Permanently verify versioned autonomy contracts, external model roles, readiness routing, deferral, and authorization-provider compatibility.
+Execution Model: Python unittest with temporary configuration and in-memory provider fakes; no model inference or database connection.
+Observability: Deterministic assertions for config digests, contract outcomes, route decisions, and audited grant behavior.
+Dependencies: Python 3.12 standard library; r3a_runtime configuration/contracts/authorization modules.
+Authority: R3A AP0/AP1 Modular Autonomy Implementation Slice 1; isolated development branch only.
+Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add focused permanent regression coverage for the first modular autonomy slice.
+Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Cover legacy configuration, durable deferral semantics, and stale readiness diagnostics.
+Supersedes: None.
+Contracts: AP0-003–010; R3A-019; MOD-006; r3a.contract-envelope.v1; r3a.model-role.v1; r3a.authorization-decision.v1.
+Tests: This test module.
+History/Predecessor: New file; initial publication recorded in Git.
+"""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+
+from r3a_runtime.authorization import (AuthorizationDecision, AuthorizationRequest,
+                                       CapabilityGrantAuthorizationProvider,
+                                       create_authorization_provider, register_authorization_provider)
+from r3a_runtime.config import ConfigurationError, load_settings, sanitized_config
+from r3a_runtime.contracts import (ContractEnvelope, ContractOutcome, ContractValidationError,
+                                   ReadinessObservation, resolve_role)
+from r3a_runtime.cme import CME
+from r3a_runtime.diagnostics import project_resource_readiness
+from r3a_runtime.protocol import ModuleProtocolServer, request as module_request
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def make_config(directory: Path, *, primary_model: str = "reasoner-a",
+                vision_model: str = "vision-a") -> Path:
+    data = directory / "state"
+    sockets = data / "run"
+    source = ROOT / "r3a_runtime" / "grace_module.py"
+    routes = [
+        {"route_id": "autonomic-route", "provider": "openai-compatible",
+         "endpoint": "http://127.0.0.1:18001/v1/chat/completions", "model": "small-reasoner",
+         "timeout_seconds": 15, "max_tokens": 128},
+        {"route_id": "primary-route", "provider": "openai-compatible",
+         "endpoint": "https://models.example.invalid/v1/chat/completions", "model": primary_model,
+         "timeout_seconds": 90, "max_tokens": 256},
+        {"route_id": "vision-route", "provider": "openai-compatible",
+         "endpoint": "https://vision.example.invalid/v1/chat/completions", "model": vision_model,
+         "timeout_seconds": 60, "max_tokens": 192},
+    ]
+    roles = [
+        {"role_id": "resident.autonomic", "route_id": "autonomic-route",
+         "capabilities": ["monitor.health"], "modalities": ["text"], "fallback_roles": [],
+         "readiness_max_age_seconds": 30, "unavailable_action": "defer",
+         "deferral_seconds": 10, "concurrency": 1},
+        {"role_id": "resident.primary", "route_id": "primary-route",
+         "capabilities": ["reason.text", "plan"], "modalities": ["text"],
+         "fallback_roles": ["resident.vision"], "readiness_max_age_seconds": 45,
+         "unavailable_action": "defer", "deferral_seconds": 12, "concurrency": 2},
+        {"role_id": "resident.vision", "route_id": "vision-route",
+         "capabilities": ["reason.text", "vision.interpret"], "modalities": ["text", "image"],
+         "fallback_roles": [], "readiness_max_age_seconds": 45,
+         "unavailable_action": "block", "deferral_seconds": 12, "concurrency": 1},
+    ]
+    value = {
+        "schema_version": 1,
+        "instance_id": "r3a_contract_test",
+        "paths": {"data_dir": str(data), "postgres_socket_dir": str(sockets),
+                  "control_socket": str(sockets / "control.sock"),
+                  "diagnostics_socket": str(sockets / "diagnostics.sock"),
+                  "module_socket": str(sockets / "module.sock"),
+                  "machine_catalog_dir": str(ROOT / "r3a_runtime" / "state_machines")},
+        "postgres": {"database": "r3a_contract_test", "user": "r3a_runtime",
+                     "socket_dir": str(sockets), "port": 55432},
+        "module": {"module_id": "resident.grace", "version": "1.0.0",
+                   "contract_id": "r3a.module", "protocol_major": 1, "protocol_minor": 0,
+                   "capabilities": ["institution.knowledge.read", "institution.diagnostics.read"],
+                   "owner": "Steward", "entrypoint": "r3a_runtime.grace_module",
+                   "source": str(source), "sha256": hashlib.sha256(source.read_bytes()).hexdigest()},
+        "timing": {"observer_interval_seconds": 60, "scheduler_interval_seconds": 1,
+                   "lease_seconds": 30, "heartbeat_interval_seconds": 2,
+                   "heartbeat_stale_after_seconds": 10, "diagnostic_stale_after_seconds": 10,
+                   "restart_initial_seconds": 1, "restart_max_seconds": 8,
+                   "worker_concurrency": 2},
+        "grace": {"routes": routes, "default_route": "primary-route",
+                  "knowledge_sources": [str(ROOT / "r3a_runtime" / "state_machines" / "process.json")],
+                  "role_registry": {"schema_version": 1, "default_role": "resident.primary",
+                                    "roles": roles}},
+        "authorization": {"provider_id": "capability_grants", "contract_version": "1.0.0",
+                          "options": {}},
+    }
+    path = directory / "config.json"
+    path.write_text(json.dumps(value), encoding="utf-8")
+    return path
+
+
+class VersionedEnvelopeTests(unittest.TestCase):
+    def test_contract_envelope_round_trip_and_rejects_incompatible_major(self):
+        envelope = ContractEnvelope("r3a.resident.execution", "1.0.0", "request-1", "activity-1",
+                                    "attempt-1", "correlation-1", "resident.grace", "config-1",
+                                    "2026-11-06T23:00:00Z", {"operation": "execute"})
+        self.assertEqual(ContractEnvelope.from_dict(envelope.to_dict()).activity_id, "activity-1")
+        incompatible = {**envelope.to_dict(), "contract_version": "2.0.0"}
+        with self.assertRaises(ContractValidationError):
+            ContractEnvelope.from_dict(incompatible)
+
+    def test_outcome_contract_requires_typed_defer_and_failure_reasons(self):
+        outcome = ContractOutcome("r3a.model-route-decision", "1.0.0", "request-2", "correlation-2",
+                                  "resident.grace", "config-1", "2026-11-06T23:00:00Z",
+                                  "deferred", True, reason_code="role_not_ready",
+                                  retry_after_seconds=10, activity_id="activity-1", attempt_id="attempt-1")
+        self.assertEqual(outcome.to_dict()["outcome"], "deferred")
+        with self.assertRaises(ContractValidationError):
+            ContractOutcome("r3a.model-route-decision", "1.0.0", "request-2", "correlation-2",
+                            "resident.grace", "config-1", "2026-11-06T23:00:00Z",
+                            "deferred", False, reason_code="role_not_ready")
+
+
+class ModelRoleConfigAndRoutingTests(unittest.TestCase):
+    def test_roles_are_external_and_model_assignment_change_changes_revision(self):
+        with TemporaryDirectory() as first_dir, TemporaryDirectory() as second_dir:
+            first = load_settings(make_config(Path(first_dir)))
+            second = load_settings(make_config(Path(second_dir), primary_model="reasoner-b"))
+            self.assertEqual(first.default_model_role, "resident.primary")
+            self.assertEqual(len(first.model_roles), 3)
+            self.assertEqual(first.model_route("primary-route").model, "reasoner-a")
+            self.assertEqual(second.model_route("primary-route").model, "reasoner-b")
+            self.assertNotEqual(first.source_digest, second.source_digest)
+            durable = sanitized_config(first)
+            self.assertEqual(durable["grace"]["role_registry"]["schema_version"], 1)
+            self.assertEqual(durable["authorization"]["provider_id"], "capability_grants")
+
+    def test_legacy_route_configuration_remains_supported(self):
+        with TemporaryDirectory() as directory:
+            path = make_config(Path(directory))
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["grace"].pop("role_registry")
+            value.pop("authorization")
+            path.write_text(json.dumps(value), encoding="utf-8")
+            settings = load_settings(path)
+            self.assertEqual(settings.model_roles, ())
+            self.assertIsNone(settings.default_model_role)
+            self.assertEqual(settings.authorization_provider.provider_id, "capability_grants")
+
+    def test_bad_role_route_fallback_and_contract_versions_fail_closed(self):
+        with TemporaryDirectory() as directory:
+            path = make_config(Path(directory))
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["grace"]["role_registry"]["roles"][1]["route_id"] = "missing"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaises(ConfigurationError):
+                load_settings(path)
+
+    def test_capability_selection_fallback_deferral_staleness_and_unsupported(self):
+        with TemporaryDirectory() as directory:
+            settings = load_settings(make_config(Path(directory)))
+            now = datetime.now(timezone.utc)
+            observations = {
+                "resident.primary": {"status": "unavailable", "observed_at": now.isoformat(),
+                                     "config_revision": settings.source_digest},
+                "resident.vision": {"status": "ready", "observed_at": now.isoformat(),
+                                    "config_revision": settings.source_digest},
+            }
+            fallback = resolve_role(settings.model_roles, "resident.primary", {"vision.interpret"},
+                                    observations, config_revision=settings.source_digest, now=now)
+            self.assertEqual((fallback.action, fallback.selected_role_id, fallback.route_id),
+                             ("route", "resident.vision", "vision-route"))
+            unavailable = resolve_role(settings.model_roles, "resident.primary", {"plan"},
+                                       observations, config_revision=settings.source_digest, now=now)
+            self.assertEqual(unavailable.action, "defer")
+            stale = {"resident.primary": {"status": "ready",
+                                           "observed_at": (now - timedelta(minutes=2)).isoformat(),
+                                           "config_revision": settings.source_digest}}
+            self.assertEqual(resolve_role(settings.model_roles, "resident.primary", {"plan"}, stale,
+                                          config_revision=settings.source_digest, now=now).action, "defer")
+            unsupported = resolve_role(settings.model_roles, "resident.primary", {"image.generate"},
+                                       observations, config_revision=settings.source_digest, now=now)
+            self.assertEqual((unsupported.action, unsupported.reason), ("block", "unsupported_capability"))
+            no_vision = resolve_role(settings.model_roles, "resident.primary", set(), observations,
+                                     config_revision=settings.source_digest, now=now,
+                                     required_modalities={"audio"})
+            self.assertEqual((no_vision.action, no_vision.reason), ("block", "unsupported_modality"))
+
+    def test_host_reachability_cannot_be_submitted_as_model_readiness(self):
+        with self.assertRaises(ContractValidationError):
+            ReadinessObservation("resident.grace", "resident.primary", "reasoner-a", "ready",
+                                 "tcp", "2026-11-06T23:00:00Z", "revision", "00000000-0000-0000-0000-000000000001")
+
+    def test_stale_model_readiness_is_not_projected_as_ready(self):
+        now = datetime.now(timezone.utc)
+        row = {"resource_id": "model-role:reasoner", "health": "ready",
+               "metadata": {"registry_contract": "r3a.model-role.v1",
+                            "config_revision": "revision", "readiness_max_age_seconds": 10,
+                            "readiness": {"status": "ready", "source": "provider_model",
+                                          "model_id": "model-x", "evidence_ref": "probe:abc",
+                                          "config_revision": "revision",
+                                          "observed_at": (now - timedelta(seconds=20)).isoformat()}}}
+        projected = project_resource_readiness(row, now, "revision")
+        self.assertEqual(projected["readiness_freshness"], "stale")
+        self.assertEqual(projected["health"], "stale")
+
+
+class GrantAuthorizationCompatibilityTests(unittest.TestCase):
+    class StoreFake:
+        def __init__(self, allowed: bool):
+            self.allowed = allowed
+            self.calls = []
+
+        async def require_capability(self, resident_id: str, capability_id: str):
+            self.calls.append(("require", resident_id, capability_id))
+            if not self.allowed:
+                raise PermissionError("no active grant")
+
+        async def audit_capability_invocation(self, resident_id: str, capability_id: str,
+                                              result: str, details: dict):
+            self.calls.append(("audit", resident_id, capability_id, result, details))
+
+    def make_request(self):
+        return AuthorizationRequest("r3a.authorization-decision", "1.0.0", "request-1", "correlation-1",
+                                    "resident.grace", "institution.knowledge.read", "activity-1",
+                                    "attempt-1", "config-1", "2026-11-06T23:00:00Z", {})
+
+    def test_existing_grant_check_and_audit_are_preserved_for_allow_and_deny(self):
+        for allowed in (True, False):
+            store = self.StoreFake(allowed)
+            provider = CapabilityGrantAuthorizationProvider(store, "config-1")
+            decision = asyncio.run(provider.authorize(self.make_request()))
+            self.assertEqual(decision.allowed, allowed)
+            self.assertEqual(store.calls[0], ("require", "resident.grace", "institution.knowledge.read"))
+            self.assertEqual(store.calls[1][0:4],
+                             ("audit", "resident.grace", "institution.knowledge.read",
+                              "allowed" if allowed else "denied"))
+            self.assertEqual(store.calls[1][4]["authorization_provider"], "capability_grants")
+            self.assertEqual(decision.config_revision, "config-1")
+            self.assertIsNone(decision.policy_revision)
+
+    def test_grant_provider_does_not_treat_scope_or_delegation_as_an_existing_grant(self):
+        store = self.StoreFake(True)
+        request = self.make_request()
+        scoped = AuthorizationRequest(**{**request.__dict__, "resource_scope": {"path": "source"},
+                                         "delegation_ref": "delegation-1"})
+        decision = asyncio.run(CapabilityGrantAuthorizationProvider(store, "config-1").authorize(scoped))
+        self.assertFalse(decision.allowed)
+        self.assertEqual(store.calls[-1][3], "denied")
+
+    def test_alternative_provider_can_be_registered_without_cme_changes(self):
+        class Alternative:
+            provider_id = "test.alternative"
+            contract_version = "1.0.0"
+
+            async def authorize(self, request):
+                return None
+
+        register_authorization_provider("test.alternative", lambda *_: Alternative())
+        provider = create_authorization_provider("test.alternative", {}, "config-1", object())
+        self.assertEqual(provider.provider_id, "test.alternative")
+
+
+class NoDeploymentPolicyConstantsTests(unittest.TestCase):
+    def test_core_and_resident_sources_do_not_embed_assigned_host_or_model_identities(self):
+        sources = [(ROOT / "r3a_runtime" / "cme.py").read_text(encoding="utf-8"),
+                   (ROOT / "r3a_runtime" / "grace_module.py").read_text(encoding="utf-8")]
+        for source in sources:
+            for forbidden in ("192.168.1.155", "192.168.1.160", "192.168.1.162",
+                              "OctoMiner1", "OctoMiner2", "Camrui"):
+                self.assertNotIn(forbidden, source)
+
+
+class ExistingModuleRpcCompatibilityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_v1_module_health_rpc_remains_compatible(self):
+        async def handler(operation, payload):
+            self.assertEqual(operation, "health")
+            return {"state": "ACTIVE", "health": "healthy"}
+
+        with TemporaryDirectory() as directory:
+            socket_path = Path(directory) / "module.sock"
+            server = ModuleProtocolServer(socket_path, "resident.test", "1.0.0", handler)
+            await server.start()
+            try:
+                response = await module_request(socket_path, "resident.test", "1.0.0", "health", {})
+                self.assertEqual(response["protocol_version"], {"major": 1, "minor": 0})
+                self.assertEqual(response["result"]["state"], "ACTIVE")
+            finally:
+                await server.close()
+
+    async def test_cme_adds_execution_contract_without_changing_rpc_signature(self):
+        class Provider:
+            provider_id = "test.provider"
+            contract_version = "1.0.0"
+
+            async def authorize(self, _request):
+                raise AssertionError("no authorization call expected")
+
+        with TemporaryDirectory() as directory:
+            settings = load_settings(make_config(Path(directory)))
+            cme = CME(settings, authorization_provider=Provider())
+            captured = {}
+
+            async def fake_request(socket, module_id, version, operation, payload, timeout):
+                captured.update(socket=socket, module_id=module_id, version=version,
+                                operation=operation, payload=payload, timeout=timeout)
+                return {"ok": True, "result": {}}
+
+            payload = {"activity_type": "grace.objective", "activity_id": "activity-1",
+                       "attempt_id": "attempt-1", "config_revision": settings.source_digest}
+            with patch("r3a_runtime.cme.module_request", fake_request):
+                await cme._module_call("execute", payload, timeout=30)
+            self.assertEqual(captured["operation"], "execute")
+            self.assertEqual(captured["module_id"], "resident.grace")
+            envelope = ContractEnvelope.from_dict(
+                captured["payload"]["contract_envelope"], expected_contract="r3a.resident.execution")
+            self.assertEqual(envelope.activity_id, "activity-1")
+            self.assertEqual(envelope.attempt_id, "attempt-1")
+
+    async def test_unready_requested_role_is_durably_deferred_not_completed(self):
+        class Provider:
+            provider_id = "test.provider"
+            contract_version = "1.0.0"
+
+            async def authorize(self, request):
+                return AuthorizationDecision("r3a.authorization-decision", "1.0.0",
+                                             self.provider_id, True, "allowed", False,
+                                             None, request.config_revision,
+                                             "2026-11-06T23:00:00Z", request.correlation_id,
+                                             request.activity_id, request.attempt_id)
+
+        class StoreFake:
+            def __init__(self):
+                self.deferred = []
+                self.completed = False
+
+            async def model_role_observations(self, _role_ids):
+                return {}
+
+            async def defer_activity(self, activity, reason, retry_after, details):
+                self.deferred.append((activity["activity_id"], reason, retry_after, details))
+
+            async def block_activity(self, *_args):
+                raise AssertionError("freshly deferrable role should not block")
+
+            async def finish_activity(self, *_args):
+                self.completed = True
+                raise AssertionError("unready role must never complete")
+
+
+        with TemporaryDirectory() as directory:
+            settings = load_settings(make_config(Path(directory)))
+            cme = CME(settings, authorization_provider=Provider())
+            store = StoreFake()
+            cme.store = store
+            cme.module_process = type("Process", (), {"returncode": None})()
+            activity = {"activity_type": "grace.objective", "activity_id": "activity-1",
+                        "attempt_id": "attempt-1", "attempt_count": 0,
+                        "input": {"objective": "reason using the primary role",
+                                  "event_kind": "objective", "route_id": None,
+                                  "role_id": "resident.primary",
+                                  "required_capabilities": ["plan"], "required_modalities": [],
+                                  "role_config_revision": settings.source_digest},
+                        "checkpoint": {}}
+            await cme._run_activity(activity)
+            self.assertEqual(len(store.deferred), 1)
+            self.assertTrue(store.deferred[0][1].startswith("resident.primary:stale_or_unknown"))
+            self.assertGreater(store.deferred[0][2], 0)
+            self.assertFalse(store.completed)
+
+
+if __name__ == "__main__":
+    unittest.main()
