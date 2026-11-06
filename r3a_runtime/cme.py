@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -15,6 +15,7 @@ Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Reconcile orphaned mo
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Dispatch durable Grace objectives, authorize bounded evidence reads and renew long-running leases.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
+Changed: 2026-11-06T18:16:39Z | R3A-019 | Codex GPT-6 | Bound module-child termination when a model request does not drain.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007.
 Tests: tests/test_r3a_ap1.py; live inference/recovery evidence pending this revision.
@@ -287,7 +288,15 @@ class CME:
             await self._module_call("stop")
         except (OSError, RuntimeError, asyncio.TimeoutError):
             process.terminate()
-        await process.wait()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=self.settings.heartbeat_stale_after_seconds)
+        except asyncio.TimeoutError:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=self.settings.heartbeat_stale_after_seconds)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
         self.module_process = None
         self.module_pid = None
         await self.store.module_state(module_id, version, "STOPPED", "stopped",

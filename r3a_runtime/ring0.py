@@ -2,19 +2,20 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/ring0.py
 Component: R3A-RING0-SUPERVISOR
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-06T15:25:00Z
 Created By: Codex GPT-6
 Purpose: Provide the minimal persistent Ring 0 process and supervise CME start, health, failure and restart.
 Execution Model: systemd user service with independent CME child process and process watchdog notification.
 Observability: PostgreSQL process transitions, heartbeat, exit code and restart outcome.
 Dependencies: PostgreSQL; external R3A bootstrap JSON; r3a_runtime.db/control.
-Authority: AP0-M1 implementation authorized by Steward in GitHub Issue #42; isolated R3A service only.
+Authority: AP1 / R3A-019 authorized by Steward; isolated R3A service only.
 Changed: 2026-11-06T15:25:00Z | R3A-AP0-M1 | Codex GPT-6 | Implement Ring 0 CME watchdog/restart loop.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Add startup grace, schema readiness guard and watchdog notification during CME backoff.
+Changed: 2026-11-06T18:16:39Z | R3A-019 | Codex GPT-6 | Bound CME termination and kill only the isolated child after the configured grace interval.
 Supersedes: None.
 Contracts: AP0-001/002/011; AP0-M1 D1/D3; STM-001/003.
-Tests: tests/test_r3a_supervision.py; live isolated process restart evidence.
+Tests: tests/test_r3a_ap1.py; live isolated R3A restart verification pending this revision.
 History/Predecessor: New file; initial publication recorded in Git.
 """
 from __future__ import annotations
@@ -128,7 +129,11 @@ class Ring0:
             await asyncio.wait_for(child.wait(), timeout=self.settings.heartbeat_stale_after_seconds)
         except asyncio.TimeoutError:
             child.terminate()
-            await child.wait()
+            try:
+                await asyncio.wait_for(child.wait(), timeout=self.settings.heartbeat_stale_after_seconds)
+            except asyncio.TimeoutError:
+                child.kill()
+                await child.wait()
 
     async def _check_cme(self) -> tuple[bool, dict]:
         child = self.child
