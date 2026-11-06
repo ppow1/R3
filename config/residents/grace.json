@@ -15,7 +15,8 @@
     "timeout_seconds": 15,
     "allowed_tools": [
       "r3.status",
-      "r3.host.uptime"
+      "r3.host.uptime",
+      "r3.proposal.submit"
     ]
   },
   "continuation_event_types": [

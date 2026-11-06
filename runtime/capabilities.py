@@ -1,6 +1,19 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/capabilities.py
-# Purpose: Native R3 capability catalog and fail-closed invocation.
+# Component: R3-CAPABILITY-GATEWAY
+# File Revision: 1.1.0
+# Created: 2026-11-02 UTC (exact time unverified)
+# Created By: Unknown (legacy source)
+# Purpose: Native R3 capability catalog and fail-closed invocation with verified execution context.
+# Execution Model: In-process exact-grant authorization before synchronous capability execution.
+# Observability: Durable authorization audit records for authorization, completion, and failure.
+# Dependencies: runtime.capability_authority; Python standard library.
+# Authority: R3 canonical capability grant contract; no automatic grant creation.
+# Changed: 2026-11-06T01:39:36Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Add fixed scope and verified caller context for narrow adapters.
+# Supersedes: Revision 1.0.0; extends callbacks without changing existing capability grants.
+# Contracts: docs/r3-native-tool-contract.md
+# Tests: tests/test_capabilities.py; tests/test_authenticated_tool_routing.py; tests/test_proposal_submission_integration.py
+# History/Predecessor: Git blob 709e8e23a53292c64e37d43f06f04f1d46d98a85
 """R3-owned capability contracts. No R2 imports, services, or database access."""
 from __future__ import annotations
 
@@ -30,9 +43,22 @@ class Capability:
     action: str
     description: str
     parameters: dict
-    executor: Callable[[dict], object]
+    executor: Callable[[dict], object] | None = None
     read_only: bool = False
     resource_ref: str = ""
+    scope_ref: str | None = None
+    contextual_executor: Callable[[dict, "CapabilityExecutionContext"], object] | None = None
+
+
+@dataclass(frozen=True)
+class CapabilityExecutionContext:
+    principal: str
+    grant_id: str
+    action: str
+    resource_ref: str
+    operation: str
+    scope_ref: str
+    correlation_id: str
 
 
 class CapabilityRegistry:
@@ -47,7 +73,9 @@ class CapabilityRegistry:
         self._capabilities: dict[str, Capability] = {}
 
     def register(self, capability: Capability) -> None:
-        if not capability.name or not capability.action or not callable(capability.executor):
+        executors = (callable(capability.executor), callable(capability.contextual_executor))
+        if (not capability.name or not capability.action
+                or sum(executors) != 1):
             raise ValueError("Invalid capability")
         if capability.name in self._capabilities:
             raise ValueError("Duplicate capability")
@@ -64,12 +92,14 @@ class CapabilityRegistry:
     def invoke(self, name: str, params: dict, *, correlation_id: str) -> object:
         if not isinstance(params, dict) or not isinstance(name, str):
             raise CapabilityDenied("Invalid invocation")
-        scope = params.get("scope_ref")
+        cap = self._capabilities.get(name) if isinstance(name, str) else None
+        scope = cap.scope_ref if cap is not None and cap.scope_ref else params.get("scope_ref")
         if not isinstance(scope, str) or not scope or not isinstance(correlation_id, str) or not correlation_id:
             raise CapabilityDenied("Scope and correlation required")
-        cap = self._capabilities.get(name)
         if cap is None:
             raise CapabilityDenied("Unregistered capability")
+        if cap.scope_ref and "scope_ref" in params and params["scope_ref"] != cap.scope_ref:
+            raise CapabilityDenied("Capability scope does not match its configured scope")
         event = {"principal": self.principal, "capability": name, "action": cap.action,
                  "scope_ref": scope, "correlation_id": correlation_id,
             "resource_ref": cap.resource_ref if cap else None,
@@ -96,7 +126,21 @@ class CapabilityRegistry:
             self.audit(dict(event))
             raise
         try:
-            result = cap.executor(params)
+            if cap.contextual_executor is not None:
+                result = cap.contextual_executor(
+                    params,
+                    CapabilityExecutionContext(
+                        principal=self.principal,
+                        grant_id=evidence["grant_id"],
+                        action=cap.action,
+                        resource_ref=cap.resource_ref,
+                        operation="read" if cap.read_only else "write",
+                        scope_ref=scope,
+                        correlation_id=correlation_id,
+                    ),
+                )
+            else:
+                result = cap.executor(params)
         except Exception:
             event["outcome"] = "FAILED"
             self.audit(dict(event))

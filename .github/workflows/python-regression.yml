@@ -1,3 +1,20 @@
+# R3 CONTROLLED CONFIGURATION
+# File: .github/workflows/python-regression.yml
+# Component: R3-PYTHON-REGRESSION-CI
+# File Revision: 1.1.1
+# Created: 2026-11-02 UTC (exact time unverified)
+# Created By: Unknown (legacy source)
+# Purpose: Run the permanent Python regression suite with required test/runtime SDK dependencies.
+# Execution Model: GitHub Actions on pushes and pull requests.
+# Observability: Workflow test output and status.
+# Dependencies: Python 3.12; FastAPI; HTTPX; MCP Python SDK v1.
+# Authority: Repository engineering policy; no production gate beyond existing regression suite.
+# Changed: 2026-11-06T01:39:36Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Install MCP v1 for Comms5 adapter regression tests.
+# Changed: 2026-11-06T01:48:39Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Install the version-scoped MCP dependency manifest.
+# Supersedes: Revision 1.0.0; adds one tested protocol dependency.
+# Contracts: hints/engineering-test-policy.md
+# Tests: This workflow executes `python -m unittest discover -s tests -v`.
+# History/Predecessor: Git blob 6047dde44b684b13a7540ade0f731341edbb5525
 name: Python regression
 on:
   push:
@@ -11,6 +28,6 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install test dependencies
-        run: python -m pip install 'fastapi>=0.115,<1' 'httpx>=0.27,<1'
+        run: python -m pip install 'fastapi>=0.115,<1' 'httpx>=0.27,<1' -r requirements-comms5-proposal.txt
       - name: Run permanent regression suite
         run: python -m unittest discover -s tests -v

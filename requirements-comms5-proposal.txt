@@ -1,0 +1,17 @@
+# R3 CONTROLLED CONFIGURATION
+# File: requirements-comms5-proposal.txt
+# Component: R3-COMMS5-PROPOSAL-DEPENDENCY
+# File Revision: 1.0.0
+# Created: 2026-11-06T01:48:39Z
+# Created By: Codex GPT-6, acting on Steward instruction
+# Purpose: Declare the optional MCP client dependency for the narrow Comms5 proposal draft adapter.
+# Execution Model: Installed into the isolated native-tool release environment when the adapter is enabled.
+# Observability: Dependency version recorded in the immutable release manifest.
+# Dependencies: Official MCP Python SDK v1; its Streamable HTTP client uses HTTPX.
+# Authority: Steward-directed Grace Autonomy P1; no production installation performed.
+# Changed: 2026-11-06T01:48:39Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Pin MCP major version to retain the reviewed v1 client API.
+# Supersedes: None
+# Contracts: runtime/comms5_proposals.py; .github/workflows/python-regression.yml
+# Tests: This dependency is exercised by tests/test_comms5_mcp_transport.py.
+# History/Predecessor: New file; no predecessor.
+mcp>=1,<2
