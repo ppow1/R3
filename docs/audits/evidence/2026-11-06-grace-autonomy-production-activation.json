@@ -1,0 +1,107 @@
+{
+  "audit": "Grace Autonomy proposal capability activation",
+  "observed_at": "2026-11-06",
+  "r3_branch": "engineering/grace-autonomy-recovery-20261106",
+  "r3_source_head": "474daa9c9b1a2a952678fca4d99a932283c92bd0",
+  "riverview_source": {
+    "repository": "ppow1/Riverview-",
+    "commit": "b52d891f58b6667bdddaf6608e8c2cadedaeed5d"
+  },
+  "dashboard_release": {
+    "active": "8325d3ffe8e53f3deaab4c9e14e471467454a08b-grace-proposals-20261106-r2",
+    "previous": "8325d3ffe8e53f3deaab4c9e14e471467454a08b-grace-controls-20261028-r2",
+    "tree_sha256": "b5040b6ce02dd1fe49c70aa36e45b46d09250dcae1b10b7004f2f07c7b14566f",
+    "unit_sha256": "91cf8ad088f794e763c594981398b881ecf2839cdaf6728eeed64aa4ab1815ca",
+    "changed_components": [
+      "status_dashboard.server: internal resident proposal POST/GET route",
+      "resident_execution.proposals: exact-grant resident draft/read service",
+      "resident_execution.capability_registry: Grace proposal capability executor and registration"
+    ],
+    "behavioral_correction": "GrantDenied is returned as HTTP 403; authority backend failures remain fail-closed HTTP 503",
+    "database_migration": false,
+    "production_identity_or_grants_changed": false,
+    "deployment": {
+      "active_symlink_switched_atomically": true,
+      "dashboard_only_restart": true,
+      "authenticated_status_http": 200,
+      "resident_proposal_read_without_exact_grant": {
+        "http": 403,
+        "error": "resident_proposal_not_authorized"
+      },
+      "rollback_target": "8325d3ffe8e53f3deaab4c9e14e471467454a08b-grace-controls-20261028-r2",
+      "rollback_mechanics_test": "passed in an isolated symlink directory; previous activation attempts restored the original pointer"
+    }
+  },
+  "authorization_observation": {
+    "r3_current_authenticated_principal": "resident:Grace",
+    "institutional_registry_canonical_principal": "resident:grace",
+    "r3_exact_grants": [],
+    "institutional_exact_grants_effective": {
+      "proposal.draft.submit": false,
+      "proposal.status.read": false
+    },
+    "identity_association_present": false,
+    "credential_material_recorded": false
+  },
+  "native_broker": {
+    "staged_release": "/home/admin1/.local/share/r3/releases/grace-proposal-native-2564ad11fd31047d727ccc66f082e6c4c5f4fa202cadcbd690ef5a09d86aa3c8",
+    "staged_tool_server_sha256": "2564ad11fd31047d727ccc66f082e6c4c5f4fa202cadcbd690ef5a09d86aa3c8",
+    "added_tools": ["r3.proposal.submit", "r3.proposal.status"],
+    "preserved_tools": [
+      "r3.status",
+      "r3.host.uptime",
+      "r3.resources.local_snapshot",
+      "r3.resources.assess_gpu_capacity",
+      "r3.evidence.record",
+      "hr.directory",
+      "hr.read",
+      "hr.save"
+    ],
+    "activated": false,
+    "reason": "R3 exact grants and the authoritative identity crosswalk are not active; no institutional resident credential was copied or created"
+  },
+  "live_acceptance": {
+    "model_assignment_run": false,
+    "proposal_created": false,
+    "reason": "No exact proposal authorization; resident identity mapping remains unresolved",
+    "website_or_engineering_side_effect": false
+  },
+  "steward_actions_prepared": {
+    "identity": "Through the authorized HR identity mechanism, bind existing HR record r3:grace (revision 1) to canonical principal resident:grace and establish that mapping for the current R3 principal resident:Grace without rotating the existing credential or removing its existing HR grants. Existing R3 runtime has no populated authoritative crosswalk for this relation.",
+    "r3_grants": [
+      {
+        "target_principal": "resident:Grace",
+        "resource_ref": "riverview:institutional-proposals",
+        "action": "proposal.draft.submit",
+        "operation": "write",
+        "scope_ref": "institution:proposal-drafts",
+        "delegable": false,
+        "expiry": "7 days from approval"
+      },
+      {
+        "target_principal": "resident:Grace",
+        "resource_ref": "riverview:institutional-proposals",
+        "action": "proposal.status.read",
+        "operation": "read",
+        "scope_ref": "institution:proposal-drafts",
+        "delegable": false,
+        "expiry": "7 days from approval"
+      }
+    ],
+    "institutional_grants": [
+      {
+        "target_principal": "resident:grace",
+        "action": "proposal.draft.submit",
+        "scope_ref": "institution:proposal-drafts",
+        "expiry": "7 days from approval"
+      },
+      {
+        "target_principal": "resident:grace",
+        "action": "proposal.status.read",
+        "scope_ref": "institution:proposal-drafts",
+        "expiry": "7 days from approval"
+      }
+    ],
+    "approval_status": "not_requested_or_granted; authenticated Steward session required"
+  }
+}
