@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/development-governance.md
 Component: ENG-DEV-GOVERNANCE
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-05 UTC (date only; exact time not independently verified)
 Created By: ChatGPT GPT-6
 Purpose: Initial R3 development lifecycle, Definition of Done and deployment-input contract
@@ -15,6 +15,7 @@ Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-002 | ChatGPT GPT-6 | Require local-e
 Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-001 | ChatGPT GPT-6 | Initial bootstrap guidance
 Changed: 2026-11-06T04:57:50Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Establish mandatory R3A roadmap compliance and R3A-GOV-02 coordination.
 Changed: 2026-11-06T05:03:56Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Require a coordination issue and integration authority for each active milestone.
+Changed: 2026-11-06 | R3A-GOV-01A | Steward-directed clarification | Permit autonomous in-scope engineering and reserve approval for material deviations.
 Supersedes: None
 Superseded By: None
 Contracts: hints/file-provenance.md; docs/PROJECT_CHARTER_REVISION_2_REVIEW.md
@@ -69,6 +70,14 @@ The Steward-approved, versioned [R3A Master Roadmap](../docs/architecture/R3A_MA
 - an applicable Steward-approved exception ID, or `None`.
 
 Do not begin implementation if the roadmap lacks Steward approval or the assignment omits a required field. Codex sessions, residents and engineering coordinators cannot independently change phase ownership, roadmap priorities or acceptance criteria. Proposed deviations must be recorded in the [R3A Roadmap Exception Register](../docs/architecture/R3A_ROADMAP_EXCEPTION_REGISTER.md), with reason, alternatives, impact and affected requirements. `PROPOSED` is not authorization; the Steward's approval must be explicitly recorded before any deviation work starts. Keep versioned decision and exception history; do not overwrite or erase prior dispositions.
+
+### Execution autonomy within approved objectives — R3A-GOV-01A
+
+The approved roadmap governs **the destination, not every engineering step**. Once a milestone is authorized, Engineering and Codex have broad discretion to investigate, design implementation details, write necessary supporting code, debug, refactor within scope, run proportionate checks, coordinate workstreams and recover from ordinary failures **without seeking repeated Steward approval**. Technical approaches, corrective fixes and incidental changes necessary to satisfy the assigned acceptance criteria are not roadmap deviations, provided they stay inside the authorized objective, interfaces, safety/production boundaries and acceptance criteria.
+
+A failure or unexpected dependency should ordinarily trigger diagnosis, a reasonable alternative and continued execution toward verified completion. Do not end an assignment merely because the first attempt or a test failed. Escalate only when an actual authority boundary, material scope/priority/acceptance change, unresolved architecture decision with consequential tradeoffs, or genuine external blocker prevents responsible continuation. Record what was tried and the narrow decision required.
+
+A **material deviation** changes the authorized objective, phase ownership, priorities, protected boundaries or acceptance criteria; it requires the existing versioned exception and explicit Steward approval. Do not misclassify ordinary implementation choices, bug fixes or supporting work as deviations. Production deployment and destructive changes remain separately authorized. Bounded testing must establish real acceptance, not become an endless cycle of speculative hardening or unrelated tests.
 
 ## Parallel Engineering Coordination — R3A-GOV-02
 
