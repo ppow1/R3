@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_MASTER_ROADMAP_AP0_AP6.md
 Component: R3A-MASTER-ROADMAP
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-06T03:39:05Z
 Created By: Codex GPT-6
 Purpose: Sequence R3A architecture and delivery phases AP0 through AP6.
@@ -13,6 +13,7 @@ Authority: Steward directive; phase details beyond stated scope are planning pro
 Changed: 2026-11-06T03:39:05Z | R3A-BASELINE-001 | Codex GPT-6 | Establish initial master roadmap.
 Changed: 2026-11-06T04:57:50Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Reconcile phase sequence and establish roadmap governance.
 Changed: 2026-11-06T05:03:56Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Clarify Baseline 1.0 approval status and phase requirement mapping.
+Changed: 2026-11-06 | R3A-GOV-01A | Steward-directed clarification | Permit autonomous in-scope engineering and reserve approval for material deviations.
 Supersedes: None.
 Contracts: R3A Architecture Charter; R3A Punch List and Parking Lot; AP0 Technical Specification.
 Tests: Not run; documentation only.
@@ -39,6 +40,10 @@ History/Predecessor: Git blob 14c74b8af1f0e7a9ff9135a8e7954396f9e136db at baseli
 Once approved by the Steward, this versioned Master Roadmap is the authoritative R3A development plan. Until that approval is recorded, this corrected Baseline 1.0 is a proposed plan and authorizes no implementation. Every R3A engineering assignment must state: approved roadmap revision; AP phase and milestone; requirement IDs; authorized scope; acceptance criteria; and applicable approved exception (or `None`). An assignment missing these fields is not ready for execution.
 
 Any proposed deviation to phase ownership/order, priorities, scope or acceptance requirements must be entered in the [versioned exception register](R3A_ROADMAP_EXCEPTION_REGISTER.md), including reason, alternatives, impact and affected requirements. **Steward approval recorded against the exception is mandatory before executing the deviation.** A proposal, coordinator message, issue comment, branch, commit or Codex/resident decision is not approval. No Codex session, resident or Engineering coordinator may independently change roadmap priorities or acceptance requirements. Preserve superseded roadmap and decision versions in Git; never rewrite approved history.
+
+## Authorized engineering autonomy — R3A-GOV-01A
+
+The roadmap fixes objectives, scope boundaries, priorities and acceptance evidence, **not the individual implementation route**. After a milestone is explicitly authorized, Engineering may independently select techniques, implement supporting work, correct defects, coordinate parallel contributors and continue through recoverable obstacles without new approvals for ordinary in-scope decisions. A technical failure alone is not a stop condition. Material changes to the objective, roadmap phase/priority, protected scope or acceptance criteria require an approved exception before execution. Production deployment and destructive operations remain subject to their separate authorization. See [development governance](../../hints/development-governance.md).
 
 ## Phase gates and ordering
 
