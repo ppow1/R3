@@ -1,13 +1,18 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_configuration.py
 # Component: R3-CONFIGURATION-REGRESSION
-# File Revision: 1.0.1
+# File Revision: 1.0.2
 # Created: 2026-11-02 UTC
 # Purpose: Permanent external configuration validation regression.
 # Created By: ChatGPT GPT-6
 # Execution Model: Standard-library unittest with temporary and repository configuration.
 # Observability: Configuration assertions.
 # Dependencies: runtime/configuration.py; config/residents/grace.json
+# Authority: Tool visibility is a broker-catalog concern; invocation authority remains server-side.
+# Changed: 2026-11-06T23:06:45Z | GRACE-AUTHORITY-ARCH-001 | Codex GPT-6 | Allow residents to consume registered tools without a duplicated local name allowlist.
+# Supersedes: Revision 1.0.1.
+# Contracts: docs/architecture/RESIDENT_AUTHORITY_AND_CAPABILITIES.md.
+# History/Predecessor: Git predecessor at current branch baseline.
 # Authority: hints/engineering-test-policy.md
 # Changed: 2026-11-03T02:25:24.123Z | R3-VERIFY-FEEDBACK-LOOP-001 | Codex | Assert production Grace config enables review feedback continuity.
 # Supersedes: None
@@ -57,6 +62,7 @@ class ConfigurationContractTests(unittest.TestCase):
                       grace["settings"].get("continuation_event_types", []))
         self.assertIn("REVIEW_FEEDBACK",
                       grace["settings"].get("continuation_event_types", []))
+        self.assertNotIn("allowed_tools", grace["settings"]["tools"])
         self.assertIn("For RESIDENT_ACTIVITY and REVIEW_FEEDBACK events only",
                       grace["system_prompt"])
 
@@ -70,6 +76,13 @@ class ConfigurationContractTests(unittest.TestCase):
         result = load_configuration(self.root)
         self.assertEqual(result["residents"][0]["system_prompt"], "Revised personality")
         self.assertEqual(result["residents"][0]["settings"]["inference"]["model"], "another-model")
+
+    def test_native_resident_can_use_catalog_visibility_without_local_allowlist(self):
+        self.grace["tools"] = {"provider": "r3-native",
+            "endpoint": "http://localhost:8765", "timeout_seconds": 15}
+        self.save()
+        result = load_configuration(self.root)
+        self.assertNotIn("allowed_tools", result["residents"][0]["settings"]["tools"])
 
 
     def test_institutional_listeners_loaded_from_json(self):

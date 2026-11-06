@@ -12,13 +12,7 @@
   "tools": {
     "provider": "r3-native",
     "endpoint": "http://127.0.0.1:8765",
-    "timeout_seconds": 15,
-    "allowed_tools": [
-      "r3.status",
-      "r3.host.uptime",
-      "r3.proposal.submit",
-      "r3.proposal.status"
-    ]
+    "timeout_seconds": 15
   },
   "continuation_event_types": [
     "RESIDENT_ACTIVITY",

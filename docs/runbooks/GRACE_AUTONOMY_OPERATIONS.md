@@ -1,28 +1,37 @@
+<!--
+R3 CONTROLLED DOCUMENT
+File: docs/runbooks/GRACE_AUTONOMY_OPERATIONS.md
+Component: R3-GRACE-AUTONOMY-OPERATIONS
+File Revision: 1.0.0
+Created: Unknown (legacy)
+Created By: Unknown (legacy)
+Purpose: Operate and verify Grace's authenticated autonomy workflow.
+Execution Model: Human/operator reference; no automatic grants or deployment.
+Observability: Authority decisions, identity crosswalk, durable proposal receipts, and workflow state.
+Dependencies: R3 broker; authoritative HR identity contract; institutional proposal registry.
+Authority: Steward directives; proposal approval and Engineering execution remain institutional decisions.
+Changed: 2026-11-06T23:06:45Z | GRACE-AUTHORITY-ARCH-001 | Codex GPT-6 | Remove duplicate seven-day R3 proposal grant prerequisites.
+Supersedes: Git predecessor's temporary-grant operational assumption.
+Contracts: docs/architecture/RESIDENT_AUTHORITY_AND_CAPABILITIES.md; docs/r3-native-tool-contract.md.
+Tests: Documentation review.
+History/Predecessor: Git blob e2f767425484cd24233db6c1587d8acda3c6ac2b at cb162499a5ae94b801cbdbf9e5aa2dcd4c75ebaf.
+-->
 # Grace Autonomy Operations
 
-## Temporary proposal grant expiration — action required
+## Proposal authorization source
 
-**The proposal permissions authorized for Grace are temporary seven-day grants. They expire seven days after the individual grant's issuance timestamp. Expiration can stop proposal submission or readback even when the broker and institutional registry are healthy. This is a temporary operational limitation, not a permanent architectural requirement.**
+**Do not provision duplicate R/3 proposal grants.** The prior implementation required separate local `proposal.draft.submit` and `proposal.status.read` grants in addition to the institutional registry's decision. The architecture correction removes that extra gate. The R/3 broker authenticates the resident, resolves the exact HR identity association, and delegates proposal authorization to Riverview's existing internal proposal registry.
 
-No grant identifiers or issue/expiry timestamps are recorded yet because no production grants have been issued in the verified authority stores. Do not fill these fields from estimates. Copy them from each authoritative grant record immediately after the authenticated Steward approval succeeds.
+The registry may still require an exact grant, active resident policy, or time-bounded exception under its own currently commissioned policy. Preserve its decision. If it denies or reports an expired institutional grant, record the identifier and exact expiry supplied by that authority and follow its authenticated Steward renewal process. Do not silently renew, extend, or invent an R/3-side substitute. If policy state cannot be read, treat it as unverified and stop that operation.
 
-| Grant ID | Authorized principal | Resource | Action | Scope | Operation | Issued at (UTC) | Expires at (UTC) | Renewal authority |
-|---|---|---|---|---|---|---|---|---|
-| Pending issuance | `resident:Grace` (R/3 authority) | `riverview:institutional-proposals` | `proposal.draft.submit` | `institution:proposal-drafts` | `write` | Pending | Pending | Steward, through authenticated R/3 grant request/decision |
-| Pending issuance | `resident:Grace` (R/3 authority) | `riverview:institutional-proposals` | `proposal.status.read` | `institution:proposal-drafts` | `read` | Pending | Pending | Steward, through authenticated R/3 grant request/decision |
-| Pending issuance | `resident:grace` (institutional registry) | `riverview:institutional-proposals` | `proposal.draft.submit` | `institution:proposal-drafts` | `write` | Pending | Pending | Steward, through the registry's authenticated exact-grant approval |
-| Pending issuance | `resident:grace` (institutional registry) | `riverview:institutional-proposals` | `proposal.status.read` | `institution:proposal-drafts` | `read` | Pending | Pending | Steward, through the registry's authenticated exact-grant approval |
-
-All four grants must remain exact, non-delegable, and limited to seven days. Renewal requires a new exact request and authenticated Steward approval. **Never silently renew or extend a grant.** The broker's authorized resident diagnostic is `GET /v1/diagnostics/authorization` with Grace's existing bearer credential. It lists only the authenticated resident's two exact R/3 proposal grants and marks grants inside a 50-hour visibility window as `EXPIRING_SOON`. The monitor scans hourly and begins warning by the 50-hour threshold, so its normal polling delay still leaves at least 49 hours before expiration. It emits a warning with grant ID, principal, resource, action, scope, operation, issue time, expiration time, and renewal action.
-
-After expiration, proposal calls must stop with `AUTHORIZATION_EXPIRED`, identify the expired grant, and instruct the operator to request a new exact grant through Steward approval. This is an authorization lifecycle event, not a generic autonomy or service-health failure. Do not retry indefinitely. Institutional-registry grants remain governed by the registry's own authority records; record their grant IDs and exact times in the table above as well.
+No production identity association or proposal grant was verified during the latest read-only check. Do not infer an active permission from the tool descriptor or this runbook. Proposal approval, promotion, work-order creation, and Engineering execution remain separate institutional decisions.
 
 ## Deployment handoff
 
-- The expiry monitor and authenticated diagnostic are included in the additive native broker release, alongside the existing HR and operational tools.
-- These additions do not issue, extend, or approve grants.
-- Before live Grace acceptance, confirm the four exact grants are active and record each grant's issue and expiry timestamps above and in the operational evidence log.
-- If any required grant is missing or expired, leave the website-clock proposal unsubmitted and escalate the exact grant ID and renewal request to the Steward.
+- The additive broker preserves the existing HR and operational tools and registers the two proposal tools.
+- The proposal tools carry the named institutional-registry authority source; they do not create or extend grants.
+- Before live Grace acceptance, verify the confidential HR identity crosswalk and obtain a current decision from the institutional registry.
+- If the registry denies or is unavailable, leave the proposal unsubmitted and report its exact response; do not bypass the denial.
 - Proposal approval and Engineering execution remain Steward-controlled.
 
 ## R3-to-institutional identity crosswalk

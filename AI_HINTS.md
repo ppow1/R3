@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.0.4
+File Revision: 1.0.8
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -11,12 +11,13 @@ Observability: N/A
 Dependencies: hints/README.md
 Authority: R3 engineering navigation, subordinate to approved charter
 Changed: 2026-11-04 UTC | R3-GRANT-RUNBOOK-MIGRATION | ChatGPT GPT-6 | Direct all new grant/delegation runbooks to R3
+Changed: 2026-11-06T23:06:45Z | GRACE-AUTHORITY-ARCH-001 | Codex GPT-6 | Index the resident authority invariant and current R3 architecture contract.
 Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Index resident avatar implementation notes
 Changed: 2026-10-31 UTC | R3-COMMS-001 | ChatGPT GPT-6 | Index mandatory Comms incident capture
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Manual source inspection; automated validation pending
-History/Predecessor: Git blob 27ad852c7f9fdf2e11404031128bf9c192979376
+History/Predecessor: Git blob 8a5a3a56865ec2abd215587c7021fea5351ec232 at cb162499a5ae94b801cbdbf9e5aa2dcd4c75ebaf; earlier pointer retained below as preserved source.
 -->
 # AI_HINTS.md — Riverview 3
 
@@ -38,6 +39,7 @@ Start with [the hints index](hints/README.md). Keep this root file short; put de
 - Inspect actual repository and runtime state; distinguish verified behavior from requirements and plans.
 - **Engineering scope is not operational scope.** Do not impose arbitrary limits on Grace or other residents based on a narrow test.
 - Preserve authorization, audit, recovery, substantive verification, and truthful UI status without unnecessary bureaucracy.
+- **Authority invariant:** tools and resources are centrally registered; residents use the institutional decision for their authenticated identity and scope. Never add a parallel grant/approval gate or infer authority from registration. Read [resident authority and capabilities](docs/architecture/RESIDENT_AUTHORITY_AND_CAPABILITIES.md) before changing a tool or policy boundary.
 - Do not migrate Riverview 2 wholesale or modify production/backups without explicit authorization.
 - Favor small, testable changes and verified outcomes.
 
@@ -46,9 +48,14 @@ Start with [the hints index](hints/README.md). Keep this root file short; put de
 - [Engineering and current handoff](hints/engineering.md)
 - [Institutional architecture and durable state](hints/architecture.md)
 - [Deployment and command execution](hints/deployment.md)
+- [Resident authority and capabilities](docs/architecture/RESIDENT_AUTHORITY_AND_CAPABILITIES.md)
 - [Resident avatar system](hints/resident-avatar-system.md) — replaceable website avatar runtime, browser animation API, and pending authorized backend connection
 
 When asked to add material to AI_HINTS, update a focused `hints/` document and add or adjust a concise pointer here only if needed.
+
+## Current resident-authority correction
+
+New software must consume the existing institutional authority decision. The R3 proposal adapter uses HR's exact principal crosswalk and the existing Riverview proposal registry's authorization decision; it does not require a duplicate proposal-specific R3 grant. R3-owned capabilities continue using R3 authority. HR capability assignments and Ingrid security classifications are not currently present in the R3 HR identity contract; do not invent a local substitute. See [the resident authority and capabilities contract](docs/architecture/RESIDENT_AUTHORITY_AND_CAPABILITIES.md).
 
 ---
 

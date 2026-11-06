@@ -1,13 +1,20 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/native_tools.py
 # Component: R3-NATIVE-TOOLS
-# File Revision: 1.1.0
+# File Revision: 1.2.0
 # Created: 2026-11-02 UTC
+# Created By: Unknown (legacy)
 # Purpose: R3-owned discovery and invocation client with per-call correlation metadata.
+# Execution Model: Authenticated native broker discovery and invocation.
+# Observability: Correlation metadata on every invocation; server-owned authorization audit.
+# Dependencies: R3 native broker endpoint; resident credential.
+# Authority: Local visibility is not authorization; broker/owning institutional service decides each invocation.
 # Contracts: docs/r3-native-tool-contract.md
 # Changed: 2026-11-06T02:24:00Z | GRACE-AUTONOMY-P2 | Codex GPT-6 | Attach correlation metadata to every invocation for durable exact-grant auditing.
-# Supersedes: Revision 1.0.0; read operations now receive generated correlation IDs when the caller has none.
-# Tests: tests/test_native_tools.py; tests/test_native_correlation_contract.py; tests/test_proposal_submission_integration.py
+# Changed: 2026-11-06T23:06:45Z | GRACE-AUTHORITY-ARCH-001 | Codex GPT-6 | Make resident catalog visibility dynamic; authorization stays server-side.
+# Supersedes: Revision 1.1.0; read operations retain generated correlation IDs and visibility may follow the broker catalog.
+# Tests: tests/test_native_tools.py; tests/test_native_correlation_contract.py; tests/test_proposal_submission_integration.py.
+# History/Predecessor: Git blob 258952008a32fb10eff8775a5f43a8a58d645a39 at cb162499a5ae94b801cbdbf9e5aa2dcd4c75ebaf.
 """R3-native tool client; every invocation remains subject to server-side grants."""
 from __future__ import annotations
 
@@ -25,7 +32,7 @@ class ToolContractError(RuntimeError):
 class NativeTools:
     base_url: str
     timeout: float
-    allowed_tools: tuple[str, ...]
+    allowed_tools: tuple[str, ...] | None
     credential: str | None = None
 
     def __post_init__(self):
@@ -33,6 +40,11 @@ class NativeTools:
             raise ValueError("Tool endpoint must be HTTP(S)")
         if self.timeout <= 0:
             raise ValueError("Tool timeout must be positive")
+        if (self.allowed_tools is not None and
+                (not isinstance(self.allowed_tools, tuple)
+                 or any(not isinstance(name, str) or not name for name in self.allowed_tools)
+                 or len(set(self.allowed_tools)) != len(self.allowed_tools))):
+            raise ValueError("Tool visibility filter must be a tuple of unique tool names or None")
 
     def _request(self, method: str, path: str, payload: dict | None = None):
         data = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -64,7 +76,7 @@ class NativeTools:
                 raise ToolContractError("Tool definition mismatch")
             if not isinstance(descriptor.get("read_only"), bool):
                 raise ToolContractError("Missing read-only classification")
-            if name in self.allowed_tools:
+            if self.allowed_tools is None or name in self.allowed_tools:
                 result.append(descriptor)
         return result
 
@@ -72,7 +84,8 @@ class NativeTools:
         if not isinstance(params, dict):
             raise ToolContractError("Arguments must be an object")
         name = descriptor.get("tool")
-        if not isinstance(name, str) or name not in self.allowed_tools:
+        if (not isinstance(name, str) or
+                (self.allowed_tools is not None and name not in self.allowed_tools)):
             raise PermissionError("Tool not authorized")
         if descriptor.get("read_only") is not True and not self.credential:
             raise PermissionError("Write tool requires resident credential")

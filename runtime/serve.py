@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/serve.py
 # Component: R3-INSTITUTION-RUNTIME
-# File Revision: 1.2.4
+# File Revision: 1.2.5
 # Created: 2026-11-01 UTC (exact time not verified)
 # Created By: ChatGPT GPT-6
 # Purpose: Start and monitor R3 institutional scheduler and supervisor.
@@ -11,8 +11,10 @@
 # Authority: R3 Charter Revision 2; does not modify R2 or start inference.
 # Changed: 2026-11-01 UTC | R3-RUNTIME-002 | First executable service entrypoint
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-009 | Expose independent verification backlog.
-# Supersedes: None
-# Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md
+# Changed: 2026-11-06T23:06:45Z | GRACE-AUTHORITY-ARCH-001 | Codex GPT-6 | Pass through dynamic broker catalog visibility when resident allowlist is absent.
+# Supersedes: Revision 1.2.4; scheduler and listener behavior preserved.
+# Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; docs/architecture/RESIDENT_AUTHORITY_AND_CAPABILITIES.md
+# History/Predecessor: Git blob 6ea3a3e11b91b05e178d02ee74a96373ae0af192 at cb162499a5ae94b801cbdbf9e5aa2dcd4c75ebaf.
 # Tests: Initial service smoke test pending
 # Changed: 2026-11-02 UTC | R3-GRACE-002 | Register configured inference resident
 # Changed: 2026-11-02 UTC | R3-RUNTIME-004 | Schedule Grace only when durable inbox has pending work
@@ -97,7 +99,8 @@ async def serve(db: Path, health_file: Path, config_dir: Path, credential_dir: P
             tools = NativeTools(
                 tool_settings["endpoint"],
                 timeout=tool_settings["timeout_seconds"],
-                allowed_tools=tuple(tool_settings["allowed_tools"]),
+                allowed_tools=(tuple(tool_settings["allowed_tools"])
+                               if tool_settings.get("allowed_tools") is not None else None),
                 credential=load_resident_credential(
                     credential_dir, resident["name"]
                 ),
@@ -184,7 +187,8 @@ async def serve(db: Path, health_file: Path, config_dir: Path, credential_dir: P
         raise ConfigurationError("Conversation API requires both port and token file")
     if conversation_port is not None:
         resident_actions = {
-            definition["settings"]["name"]: list(definition["settings"]["tools"]["allowed_tools"])
+            definition["settings"]["name"]: list(
+                definition["settings"]["tools"].get("allowed_tools", []))
             for definition in configuration["residents"]
             if definition["settings"]["enabled"]
         }

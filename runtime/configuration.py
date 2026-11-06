@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/configuration.py
 # Component: R3-CONFIGURATION
-# File Revision: 1.1.0
+# File Revision: 1.2.0
 # Created: 2026-11-02 UTC
 # Purpose: Validate externally defined runtime and resident settings.
 # Dependencies: Python standard library only.
@@ -10,7 +10,10 @@
 # Changed: 2026-11-03T01:37:00.460Z | R3-VERIFY-WIRING-001 | Codex | Validate the configured independent reviewer, tools and manager.
 # Changed: 2026-11-03T01:39:59.849Z | R3-VERIFY-WIRING-002 | Codex | Preserve loading of resident configurations without an optional reviewer.
 # Changed: 2026-11-06T02:45:00Z | GRACE-AUTONOMY-P3 | Codex GPT-6 | Validate an optional canonical authority database for resumption-enabled assignment intake.
-# History/Predecessor: Git blob b42c627df1ad343e27a6f1779fe5c4fab6cde1c7
+# Changed: 2026-11-06T23:06:45Z | GRACE-AUTHORITY-ARCH-001 | Codex GPT-6 | Make resident-local tool-name allowlists optional; server authorization remains mandatory.
+# Supersedes: Revision 1.1.0.
+# Contracts: docs/architecture/RESIDENT_AUTHORITY_AND_CAPABILITIES.md.
+# History/Predecessor: Git blob 5eb9cf787ce5460d505d3cf1193aa068e9dbd9df at cb162499a5ae94b801cbdbf9e5aa2dcd4c75ebaf.
 """Small, strict JSON configuration loader; no implicit runtime defaults."""
 from __future__ import annotations
 
@@ -144,8 +147,10 @@ def load_configuration(directory: str | Path):
             _url(tools.get("endpoint"), f"{key}.tools.endpoint")
             _positive(tools.get("timeout_seconds"), f"{key}.tools.timeout_seconds")
             allowed = tools.get("allowed_tools")
-            if not isinstance(allowed, list) or any(not isinstance(t, str) or not t for t in allowed) or len(allowed) != len(set(allowed)):
-                raise ConfigurationError(f"{key}.tools.allowed_tools must be a unique list of names")
+            if allowed is not None and (not isinstance(allowed, list)
+                    or any(not isinstance(t, str) or not t for t in allowed)
+                    or len(allowed) != len(set(allowed))):
+                raise ConfigurationError(f"{key}.tools.allowed_tools must be absent or a unique list of names")
         prompt_path = (root / _text(entry.get("system_prompt_file"), f"{key}.system_prompt_file")).resolve()
         if not prompt_path.is_relative_to(root):
             raise ConfigurationError("System prompt escapes config directory")

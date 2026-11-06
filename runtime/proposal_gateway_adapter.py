@@ -1,8 +1,26 @@
+# R3 CONTROLLED SOURCE
+# File: runtime/proposal_gateway_adapter.py
+# Component: R3-INSTITUTIONAL-PROPOSAL-GATEWAY-ADAPTER
+# File Revision: 1.1.0
+# Created: Unknown (legacy; exact creation time not independently established)
+# Created By: Unknown (legacy)
+# Purpose: Register resident proposal draft/read operations on the existing HR-enabled broker.
+# Execution Model: Governed broker capability adapter with exact HR identity resolution.
+# Observability: Broker grant/audit and write idempotency; institutional registry owns policy decision.
+# Dependencies: GovernedToolGateway; HR identity crosswalk; InstitutionalProposalClient.
+# Authority: Proposal authorization is delegated to the existing institutional registry; no parallel grants.
+# Changed: 2026-11-06T23:06:45Z | GRACE-AUTHORITY-ARCH-001 | Codex GPT-6 | Require HR principal mapping and mark registry as owning authority.
+# Supersedes: Git predecessor behavior requiring a separate R3 proposal grant.
+# Contracts: docs/r3-native-tool-contract.md; docs/architecture/RESIDENT_AUTHORITY_AND_CAPABILITIES.md.
+# Tests: tests/test_proposal_gateway_adapter.py; tests/test_internal_proposal_tool_integration.py.
+# History/Predecessor: Git blob 43d35fa1ee8d0f77d29a38932db93e9f6ad40d16 at cb162499a5ae94b801cbdbf9e5aa2dcd4c75ebaf.
 """Add the internal proposal operations to the existing governed R3 broker.
 
 The deployed broker has HR and operational tools registered through
-GovernedToolGateway. This adapter is additive and intentionally uses that same
-credential, grant, audit, and write-idempotency boundary.
+GovernedToolGateway. This adapter is additive, resolves identity from the
+authoritative HR crosswalk, and delegates policy authorization to the existing
+institutional proposal registry. R3 credentials, audit, and write-idempotency
+remain in the broker; no duplicate proposal-specific R3 grant is required.
 """
 from __future__ import annotations
 
@@ -22,6 +40,8 @@ class ProposalGatewayCapability:
     description: str
     parameters: dict
     executor: object
+    authorization_mode: str = "authoritative-service"
+    authority_source: str = "riverview.institutional-proposal-registry"
 
 
 def _scope_property() -> dict:
@@ -29,7 +49,13 @@ def _scope_property() -> dict:
 
 
 def register_internal_proposal_tools(gateway, client, *, hr_database=None) -> None:
-    """Register exactly draft-write and proposal-read; issue no grants."""
+    """Register draft-write and proposal-read; the institution decides policy."""
+    if hr_database is None:
+        raise ValueError("Authoritative HR database is required for proposal identity resolution")
+
+    def resolve_principal(r3_principal):
+        from runtime.hr_identity_association import resolve_authority_principal
+        return resolve_authority_principal(hr_database, r3_principal)
     content_fields = {
         "title": {"type": "string", "minLength": 1, "maxLength": 200},
         "summary": {"type": "string", "minLength": 1, "maxLength": 1000},
@@ -44,17 +70,15 @@ def register_internal_proposal_tools(gateway, client, *, hr_database=None) -> No
     def submit(params, context):
         if set(params) != {"scope_ref", "content"} or params["scope_ref"] != SCOPE:
             raise ValueError("Proposal draft scope or parameters are invalid")
-        principal = context.principal
-        if hr_database is not None:
-            from runtime.hr_identity_association import resolve_authority_principal
-            principal = resolve_authority_principal(hr_database, context.principal)
+        principal = resolve_principal(context.principal)
         return client.submit(params["content"], principal=principal,
                              correlation_id=context.correlation_id)
 
     def read(params, context):
         if set(params) != {"scope_ref", "proposal_id"} or params["scope_ref"] != SCOPE:
             raise ValueError("Proposal read scope or parameters are invalid")
-        return client.proposal_status(params["proposal_id"])
+        principal = resolve_principal(context.principal)
+        return client.proposal_status(params["proposal_id"], expected_principal=principal)
 
     gateway.register(ProposalGatewayCapability(
         name="r3.proposal.submit",

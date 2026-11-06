@@ -1,4 +1,20 @@
-"""Permanent regressions for R3-owned capabilities; no R2 dependency."""
+# R3 CONTROLLED SOURCE
+# File: tests/test_capabilities.py
+# Component: R3-CAPABILITY-AUTHORITY-REGRESSION
+# File Revision: 1.0.0
+# Created: Unknown (legacy)
+# Created By: Unknown (legacy)
+# Purpose: Protect R3 grant authorization and explicit authoritative-service delegation contracts.
+# Execution Model: unittest.
+# Observability: Assertions over authorization calls, durable events, and executor calls.
+# Dependencies: runtime.capabilities.
+# Authority: New capability policy must use an established authority decision; registration alone grants nothing.
+# Changed: 2026-11-06T23:06:45Z | GRACE-AUTHORITY-ARCH-001 | Codex GPT-6 | Cover authoritative service decisions without duplicate R3 grants.
+# Supersedes: None.
+# Contracts: docs/architecture/RESIDENT_AUTHORITY_AND_CAPABILITIES.md
+# Tests: This module.
+# History/Predecessor: Git history at current branch baseline.
+"""Permanent regressions for R3 capability authorization contracts."""
 import unittest
 from runtime.capabilities import (Capability, CapabilityRegistry,
                                   CapabilityDenied, AuthorityUnavailable)
@@ -91,6 +107,55 @@ class CapabilityTests(unittest.TestCase):
     def test_discovery_does_not_grant_authority(self):
         self.assertFalse(self.registry.discover()[0]["read_only"])
         self.assertFalse(self.verifier.calls)
+
+    def test_authoritative_service_decision_needs_no_duplicate_r3_grant(self):
+        calls = []
+        def execute(_args, context):
+            calls.append(context)
+            return {"persisted": True}
+        self.registry.register(Capability(
+            "r3.institutional.write", "proposal.draft.submit", "Draft proposal",
+            {"type": "object", "properties": {}}, read_only=False,
+            resource_ref="riverview:institutional-proposals",
+            scope_ref="institution:proposal-drafts", contextual_executor=execute,
+            authorization_mode="authoritative-service",
+            authority_source="riverview.institutional-proposal-registry"))
+        result = self.registry.invoke("r3.institutional.write", {}, correlation_id="call-external")
+        self.assertEqual(result["result"], {"persisted": True})
+        self.assertIsNone(result["authorization"]["grant_id"])
+        self.assertEqual(result["authorization"]["authority_source"],
+                         "riverview.institutional-proposal-registry")
+        self.assertEqual(calls[0].authority_source, "riverview.institutional-proposal-registry")
+        self.assertEqual(self.verifier.calls, [])
+        self.assertEqual([event["outcome"] for event in self.events], ["AUTHORIZED", "COMPLETED"])
+
+    def test_authoritative_service_denial_is_audited_and_does_not_complete(self):
+        def deny(_args, _context):
+            raise CapabilityDenied("institutional policy denial")
+        self.registry.register(Capability(
+            "r3.institutional.denied", "proposal.draft.submit", "Draft proposal",
+            {"type": "object", "properties": {}}, read_only=False,
+            resource_ref="riverview:institutional-proposals",
+            scope_ref="institution:proposal-drafts", contextual_executor=deny,
+            authorization_mode="authoritative-service",
+            authority_source="riverview.institutional-proposal-registry"))
+        with self.assertRaises(CapabilityDenied):
+            self.registry.invoke("r3.institutional.denied", {}, correlation_id="call-denied")
+        self.assertEqual(self.events[-1]["outcome"], "DENIED")
+        self.assertEqual(self.verifier.calls, [])
+
+    def test_alternate_authority_requires_explicit_named_service_and_context(self):
+        with self.assertRaises(ValueError):
+            self.registry.register(Capability(
+                "r3.bad", "proposal.draft.submit", "Bad",
+                {"type": "object"}, lambda _: None,
+                authorization_mode="authoritative-service"))
+        with self.assertRaises(ValueError):
+            self.registry.register(Capability(
+                "r3.bad", "proposal.draft.submit", "Bad",
+                {"type": "object"}, contextual_executor=lambda _args, _ctx: None,
+                authorization_mode="authoritative-service",
+                authority_source="unregistered.private-policy"))
 
 
 if __name__ == "__main__":

@@ -1,3 +1,19 @@
+# R3 CONTROLLED SOURCE
+# File: runtime/institutional_proposals.py
+# Component: R3-INSTITUTIONAL-PROPOSAL-ADAPTER
+# File Revision: 1.1.0
+# Created: Unknown (legacy; exact creation time not independently established)
+# Created By: Unknown (legacy)
+# Purpose: Authenticated R3 adapter to Riverview's existing internal proposal registry.
+# Execution Model: HTTPS/loopback HTTP client with HR-resolved resident identity.
+# Observability: Safe authorization/backend error classes and durable correlation receipts.
+# Dependencies: runtime.capabilities; HR identity crosswalk; internal resident-proposals API.
+# Authority: Riverview institutional registry decides proposal authorization; this adapter issues no grants.
+# Changed: 2026-11-06T23:06:45Z | GRACE-AUTHORITY-ARCH-001 | Codex GPT-6 | Preserve upstream denials and verify proposal readback author against HR identity.
+# Supersedes: Existing unversioned adapter behavior; proposal payload contract unchanged.
+# Contracts: docs/r3-native-tool-contract.md; docs/architecture/RESIDENT_AUTHORITY_AND_CAPABILITIES.md.
+# Tests: tests/test_internal_proposal_tool_integration.py.
+# History/Predecessor: Git blob 4e71ae185f4a9ce9e1b415cb34384c903ec03588 at cb162499a5ae94b801cbdbf9e5aa2dcd4c75ebaf.
 """Authenticated R3 adapter to Riverview's existing internal proposal registry."""
 from __future__ import annotations
 
@@ -11,9 +27,15 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from urllib.parse import urlsplit
 
+from runtime.capabilities import CapabilityDenied
+
 
 class InstitutionalProposalError(RuntimeError):
     """Safe, content-free failure from the internal proposal registry."""
+
+
+class InstitutionalProposalDenied(CapabilityDenied):
+    """The authoritative Riverview registry denied the resident operation."""
 
 
 def read_resident_credential(path: str | Path) -> str:
@@ -56,7 +78,10 @@ class InstitutionalProposalClient:
             with urlopen(request, timeout=self.timeout) as response:
                 result = json.loads(response.read(65536))
         except HTTPError as exc:
-            if exc.code in {401, 403, 404, 409}:
+            if exc.code in {401, 403}:
+                raise InstitutionalProposalDenied(
+                    "Authoritative institutional proposal policy denied the operation") from None
+            if exc.code in {404, 409}:
                 raise InstitutionalProposalError("Internal proposal operation was denied or conflicted") from None
             raise InstitutionalProposalError("Internal proposal service is unavailable") from None
         except (URLError, TimeoutError, OSError, ValueError):
@@ -89,14 +114,21 @@ class InstitutionalProposalClient:
             "author_principal_id": result["author_principal_id"],
             "correlation_id": result["correlation_id"]}
 
-    def proposal_status(self, proposal_id: str) -> dict:
+    def proposal_status(self, proposal_id: str, *, expected_principal: str | None = None) -> dict:
         if not isinstance(proposal_id, str) or not re.fullmatch(r"proposal:[0-9a-f-]{36}", proposal_id):
             raise InstitutionalProposalError("Institutional proposal ID is invalid")
+        if expected_principal is not None and not re.fullmatch(
+                r"resident:[A-Za-z0-9_.:-]+", expected_principal):
+            raise InstitutionalProposalError("Authoritative resident identity is invalid")
         record = self._request("GET", "/" + proposal_id)
         proposal, revision = record.get("proposal"), record.get("revision")
         if (not isinstance(proposal, dict) or not isinstance(revision, dict)
                 or proposal.get("proposal_id") != proposal_id):
             raise InstitutionalProposalError("Internal proposal readback did not match the requested record")
+        if (expected_principal is not None and
+                proposal.get("created_by") != expected_principal):
+            raise InstitutionalProposalDenied(
+                "Authoritative proposal identity does not match the HR association")
         return {"proposal_id": proposal_id, "revision": revision.get("revision"),
             "content_sha256": revision.get("content_sha256"),
             "lifecycle_status": proposal.get("lifecycle_status"), "persisted": True,
@@ -104,13 +136,15 @@ class InstitutionalProposalClient:
             "approval_granted": proposal.get("lifecycle_status") in {"APPROVED", "PROMOTED"}}
 
 
-def proposal_submission_capability(client: InstitutionalProposalClient):
+def proposal_submission_capability(client: InstitutionalProposalClient, *, hr_database):
     from runtime.capabilities import Capability
 
     def submit(params, context):
         if set(params) != {"content"}:
             raise InstitutionalProposalError("Proposal operation received unsupported fields")
-        return client.submit(params["content"], principal=context.principal,
+        from runtime.hr_identity_association import resolve_authority_principal
+        institutional_principal = resolve_authority_principal(hr_database, context.principal)
+        return client.submit(params["content"], principal=institutional_principal,
             correlation_id=context.correlation_id)
 
     fields = {
@@ -129,19 +163,26 @@ def proposal_submission_capability(client: InstitutionalProposalClient):
             "type": "object", "properties": fields, "required": list(fields),
             "additionalProperties": False}}, "required": ["content"], "additionalProperties": False},
         contextual_executor=submit, read_only=False,
-        resource_ref="riverview:institutional-proposals", scope_ref="institution:proposal-drafts")
+        resource_ref="riverview:institutional-proposals", scope_ref="institution:proposal-drafts",
+        authorization_mode="authoritative-service",
+        authority_source="riverview.institutional-proposal-registry")
 
 
-def proposal_status_capability(client: InstitutionalProposalClient):
+def proposal_status_capability(client: InstitutionalProposalClient, *, hr_database):
     from runtime.capabilities import Capability
-    def status(params, _context):
+    def status(params, context):
         if set(params) != {"proposal_id"}:
             raise InstitutionalProposalError("Proposal status received unsupported fields")
-        return client.proposal_status(params["proposal_id"])
+        from runtime.hr_identity_association import resolve_authority_principal
+        institutional_principal = resolve_authority_principal(hr_database, context.principal)
+        return client.proposal_status(params["proposal_id"],
+                                      expected_principal=institutional_principal)
     return Capability(name="r3.proposal.status", action="proposal.status.read",
         description="Read the authenticated resident's authoritative institutional proposal state.",
         parameters={"type": "object", "properties": {
             "proposal_id": {"type": "string", "minLength": 1}},
             "required": ["proposal_id"], "additionalProperties": False},
         contextual_executor=status, read_only=True,
-        resource_ref="riverview:institutional-proposals", scope_ref="institution:proposal-drafts")
+        resource_ref="riverview:institutional-proposals", scope_ref="institution:proposal-drafts",
+        authorization_mode="authoritative-service",
+        authority_source="riverview.institutional-proposal-registry")

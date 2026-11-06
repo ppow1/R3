@@ -1,22 +1,23 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/tool_server.py
 # Component: R3-NATIVE-TOOL-SERVER
-# File Revision: 1.3.0
+# File Revision: 1.4.0
 # Created: 2026-11-02 UTC
 # Created By: Unknown (legacy source)
-# Purpose: Independent R3 tool router, exact-grant capabilities, and durable audit.
+# Purpose: Independent R3 tool router with per-capability owning authority decisions and durable audit.
 # Execution Model: Loopback HTTP server with fail-closed resident authentication and capability authorization.
 # Observability: tool_audit and canonical authority audit; no credentials or proposal payloads logged.
 # Dependencies: runtime.capabilities; runtime.capability_authority; internal Riverview proposal API.
-# Authority: R3 exact-grant contract; internal proposal submission also requires Riverview's exact resident grants.
+# Authority: R3-owned capabilities use R3 exact grants; internal proposals use Riverview's existing institutional authority decision.
 # Changed: 2026-11-06T01:39:36Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Add opt-in, single-operation Comms5 proposal adapter.
 # Changed: 2026-11-06T01:48:39Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Report authorized backend failures separately from authorization denials.
 # Changed: 2026-11-06T02:15:00Z | GRACE-AUTONOMY-P2 | Codex GPT-6 | Add exact-grant Comms5 proposal and objective status reads.
 # Changed: 2026-11-06T15:30:00Z | GRACE-INTERNAL-PROPOSAL | Codex GPT-6 | Route proposal submit/read through Riverview's internal registry endpoint.
-# Supersedes: Revision 1.2.1; preserves existing routes and write capability.
-# Contracts: docs/r3-native-tool-contract.md; /api/v1/internal/resident-proposals
+# Changed: 2026-11-06T23:06:45Z | GRACE-AUTHORITY-ARCH-001 | Codex GPT-6 | Require authoritative HR identity mapping and avoid duplicate R3 proposal grants.
+# Supersedes: Revision 1.3.0; preserves existing routes and R3-owned grant enforcement.
+# Contracts: docs/r3-native-tool-contract.md; docs/architecture/RESIDENT_AUTHORITY_AND_CAPABILITIES.md; /api/v1/internal/resident-proposals
 # Tests: tests/test_tool_server.py; tests/test_internal_proposal_tool_integration.py
-# History/Predecessor: Git blob 36e9f176584d51b98f86ff3c88c30582712687e0
+# History/Predecessor: Git blob edabf23dd532ee239c372dc47c07e265334e2131 at cb162499a5ae94b801cbdbf9e5aa2dcd4c75ebaf.
 """R3 native tool server: initial read-only status capability."""
 from __future__ import annotations
 
@@ -164,11 +165,14 @@ def handler_for(router):
 
 
 def build_router(*, audit_db, catalog=None, hosts=None, authority_db=None,
-                 institutional_proposal_url=None, institutional_proposal_credential_file=None):
+                 institutional_proposal_url=None, institutional_proposal_credential_file=None,
+                 hr_database=None):
     if hosts is not None and catalog is None:
         raise ValueError("Hosts require a catalog")
     if (institutional_proposal_url is None) != (institutional_proposal_credential_file is None):
         raise ValueError("Internal proposal integration requires both endpoint and credential file")
+    if institutional_proposal_url is not None and hr_database is None:
+        raise ValueError("Internal proposal integration requires authoritative HR identity mapping")
     authority = R3Authority(authority_db) if authority_db is not None else None
     executor = HostExecutor(catalog, hosts) if catalog else None
     capabilities = ()
@@ -182,8 +186,8 @@ def build_router(*, audit_db, catalog=None, hosts=None, authority_db=None,
             read_resident_credential(institutional_proposal_credential_file),
         )
         capabilities = (
-            proposal_submission_capability(client),
-            proposal_status_capability(client),
+            proposal_submission_capability(client, hr_database=hr_database),
+            proposal_status_capability(client, hr_database=hr_database),
         )
     return ToolRouter(audit_db, executor, authority=authority, capabilities=capabilities)
 
@@ -196,6 +200,7 @@ def main():
     parser.add_argument("--authority-db", type=Path)
     parser.add_argument("--institutional-proposal-url")
     parser.add_argument("--institutional-proposal-credential-file", type=Path)
+    parser.add_argument("--hr-database", type=Path)
     parser.add_argument("--catalog", type=Path)
     parser.add_argument("--hosts", type=Path)
     args = parser.parse_args()
@@ -210,6 +215,7 @@ def main():
         authority_db=args.authority_db,
         institutional_proposal_url=args.institutional_proposal_url,
         institutional_proposal_credential_file=args.institutional_proposal_credential_file,
+        hr_database=args.hr_database,
     )
     ThreadingHTTPServer((args.host, args.port), handler_for(router)).serve_forever()
 
