@@ -107,6 +107,102 @@ class AssignmentResumeApiTests(unittest.TestCase):
         )
         return urlopen(request, timeout=3)
 
+    def grant_dispatch(self, *, resource="work-order:work-77", scope="objective:objective-33"):
+        with sqlite3.connect(self.authority_db) as db:
+            db.execute(
+                """INSERT INTO capability_grants
+                   (grant_id,principal,resource_ref,action,operation,scope_ref,active,approved_by)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                ("grant:dispatch-test", "resident:Grace", resource,
+                 "resident.assignment.dispatch", "write", scope, 1,
+                 "human:steward:test"),
+            )
+
+    @staticmethod
+    def dispatch_payload():
+        return {
+            "schema_version": "riverview-comms-work-order-dispatch:1",
+            "resident": "Grace", "assignment_id": "assignment-work-77",
+            "objective": "Add a date/time clock to the Riverview website",
+            "acceptance_criteria": [{
+                "id": "clock-visible", "version": "1",
+                "description": "Clock renders the current date and time accurately",
+            }],
+            "proposal_id": "proposal-11", "objective_id": "objective-33",
+            "work_order_id": "work-77", "owner": "website-engineering",
+            "constraints": ["Do not deploy before Steward approval"],
+            "authority_id": "objective-authority-5",
+            "evidence_lineage": ["proposal-11", "objective-33", "work-77"],
+            "correlation_id": "comms5-work-77",
+        }
+
+    def post_dispatch(self, payload, *, resident_credential=None):
+        headers = {
+            "Authorization": "Bearer " + self.service_credential,
+            "Content-Type": "application/json",
+            "Idempotency-Key": "work-order-dispatch-77",
+        }
+        if resident_credential is not None:
+            headers["X-R3-Resident-Credential"] = resident_credential
+        request = Request(
+            f"{self.base_url}/v2/work-orders/dispatch",
+            data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST",
+        )
+        return urlopen(request, timeout=3)
+
+    def test_authorized_work_order_dispatch_is_durable_and_idempotent(self):
+        self.grant_dispatch()
+        payload = self.dispatch_payload()
+        with self.post_dispatch(payload, resident_credential=self.resident_credential) as response:
+            self.assertEqual(response.status, 202)
+            accepted = json.load(response)
+        with self.post_dispatch(payload, resident_credential=self.resident_credential) as response:
+            self.assertEqual(response.status, 200)
+            duplicate = json.load(response)
+        self.assertEqual(duplicate, {"event_id": accepted["event_id"], "status": "DUPLICATE"})
+        with sqlite3.connect(self.inbox_db) as db:
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM assignment_intake_assignments "
+                "WHERE assignment_id='assignment-work-77'"
+            ).fetchone()[0], 1)
+            stored = json.loads(db.execute(
+                "SELECT payload FROM resident_inbox WHERE id=?", (accepted["event_id"],)
+            ).fetchone()[0])
+        workflow = stored["institutional_workflow"]
+        self.assertEqual(workflow["proposal_id"], "proposal-11")
+        self.assertEqual(workflow["objective_id"], "objective-33")
+        self.assertEqual(workflow["work_order_id"], "work-77")
+        self.assertEqual(workflow["authority_id"], "objective-authority-5")
+        self.assertEqual(workflow["constraints"], payload["constraints"])
+        self.assertEqual(workflow["evidence_lineage"], payload["evidence_lineage"])
+        status_request = Request(
+            f"{self.base_url}/v1/assignments/{accepted['event_id']}",
+            headers={"Authorization": "Bearer " + self.service_credential},
+        )
+        with urlopen(status_request, timeout=3) as response:
+            status = json.load(response)
+        self.assertEqual(status["institutional_workflow"], workflow)
+        with self.authority._connect() as db:
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM capability_audit WHERE capability='assignment-intake' "
+                "AND action='resident.assignment.dispatch' AND outcome='AUTHORIZED'"
+            ).fetchone()[0], 2)
+
+    def test_work_order_dispatch_requires_exact_grant_and_resident_identity(self):
+        payload = self.dispatch_payload()
+        with self.assertRaises(HTTPError) as missing_credential:
+            self.post_dispatch(payload)
+        self.assertEqual(missing_credential.exception.code, 401)
+        self.grant_dispatch(resource="work-order:other-work-order")
+        with self.assertRaises(HTTPError) as wrong_resource:
+            self.post_dispatch(payload, resident_credential=self.resident_credential)
+        self.assertEqual(wrong_resource.exception.code, 403)
+        with sqlite3.connect(self.inbox_db) as db:
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM assignment_intake_assignments "
+                "WHERE assignment_id='assignment-work-77'"
+            ).fetchone()[0], 0)
+
     def test_exact_grant_resumes_once_and_preserves_blocked_lineage(self):
         with self.post_resume(resident_credential=self.resident_credential) as response:
             self.assertEqual(response.status, 202)

@@ -2,15 +2,15 @@
 R3 CONTROLLED DOCUMENT
 File: docs/r3-assignment-intake-contract.md
 Component: R3-STEWARD-ASSIGNMENT-INTAKE
-File Revision: 1.0.0
+File Revision: 1.1.0
 Created: 2026-11-06T02:45:00Z
 Created By: Codex GPT-6, acting on Steward instruction
-Purpose: Define durable assignment intake, status, and exact-grant blocked-resumption HTTP boundaries.
+Purpose: Define durable assignment intake, exact-grant work-order dispatch, status, and blocked-resumption HTTP boundaries.
 Execution Model: Loopback-only authenticated HTTP API hosted by runtime.serve.
-Observability: Assignment event lineage plus canonical resident capability audit on resumption.
+Observability: Assignment event lineage plus canonical resident capability audit on dispatch and resumption.
 Dependencies: runtime.assignment_intake; runtime.resident_identity; runtime.capability_authority.
 Authority: R3 assignment intake contract; resumption requires a resident credential and exact Steward-approved grant.
-Contracts: runtime/assignment_intake.py; runtime/resident_inference.py::Inbox.resume_blocked
+Contracts: runtime/assignment_intake.py; runtime/resident_inference.py::Inbox.resume_blocked; riverview-comms-work-order-dispatch:1
 Tests: tests/test_assignment_resume_api.py
 History/Predecessor: New file; no predecessor.
 -->
@@ -22,6 +22,14 @@ The API binds only to `127.0.0.1`. Every route requires the private assignment-i
 
 - `POST /v1/assignments` creates one durable `RESIDENT_ACTIVITY`, keyed by `Idempotency-Key`. The existing assignment schema and behavior are unchanged.
 - `GET /v1/assignments/{root_event_id}` returns the durable continuation chain and independent verification projection for that assignment.
+
+## Dispatch a Comms5 work order
+
+`POST /v2/work-orders/dispatch` requires the assignment-intake bearer, an `X-R3-Resident-Credential`, and an `Idempotency-Key`. The request uses schema `riverview-comms-work-order-dispatch:1` and carries the proposal, objective, work-order and assignment IDs, resident, owner, objective text, constraints, active Comms5 authority ID, acceptance criteria, evidence lineage, and correlation ID. The resident principal is resolved from the credential.
+
+R3 requires and audits the exact write grant `resident.assignment.dispatch` for resource `work-order:{work_order_id}` and scope `objective:{objective_id}` before accepting the dispatch. The complete workflow metadata is persisted with the inbox event and included in assignment status readback. Identical retries return the same event; conflicting idempotency-key reuse is rejected. Missing canonical identity configuration fails closed. This endpoint creates no approval, objective, authority, or Engineering execution; it only records the authorized assignment for the configured resident runtime.
+
+The R3 endpoint does not call Comms5 to independently confirm proposal approval, objective promotion, or work-order readiness. Its caller must originate from the authorized Comms5 work-order dispatcher and provide the exact R3-granted identity. The deployed Comms5-to-R3 authentication/egress contract remains unverified; until it is implemented and tested against a controlled integration service, this endpoint is a development contract and is not enabled in production.
 
 ## Resume a blocked activity
 

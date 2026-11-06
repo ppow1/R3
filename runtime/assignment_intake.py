@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/assignment_intake.py
 # Component: R3-STEWARD-ASSIGNMENT-INTAKE
-# File Revision: 1.1.0
+# File Revision: 1.2.0
 # Created: 2026-11-03 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6 via GitHub API
 # Purpose: Authenticated loopback API for durable resident assignment submission and status.
@@ -12,7 +12,8 @@
 # Changed: 2026-11-03 UTC | R3-ASSIGNMENT-INTAKE-001 | ChatGPT GPT-6 | Add opt-in durable assignment API.
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-006 | Follow authorized blocked-activity resumption links in assignment status.
 # Changed: 2026-11-06T02:45:00Z | GRACE-AUTONOMY-P3 | Codex GPT-6 | Expose exact-grant resident-authenticated blocked-activity resumption.
-# Supersedes: Revision 1.0.1; adds an opt-in route without changing assignment submission semantics.
+# Changed: 2026-11-06 | GRACE-AUTONOMY-P2 | Codex GPT-6 | Add versioned exact-grant Comms5 work-order dispatch intake with durable workflow lineage.
+# Supersedes: Revision 1.1.0; adds opt-in routes without changing version 1 assignment submission semantics.
 # Supersedes: None
 # Contracts: docs/r3-assignment-intake-contract.md; hints/engineering-test-policy.md
 # Tests: tests/test_assignment_resume_api.py; existing assignment intake and activity continuation tests.
@@ -116,8 +117,13 @@ class AssignmentIntake:
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         return payload, hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
-    def submit(self, payload, idempotency_key: str):
+    def submit(self, payload, idempotency_key: str, *, workflow: dict | None = None):
         payload, digest = self._validate(payload, idempotency_key)
+        if workflow is not None:
+            payload = {**payload, "workflow": workflow}
+            digest = hashlib.sha256(json.dumps(
+                payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")).hexdigest()
         resident = payload["resident"]
         if resident not in self.residents:
             raise IntakeError(404, "Resident is not registered")
@@ -162,6 +168,8 @@ class AssignmentIntake:
                 event_payload["next_step"] = payload["next_step"]
             if "correlation_id" in payload:
                 event_payload["correlation_id"] = payload["correlation_id"]
+            if workflow is not None:
+                event_payload["institutional_workflow"] = workflow
             now = time.time()
             cursor = db.execute(
                 "INSERT INTO resident_inbox(resident,event_type,payload,created_at,updated_at) VALUES (?,?,?,?,?)",
@@ -186,6 +194,72 @@ class AssignmentIntake:
             raise IntakeError(503, "Assignment store unavailable") from None
         finally:
             db.close()
+
+    def submit_work_order(self, payload, idempotency_key: str, *,
+                          authority: R3Authority, principal: str):
+        required = {
+            "schema_version", "resident", "assignment_id", "objective",
+            "acceptance_criteria", "proposal_id", "objective_id", "work_order_id",
+            "owner", "constraints", "authority_id", "evidence_lineage", "correlation_id",
+        }
+        if not isinstance(payload, dict) or set(payload) != required:
+            raise IntakeError(400, "Invalid version 2 work-order dispatch request")
+        if payload["schema_version"] != "riverview-comms-work-order-dispatch:1":
+            raise IntakeError(400, "Unsupported work-order dispatch schema")
+        for field in ("proposal_id", "objective_id", "work_order_id", "owner", "authority_id"):
+            if not isinstance(payload[field], str) or not payload[field].strip() or len(payload[field]) > 200:
+                raise IntakeError(400, f"{field} must contain 1 to 200 characters")
+        constraints = payload["constraints"]
+        lineage = payload["evidence_lineage"]
+        if (not isinstance(constraints, list) or len(constraints) > 50
+                or any(not isinstance(item, str) or not item.strip() or len(item) > 1000
+                       for item in constraints)):
+            raise IntakeError(400, "constraints must be a list of at most 50 bounded strings")
+        if (not isinstance(lineage, list) or not lineage or len(lineage) > 100
+                or any(not isinstance(item, str) or not item.strip() or len(item) > 200
+                       for item in lineage)):
+            raise IntakeError(400, "evidence_lineage must contain 1 to 100 bounded identifiers")
+        correlation_id = payload["correlation_id"]
+        if not isinstance(correlation_id, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", correlation_id):
+            raise IntakeError(400, "correlation_id must contain 1 to 200 safe characters")
+        scope_ref = "objective:" + payload["objective_id"]
+        resource_ref = "work-order:" + payload["work_order_id"]
+        try:
+            grant = authority.authorize(
+                principal=principal, action="resident.assignment.dispatch",
+                scope_ref=scope_ref, resource_id=resource_ref, operation="write",
+            )
+            authority.audit({
+                "principal": principal, "capability": "assignment-intake",
+                "action": "resident.assignment.dispatch", "scope_ref": scope_ref,
+                "correlation_id": "comms5-dispatch:" + correlation_id,
+                "grant_id": grant["grant_id"], "outcome": "AUTHORIZED",
+                "resource_ref": resource_ref, "operation": "write",
+            })
+        except CapabilityDenied as exc:
+            raise IntakeError(403, "Work-order dispatch is not authorized") from exc
+        except (AuthorityUnavailable, KeyError, TypeError):
+            raise IntakeError(503, "Canonical dispatch authority is unavailable") from None
+        workflow = {
+            "schema_version": payload["schema_version"],
+            "proposal_id": payload["proposal_id"],
+            "objective_id": payload["objective_id"],
+            "work_order_id": payload["work_order_id"],
+            "owner": payload["owner"],
+            "constraints": constraints,
+            "authority_id": payload["authority_id"],
+            "evidence_lineage": lineage,
+            "principal": principal,
+            "grant_id": grant["grant_id"],
+        }
+        submission = {
+            "resident": payload["resident"],
+            "assignment_id": payload["assignment_id"],
+            "objective": payload["objective"],
+            "acceptance_criteria": payload["acceptance_criteria"],
+            "correlation_id": correlation_id,
+        }
+        return self.submit(submission, idempotency_key, workflow=workflow)
 
     def status(self, root_event_id: int):
         with closing(self._connect()) as db:
@@ -216,8 +290,13 @@ class AssignmentIntake:
                     break
                 current_id = next_id
             review = VerificationLedger(db).assignment_review_status(assignment_id)
+            root_payload = db.execute(
+                "SELECT payload FROM resident_inbox WHERE id=?", (root_event_id,)
+            ).fetchone()
+            root_data = json.loads(root_payload[0]) if root_payload else {}
             return {"assignment_id": assignment_id, "resident": resident,
                     "root_event_id": root_event_id, "events": events,
+                    "institutional_workflow": root_data.get("institutional_workflow"),
                     "verification": review}
 
     def resume(self, event_id: int, *, authority: R3Authority, principal: str,
@@ -273,14 +352,15 @@ def create_server(database: Path, token_file: Path, residents: set[str],
 
         def do_POST(self):
             resume_match = re.fullmatch(r"/v1/assignments/([0-9]+)/resume", self.path)
-            if self.path != "/v1/assignments" and resume_match is None:
+            dispatch_path = self.path == "/v2/work-orders/dispatch"
+            if self.path != "/v1/assignments" and resume_match is None and not dispatch_path:
                 self._respond(404, {"error": "Not found"})
                 return
             if not self._authorized():
                 return
-            if resume_match is not None:
+            if resume_match is not None or dispatch_path:
                 if resident_identity is None or authority is None:
-                    self._respond(503, {"error": "Canonical resumption authority is unavailable"})
+                    self._respond(503, {"error": "Canonical resident authority is unavailable"})
                     return
                 try:
                     principal = resident_identity.authenticate(
@@ -293,7 +373,7 @@ def create_server(database: Path, token_file: Path, residents: set[str],
                     return
             try:
                 size = int(self.headers.get("Content-Length", "-1"))
-                if size < 0 or size > (4096 if resume_match is not None else 1_048_576):
+                if size < 0 or size > (4096 if resume_match is not None else 65_536 if dispatch_path else 1_048_576):
                     self._respond(413, {"error": "Invalid request size"})
                     return
                 payload = json.loads(self.rfile.read(size))
@@ -306,6 +386,13 @@ def create_server(database: Path, token_file: Path, residents: set[str],
                         principal=principal, resolution_evidence=payload["resolution_evidence"],
                     )
                     self._respond(202, {"event_id": event_id, "status": "PENDING"})
+                    return
+                if dispatch_path:
+                    result = app.submit_work_order(
+                        payload, self.headers.get("Idempotency-Key"),
+                        authority=authority, principal=principal,
+                    )
+                    self._respond(200 if result["status"] == "DUPLICATE" else 202, result)
                     return
                 result = app.submit(payload, self.headers.get("Idempotency-Key"))
                 self._respond(200 if result["status"] == "DUPLICATE" else 202, result)
