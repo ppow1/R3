@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/knowledge.py
 Component: R3A-KNOWLEDGE-RETRIEVAL
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Retrieve relevant evidence from explicitly configured knowledge sources and preserve its source digest.
@@ -12,10 +12,11 @@ Dependencies: Python standard library; allowlisted files supplied by R3A configu
 Authority: AP1 / R3A-019 authorized by Steward; read-only institutional knowledge use.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Add source-aware retrieval for durable Grace activities.
 Changed: 2026-11-06T18:26:37Z | R3A-019 | Codex GPT-6 | Match source-state phrases despite preceding articles or unrelated "from" phrases.
+Changed: 2026-11-06T18:54:42Z | R3A-019 | Codex GPT-6 | Keep each transition set together as one answerable, source-traceable knowledge fact.
 Supersedes: None.
 Contracts: R3A-019 knowledge grounding and retrieval; AP1 activity evidence lineage.
 Tests: tests/test_r3a_ap1.py retrieval and digest checks.
-History/Predecessor: Git blob 6a5953579b20148283965a0ada8f74d4b40d1891 at commit cc9eae1baf691b016666cfc15c8905e04f666ec8.
+History/Predecessor: Git blob 03bbb3c0a3d1cabc2a696cea83728216f271f33a at commit 612f591b77fef040e91e8d0d450a6b9f5fae0751.
 """
 from __future__ import annotations
 
@@ -37,9 +38,9 @@ def _json_facts(value: Any, prefix: str = "") -> list[tuple[str, str]]:
             if key == "transitions" and isinstance(child, dict):
                 for source, targets in child.items():
                     if isinstance(targets, list):
-                        for index, target in enumerate(targets):
-                            facts.append((f"{path}.{source}[{index}]",
-                                          f"Transition from {source} to {target}"))
+                        destinations = ", ".join(str(target) for target in targets)
+                        facts.append((f"{path}.{source}",
+                                      f"Transitions from {source}: {destinations}"))
                 continue
             facts.extend(_json_facts(child, path))
     elif isinstance(value, list):

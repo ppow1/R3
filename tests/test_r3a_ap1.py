@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.0.5
+File Revision: 1.0.6
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -15,10 +15,11 @@ Changed: 2026-11-06T18:07:21Z | R3A-019 | Codex GPT-6 | Verify source-state tran
 Changed: 2026-11-06T18:07:40Z | R3A-019 | Codex GPT-6 | Extend the fixture to include all four RUNNING successors.
 Changed: 2026-11-06T18:26:37Z | R3A-019 | Codex GPT-6 | Handle preceding article phrases and preserve source-state precision.
 Changed: 2026-11-06T18:27:15Z | R3A-019 | Codex GPT-6 | Retain the knowledge source ID in the query fixture.
+Changed: 2026-11-06T18:54:42Z | R3A-019 | Codex GPT-6 | Assert transition successors arrive together for model grounding.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
-History/Predecessor: Git blob 9beeb6a7b5a0d2076d6116d9064c156e3abc49dd at commit cc9eae1baf691b016666cfc15c8905e04f666ec8.
+History/Predecessor: Git blob e6162806f293ffefd477108a8d529827847d56e4 at commit 612f591b77fef040e91e8d0d450a6b9f5fae0751.
 """
 from __future__ import annotations
 
@@ -55,9 +56,11 @@ class KnowledgeRetrievalTests(unittest.TestCase):
             results = retrieve(source, "knowledge.1",
                                "From the process.lifecycle definition, report transitions from RUNNING")
             self.assertTrue(results)
-            self.assertEqual(len(results), 4)
+            self.assertEqual(len(results), 1)
             self.assertTrue(all(item["source_id"] == "knowledge.1" for item in results))
-            self.assertTrue(all(item["source_path"].startswith("transitions.RUNNING") for item in results))
+            self.assertEqual(results[0]["source_path"], "transitions.RUNNING")
+            for state in ("DEGRADED", "STOPPING", "FAILED", "RESTARTING"):
+                self.assertIn(state, results[0]["content"])
             self.assertTrue(all(len(item["sha256"]) == 64 and len(item["source_sha256"]) == 64
                                 for item in results))
             self.assertFalse(any("owner" in item["source_path"] for item in results))
