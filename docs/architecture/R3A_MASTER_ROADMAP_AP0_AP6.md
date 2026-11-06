@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_MASTER_ROADMAP_AP0_AP6.md
 Component: R3A-MASTER-ROADMAP
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-06T03:39:05Z
 Created By: Codex GPT-6
 Purpose: Sequence R3A architecture and delivery phases AP0 through AP6.
@@ -14,6 +14,7 @@ Changed: 2026-11-06T03:39:05Z | R3A-BASELINE-001 | Codex GPT-6 | Establish initi
 Changed: 2026-11-06T04:57:50Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Reconcile phase sequence and establish roadmap governance.
 Changed: 2026-11-06T05:03:56Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Clarify Baseline 1.0 approval status and phase requirement mapping.
 Changed: 2026-11-06 | R3A-GOV-01A | Steward-directed clarification | Permit autonomous in-scope engineering and reserve approval for material deviations.
+Changed: 2026-11-06 | R3A-DIAG-CLARIFICATION | Steward-directed clarification | Specify permanently re-enableable correlated execution diagnostics under existing AP0 ownership; no phase or baseline change.
 Changed: 2026-11-06 | R3A-BASELINE-APPROVAL | Steward authorization in conversation | Approve Roadmap Baseline 1.0 for governance and AP0 decision planning only.
 Supersedes: None.
 Contracts: R3A Architecture Charter; R3A Punch List and Parking Lot; AP0 Technical Specification.
@@ -35,6 +36,19 @@ History/Predecessor: Git blob 14c74b8af1f0e7a9ff9135a8e7954396f9e136db at baseli
 | **AP4 — Institutional expansion** | R3A-015, R3A-021 | Expand institutional participation, roles, onboarding and domain capabilities, including Jessica's character-development responsibilities with authoritative HR/personnel ownership and privacy. | AP0 module/identity contracts; AP1 resident continuity; AP2 capability/evidence flow; AP3 access controls as required; HR/personnel and ownership decisions. | New residents/responsibilities join through versioned contracts and authorized identity; Jessica can perform character development with provenance and correct HR/canon boundaries; existing institutional operation remains compatible. | PLANNED |
 | **AP5 — Spatial institution, avatars and Quest** | R3A-016 | Spatial estate, resident avatars and Meta Quest integration over common authoritative state. Spatial presentation cannot block functional desktop/mobile interfaces. | AP0 APIs/state semantics; AP3 remote/mobile access where applicable; actual avatar/spatial asset and hardware/runtime inventory; accessibility contracts. | Spatial/Quest interfaces expose genuine state and freshness, resident avatar status derives from authoritative records, and core activities/interfaces remain usable when spatial services are absent. | PLANNED |
 | **AP6 — Future capabilities and mature resilience** | R3A-014, R3A-023 | Future capability growth and deferred enhancements; mature backup/restore infrastructure, privacy lifecycle, emergency lockdown, cryptographic erasure, operational scaling and extended resilience. Basic AP0 recovery/backup is a prerequisite, not deferred here. | Durable AP0 data ownership/schema and basic restore evidence; AP1/AP2 operation; AP3 security; AP4/AP5 integration; explicit Steward privacy/security decisions. | Mature backup/restore and recovery are evidenced; lockdown is enforceable with approved emergency authority; privacy/erasure follows approved key/retention policy; future capabilities preserve compatibility and truthful operation. | PLANNED |
+
+## Diagnostic observability clarification — existing AP0 responsibility
+
+This section clarifies the already-approved AP0 requirement for **actual diagnostics**, inherited by AP1–AP6. It does not create a new phase, requirement ID, roadmap baseline, or implementation authorization. Durable operational events, state transitions, and security audit records remain available regardless of optional verbose tracing settings.
+
+- **Runtime controls:** Authorized operators can enable, scope, and disable detailed diagnostics without editing source code. Support OFF, ERROR, INFO, DEBUG, and TRACE (or explicitly mapped equivalents), including resident-, activity-, and component-specific capture. OFF applies only to optional verbose traces, never mandatory durable history or audit records.
+- **Correlated execution path:** Trace event intake, activity and attempt IDs, resident identity, deterministic Python branches, configuration and route selection, state-machine transitions, knowledge retrieval and evidence selection, capability discovery/authorization/invocation/arguments/results, validation, retry, and terminal outcome. Each record identifies its decision mechanism (deterministic, state machine, configuration, tool, inference, or external observation).
+- **Inference diagnostics:** When detailed capture is enabled, preserve the assembled system/user/developer messages, model-visible tool schemas and examples (if any), evidence and citations, model/provider/route and parameters, exact outbound request and inbound response representations or explicitly identified redactions, finish reason, token counts, errors, and timing. Clearly distinguish a reconstructed request from historically captured bytes.
+- **Reproduction:** Provide correlated inspection and safe recorded-input replay; fresh model/tool re-execution is a separate authorized operation. Replay must not repeat external writes or side effects by default. Record code, configuration, model, and evidence revisions and indicate where deterministic reproduction is impossible.
+- **Safety and availability:** Apply access control, secret redaction, bounded retention, storage quotas, and defined behavior on trace failure or storage exhaustion. Disabled verbose tracing should have bounded overhead. Diagnostic capability must remain available for reactivation throughout the institution's lifetime.
+- **Phase acceptance inheritance:** AP0 establishes the diagnostic contract and operator controls; AP1 exposes Grace's actual inference/knowledge/decision path; AP2 adds tool-driven work, escalation, and verification lineage; AP3–AP6 preserve the same contract in their respective features. At each applicable acceptance gate, an authorized operator must be able to enable scoped tracing, run an activity, inspect its correlated path, safely reproduce recorded inputs, and disable verbose capture while retaining mandatory history.
+
+This clarification does not assert these capabilities are already implemented. Existing implementation gaps remain to be assessed against the AP0 specification and phase-specific acceptance evidence.
 
 ## Roadmap governance — R3A-GOV-01
 
