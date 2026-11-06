@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.0.7
+File Revision: 1.0.8
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -17,10 +17,11 @@ Changed: 2026-11-06T18:26:37Z | R3A-019 | Codex GPT-6 | Handle preceding article
 Changed: 2026-11-06T18:27:15Z | R3A-019 | Codex GPT-6 | Retain the knowledge source ID in the query fixture.
 Changed: 2026-11-06T18:54:42Z | R3A-019 | Codex GPT-6 | Assert transition successors arrive together for model grounding.
 Changed: 2026-11-06T19:01:13Z | R3A-019 | Codex GPT-6 | Cover the after-state wording used by notification events.
+Changed: 2026-11-06T19:05:07Z | R3A-019 | Codex GPT-6 | Test evidence selection for knowledge-only and runtime objectives.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
-History/Predecessor: Git blob a65d7c7fcb8f28f1815d8f69e6bf2444e6dae364 at commit 81d33d631daaf35fa50091219ea0326a5373851f.
+History/Predecessor: Git blob 21df60a1fe901030ef2c371ff449ab02b3626522 at commit f730db60d5da7feebb235d7c413bb3f823830ca6.
 """
 from __future__ import annotations
 
@@ -28,6 +29,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from r3a_runtime.cme import _requires_runtime_evidence
 from r3a_runtime.config import ConfigurationError, ModelRoute, resolve_model_route
 from r3a_runtime.knowledge import retrieve
 
@@ -48,6 +50,12 @@ class ModelRouteTests(unittest.TestCase):
 
 
 class KnowledgeRetrievalTests(unittest.TestCase):
+    def test_runtime_evidence_is_selected_only_for_runtime_questions(self):
+        self.assertFalse(_requires_runtime_evidence(
+            "List every state permitted immediately after RUNNING in process.lifecycle"))
+        self.assertTrue(_requires_runtime_evidence(
+            "Are Ring0, CME, PostgreSQL, and Grace healthy now?"))
+
     def test_json_retrieval_returns_relevant_source_facts_and_digests(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "machine.json"

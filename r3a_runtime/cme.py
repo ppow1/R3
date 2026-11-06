@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.0.5
+File Revision: 1.0.6
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -17,10 +17,11 @@ Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to conf
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
 Changed: 2026-11-06T18:16:39Z | R3A-019 | Codex GPT-6 | Bound module-child termination when a model request does not drain.
 Changed: 2026-11-06T18:21:00Z | R3A-019 | Codex GPT-6 | Persist required knowledge citations and restore them on activity recovery.
+Changed: 2026-11-06T19:05:07Z | R3A-019 | Codex GPT-6 | Exclude unrelated runtime observations from knowledge-only model context.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007.
 Tests: tests/test_r3a_ap1.py; live inference/recovery evidence pending this revision.
-History/Predecessor: Git blob 5f4a6eeb5644cee20b18020b9835fb5e6a0aed20 at commit 600bbd218d9c53620b9938aa1c8fd4ace801f396.
+History/Predecessor: Git blob ba6f7d1817804c13039680b82287c4668a8af5d9 at commit f730db60d5da7feebb235d7c413bb3f823830ca6.
 """
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import signal
 import sys
 import uuid
@@ -42,6 +44,14 @@ from .db import InvalidTransition, Store, utcnow
 from .diagnostics import make_server
 from .knowledge import retrieve
 from .protocol import PROTOCOL_MAJOR, PROTOCOL_MINOR, request as module_request
+
+
+def _requires_runtime_evidence(objective: str) -> bool:
+    runtime_terms = {"healthy", "health", "runtime", "live", "current", "currently",
+                     "postgres", "postgresql", "database", "ring0", "cme", "grace",
+                     "module", "pid", "heartbeat", "operational"}
+    objective_terms = set(re.findall(r"[a-z0-9_]+", objective.casefold()))
+    return bool(runtime_terms & objective_terms)
 
 
 class CME:
@@ -505,16 +515,21 @@ class CME:
                          "pid": row["diagnostic"].get("pid") if isinstance(row["diagnostic"], dict) else None,
                          "observed_at": row["observed_at"].isoformat() if row["observed_at"] else None}
                         for row in module_rows]
-        evidence = [{"source_id": "runtime.processes", "sha256": hashlib.sha256(
+        runtime_evidence = [{"source_id": "runtime.processes", "sha256": hashlib.sha256(
             json.dumps(live, sort_keys=True, default=str).encode()).hexdigest(), "content": live},
                     {"source_id": "runtime.postgres", "sha256": hashlib.sha256(
             json.dumps(db[0], sort_keys=True, default=str).encode()).hexdigest(),
                      "content": {**db[0], "ready": True, "observed_at": db[0]["observed_at"].isoformat()}}]
-        evidence.append({"source_id": "runtime.modules", "sha256": hashlib.sha256(
+        runtime_evidence.append({"source_id": "runtime.modules", "sha256": hashlib.sha256(
             json.dumps(live_modules, sort_keys=True).encode()).hexdigest(), "content": live_modules})
         objective = event_input["objective"]
+        knowledge_evidence = []
         for index, path in enumerate(self.settings.knowledge_sources):
-            evidence.extend(retrieve(path, f"knowledge.{index+1}", objective))
+            knowledge_evidence.extend(retrieve(path, f"knowledge.{index+1}", objective))
+        if knowledge_evidence and not _requires_runtime_evidence(objective):
+            evidence = knowledge_evidence
+        else:
+            evidence = runtime_evidence + knowledge_evidence
         request_ref = str(uuid.uuid4())
         route = self.settings.model_route(event_input.get("route_id"))
         return {"activity_type": "grace.objective", "activity_id": str(activity["activity_id"]),
