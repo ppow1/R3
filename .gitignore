@@ -1,0 +1,20 @@
+# R3 CONTROLLED SOURCE
+# File: .gitignore
+# Component: R3A-AP0-LOCAL-ARTIFACT-EXCLUSIONS
+# File Revision: 1.0.0
+# Created: 2026-11-06T15:46:11Z
+# Created By: Codex GPT-6
+# Purpose: Keep local Python build and interpreter artifacts out of source control.
+# Execution Model: Git ignore rules.
+# Observability: `git status` omits venv, package metadata and bytecode artifacts.
+# Dependencies: Git.
+# Authority: AP0-M1 implementation authorized in GitHub Issue #42.
+# Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Add controlled local artifact exclusions.
+# Supersedes: None.
+# Contracts: hints/file-provenance.md.
+# Tests: `git check-ignore` and working-tree status.
+# History/Predecessor: New file; initial publication recorded in Git.
+.venv/
+*.egg-info/
+__pycache__/
+*.py[cod]

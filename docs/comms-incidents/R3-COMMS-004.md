@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/comms-incidents/R3-COMMS-004.md
 Component: COMMS-INCIDENT
-File Revision: 1.0.9
+File Revision: 1.0.10
 Created: 2026-10-31 UTC (exact time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Record Camrui Comms command gateway internal failure during R3 deployment preflight
@@ -11,10 +11,11 @@ Observability: Tool error and verified grant status
 Dependencies: R3 deployment; Camrui command gateway
 Authority: Steward instruction to log Comms failures and punch list
 Changed: 2026-11-01T15:06:03.086Z | R3-P020 | ChatGPT GPT-6 | Record successful queued deployment and remaining visual acceptance
+Changed: 2026-11-06T14:57:21Z | R3A-AP0-M1 | Codex GPT-6 | Record bounded_request_or_state_invalid response during authorized read-only AP0 preflight.
 Supersedes: None
 Contracts: hints/comms-failure-recovery.md; hints/file-provenance.md
 Tests: Pending reproduction and gateway diagnostics
-History/Predecessor: Git blob 14aa05d460ac91dfd45386ee8ffa9eddcdf22017
+History/Predecessor: Git blob c8c6da17f674b2165a679f032aeea82181591dad at commit 2cf6f502d968a5b6e9eb4ab517d7bbea3765253a.
 -->
 # R3-COMMS-004 — Camrui command task submission fails internally
 
@@ -82,3 +83,12 @@ History/Predecessor: Git blob 14aa05d460ac91dfd45386ee8ffa9eddcdf22017
 - Independent read-back confirmed remote HEAD `f5d689cf9ff307c2ae9c18edcc8a81ca44e4f6a6`, health HTTP 200, title `Riverview 3`, old prototype/demo labels absent, top bar absent, Engineering status UI present, and target marker code present. The read-back shell returned exit 2 after these checks because its final `exit 0` line retained a carriage return; the deployer's own activation and health checks completed successfully.
 - The recovery was temporary; the installed deployment script was restored. Browser visual acceptance remains pending.
 - **Punch-list reference:** `R3-P020` — preserve this successful outcome and finish visual acceptance against the Steward's screenshot.
+
+## 2026-11-06 — AP0-M1 read-only preflight request rejected
+
+- **Objective:** Read the authorized Camrui development host name, user, isolated R3A checkout ref, user systemd state, PostgreSQL client version, and R3 runtime unit state before implementing AP0-M1. No writes, service operations, database connections, or production configuration changes were requested.
+- **Grant discovery:** `grant:dd4ded3b165f4435b29fe78d184132ed` was read as active/IMPLEMENTED for `steward:camrui`, `comms5.command.submit.task.camrui.standard`, scope `host:camrui`, valid through `2026-11-10T19:11:15.788733-05:00`. `grant:be2d2a60f99048ad9237a28fe938d080` was read as active/IMPLEMENTED for `service:command-gateway`, `comms5.command.execute.task.camrui.standard`, same scope, valid through `2026-11-10T19:11:16.109407-05:00`.
+- **Operation:** `comms5_command_task_submit`, standard, host `camrui`, idempotency key `r3a-ap0m1-preflight-20261106-01`, command digest `a8d933e45289e7c6df9fb255cea7607fd751acc4ebad4e3f8262d88f7a43b827`.
+- **Observed response:** task `fdee6dcd-b4f7-432c-9bdb-dcc70f90a4dc`, execution ID `fdee6dcd-b4f7-432c-9bdb-dcc70f90a4dc`, exit 2; stdout was `{"status":"denied","reason":"bounded_request_or_state_invalid"}`; audit event `07e70e9b-dc9d-456b-a4b4-edec8339d76a`; reservation status `consumed`. The gateway returned no host-command output. No host command effects are evidenced. The underlying validation cause is unknown; do not label this a missing grant or host failure.
+- **Recovery:** No retry of that probe. Equivalent local preflight facts were already available in the authorized isolated development environment. Work continues in the explicitly authorized local worktree; the R3 production service/database are excluded. Exact gateway request-shape cause remains for later gateway diagnosis.
+- **Status:** Gateway method failed; AP0-M1 objective is not blocked. Keep this record linked to `docs/PUNCH_LIST.md` R3-P019 until gateway validation cause is understood.
