@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.0.5
+File Revision: 1.0.6
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
 Purpose: Execute bounded read-only Grace objectives with the configured real model and supplied authorized evidence.
@@ -16,6 +16,7 @@ Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Execute selected configu
 Changed: 2026-11-06T18:13:55Z | R3A-019 | Codex GPT-6 | Send only cited evidence content to inference and retain HTTP error details.
 Changed: 2026-11-06T18:21:00Z | R3A-019 | Codex GPT-6 | Require model decisions to cite retrieved knowledge evidence.
 Changed: 2026-11-06T18:31:45Z | R3A-019 | Codex GPT-6 | Clarify that model assessments answer objectives and reserve blocked for missing evidence.
+Changed: 2026-11-06T18:38:00Z | R3A-019 | Codex GPT-6 | Request schema-constrained JSON and report missing decision fields precisely.
 Supersedes: None.
 Contracts: R3A-019; AP1-M1 Issue #43 acceptance.
 Tests: tests/test_r3a_ap1.py; live model-backed objective evidence pending this revision.
@@ -36,6 +37,19 @@ from typing import Any
 
 from .config import load_settings
 from .protocol import ModuleProtocolServer
+
+
+DECISION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "assessment": {"type": "string"},
+        "status": {"type": "string", "enum": ["healthy", "degraded", "blocked"]},
+        "evidence_refs": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "recommended_action": {"type": "string"},
+    },
+    "required": ["assessment", "status", "evidence_refs", "recommended_action"],
+    "additionalProperties": False,
+}
 
 
 class GraceResident:
@@ -110,6 +124,7 @@ class GraceResident:
                 "model": route.model,
                 "temperature": 0,
                 "max_tokens": route.max_tokens,
+                "response_format": {"type": "json_object", "schema": DECISION_SCHEMA},
                 "chat_template_kwargs": {"enable_thinking": False},
                 "messages": [
                     {"role": "system", "content": (
@@ -146,8 +161,12 @@ class GraceResident:
                     result_text = result_text[:-3]
                 result_text = result_text.strip()
                 decision = json.loads(result_text)
-                if not isinstance(decision, dict) or not {"assessment", "status", "evidence_refs", "recommended_action"}.issubset(decision):
-                    raise ValueError("model result does not satisfy the decision contract")
+                required_fields = {"assessment", "status", "evidence_refs", "recommended_action"}
+                if not isinstance(decision, dict):
+                    raise ValueError("model result must be a JSON object")
+                missing_fields = required_fields - decision.keys()
+                if missing_fields:
+                    raise ValueError(f"model result is missing decision fields: {sorted(missing_fields)}")
                 if decision["status"] not in {"healthy", "degraded", "blocked"}:
                     raise ValueError("model returned an unsupported status")
                 if not isinstance(decision["evidence_refs"], list) or not decision["evidence_refs"] or not set(decision["evidence_refs"]).issubset(evidence_ids):
