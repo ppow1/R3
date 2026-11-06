@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_MASTER_ROADMAP_AP0_AP6.md
 Component: R3A-MASTER-ROADMAP
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-06T03:39:05Z
 Created By: Codex GPT-6
 Purpose: Sequence R3A architecture and delivery phases AP0 through AP6.
@@ -14,6 +14,7 @@ Changed: 2026-11-06T03:39:05Z | R3A-BASELINE-001 | Codex GPT-6 | Establish initi
 Changed: 2026-11-06T04:57:50Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Reconcile phase sequence and establish roadmap governance.
 Changed: 2026-11-06T05:03:56Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Clarify Baseline 1.0 approval status and phase requirement mapping.
 Changed: 2026-11-06 | R3A-GOV-01A | Steward-directed clarification | Permit autonomous in-scope engineering and reserve approval for material deviations.
+Changed: 2026-11-06 | R3A-BASELINE-APPROVAL | Steward authorization in conversation | Approve Roadmap Baseline 1.0 for governance and AP0 decision planning only.
 Supersedes: None.
 Contracts: R3A Architecture Charter; R3A Punch List and Parking Lot; AP0 Technical Specification.
 Tests: Not run; documentation only.
@@ -21,7 +22,7 @@ History/Predecessor: Git blob 14c74b8af1f0e7a9ff9135a8e7954396f9e136db at baseli
 -->
 # R3A Master Roadmap — AP0–AP6
 
-**Status:** Corrected proposed Roadmap Baseline 1.0; awaiting Steward approval. No AP0 implementation is authorized. The requirements below preserve the Steward's required phase ownership; they do not declare any phase implemented or operational.
+**Status:** Roadmap Baseline 1.0 APPROVED by Steward on 2026-11-06 (conversation directive “go” following explicit approval recommendation). Approval authorizes AP0 decision planning and coordination; AP0 runtime implementation and production deployment require separate authorization. The requirements below preserve the Steward's required phase ownership; they do not declare any phase implemented or operational.
 
 **Version distinction:** Roadmap baseline `1.0` is the plan presented for approval; this controlled document is revision `1.0.1`, preserving the correction history from its initial revision.
 
@@ -37,7 +38,7 @@ History/Predecessor: Git blob 14c74b8af1f0e7a9ff9135a8e7954396f9e136db at baseli
 
 ## Roadmap governance — R3A-GOV-01
 
-Once approved by the Steward, this versioned Master Roadmap is the authoritative R3A development plan. Until that approval is recorded, this corrected Baseline 1.0 is a proposed plan and authorizes no implementation. Every R3A engineering assignment must state: approved roadmap revision; AP phase and milestone; requirement IDs; authorized scope; acceptance criteria; and applicable approved exception (or `None`). An assignment missing these fields is not ready for execution.
+This Steward-approved, versioned Master Roadmap is the authoritative R3A development plan. Approval of the roadmap alone does not authorize runtime implementation or production deployment. Every R3A engineering assignment must state: approved roadmap revision; AP phase and milestone; requirement IDs; authorized scope; acceptance criteria; and applicable approved exception (or `None`). An assignment missing these fields is not ready for execution.
 
 Any proposed deviation to phase ownership/order, priorities, scope or acceptance requirements must be entered in the [versioned exception register](R3A_ROADMAP_EXCEPTION_REGISTER.md), including reason, alternatives, impact and affected requirements. **Steward approval recorded against the exception is mandatory before executing the deviation.** A proposal, coordinator message, issue comment, branch, commit or Codex/resident decision is not approval. No Codex session, resident or Engineering coordinator may independently change roadmap priorities or acceptance requirements. Preserve superseded roadmap and decision versions in Git; never rewrite approved history.
 
