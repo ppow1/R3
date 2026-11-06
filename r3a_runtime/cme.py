@@ -9,12 +9,13 @@ Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery
 Execution Model: Async PostgreSQL-backed process supervised by Ring 0.
 Observability: Durable process/activity/module/resource/event state and local diagnostics socket.
 Dependencies: PostgreSQL; psycopg 3 pool; r3a_runtime.config/db/protocol/control/diagnostics.
-Authority: AP0-M1 implementation authorized by Steward in GitHub Issue #42; isolated R3A only.
+Authority: AP0-M1 authorized by Steward in Issue #42; AP1-M1 authorized in Issue #43; isolated R3A only.
 Changed: 2026-11-06T15:22:00Z | R3A-AP0-M1 | Codex GPT-6 | Implement CME process, scheduler, module worker and control plane.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Reconcile orphaned module processes, record live health and correct replacement status.
+Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Dispatch durable Grace objectives, authorize bounded evidence reads and renew long-running leases.
 Supersedes: None.
-Contracts: AP0-002–010; AP0-M1 D2–D8; MOD-001–MOD-010; STM-001–STM-007.
-Tests: tests/test_r3a_store.py; live CME/process/database recovery evidence.
+Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007.
+Tests: Live AP1-M1 objective, inference, and restart evidence recorded in Issue #43.
 History/Predecessor: New file; initial publication recorded in Git.
 """
 from __future__ import annotations
@@ -71,12 +72,12 @@ class CME:
             "configuration_schema": "r3a.bootstrap.v1",
             "configuration_ref": str(self.settings.source_path),
             "capability_refs": list(self.settings.module_capabilities),
-            "resource_refs": ["foundation.observer"],
-            "state_namespace": "foundation.observer",
             "migration_contract": "none-v1",
             "artifact_ref": str(self.settings.module_source),
             "artifact_digest": self.settings.module_digest,
             "recovery_policy": "idempotent",
+            "resource_refs": ["foundation.observer", "institution.reasoning"],
+            "state_namespace": self.settings.module_id,
         }
 
     async def start(self) -> None:
@@ -89,6 +90,10 @@ class CME:
                                              metadata={"description": "Read current Ring 0/CME process observations"})
         await self.store.register_capability("postgres.readiness", "R3A-CME", "read_only",
                                              metadata={"description": "Read PostgreSQL version and readiness"})
+        await self.store.register_capability("institution.knowledge.read", "R3A-CME", "read_only",
+                                             metadata={"description": "Read explicitly allowlisted institutional knowledge sources"})
+        await self.store.register_capability("institution.diagnostics.read", "R3A-CME", "read_only",
+                                             metadata={"description": "Read current durable process and database observations"})
         await self.store.register_resource("foundation.observer", self.settings.worker_concurrency,
                                            owner="R3A-CME")
         await self._recover_startup()
@@ -160,7 +165,8 @@ class CME:
             if proc.stat().st_uid != os.getuid():
                 return
             argv = (proc / "cmdline").read_bytes().split(b"\0")
-            expected = [b"-m", b"r3a_runtime.observer_module", b"--module-id", module_id.encode(),
+            entrypoint = b"r3a_runtime.grace_module" if module_id == "resident.grace" else b"r3a_runtime.observer_module"
+            expected = [b"-m", entrypoint, b"--module-id", module_id.encode(),
                         b"--module-version", version.encode()]
             if any(item not in argv for item in expected) or not process_alive(pid):
                 return
@@ -174,9 +180,10 @@ class CME:
         except FileNotFoundError:
             return
 
-    async def _module_call(self, operation: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def _module_call(self, operation: str, payload: dict[str, Any] | None = None,
+                           timeout: float = 5.0) -> dict[str, Any]:
         return await module_request(self.settings.module_socket, self.module_id, self.module_version,
-                                    operation, payload, timeout=5.0)
+                                    operation, payload, timeout=timeout)
 
     async def _activate_configured_module(self) -> None:
         await self._activate_module(self.module_id, self.module_version)
@@ -216,9 +223,12 @@ class CME:
             await self.store.module_state(module_id, version, "ACTIVATING", "starting")
             socket = self.settings.module_socket
             socket.unlink(missing_ok=True)
+            command = [sys.executable, "-m", manifest["entrypoint"], "--socket", str(socket),
+                       "--module-id", module_id, "--module-version", version]
+            if manifest["entrypoint"] == "r3a_runtime.grace_module":
+                command.extend(["--config", str(self.settings.source_path)])
             process = await asyncio.create_subprocess_exec(
-                sys.executable, "-m", manifest["entrypoint"], "--socket", str(socket),
-                "--module-id", module_id, "--module-version", version,
+                *command,
                 cwd=Path(__file__).resolve().parent.parent,
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
                 start_new_session=True,
@@ -361,6 +371,11 @@ class CME:
                                                          {"request_idempotency_key": idempotency_key})
             return {"module_id": module_id, "capability_id": capability_id,
                     "authorized": allowed, "effect": "none; discovery/check is read-only"}
+        if operation == "grace.objective.submit":
+            if self.settings.module_id != "resident.grace":
+                raise RuntimeError("The configured module is not the AP1 Grace resident")
+            return await self.store.submit_grace_objective(str(payload.get("objective", "")),
+                                                           idempotency_key)
         if operation == "config.reload":
             if any(not task.done() for task in self.active_activities.values()):
                 raise RuntimeError("Config reload waits for in-flight activity to reach a safe boundary")
@@ -396,7 +411,8 @@ class CME:
             await self.store.audit_capability_invocation(module_id, capability_id, "allowed",
                                                          {"activity_id": str(activity["activity_id"])})
         processes = await self.store.rows(
-            "SELECT component_id,pid,state,health,heartbeat_at,details FROM r3a.process_observations ORDER BY component_id"
+            "SELECT component_id,pid,state,health,heartbeat_at FROM r3a.process_observations "
+            "WHERE component_id IN ('ring0','cme') ORDER BY component_id"
         )
         now = datetime.now(timezone.utc)
         process_evidence = []
@@ -412,20 +428,94 @@ class CME:
             "SELECT current_setting('server_version') AS server_version,clock_timestamp() AS observed_at,"
             "pg_is_in_recovery() AS in_recovery, current_database() AS database"
         )
-        return {"activity_id": str(activity["activity_id"]), "attempt_id": str(activity["attempt_id"]),
+        return {"activity_type": activity["activity_type"],
+                "activity_id": str(activity["activity_id"]), "attempt_id": str(activity["attempt_id"]),
                 "processes": process_evidence,
                 "postgres": {**db_evidence[0], "ready": True,
                              "observed_at": db_evidence[0]["observed_at"].isoformat()},
                 "config_revision": self.settings.source_digest}
 
+    async def _objective_context(self, activity: dict[str, Any]) -> dict[str, Any]:
+        module_id = self.module_id
+        for capability_id in self.settings.module_capabilities:
+            try:
+                await self.store.require_capability(module_id, capability_id)
+            except PermissionError:
+                await self.store.audit_capability_invocation(module_id, capability_id, "denied",
+                                                             {"activity_id": str(activity["activity_id"])})
+                raise
+            await self.store.audit_capability_invocation(module_id, capability_id, "allowed",
+                                                         {"activity_id": str(activity["activity_id"])})
+        processes = await self.store.rows(
+            "SELECT component_id,pid,state,health,heartbeat_at FROM r3a.process_observations "
+            "WHERE component_id IN ('ring0','cme') ORDER BY component_id"
+        )
+        now = datetime.now(timezone.utc)
+        live = [{"component_id": row["component_id"], "pid": row["pid"],
+                 "process_exists": process_alive(row["pid"]), "state": row["state"],
+                 "health": row["health"] if (now-row["heartbeat_at"]).total_seconds() <= self.settings.heartbeat_stale_after_seconds else "stale",
+                 "heartbeat_age_seconds": (now-row["heartbeat_at"]).total_seconds()}
+                for row in processes]
+        db = await self.store.rows(
+            "SELECT current_setting('server_version') AS server_version,clock_timestamp() AS observed_at,"
+            "pg_is_in_recovery() AS in_recovery,current_database() AS database"
+        )
+        module_rows = await self.store.rows(
+            "SELECT module_id,module_version,lifecycle_state,health,observed_at,diagnostic "
+            "FROM r3a.module_registry WHERE module_id=%s AND module_version=%s",
+            (self.module_id, self.module_version)
+        )
+        live_modules = [{"module_id": row["module_id"], "module_version": row["module_version"],
+                         "lifecycle_state": row["lifecycle_state"], "health": row["health"],
+                         "pid": row["diagnostic"].get("pid") if isinstance(row["diagnostic"], dict) else None,
+                         "observed_at": row["observed_at"].isoformat() if row["observed_at"] else None}
+                        for row in module_rows]
+        evidence = [{"source_id": "runtime.processes", "sha256": hashlib.sha256(
+            json.dumps(live, sort_keys=True, default=str).encode()).hexdigest(), "content": live},
+                    {"source_id": "runtime.postgres", "sha256": hashlib.sha256(
+            json.dumps(db[0], sort_keys=True, default=str).encode()).hexdigest(),
+                     "content": {**db[0], "ready": True, "observed_at": db[0]["observed_at"].isoformat()}}]
+        evidence.append({"source_id": "runtime.modules", "sha256": hashlib.sha256(
+            json.dumps(live_modules, sort_keys=True).encode()).hexdigest(), "content": live_modules})
+        for index, path in enumerate(self.settings.knowledge_sources):
+            content = path.read_text(encoding="utf-8")[:4000]
+            evidence.append({"source_id": f"knowledge.{index+1}",
+                             "sha256": hashlib.sha256(content.encode()).hexdigest(),
+                             "content": content, "source": path.name})
+        request_ref = str(uuid.uuid4())
+        return {"activity_type": "grace.objective", "activity_id": str(activity["activity_id"]),
+                "attempt_id": str(activity["attempt_id"]),
+                "objective": activity["input"]["objective"], "evidence": evidence,
+                "request_ref": request_ref, "config_revision": self.settings.source_digest}
+
+    async def _lease_heartbeat(self, activity: dict[str, Any]) -> None:
+        interval = max(1.0, self.settings.lease_seconds / 3.0)
+        while True:
+            await asyncio.sleep(interval)
+            await self.store.renew_activity_lease(activity)
+
     async def _run_activity(self, activity: dict[str, Any]) -> None:
+        lease_task: asyncio.Task | None = None
         try:
             if self.module_process is None or self.module_process.returncode is not None:
                 raise RuntimeError("registered module process is not running")
-            context = await self._observer_context(activity)
-            await self.store.record_progress(activity, {"phase": "capabilities_read", "at": utcnow().isoformat()},
+            context = (await self._objective_context(activity) if activity["activity_type"] == "grace.objective"
+                       else await self._observer_context(activity))
+            if activity["activity_type"] == "grace.objective":
+                await self.store.record_progress(activity,
+                    {"phase": "model.requested", "at": utcnow().isoformat(),
+                     "provider": self.settings.model_provider, "model": self.settings.model_name,
+                     "request_ref": context["request_ref"], "objective_sha256": hashlib.sha256(
+                         activity["input"]["objective"].encode()).hexdigest()},
+                    {"activity_input": activity["input"], "evidence_refs": [item["source_id"] for item in context["evidence"]]})
+                lease_task = asyncio.create_task(self._lease_heartbeat(activity),
+                                                 name=f"lease-heartbeat:{activity['activity_id']}")
+            else:
+                await self.store.record_progress(activity,
+                    {"phase": "capabilities_read", "at": utcnow().isoformat()},
                                              {"capability_observations": context})
-            result = await self._module_call("execute", context)
+            result = await self._module_call("execute", context,
+                timeout=self.settings.model_timeout_seconds + 15 if activity["activity_type"] == "grace.objective" else 5.0)
             observations = result["result"]
             await self.store.finish_activity(activity, observations)
         except PermissionError as exc:
@@ -438,6 +528,9 @@ class CME:
                         self.settings.restart_max_seconds)
             await self.store.fail_activity(activity, exc, retry)
         finally:
+            if lease_task:
+                lease_task.cancel()
+                await asyncio.gather(lease_task, return_exceptions=True)
             self.active_activities.pop(activity["activity_id"], None)
 
     async def _scheduler_loop(self) -> None:

@@ -9,11 +9,12 @@ Purpose: Expose operator-invoked AP0 diagnostics, CME controls and isolated back
 Execution Model: Local command line using Unix sockets and PostgreSQL client utilities.
 Observability: JSON responses with explicit operation results and source revisions.
 Dependencies: r3a_runtime.config/control/diagnostics/backup.
-Authority: AP0-M1 implementation authorized in GitHub Issue #42; isolated R3A only.
+Authority: AP0-M1 authorized in Issue #42; AP1-M1 authorized in Issue #43; isolated R3A only.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Finalize local diagnostics, lifecycle and backup CLI.
+Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Add durable idempotent Grace objective submission.
 Supersedes: None.
-Contracts: AP0-007/010/013; AP0-M1 D8/D9.
-Tests: Targeted command-line and live isolated runtime verification.
+Contracts: AP0-007/010/013; R3A-019; AP0-M1 D8/D9.
+Tests: Live AP1-M1 objective submission and duplicate-key verification.
 History/Predecessor: New file; initial publication recorded in Git.
 """
 from __future__ import annotations
@@ -58,6 +59,8 @@ async def _run(args: argparse.Namespace) -> Any:
     elif args.command == "capability-grant":
         payload = {"module_id": args.module_id, "capability_id": args.capability_id,
                    "reason": args.reason}
+    elif args.command == "grace-objective-submit":
+        payload = {"objective": args.objective}
     elif args.command == "config-reload":
         operation = "config.reload"
     return await control_request(settings.control_socket, operation, payload,
@@ -70,6 +73,10 @@ def main() -> None:
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("status", "events", "definitions", "module-stop", "config-reload"):
         commands.add_parser(name)
+    objective = commands.add_parser("grace-objective-submit",
+                                    help="Durably submit a read-only objective to the configured Grace resident")
+    objective.add_argument("--objective", required=True)
+    objective.add_argument("--idempotency-key", required=True)
     for name in ("module-install", "module-activate", "module-replace"):
         cmd = commands.add_parser(name)
         cmd.add_argument("--version", required=name != "module-install", default=None)

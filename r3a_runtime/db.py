@@ -9,12 +9,13 @@ Purpose: Provide PostgreSQL migrations, versioned state transitions, events, reg
 Execution Model: Async Psycopg 3 connection pool.
 Observability: PostgreSQL current-state projections, append-only events, migrations, and activity lineage.
 Dependencies: psycopg 3; PostgreSQL; r3a_runtime.config.
-Authority: AP0-M1 implementation authorized by Steward in GitHub Issue #42; R3A database only.
+Authority: AP0-M1 authorized by Steward in Issue #42; AP1-M1 authorized in Issue #43; R3A database only.
 Changed: 2026-11-06T15:06:00Z | R3A-AP0-M1 | Codex GPT-6 | Add durable PostgreSQL store.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Add validated machine definitions, idempotent grants/lifecycle, retry-safe leases and guarded state/event commits.
+Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Persist Grace objective inputs/results, deduplicate intake and renew activity/resource leases.
 Supersedes: None.
-Contracts: AP0-004/005/006/008/009/010/013; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007.
-Tests: tests/test_r3a_store.py.
+Contracts: AP0-004/005/006/008/009/010/013; R3A-019; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007.
+Tests: Live AP1-M1 intake, deduplication, and CME recovery evidence in Issue #43.
 History/Predecessor: New file; initial publication recorded in Git.
 """
 from __future__ import annotations
@@ -444,6 +445,51 @@ class Store:
             if not accepted:
                 raise InvalidTransition("Observer activity could not enter QUEUED")
 
+    async def submit_grace_objective(self, objective: str, idempotency_key: str) -> dict[str, Any]:
+        """Durably enqueue one read-only Grace objective; duplicate keys return the same activity."""
+        if not objective.strip() or len(objective) > 4000:
+            raise ValueError("objective must contain 1 to 4000 characters")
+        if not idempotency_key.strip() or len(idempotency_key) > 200:
+            raise ValueError("idempotency_key must contain 1 to 200 characters")
+        async with self.pool.connection() as conn, conn.transaction():
+            existing = await (await conn.execute(
+                "SELECT activity_id,state,activity_type,idempotency_key,input,attempt_count "
+                "FROM r3a.activities WHERE idempotency_key=%s FOR UPDATE", (idempotency_key,)
+            )).fetchone()
+            if existing:
+                if existing["activity_type"] != "grace.objective" or existing["input"].get("objective") != objective:
+                    raise ValueError("idempotency key already belongs to a different request")
+                return {**existing, "duplicate": True}
+            activity_id = uuid.uuid4()
+            correlation_id = uuid.uuid4()
+            config = await (await conn.execute(
+                "SELECT revision_id FROM r3a.config_current WHERE singleton=true"
+            )).fetchone()
+            await conn.execute(
+                "INSERT INTO r3a.activities(activity_id,activity_type,idempotency_key,machine_id,machine_version,state,"
+                "available_at,recovery_policy,config_revision,input) "
+                "VALUES (%s,'grace.objective',%s,'activity.generic',1,'QUEUED',clock_timestamp(),'idempotent',%s,%s)",
+                (activity_id, idempotency_key, config["revision_id"] if config else None,
+                 json.dumps({"objective": objective, "authorized_capability": "institution.knowledge.read"})),
+            )
+            event_id = await self._event(conn, "grace.objective.received", "activity", str(activity_id),
+                                         "activity.generic", 1, None, "QUEUED", "objective accepted into durable inbox",
+                                         {"idempotency_key": idempotency_key, "objective_sha256": hashlib.sha256(objective.encode()).hexdigest(),
+                                          "authorized_capability": "institution.knowledge.read"},
+                                         correlation_id=correlation_id)
+            accepted = await self._transition_on_conn(conn, "activity", str(activity_id),
+                                                       "activity.generic", 1, "QUEUED",
+                                                       "Grace objective durably accepted",
+                                                       {"idempotency_key": idempotency_key,
+                                                        "received_event_id": str(event_id)}, initial=True)
+            if not accepted:
+                raise InvalidTransition("Grace objective could not enter QUEUED")
+            await conn.execute("UPDATE r3a.activities SET latest_event_id=%s WHERE activity_id=%s",
+                               (event_id, activity_id))
+            return {"activity_id": activity_id, "state": "QUEUED", "activity_type": "grace.objective",
+                    "idempotency_key": idempotency_key, "attempt_count": 0, "duplicate": False,
+                    "received_event_id": event_id}
+
     async def requeue_blocked_activities(self) -> int:
         async with self.pool.connection() as conn, conn.transaction():
             rows = await (await conn.execute(
@@ -494,7 +540,7 @@ class Store:
             if resource is None or resource["health"] != "available" or resource["allocated"] >= resource["capacity"]:
                 return None
             row = await (await conn.execute(
-                "SELECT activity_id,activity_type,idempotency_key,machine_id,machine_version,state,attempt_count,config_revision "
+                "SELECT activity_id,activity_type,idempotency_key,machine_id,machine_version,state,attempt_count,config_revision,input "
                 "FROM r3a.activities WHERE state IN ('QUEUED','RECOVERING') AND available_at<=clock_timestamp() "
                 "ORDER BY available_at,created_at FOR UPDATE SKIP LOCKED LIMIT 1"
             )).fetchone()
@@ -513,7 +559,7 @@ class Store:
             )
             await conn.execute(
                 "UPDATE r3a.activities SET state='RUNNING',attempt_id=%s,attempt_count=attempt_count+1,"
-                "lease_owner=%s,lease_until=%s,updated_at=clock_timestamp() WHERE activity_id=%s",
+                "lease_owner=%s,lease_until=%s,exception=NULL,updated_at=clock_timestamp() WHERE activity_id=%s",
                 (attempt_id, owner, lease_until, row["activity_id"]),
             )
             event_id = await self._event(conn, "activity.claimed", "activity", str(row["activity_id"]),
@@ -531,6 +577,22 @@ class Store:
             row.update({"attempt_id": attempt_id, "attempt_count": row["attempt_count"] + 1,
                         "resource_id": resource_id, "lease_id": lease_id, "state": "RUNNING"})
             return row
+
+    async def renew_activity_lease(self, activity: dict[str, Any]) -> None:
+        """Extend the database activity and resource lease while an idempotent model call is in flight."""
+        async with self.pool.connection() as conn, conn.transaction():
+            updated = await conn.execute(
+                "UPDATE r3a.activities SET lease_until=clock_timestamp()+(%s * interval '1 second'),updated_at=clock_timestamp() "
+                "WHERE activity_id=%s AND state='RUNNING' AND attempt_id=%s",
+                (self.settings.lease_seconds, activity["activity_id"], activity["attempt_id"]),
+            )
+            if updated.rowcount != 1:
+                raise RuntimeError("Activity lease was lost during model execution")
+            await conn.execute(
+                "UPDATE r3a.resource_leases SET lease_until=clock_timestamp()+(%s * interval '1 second') "
+                "WHERE lease_id=%s AND released_at IS NULL",
+                (self.settings.lease_seconds, activity["lease_id"]),
+            )
 
     async def record_progress(self, activity: dict[str, Any], progress: dict[str, Any],
                               checkpoint: dict[str, Any] | None = None) -> None:
@@ -555,9 +617,9 @@ class Store:
     async def finish_activity(self, activity: dict[str, Any], result: dict[str, Any]) -> None:
         async with self.pool.connection() as conn, conn.transaction():
             updated = await conn.execute(
-                "UPDATE r3a.activities SET state='COMPLETED',progress=%s,exception=NULL,lease_owner=NULL,lease_until=NULL,"
+                "UPDATE r3a.activities SET state='COMPLETED',progress=%s,result=%s,exception=NULL,lease_owner=NULL,lease_until=NULL,"
                 "updated_at=clock_timestamp() WHERE activity_id=%s AND state='RUNNING' AND attempt_id=%s",
-                (json.dumps(result), activity["activity_id"], activity["attempt_id"]),
+                (json.dumps(result), json.dumps(result), activity["activity_id"], activity["attempt_id"]),
             )
             if updated.rowcount != 1:
                 raise RuntimeError("Activity lease was lost before completion")
@@ -572,13 +634,13 @@ class Store:
                 )
             event_id = await self._event(conn, "activity.completed", "activity", str(activity["activity_id"]),
                                          "activity.generic", 1, "RUNNING", "COMPLETED",
-                                         "observer completed with actual observations", result,
+                                         "activity completed with actual evidence", result,
                                          causation_id=activity["attempt_id"])
             await conn.execute("UPDATE r3a.activities SET latest_event_id=%s WHERE activity_id=%s",
                                (event_id, activity["activity_id"]))
             accepted = await self._transition_on_conn(conn, "activity", str(activity["activity_id"]),
                                                       "activity.generic", 1, "COMPLETED",
-                                                      "observer completed with evidence", result)
+                                                      "activity completed with evidence", result)
             if not accepted:
                 raise InvalidTransition(f"Cannot complete activity {activity['activity_id']}")
             activity_id = uuid.uuid4()

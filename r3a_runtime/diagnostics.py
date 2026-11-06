@@ -9,12 +9,13 @@ Purpose: Serve read-only process, activity, registry, event and machine diagnost
 Execution Model: Async local Unix socket projection.
 Observability: Durable snapshot with source timestamps and explicit freshness.
 Dependencies: r3a_runtime.db; r3a_runtime.control.
-Authority: AP0-M1 implementation authorized by Steward in GitHub Issue #42; local read-only access only.
+Authority: AP0-M1 authorized in Issue #42; AP1-M1 authorized in Issue #43; local read-only access only.
 Changed: 2026-11-06T15:18:00Z | R3A-AP0-M1 | Codex GPT-6 | Add truthful diagnostic projection.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Bound status payload and report module/process freshness from live observations.
+Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Expose objective progress, model references, completed decisions and failure diagnostics.
 Supersedes: None.
-Contracts: AP0-010; AP0-M1 D8; STM-006.
-Tests: tests/test_r3a_diagnostics.py; live PostgreSQL/process comparisons.
+Contracts: AP0-010; R3A-019; AP0-M1 D8; STM-006.
+Tests: Live AP1-M1 PostgreSQL, process, model, and objective diagnostics.
 History/Predecessor: New file; initial publication recorded in Git.
 """
 from __future__ import annotations
@@ -83,7 +84,7 @@ class DiagnosticProjection:
         )
         activities = [{key: row[key] for key in (
             "activity_id", "activity_type", "state", "attempt_count", "attempt_id",
-            "available_at", "lease_owner", "lease_until", "updated_at", "exception")}
+            "available_at", "lease_owner", "lease_until", "updated_at", "exception", "progress", "result")}
             for row in snapshot["activities"][:10]]
         machines = [{key: row[key] for key in ("machine_id", "machine_version", "digest")}
                     for row in snapshot["state_machines"]]

@@ -9,12 +9,13 @@ Purpose: Strictly validate external R3A AP0-M1 bootstrap and operating settings.
 Execution Model: Shared synchronous configuration parser.
 Observability: Configuration revision digest and validation errors.
 Dependencies: Python 3.12 standard library.
-Authority: AP0-M1 implementation authorized by Steward in GitHub Issue #42; isolated R3A only.
+Authority: AP0-M1 authorized by Steward in Issue #42; AP1-M1 authorized in Issue #43; isolated R3A only.
 Changed: 2026-11-06T15:04:00Z | R3A-AP0-M1 | Codex GPT-6 | Add fail-closed external configuration parser.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Restrict observer capabilities to the two AP0 read-only contracts.
+Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Validate Grace model, capability, and allowlisted knowledge configuration.
 Supersedes: None.
-Contracts: AP0-001/009; AP0-M1 D7; hints/file-provenance.md.
-Tests: tests/test_r3a_config.py.
+Contracts: AP0-001/009; R3A-019; AP0-M1 D7; hints/file-provenance.md.
+Tests: Live AP1-M1 model configuration preflight and operation.
 History/Predecessor: New file; initial publication recorded in Git.
 """
 from __future__ import annotations
@@ -104,6 +105,12 @@ class Settings:
     restart_initial_seconds: float
     restart_max_seconds: float
     worker_concurrency: int
+    model_provider: str | None
+    model_endpoint: str | None
+    model_name: str | None
+    model_timeout_seconds: float
+    model_max_tokens: int
+    knowledge_sources: tuple[Path, ...]
 
     @property
     def connection_info(self) -> dict[str, Any]:
@@ -129,7 +136,11 @@ def load_settings(path: str | Path) -> Settings:
         raise ConfigurationError(f"Cannot read bootstrap config {source}: {exc}") from exc
     if not isinstance(value, dict):
         raise ConfigurationError("bootstrap config must be a JSON object")
-    _keys(value, {"schema_version", "instance_id", "paths", "postgres", "module", "timing"}, "root")
+    expected_root = {"schema_version", "instance_id", "paths", "postgres", "module", "timing"}
+    extra = value.keys() - expected_root - {"grace"}
+    missing = expected_root - value.keys()
+    if missing or extra:
+        raise ConfigurationError(f"root keys invalid; missing={sorted(missing)}, unknown={sorted(extra)}")
     if value["schema_version"] != 1:
         raise ConfigurationError("schema_version must equal 1")
     instance_id = _text(value["instance_id"], "instance_id")
@@ -190,12 +201,16 @@ def load_settings(path: str | Path) -> Settings:
             or any(not isinstance(cap, str) or not cap.strip() for cap in capabilities)
             or len(set(capabilities)) != len(capabilities)):
         raise ConfigurationError("module.capabilities must be a nonempty list of unique capability IDs")
-    if set(capabilities) != {"host.process.read", "postgres.readiness"}:
-        raise ConfigurationError("AP0-M1 foundation observer supports only host.process.read and postgres.readiness")
+    ap0_caps = {"host.process.read", "postgres.readiness"}
+    ap1_caps = ap0_caps | {"institution.knowledge.read", "institution.diagnostics.read"}
+    if set(capabilities) not in (ap0_caps, ap1_caps):
+        raise ConfigurationError("module.capabilities must use the supported AP0 or AP1 read-only capability set")
     module_owner = _text(module["owner"], "module.owner")
     entrypoint = _text(module["entrypoint"], "module.entrypoint")
-    if entrypoint != "r3a_runtime.observer_module":
-        raise ConfigurationError("module.entrypoint is not supported by this AP0-M1 installation")
+    if entrypoint not in {"r3a_runtime.observer_module", "r3a_runtime.grace_module"}:
+        raise ConfigurationError("module.entrypoint is not supported by this R3A installation")
+    if (entrypoint == "r3a_runtime.observer_module") != (module_id == "foundation.observer"):
+        raise ConfigurationError("module_id must match its supported module entrypoint")
     module_source = _absolute_path(module["source"], "module.source")
     module_digest = _text(module["sha256"], "module.sha256").lower()
     if len(module_digest) != 64 or any(c not in "0123456789abcdef" for c in module_digest):
@@ -205,6 +220,37 @@ def load_settings(path: str | Path) -> Settings:
     actual_digest = hashlib.sha256(module_source.read_bytes()).hexdigest()
     if actual_digest != module_digest:
         raise ConfigurationError("module source digest does not match the registered manifest")
+
+    grace = value.get("grace")
+    model_provider = model_endpoint = model_name = None
+    model_timeout_seconds = 120.0
+    model_max_tokens = 192
+    knowledge_sources: tuple[Path, ...] = ()
+    if entrypoint == "r3a_runtime.grace_module" or grace is not None:
+        if not isinstance(grace, dict):
+            raise ConfigurationError("grace must be an object when the Grace resident is configured")
+        _keys(grace, {"provider", "endpoint", "model", "timeout_seconds", "max_tokens", "knowledge_sources"}, "grace")
+        model_provider = _text(grace["provider"], "grace.provider")
+        if model_provider != "openai-compatible":
+            raise ConfigurationError("grace.provider must equal openai-compatible")
+        model_endpoint = _text(grace["endpoint"], "grace.endpoint")
+        if not model_endpoint.startswith(("http://127.0.0.1:", "http://localhost:", "https://")):
+            raise ConfigurationError("grace.endpoint must use loopback HTTP or HTTPS")
+        model_name = _text(grace["model"], "grace.model")
+        model_timeout_seconds = _positive(grace["timeout_seconds"], "grace.timeout_seconds")
+        model_max_tokens = grace["max_tokens"]
+        if isinstance(model_max_tokens, bool) or not isinstance(model_max_tokens, int) or not 64 <= model_max_tokens <= 512:
+            raise ConfigurationError("grace.max_tokens must be an integer from 64 through 512")
+        sources = grace["knowledge_sources"]
+        if (not isinstance(sources, list) or not sources or
+                any(not isinstance(item, str) for item in sources) or len(set(sources)) != len(sources)):
+            raise ConfigurationError("grace.knowledge_sources must be a nonempty unique path list")
+        resolved = tuple(_absolute_path(item, "grace.knowledge_sources[]") for item in sources)
+        if any(not item.is_file() for item in resolved):
+            raise ConfigurationError("every configured knowledge source must exist and be a regular file")
+        knowledge_sources = resolved
+    if entrypoint == "r3a_runtime.grace_module" and not (model_endpoint and model_name and knowledge_sources):
+        raise ConfigurationError("Grace requires explicit model and knowledge-source configuration")
 
     timing = value["timing"]
     if not isinstance(timing, dict):
@@ -254,6 +300,12 @@ def load_settings(path: str | Path) -> Settings:
         restart_initial_seconds=initial,
         restart_max_seconds=maximum,
         worker_concurrency=concurrency,
+        model_provider=model_provider,
+        model_endpoint=model_endpoint,
+        model_name=model_name,
+        model_timeout_seconds=model_timeout_seconds,
+        model_max_tokens=model_max_tokens,
+        knowledge_sources=knowledge_sources,
     )
 
 
@@ -272,6 +324,11 @@ def sanitized_config(settings: Settings) -> dict[str, Any]:
                    "capabilities": list(settings.module_capabilities), "owner": settings.module_owner,
                    "entrypoint": settings.module_entrypoint, "source": str(settings.module_source),
                    "sha256": settings.module_digest},
+        "grace": ({"provider": settings.model_provider, "endpoint": settings.model_endpoint,
+                   "model": settings.model_name, "timeout_seconds": settings.model_timeout_seconds,
+                   "max_tokens": settings.model_max_tokens,
+                   "knowledge_sources": [str(path) for path in settings.knowledge_sources]}
+                  if settings.model_endpoint else None),
         "timing": {"observer_interval_seconds": settings.observer_interval_seconds,
                    "scheduler_interval_seconds": settings.scheduler_interval_seconds,
                    "lease_seconds": settings.lease_seconds,
