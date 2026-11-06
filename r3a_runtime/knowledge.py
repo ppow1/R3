@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/knowledge.py
 Component: R3A-KNOWLEDGE-RETRIEVAL
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Retrieve relevant evidence from explicitly configured knowledge sources and preserve its source digest.
@@ -11,10 +11,11 @@ Observability: Source IDs, excerpt paths/text, source and excerpt SHA-256 digest
 Dependencies: Python standard library; allowlisted files supplied by R3A configuration.
 Authority: AP1 / R3A-019 authorized by Steward; read-only institutional knowledge use.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Add source-aware retrieval for durable Grace activities.
+Changed: 2026-11-06T18:26:37Z | R3A-019 | Codex GPT-6 | Match source-state phrases despite preceding articles or unrelated "from" phrases.
 Supersedes: None.
 Contracts: R3A-019 knowledge grounding and retrieval; AP1 activity evidence lineage.
 Tests: tests/test_r3a_ap1.py retrieval and digest checks.
-History/Predecessor: Git blob af78fe3892de42074da345f5c2bbe18e6409bb86 at commit 600bbd218d9c53620b9938aa1c8fd4ace801f396.
+History/Predecessor: Git blob 6a5953579b20148283965a0ada8f74d4b40d1891 at commit cc9eae1baf691b016666cfc15c8905e04f666ec8.
 """
 from __future__ import annotations
 
@@ -65,16 +66,20 @@ def retrieve(path: Path, source_id: str, query: str) -> list[dict[str, Any]]:
     query_terms = set(_WORD.findall(query.casefold()))
     if not query_terms:
         return []
-    transition_source = re.search(r"\bfrom\s+([a-z0-9_-]+)", query.casefold())
+    facts = _chunks(text)
+    transition_sources = {match.group(1).casefold() for source_path, _ in facts
+                          if (match := re.match(r"transitions\.([a-z0-9_-]+)\[", source_path.casefold()))}
+    transition_source = next((state for state in transition_sources
+                              if re.search(rf"\bfrom\s+(?:the\s+)?{re.escape(state)}\b", query.casefold())), None)
     ranked = []
-    for source_path, excerpt in _chunks(text):
+    for source_path, excerpt in facts:
         terms = set(_WORD.findall(excerpt.casefold()))
         matched = sorted(query_terms & terms)
         if matched:
             score = len(matched)
             if transition_source:
                 relation = re.match(r"transitions\.([a-z0-9_-]+)\[", source_path.casefold())
-                if relation and relation.group(1) == transition_source.group(1):
+                if relation and relation.group(1) == transition_source:
                     score += len(query_terms)
             ranked.append((score, source_path, excerpt, matched))
     if not ranked:
