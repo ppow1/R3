@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.0.4
+File Revision: 1.0.5
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
 Purpose: Execute bounded read-only Grace objectives with the configured real model and supplied authorized evidence.
@@ -15,6 +15,7 @@ Changed: 2026-11-06 | AP1-M1 | Codex GPT-6 | Constrain JSON output and retain mo
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Execute selected configured model route and retain event/evidence lineage.
 Changed: 2026-11-06T18:13:55Z | R3A-019 | Codex GPT-6 | Send only cited evidence content to inference and retain HTTP error details.
 Changed: 2026-11-06T18:21:00Z | R3A-019 | Codex GPT-6 | Require model decisions to cite retrieved knowledge evidence.
+Changed: 2026-11-06T18:31:45Z | R3A-019 | Codex GPT-6 | Clarify that model assessments answer objectives and reserve blocked for missing evidence.
 Supersedes: None.
 Contracts: R3A-019; AP1-M1 Issue #43 acceptance.
 Tests: tests/test_r3a_ap1.py; live model-backed objective evidence pending this revision.
@@ -112,7 +113,10 @@ class GraceResident:
                 "chat_template_kwargs": {"enable_thinking": False},
                 "messages": [
                     {"role": "system", "content": (
-                        "You are Grace. Use only evidence. Return one compact JSON object exactly shaped as "
+                        "You are Grace. Use only supplied evidence. The assessment field must directly answer the objective. "
+                        "Use status healthy when the evidence fully supports that answer, degraded when it only partly supports it, "
+                        "and blocked only when the needed evidence is missing or ambiguous. Do not return an instruction to check facts "
+                        "that are already stated in the evidence. Return one compact JSON object exactly shaped as "
                         "{\"assessment\":\"short\",\"status\":\"healthy|degraded|blocked\","
                         "\"evidence_refs\":[\"source_id\"],\"recommended_action\":\"short\"}. "
                         "Use only supplied source IDs and include every required evidence reference. "
