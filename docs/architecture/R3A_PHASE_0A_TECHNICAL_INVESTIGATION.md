@@ -1,6 +1,24 @@
+<!--
+R3 CONTROLLED DOCUMENT
+File: docs/architecture/R3A_PHASE_0A_TECHNICAL_INVESTIGATION.md
+Component: R3A-PHASE0A-INVESTIGATION
+File Revision: 1.0.1
+Created: 2026-11-06T01:23:48Z
+Created By: Codex GPT-6
+Purpose: Record targeted source findings on R3 supervisory loops, CME and related dependencies.
+Execution Model: Read-only source/document/history investigation.
+Observability: Git source commits and cited audit evidence.
+Dependencies: R3 modular architecture audit at commit 7e6d8d053b97837866470db4549331d839bf8ba8; deployed runtime source at 8ab4b2ab1669b2bbc55467ec2cdd9bdc9f489135.
+Authority: Original Phase 0A read-only investigation directive; R3A architecture baseline documentation task.
+Changed: 2026-11-06T03:48:35Z | R3A-BASELINE-001 | Codex GPT-6 | Add controlled provenance and correct historical audit reference; investigation findings unchanged.
+Supersedes: None.
+Contracts: R3A Architecture Charter and AP0 specification use this report as prior evidence; it does not establish new architecture decisions.
+Tests: Not run; documentation metadata/reference correction only.
+History/Predecessor: Git blob 18f8e57fc822b428c408e37b2c3b0b07bb57f5cb at commit 9adc3d74ae29280f9659eefcb5eff45723b67d11.
+-->
 # R3A Phase 0A — Targeted Technical Investigation
 
-**Scope:** Supervisory loops, CME, and only the dependencies relevant to extracting or independently operating them. This supplements [the modular architecture audit](R3_MODULAR_ARCHITECTURE_AUDIT_2026-11-05.md); it does not repeat its general inventory or recommendations.
+**Scope:** Supervisory loops, CME, and only the dependencies relevant to extracting or independently operating them. This supplements [the modular architecture audit](https://github.com/ppow1/R3/blob/7e6d8d053b97837866470db4549331d839bf8ba8/docs/architecture/R3_MODULAR_ARCHITECTURE_AUDIT_2026-11-05.md); it does not repeat its general inventory or recommendations.
 
 **Evidence baseline:** Runtime source at deployed integration commit `8ab4b2ab1669b2bbc55467ec2cdd9bdc9f489135`; architecture audit commit `7e6d8d053b97837866470db4549331d839bf8ba8`. Operational status below is reported from that audit's read-only observation, not re-probed for this report. No code or production state was changed; tests were not run.
 
