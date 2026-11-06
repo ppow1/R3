@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
 Purpose: Execute bounded read-only Grace objectives with the configured real model and supplied authorized evidence.
@@ -13,6 +13,7 @@ Authority: AP1 / R3A-019 authorized by Steward; assigned authority and read-only
 Changed: 2026-11-06 | AP1-M1 | Codex GPT-6 | Implement local inference and read-only objective execution.
 Changed: 2026-11-06 | AP1-M1 | Codex GPT-6 | Constrain JSON output and retain model response references on validation failure.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Execute selected configured model route and retain event/evidence lineage.
+Changed: 2026-11-06T18:13:55Z | R3A-019 | Codex GPT-6 | Send only cited evidence content to inference and retain HTTP error details.
 Supersedes: None.
 Contracts: R3A-019; AP1-M1 Issue #43 acceptance.
 Tests: tests/test_r3a_ap1.py; live model-backed objective evidence pending this revision.
@@ -59,6 +60,9 @@ class GraceResident:
                         raise RuntimeError(f"model HTTP status {response.status}")
                     raw = response.read(1_000_000)
                     return json.loads(raw)
+            except urllib.error.HTTPError as exc:
+                detail = exc.read(4000).decode("utf-8", "replace")
+                raise RuntimeError(f"model HTTP status {exc.code}: {detail}") from exc
             except urllib.error.URLError as exc:
                 raise RuntimeError(f"model transport failed: {exc}") from exc
 
@@ -98,6 +102,8 @@ class GraceResident:
             request_ref = str(payload["request_ref"])
             route = self.settings.model_route(payload.get("route_id"))
             evidence_ids = {item["source_id"] for item in evidence}
+            prompt_evidence = [{key: item[key] for key in ("source_id", "source_path", "content") if key in item}
+                               for item in evidence]
             request = {
                 "model": route.model,
                 "temperature": 0,
@@ -110,7 +116,7 @@ class GraceResident:
                         "\"evidence_refs\":[\"source_id\"],\"recommended_action\":\"short\"}. "
                         "Use only supplied source IDs; missing facts => blocked. For notifications, record an assessment and recommended next action; do not claim an external delivery. Keep under 70 tokens." )},
                     {"role": "user", "content": json.dumps({"event_kind": payload.get("event_kind", "objective"),
-                                                                  "objective": objective, "evidence": evidence},
+                                                                  "objective": objective, "evidence": prompt_evidence},
                                                                  separators=(",", ":"))},
                 ],
             }
