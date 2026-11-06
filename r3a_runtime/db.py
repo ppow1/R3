@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -14,10 +14,11 @@ Changed: 2026-11-06T15:06:00Z | R3A-AP0-M1 | Codex GPT-6 | Add durable PostgreSQ
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Add validated machine definitions, idempotent grants/lifecycle, retry-safe leases and guarded state/event commits.
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Persist Grace objective inputs/results, deduplicate intake and renew activity/resource leases.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Persist idempotent objective and notification event metadata in the existing activity ledger.
+Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Return the durable activity checkpoint to recovered workers.
 Supersedes: None.
 Contracts: AP0-004/005/006/008/009/010/013; R3A-019; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007.
 Tests: tests/test_r3a_ap1.py; live AP1 event and recovery evidence pending this revision.
-History/Predecessor: Git blob c7a1be0806f1e5ac5a7c2400364d5cef9dab2943 at commit cdcb63ce1fa33975ce4468d5121e4bfef5429f92.
+History/Predecessor: Git blob b7f6cb56c22d8e11258a58ff40fe336183572e9e at commit 600bbd218d9c53620b9938aa1c8fd4ace801f396.
 """
 from __future__ import annotations
 
@@ -556,7 +557,7 @@ class Store:
             if resource is None or resource["health"] != "available" or resource["allocated"] >= resource["capacity"]:
                 return None
             row = await (await conn.execute(
-                "SELECT activity_id,activity_type,idempotency_key,machine_id,machine_version,state,attempt_count,config_revision,input "
+                "SELECT activity_id,activity_type,idempotency_key,machine_id,machine_version,state,attempt_count,config_revision,input,checkpoint "
                 "FROM r3a.activities WHERE state IN ('QUEUED','RECOVERING') AND available_at<=clock_timestamp() "
                 "ORDER BY available_at,created_at FOR UPDATE SKIP LOCKED LIMIT 1"
             )).fetchone()

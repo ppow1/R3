@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/knowledge.py
 Component: R3A-KNOWLEDGE-RETRIEVAL
-File Revision: 1.0.0
+File Revision: 1.0.2
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Retrieve relevant evidence from explicitly configured knowledge sources and preserve its source digest.
@@ -14,7 +14,7 @@ Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Add source-aware retriev
 Supersedes: None.
 Contracts: R3A-019 knowledge grounding and retrieval; AP1 activity evidence lineage.
 Tests: tests/test_r3a_ap1.py retrieval and digest checks.
-History/Predecessor: New file; initial publication recorded in Git.
+History/Predecessor: Git blob af78fe3892de42074da345f5c2bbe18e6409bb86 at commit 600bbd218d9c53620b9938aa1c8fd4ace801f396.
 """
 from __future__ import annotations
 
@@ -33,6 +33,13 @@ def _json_facts(value: Any, prefix: str = "") -> list[tuple[str, str]]:
     if isinstance(value, dict):
         for key, child in value.items():
             path = f"{prefix}.{key}" if prefix else str(key)
+            if key == "transitions" and isinstance(child, dict):
+                for source, targets in child.items():
+                    if isinstance(targets, list):
+                        for index, target in enumerate(targets):
+                            facts.append((f"{path}.{source}[{index}]",
+                                          f"Transition from {source} to {target}"))
+                continue
             facts.extend(_json_facts(child, path))
     elif isinstance(value, list):
         for index, child in enumerate(value):
@@ -58,13 +65,25 @@ def retrieve(path: Path, source_id: str, query: str) -> list[dict[str, Any]]:
     query_terms = set(_WORD.findall(query.casefold()))
     if not query_terms:
         return []
+    transition_source = re.search(r"\bfrom\s+([a-z0-9_-]+)", query.casefold())
     ranked = []
     for source_path, excerpt in _chunks(text):
         terms = set(_WORD.findall(excerpt.casefold()))
         matched = sorted(query_terms & terms)
         if matched:
-            ranked.append((len(matched), source_path, excerpt, matched))
-    ranked.sort(key=lambda item: (-item[0], item[1]))
+            score = len(matched)
+            if transition_source:
+                relation = re.match(r"transitions\.([a-z0-9_-]+)\[", source_path.casefold())
+                if relation and relation.group(1) == transition_source.group(1):
+                    score += len(query_terms)
+            ranked.append((score, source_path, excerpt, matched))
+    if not ranked:
+        return []
+    best_score = max(item[0] for item in ranked)
+    # Preserve all equally relevant facts, while excluding weaker incidental word overlap.
+    # This is relevance ranking rather than a fixed result-count/context cap.
+    ranked = [item for item in ranked if item[0] == best_score]
+    ranked.sort(key=lambda item: item[1])
     source_hash = hashlib.sha256(raw).hexdigest()
     return [{"source_id": source_id, "source": path.name, "source_sha256": source_hash,
              "source_path": source_path, "matched_terms": matched, "content": excerpt,

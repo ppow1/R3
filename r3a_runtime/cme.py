@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -14,10 +14,11 @@ Changed: 2026-11-06T15:22:00Z | R3A-AP0-M1 | Codex GPT-6 | Implement CME process
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Reconcile orphaned module processes, record live health and correct replacement status.
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Dispatch durable Grace objectives, authorize bounded evidence reads and renew long-running leases.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
+Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007.
 Tests: tests/test_r3a_ap1.py; live inference/recovery evidence pending this revision.
-History/Predecessor: Git blob 0d1ba7366f6ab6009ec3d7ae279e113ca19599ca at commit cdcb63ce1fa33975ce4468d5121e4bfef5429f92.
+History/Predecessor: Git blob 5f4a6eeb5644cee20b18020b9835fb5e6a0aed20 at commit 600bbd218d9c53620b9938aa1c8fd4ace801f396.
 """
 from __future__ import annotations
 
@@ -450,6 +451,23 @@ class CME:
                 raise
             await self.store.audit_capability_invocation(module_id, capability_id, "allowed",
                                                          {"activity_id": str(activity["activity_id"])})
+        event_input = activity["input"]
+        saved = activity.get("checkpoint") or {}
+        if saved.get("evidence_format") == "r3a.knowledge-evidence.v1":
+            route = self.settings.model_route(event_input.get("route_id"))
+            saved_route = saved["model_route"]
+            effective_route = {"route_id": route.route_id, "provider": route.provider,
+                               "model": route.model, "endpoint": route.endpoint,
+                               "timeout_seconds": route.timeout_seconds, "max_tokens": route.max_tokens}
+            if saved_route != effective_route:
+                raise RuntimeError("Configured model route changed during durable activity continuation")
+            return {"activity_type": "grace.objective", "activity_id": str(activity["activity_id"]),
+                    "attempt_id": str(activity["attempt_id"]), "objective": event_input["objective"],
+                    "event_kind": event_input.get("event_kind", "objective"),
+                    "route_id": route.route_id, "model_route": saved_route,
+                    "evidence": saved["evidence"], "evidence_format": saved["evidence_format"],
+                    "request_ref": str(uuid.uuid4()),
+                    "config_revision": saved["config_revision"]}
         processes = await self.store.rows(
             "SELECT component_id,pid,state,health,heartbeat_at FROM r3a.process_observations "
             "WHERE component_id IN ('ring0','cme') ORDER BY component_id"
@@ -481,7 +499,6 @@ class CME:
                      "content": {**db[0], "ready": True, "observed_at": db[0]["observed_at"].isoformat()}}]
         evidence.append({"source_id": "runtime.modules", "sha256": hashlib.sha256(
             json.dumps(live_modules, sort_keys=True).encode()).hexdigest(), "content": live_modules})
-        event_input = activity["input"]
         objective = event_input["objective"]
         for index, path in enumerate(self.settings.knowledge_sources):
             evidence.extend(retrieve(path, f"knowledge.{index+1}", objective))
@@ -495,6 +512,7 @@ class CME:
                                 "model": route.model, "endpoint": route.endpoint,
                                 "timeout_seconds": route.timeout_seconds,
                                 "max_tokens": route.max_tokens},
+                "evidence_format": "r3a.knowledge-evidence.v1",
                 "evidence": evidence,
                 "request_ref": request_ref, "config_revision": self.settings.source_digest}
 
@@ -520,6 +538,8 @@ class CME:
                      "request_ref": context["request_ref"], "objective_sha256": hashlib.sha256(
                          activity["input"]["objective"].encode()).hexdigest()},
                     {"activity_input": activity["input"], "model_route": model_route,
+                     "evidence_format": context["evidence_format"],
+                     "config_revision": context["config_revision"],
                      "evidence": context["evidence"], "evidence_refs": [
                          {"source_id": item["source_id"], "source_path": item.get("source_path"),
                           "sha256": item["sha256"], "source_sha256": item.get("source_sha256")}

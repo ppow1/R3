@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.0.0
+File Revision: 1.0.3
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -10,11 +10,13 @@ Execution Model: Python unittest, isolated temporary fixtures.
 Observability: Deterministic assertions and unittest results.
 Dependencies: Python standard library; r3a_runtime.config and r3a_runtime.knowledge.
 Authority: AP1 / R3A-019 targeted verification authorized by Steward.
-Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Add focused route and knowledge retrieval checks.
+Changed: 2026-11-06T18:05:53Z | R3A-019 | Codex GPT-6 | Add focused route and knowledge retrieval checks.
+Changed: 2026-11-06T18:07:21Z | R3A-019 | Codex GPT-6 | Verify source-state transition retrieval returns all four permitted successors.
+Changed: 2026-11-06T18:07:40Z | R3A-019 | Codex GPT-6 | Extend the fixture to include all four RUNNING successors.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
-History/Predecessor: New file; initial publication recorded in Git.
+History/Predecessor: Git blob d38488e3e7aea438463609247587baad15f099d7 at commit 600bbd218d9c53620b9938aa1c8fd4ace801f396.
 """
 from __future__ import annotations
 
@@ -46,11 +48,13 @@ class KnowledgeRetrievalTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "machine.json"
             source.write_text('{"machine_id":"process.lifecycle","states":["RUNNING","STOPPED"],'
-                              '"transitions":{"RUNNING":["STOPPED"]},"owner":"CME"}', encoding="utf-8")
-            results = retrieve(source, "knowledge.1", "When can the process transition from RUNNING to STOPPED?")
+                              '"transitions":{"RUNNING":["DEGRADED","STOPPING","FAILED","RESTARTING"]},'
+                              '"owner":"CME"}', encoding="utf-8")
+            results = retrieve(source, "knowledge.1", "process transitions from RUNNING")
             self.assertTrue(results)
+            self.assertEqual(len(results), 4)
             self.assertTrue(all(item["source_id"] == "knowledge.1" for item in results))
-            self.assertTrue(any("transitions" in item["source_path"] for item in results))
+            self.assertTrue(all(item["source_path"].startswith("transitions.RUNNING") for item in results))
             self.assertTrue(all(len(item["sha256"]) == 64 and len(item["source_sha256"]) == 64
                                 for item in results))
             self.assertFalse(any("owner" in item["source_path"] for item in results))
