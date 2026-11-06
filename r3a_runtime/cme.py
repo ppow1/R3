@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.0.6
+File Revision: 1.0.7
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -18,10 +18,11 @@ Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable eviden
 Changed: 2026-11-06T18:16:39Z | R3A-019 | Codex GPT-6 | Bound module-child termination when a model request does not drain.
 Changed: 2026-11-06T18:21:00Z | R3A-019 | Codex GPT-6 | Persist required knowledge citations and restore them on activity recovery.
 Changed: 2026-11-06T19:05:07Z | R3A-019 | Codex GPT-6 | Exclude unrelated runtime observations from knowledge-only model context.
+Changed: 2026-11-06T19:14:04Z | R3A-019 | Codex GPT-6 | Verify exhaustive transition answers before durable completion.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007.
 Tests: tests/test_r3a_ap1.py; live inference/recovery evidence pending this revision.
-History/Predecessor: Git blob ba6f7d1817804c13039680b82287c4668a8af5d9 at commit f730db60d5da7feebb235d7c413bb3f823830ca6.
+History/Predecessor: Git blob e26efb365567dfa17559044fc61fcb06022c8e8e at commit 85c646b0a6c22cd4dbbe29a853a426dcbaa08d30.
 """
 from __future__ import annotations
 
@@ -52,6 +53,34 @@ def _requires_runtime_evidence(objective: str) -> bool:
                      "module", "pid", "heartbeat", "operational"}
     objective_terms = set(re.findall(r"[a-z0-9_]+", objective.casefold()))
     return bool(runtime_terms & objective_terms)
+
+
+def _knowledge_answer_issues(objective: str, evidence: list[dict[str, Any]],
+                             decision: dict[str, Any]) -> list[str]:
+    """Check exhaustive structured transition answers against their cited source facts."""
+    query_terms = set(re.findall(r"[a-z0-9_]+", objective.casefold()))
+    if not query_terms & {"all", "every", "each", "list", "enumerate", "name", "identify"}:
+        return []
+    if not query_terms & {"state", "states", "successor", "successors", "destination",
+                          "destinations", "transition", "transitions"}:
+        return []
+    transition_facts = [item for item in evidence
+                        if item.get("source_id", "").startswith("knowledge.")
+                        and str(item.get("source_path", "")).startswith("transitions.")]
+    if not transition_facts:
+        return []
+    if decision.get("status") == "blocked":
+        return ["model returned blocked status"]
+    missing = []
+    assessment = str(decision.get("assessment", "")).casefold()
+    for fact in transition_facts:
+        content = str(fact.get("content", ""))
+        if ":" not in content:
+            continue
+        destinations = [value.strip() for value in content.split(":", 1)[1].split(",") if value.strip()]
+        missing.extend(value for value in destinations if not re.search(
+            rf"(?<![a-z0-9_]){re.escape(value.casefold())}(?![a-z0-9_])", assessment))
+    return sorted(set(missing))
 
 
 class CME:
@@ -585,7 +614,17 @@ class CME:
                 timeout=context["model_route"]["timeout_seconds"] + 15
                 if activity["activity_type"] == "grace.objective" else 5.0)
             observations = result["result"]
-            await self.store.finish_activity(activity, observations)
+            decision = observations.get("decision", {}) if isinstance(observations, dict) else {}
+            answer_issues = (_knowledge_answer_issues(context["objective"], context["evidence"], decision)
+                             if activity["activity_type"] == "grace.objective" else [])
+            if answer_issues:
+                await self.store.block_activity(
+                    activity, "Grace response did not satisfy the evidence-backed transition request",
+                    {"validation": "r3a.transition-answer.v1", "missing_destinations": answer_issues,
+                     "decision": decision, "model": observations.get("model"),
+                     "request_ref": (observations.get("model") or {}).get("request_ref")})
+            else:
+                await self.store.finish_activity(activity, observations)
         except PermissionError as exc:
             await self.store.block_activity(activity, "capability grant required", {"error": str(exc)})
         except asyncio.CancelledError:

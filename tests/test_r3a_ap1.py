@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.0.8
+File Revision: 1.0.9
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -18,10 +18,11 @@ Changed: 2026-11-06T18:27:15Z | R3A-019 | Codex GPT-6 | Retain the knowledge sou
 Changed: 2026-11-06T18:54:42Z | R3A-019 | Codex GPT-6 | Assert transition successors arrive together for model grounding.
 Changed: 2026-11-06T19:01:13Z | R3A-019 | Codex GPT-6 | Cover the after-state wording used by notification events.
 Changed: 2026-11-06T19:05:07Z | R3A-019 | Codex GPT-6 | Test evidence selection for knowledge-only and runtime objectives.
+Changed: 2026-11-06T19:14:04Z | R3A-019 | Codex GPT-6 | Check exhaustive transition answer completeness and truthful blockers.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
-History/Predecessor: Git blob 21df60a1fe901030ef2c371ff449ab02b3626522 at commit f730db60d5da7feebb235d7c413bb3f823830ca6.
+History/Predecessor: Git blob 22e4ab5c0fbe4298bfd66bc16345e50bcf662bcd at commit 85c646b0a6c22cd4dbbe29a853a426dcbaa08d30.
 """
 from __future__ import annotations
 
@@ -29,7 +30,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from r3a_runtime.cme import _requires_runtime_evidence
+from r3a_runtime.cme import _knowledge_answer_issues, _requires_runtime_evidence
 from r3a_runtime.config import ConfigurationError, ModelRoute, resolve_model_route
 from r3a_runtime.knowledge import retrieve
 
@@ -55,6 +56,19 @@ class KnowledgeRetrievalTests(unittest.TestCase):
             "List every state permitted immediately after RUNNING in process.lifecycle"))
         self.assertTrue(_requires_runtime_evidence(
             "Are Ring0, CME, PostgreSQL, and Grace healthy now?"))
+
+    def test_exhaustive_transition_answers_require_every_destination(self):
+        evidence = [{"source_id": "knowledge.1", "source_path": "transitions.RUNNING",
+                     "content": "Transitions from RUNNING: DEGRADED, STOPPING, FAILED, RESTARTING"}]
+        objective = "List every state permitted after RUNNING"
+        partial = {"status": "healthy", "assessment": "DEGRADED and STOPPING"}
+        self.assertEqual(_knowledge_answer_issues(objective, evidence, partial), ["FAILED", "RESTARTING"])
+        complete = {"status": "healthy",
+                    "assessment": "DEGRADED, STOPPING, FAILED, and RESTARTING"}
+        self.assertEqual(_knowledge_answer_issues(objective, evidence, complete), [])
+        blocked = {"status": "blocked", "assessment": "blocked"}
+        self.assertEqual(_knowledge_answer_issues(objective, evidence, blocked),
+                         ["model returned blocked status"])
 
     def test_json_retrieval_returns_relevant_source_facts_and_digests(self):
         with tempfile.TemporaryDirectory() as directory:
