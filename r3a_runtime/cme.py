@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.0.4
+File Revision: 1.0.5
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -16,6 +16,7 @@ Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Dispatch durable Grace objectiv
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
 Changed: 2026-11-06T18:16:39Z | R3A-019 | Codex GPT-6 | Bound module-child termination when a model request does not drain.
+Changed: 2026-11-06T18:21:00Z | R3A-019 | Codex GPT-6 | Persist required knowledge citations and restore them on activity recovery.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007.
 Tests: tests/test_r3a_ap1.py; live inference/recovery evidence pending this revision.
@@ -475,6 +476,9 @@ class CME:
                     "event_kind": event_input.get("event_kind", "objective"),
                     "route_id": route.route_id, "model_route": saved_route,
                     "evidence": saved["evidence"], "evidence_format": saved["evidence_format"],
+                    "required_evidence_refs": saved.get(
+                        "required_evidence_refs", sorted({item["source_id"] for item in saved["evidence"]
+                                                           if item["source_id"].startswith("knowledge.")})),
                     "request_ref": str(uuid.uuid4()),
                     "config_revision": saved["config_revision"]}
         processes = await self.store.rows(
@@ -522,6 +526,8 @@ class CME:
                                 "timeout_seconds": route.timeout_seconds,
                                 "max_tokens": route.max_tokens},
                 "evidence_format": "r3a.knowledge-evidence.v1",
+                "required_evidence_refs": sorted({item["source_id"] for item in evidence
+                                                   if item["source_id"].startswith("knowledge.")}),
                 "evidence": evidence,
                 "request_ref": request_ref, "config_revision": self.settings.source_digest}
 
@@ -548,6 +554,7 @@ class CME:
                          activity["input"]["objective"].encode()).hexdigest()},
                     {"activity_input": activity["input"], "model_route": model_route,
                      "evidence_format": context["evidence_format"],
+                     "required_evidence_refs": context["required_evidence_refs"],
                      "config_revision": context["config_revision"],
                      "evidence": context["evidence"], "evidence_refs": [
                          {"source_id": item["source_id"], "source_path": item.get("source_path"),

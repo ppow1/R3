@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
 Purpose: Execute bounded read-only Grace objectives with the configured real model and supplied authorized evidence.
@@ -14,6 +14,7 @@ Changed: 2026-11-06 | AP1-M1 | Codex GPT-6 | Implement local inference and read-
 Changed: 2026-11-06 | AP1-M1 | Codex GPT-6 | Constrain JSON output and retain model response references on validation failure.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Execute selected configured model route and retain event/evidence lineage.
 Changed: 2026-11-06T18:13:55Z | R3A-019 | Codex GPT-6 | Send only cited evidence content to inference and retain HTTP error details.
+Changed: 2026-11-06T18:21:00Z | R3A-019 | Codex GPT-6 | Require model decisions to cite retrieved knowledge evidence.
 Supersedes: None.
 Contracts: R3A-019; AP1-M1 Issue #43 acceptance.
 Tests: tests/test_r3a_ap1.py; live model-backed objective evidence pending this revision.
@@ -114,9 +115,13 @@ class GraceResident:
                         "You are Grace. Use only evidence. Return one compact JSON object exactly shaped as "
                         "{\"assessment\":\"short\",\"status\":\"healthy|degraded|blocked\","
                         "\"evidence_refs\":[\"source_id\"],\"recommended_action\":\"short\"}. "
-                        "Use only supplied source IDs; missing facts => blocked. For notifications, record an assessment and recommended next action; do not claim an external delivery. Keep under 70 tokens." )},
+                        "Use only supplied source IDs and include every required evidence reference. "
+                        "Missing facts => blocked. For notifications, record an assessment and recommended next action; "
+                        "do not claim an external delivery. Keep under 70 tokens." )},
                     {"role": "user", "content": json.dumps({"event_kind": payload.get("event_kind", "objective"),
-                                                                  "objective": objective, "evidence": prompt_evidence},
+                                                                  "objective": objective,
+                                                                  "required_evidence_refs": payload.get("required_evidence_refs", []),
+                                                                  "evidence": prompt_evidence},
                                                                  separators=(",", ":"))},
                 ],
             }
@@ -143,6 +148,9 @@ class GraceResident:
                     raise ValueError("model returned an unsupported status")
                 if not isinstance(decision["evidence_refs"], list) or not decision["evidence_refs"] or not set(decision["evidence_refs"]).issubset(evidence_ids):
                     raise ValueError("model cited missing or unauthorized evidence")
+                required_refs = payload.get("required_evidence_refs", [])
+                if not isinstance(required_refs, list) or not set(required_refs).issubset(decision["evidence_refs"]):
+                    raise ValueError("model omitted required evidence citations")
                 finish_reason = response["choices"][0].get("finish_reason")
                 if finish_reason == "length":
                     raise ValueError("model response reached max_tokens before completing")
