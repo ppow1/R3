@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/config.py
 Component: R3A-BOOTSTRAP-CONFIG
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-06T15:04:00Z
 Created By: Codex GPT-6
 Purpose: Strictly validate external R3A AP0-M1 bootstrap and operating settings.

@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cli.py
 Component: R3A-OPERATOR-CLI
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Expose operator-invoked AP0 diagnostics, CME controls and isolated backup actions.

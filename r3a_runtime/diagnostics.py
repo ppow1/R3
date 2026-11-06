@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/diagnostics.py
 Component: R3A-TRUTHFUL-DIAGNOSTICS
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-06T15:18:00Z
 Created By: Codex GPT-6
 Purpose: Serve read-only process, activity, registry, event and machine diagnostics from PostgreSQL.
