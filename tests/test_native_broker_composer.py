@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+import hashlib
+import tempfile
+import unittest
+from pathlib import Path
+
+from scripts.deployment.compose_native_broker import (
+    CompositionError,
+    compose,
+)
+
+
+ARGS_ANCHOR = ('    parser.add_argument("--institution-db", type=Path, '
+               'help="Existing R3 institution journal for governed evidence writes")\n')
+REGISTER_ANCHOR = '''        register_hr_governed_tools(
+            gateway,
+            "/home/admin1/.local/share/r3/hr/residents.sqlite3",
+        )
+'''
+
+
+class NativeBrokerComposerTests(unittest.TestCase):
+    def make_base(self, root: Path) -> tuple[Path, str]:
+        base = root / "base"
+        (base / "runtime").mkdir(parents=True)
+        source = ("import argparse\nfrom pathlib import Path\n"
+                  "def main():\n    parser = argparse.ArgumentParser()\n"
+                  "    parser.add_argument(\"--institution-db\", type=Path, "
+                  "help=\"Existing R3 institution journal for governed evidence writes\")\n"
+                  "    if args.authority_db:\n"
+                  "        register_grace_operational_tools(gateway, evidence_journal=evidence)\n"
+                  + REGISTER_ANCHOR
+                  + "    router = ToolRouter()\n")
+        path = base / "runtime" / "tool_server.py"
+        path.write_text(source, encoding="utf-8")
+        return base, hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def test_composes_additively_and_preserves_existing_registration_calls(self):
+        with tempfile.TemporaryDirectory(prefix="r3-broker-composer-") as tmp:
+            root = Path(tmp)
+            base, digest = self.make_base(root)
+            target = root / "staged"
+            manifest = compose(base, target, expected_sha256=digest)
+            server = (target / "runtime" / "tool_server.py").read_text()
+            self.assertIn("register_grace_operational_tools(gateway, evidence_journal=evidence)", server)
+            self.assertIn("register_hr_governed_tools(", server)
+            self.assertIn("register_internal_proposal_tools(gateway, proposal_client)", server)
+            self.assertIn("--institutional-proposal-credential-file", server)
+            self.assertEqual(manifest["added_capabilities"],
+                             ["r3.proposal.submit", "r3.proposal.status"])
+            self.assertFalse(manifest["credential_values_included"])
+            compile(server, str(target / "runtime" / "tool_server.py"), "exec")
+
+    def test_unexpected_base_digest_fails_before_creating_destination(self):
+        with tempfile.TemporaryDirectory(prefix="r3-broker-composer-") as tmp:
+            root = Path(tmp)
+            base, _ = self.make_base(root)
+            target = root / "staged"
+            with self.assertRaises(CompositionError):
+                compose(base, target, expected_sha256="0" * 64)
+            self.assertFalse(target.exists())
+
+    def test_ambiguous_registration_anchor_fails_closed(self):
+        with tempfile.TemporaryDirectory(prefix="r3-broker-composer-") as tmp:
+            root = Path(tmp)
+            base, _ = self.make_base(root)
+            source = base / "runtime" / "tool_server.py"
+            source.write_text(source.read_text() + REGISTER_ANCHOR)
+            target = root / "staged"
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            with self.assertRaises(CompositionError):
+                compose(base, target, expected_sha256=digest)
+            self.assertFalse(target.exists())
+
+
+if __name__ == "__main__":
+    unittest.main()
