@@ -1,19 +1,21 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/assignment_intake.py
 # Component: R3-STEWARD-ASSIGNMENT-INTAKE
-# File Revision: 1.0.1
+# File Revision: 1.1.0
 # Created: 2026-11-03 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6 via GitHub API
 # Purpose: Authenticated loopback API for durable resident assignment submission and status.
 # Execution Model: Threaded HTTP server hosted by runtime.serve when explicitly configured.
 # Observability: Durable assignment identity, idempotency, inbox event lineage, and review status.
-# Dependencies: Python standard library; runtime.resident_inference; runtime.verification.
+# Dependencies: Python standard library; runtime.resident_inference; runtime.verification; runtime.capability_authority.
 # Authority: Steward-approved R3 charter; loopback-only and bearer-token protected.
 # Changed: 2026-11-03 UTC | R3-ASSIGNMENT-INTAKE-001 | ChatGPT GPT-6 | Add opt-in durable assignment API.
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-006 | Follow authorized blocked-activity resumption links in assignment status.
+# Changed: 2026-11-06T02:45:00Z | GRACE-AUTONOMY-P3 | Codex GPT-6 | Expose exact-grant resident-authenticated blocked-activity resumption.
+# Supersedes: Revision 1.0.1; adds an opt-in route without changing assignment submission semantics.
 # Supersedes: None
 # Contracts: docs/r3-assignment-intake-contract.md; hints/engineering-test-policy.md
-# Tests: tests/test_assignment_intake.py
+# Tests: tests/test_assignment_resume_api.py; existing assignment intake and activity continuation tests.
 # History/Predecessor: New file; immediate predecessor blob recorded in commit 8750557799b19a00fc976496fd345feae4bbc547.
 """Authenticated, loopback-only assignment ingress for the R3 resident runtime."""
 from __future__ import annotations
@@ -30,7 +32,10 @@ import stat
 import time
 from urllib.parse import unquote
 
+from runtime.capability_authority import R3Authority
+from runtime.capabilities import AuthorityUnavailable, CapabilityDenied
 from runtime.resident_inference import Inbox
+from runtime.resident_identity import R3ResidentIdentity
 from runtime.verification import VerificationLedger
 
 
@@ -215,10 +220,27 @@ class AssignmentIntake:
                     "root_event_id": root_event_id, "events": events,
                     "verification": review}
 
+    def resume(self, event_id: int, *, authority: R3Authority, principal: str,
+               resolution_evidence: str) -> int:
+        if not isinstance(resolution_evidence, str) or not resolution_evidence.strip() or len(resolution_evidence) > 2000:
+            raise IntakeError(400, "resolution_evidence must contain 1 to 2000 characters")
+        with closing(self._connect()) as db:
+            try:
+                return Inbox(db).resume_blocked(
+                    event_id, authority=authority, principal=principal,
+                    resolution_evidence=resolution_evidence.strip(),
+                )
+            except CapabilityDenied as exc:
+                raise IntakeError(403, "Blocked activity resumption is not authorized or eligible") from exc
+            except ValueError as exc:
+                raise IntakeError(409, "Blocked activity state conflicts with the requested resumption") from exc
+            except AuthorityUnavailable:
+                raise IntakeError(503, "Canonical resumption authority is unavailable") from None
+
 
 def create_server(database: Path, token_file: Path, residents: set[str],
                   continuation_residents: set[str], *, host: str = "127.0.0.1",
-                  port: int):
+                  port: int, authority_db: Path | None = None):
     if host != "127.0.0.1":
         raise ValueError("Assignment intake must bind to 127.0.0.1")
     if isinstance(port, bool) or not isinstance(port, int) or not 0 <= port <= 65535:
@@ -228,6 +250,10 @@ def create_server(database: Path, token_file: Path, residents: set[str],
     if stat.S_IMODE(metadata.st_mode) & 0o077:
         raise ValueError("Assignment intake token file must not be group- or world-accessible")
     token = token_path.read_text(encoding="utf-8").strip()
+    if authority_db is not None and not Path(authority_db).is_absolute():
+        raise ValueError("Canonical authority database path must be absolute")
+    authority = R3Authority(authority_db) if authority_db is not None else None
+    resident_identity = R3ResidentIdentity(authority) if authority is not None else None
     app = AssignmentIntake(database, token, residents, continuation_residents)
 
     class Handler(BaseHTTPRequestHandler):
@@ -246,17 +272,41 @@ def create_server(database: Path, token_file: Path, residents: set[str],
             return False
 
         def do_POST(self):
-            if self.path != "/v1/assignments":
+            resume_match = re.fullmatch(r"/v1/assignments/([0-9]+)/resume", self.path)
+            if self.path != "/v1/assignments" and resume_match is None:
                 self._respond(404, {"error": "Not found"})
                 return
             if not self._authorized():
                 return
+            if resume_match is not None:
+                if resident_identity is None or authority is None:
+                    self._respond(503, {"error": "Canonical resumption authority is unavailable"})
+                    return
+                try:
+                    principal = resident_identity.authenticate(
+                        self.headers.get("X-R3-Resident-Credential", ""))
+                except CapabilityDenied:
+                    self._respond(401, {"error": "Resident authentication required"})
+                    return
+                except AuthorityUnavailable:
+                    self._respond(503, {"error": "Canonical resident identity is unavailable"})
+                    return
             try:
                 size = int(self.headers.get("Content-Length", "-1"))
-                if size < 0 or size > 1_048_576:
+                if size < 0 or size > (4096 if resume_match is not None else 1_048_576):
                     self._respond(413, {"error": "Invalid request size"})
                     return
                 payload = json.loads(self.rfile.read(size))
+                if resume_match is not None:
+                    if not isinstance(payload, dict) or set(payload) != {"resolution_evidence"}:
+                        self._respond(400, {"error": "Invalid resumption request"})
+                        return
+                    event_id = app.resume(
+                        int(resume_match.group(1)), authority=authority,
+                        principal=principal, resolution_evidence=payload["resolution_evidence"],
+                    )
+                    self._respond(202, {"event_id": event_id, "status": "PENDING"})
+                    return
                 result = app.submit(payload, self.headers.get("Idempotency-Key"))
                 self._respond(200 if result["status"] == "DUPLICATE" else 202, result)
             except IntakeError as exc:

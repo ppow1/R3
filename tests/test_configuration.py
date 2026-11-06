@@ -78,13 +78,24 @@ class ConfigurationContractTests(unittest.TestCase):
             "token_file": "/tmp/conversation-api.token"}
         self.runtime["assignment_intake"] = {
             "enabled": True, "host": "127.0.0.1", "port": 8769,
-            "token_file": "/tmp/assignment-intake.token"}
+            "token_file": "/tmp/assignment-intake.token",
+            "authority_database": "/tmp/authority.db"}
         self.runtime["resident_credentials"] = {"directory": "/tmp/resident-credentials"}
         self.save()
         result = load_configuration(self.root)["runtime"]
         self.assertEqual(result["_conversation_api"]["port"], 8770)
         self.assertEqual(result["_assignment_intake"]["port"], 8769)
+        self.assertEqual(result["_assignment_intake"]["authority_database"], Path("/tmp/authority.db"))
         self.assertEqual(result["_resident_credentials"], Path("/tmp/resident-credentials"))
+
+    def test_assignment_resumption_authority_database_must_be_absolute(self):
+        self.runtime["assignment_intake"] = {
+            "enabled": True, "host": "127.0.0.1", "port": 8769,
+            "token_file": "/tmp/assignment-intake.token",
+            "authority_database": "relative/authority.db"}
+        self.save()
+        with self.assertRaises(ConfigurationError):
+            load_configuration(self.root)
 
     def test_listener_invalid_host_fails_closed(self):
         self.runtime["conversation_api"] = {

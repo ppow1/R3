@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/configuration.py
 # Component: R3-CONFIGURATION
-# File Revision: 1.0.2
+# File Revision: 1.1.0
 # Created: 2026-11-02 UTC
 # Purpose: Validate externally defined runtime and resident settings.
 # Dependencies: Python standard library only.
@@ -9,6 +9,7 @@
 # Tests: tests/test_configuration.py
 # Changed: 2026-11-03T01:37:00.460Z | R3-VERIFY-WIRING-001 | Codex | Validate the configured independent reviewer, tools and manager.
 # Changed: 2026-11-03T01:39:59.849Z | R3-VERIFY-WIRING-002 | Codex | Preserve loading of resident configurations without an optional reviewer.
+# Changed: 2026-11-06T02:45:00Z | GRACE-AUTONOMY-P3 | Codex GPT-6 | Validate an optional canonical authority database for resumption-enabled assignment intake.
 # History/Predecessor: Git blob b42c627df1ad343e27a6f1779fe5c4fab6cde1c7
 """Small, strict JSON configuration loader; no implicit runtime defaults."""
 from __future__ import annotations
@@ -74,7 +75,14 @@ def _service_config(runtime, key):
     token_file = Path(_text(section.get("token_file"), f"{key}.token_file"))
     if not token_file.is_absolute():
         raise ConfigurationError(f"{key}.token_file must be absolute")
-    return {"port": port, "token_file": token_file}
+    result = {"port": port, "token_file": token_file}
+    if key == "assignment_intake" and section.get("authority_database") is not None:
+        authority_database = Path(_text(section.get("authority_database"),
+                                         "assignment_intake.authority_database"))
+        if not authority_database.is_absolute():
+            raise ConfigurationError("assignment_intake.authority_database must be absolute")
+        result["authority_database"] = authority_database
+    return result
 
 
 def _credential_config(runtime):

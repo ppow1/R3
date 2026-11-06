@@ -69,6 +69,7 @@ def atomic_snapshot(path: Path, payload: dict) -> None:
 async def serve(db: Path, health_file: Path, config_dir: Path, credential_dir: Path | None = None,
                assignment_intake_port: int | None = None,
                assignment_intake_token_file: Path | None = None,
+               assignment_intake_authority_db: Path | None = None,
                conversation_port: int | None = None,
                conversation_token_file: Path | None = None) -> None:
     configuration = load_configuration(config_dir)
@@ -158,6 +159,11 @@ async def serve(db: Path, health_file: Path, config_dir: Path, credential_dir: P
     intake_thread = None
     if (assignment_intake_port is None) != (assignment_intake_token_file is None):
         raise ConfigurationError("Assignment intake requires both port and token file")
+    if assignment_intake_authority_db is not None:
+        if assignment_intake_port is None:
+            raise ConfigurationError("Assignment resumption authority requires assignment intake")
+        if not assignment_intake_authority_db.is_absolute():
+            raise ConfigurationError("Assignment intake authority database must be absolute")
     if assignment_intake_port is not None:
         continuing = {
             definition["settings"]["name"]
@@ -166,7 +172,8 @@ async def serve(db: Path, health_file: Path, config_dir: Path, credential_dir: P
         }
         intake_server = create_assignment_intake_server(
             db, assignment_intake_token_file, set(registered), continuing,
-            host="127.0.0.1", port=assignment_intake_port)
+            host="127.0.0.1", port=assignment_intake_port,
+            authority_db=assignment_intake_authority_db)
         intake_thread = threading.Thread(
             target=intake_server.serve_forever, name="r3-assignment-intake", daemon=True)
         intake_thread.start()
@@ -284,6 +291,7 @@ def main() -> None:
     parser.add_argument("--resident-credential-dir", type=Path)
     parser.add_argument("--assignment-intake-port", type=int)
     parser.add_argument("--assignment-intake-token-file", type=Path)
+    parser.add_argument("--assignment-intake-authority-db", type=Path)
     parser.add_argument("--conversation-port", type=int)
     parser.add_argument("--conversation-token-file", type=Path)
     args = parser.parse_args()
@@ -307,6 +315,13 @@ def main() -> None:
         "conversation_api", conversation, args.conversation_port, args.conversation_token_file)
     intake_port, intake_token_file = resolve_listener(
         "assignment_intake", intake, args.assignment_intake_port, args.assignment_intake_token_file)
+    configured_authority_db = intake.get("authority_database") if intake is not None else None
+    if (configured_authority_db is not None and args.assignment_intake_authority_db is not None
+            and configured_authority_db != args.assignment_intake_authority_db):
+        raise ConfigurationError("Assignment intake authority database conflicts with runtime.json")
+    authority_db = configured_authority_db or args.assignment_intake_authority_db
+    if authority_db is not None and not authority_db.is_absolute():
+        raise ConfigurationError("Assignment intake authority database must be absolute")
     if credential_dir is not None and args.resident_credential_dir is not None:
         if credential_dir != args.resident_credential_dir:
             raise ConfigurationError("Resident credential directory conflicts with runtime.json")
@@ -315,6 +330,7 @@ def main() -> None:
         credential_dir=credential_dir or args.resident_credential_dir,
         assignment_intake_port=intake_port,
         assignment_intake_token_file=intake_token_file,
+        assignment_intake_authority_db=authority_db,
         conversation_port=conversation_port,
         conversation_token_file=conversation_token_file,
     ))
