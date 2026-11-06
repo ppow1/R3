@@ -100,12 +100,15 @@ class InternalProposalToolIntegrationTests(unittest.TestCase):
             credential=self.r3_token)
         with sqlite3.connect(self.authority_path) as db:
             db.executemany("""INSERT INTO capability_grants
-                (grant_id,principal,resource_ref,action,operation,scope_ref,active,approved_by)
-                VALUES (?,?,?,?,?,?,1,?)""", [
+                (grant_id,principal,resource_ref,action,operation,scope_ref,active,
+                 approved_by,created_at,effective_at,expires_at,delegable)
+                VALUES (?,?,?,?,?,?,1,?,?,?, ?,0)""", [
                 ("grant:proposal-write", "resident:grace", "riverview:institutional-proposals",
-                 "proposal.draft.submit", "write", "institution:proposal-drafts", "human:steward:test"),
+                 "proposal.draft.submit", "write", "institution:proposal-drafts", "human:steward:test",
+                 time.time(), time.time(), time.time()+7*24*60*60),
                 ("grant:proposal-read", "resident:grace", "riverview:institutional-proposals",
-                 "proposal.status.read", "read", "institution:proposal-drafts", "human:steward:test")])
+                 "proposal.status.read", "read", "institution:proposal-drafts", "human:steward:test",
+                 time.time(), time.time(), time.time()+7*24*60*60)])
 
     def test_native_grace_tool_submits_and_reads_internal_proposal(self):
         descriptor = next(x for x in self.native.discover() if x["tool"] == "r3.proposal.submit")

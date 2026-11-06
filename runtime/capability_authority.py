@@ -23,9 +23,11 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
-from runtime.capabilities import CapabilityDenied, AuthorityUnavailable
+from runtime.capabilities import (AuthorizationExpired, CapabilityDenied,
+                                  GrantExpiryMissing, AuthorityUnavailable)
 
 GRANT_COLUMNS = {
     "resource_ref": "TEXT",
@@ -147,13 +149,108 @@ class R3Authority:
                     AND (expires_at IS NULL OR expires_at>?)""",
                     (principal, resource_id, action, operation, scope_ref, now, now)).fetchall()
                 if len(rows) != 1:
+                    if rows:
+                        raise CapabilityDenied("No unique effective exact R3 grant")
+                    expired = db.execute("""SELECT * FROM capability_grants WHERE
+                        principal=? AND resource_ref=? AND action=? AND operation=? AND scope_ref=?
+                        AND active=1 AND revoked_at IS NULL AND expires_at IS NOT NULL
+                        AND expires_at<=? AND (effective_at IS NULL OR effective_at<=?)""",
+                        (principal, resource_id, action, operation, scope_ref, now, now)).fetchall()
+                    if len(expired) == 1 and isinstance(expired[0]["approved_by"], str) and expired[0]["approved_by"].startswith("human:steward:"):
+                        raise AuthorizationExpired(self._grant_diagnostic(expired[0], now))
                     raise CapabilityDenied("No unique effective exact R3 grant")
                 grant = rows[0]
+                if (resource_id == "riverview:institutional-proposals" and
+                    ((action == "proposal.draft.submit" and operation == "write") or
+                     (action == "proposal.status.read" and operation == "read")) and
+                    scope_ref == "institution:proposal-drafts" and grant["expires_at"] is None):
+                    raise GrantExpiryMissing(self._grant_diagnostic(grant, now))
                 if not isinstance(grant["approved_by"], str) or not (
                         grant["approved_by"].startswith("human:steward:")):
                     raise CapabilityDenied("Missing authenticated Steward approval evidence")
                 self._verify_parent_chain(db, grant, now)
                 return {"grant_id": grant["grant_id"]}
+        except sqlite3.Error as exc:
+            raise AuthorityUnavailable("Canonical R3 authority unavailable") from exc
+
+    @staticmethod
+    def _grant_diagnostic(grant: sqlite3.Row, now: float) -> dict:
+        steward_approved = (isinstance(grant["approved_by"], str) and
+                            grant["approved_by"].startswith("human:steward:"))
+        return {
+            "grant_id": grant["grant_id"], "principal": grant["principal"],
+            "resource": grant["resource_ref"], "action": grant["action"],
+            "operation": grant["operation"], "scope": grant["scope_ref"],
+            "issued_at": grant["created_at"], "expires_at": grant["expires_at"],
+            "issued_at_utc": (datetime.fromtimestamp(grant["created_at"], timezone.utc).isoformat()
+                              if grant["created_at"] is not None else None),
+            "expires_at_utc": (datetime.fromtimestamp(grant["expires_at"], timezone.utc).isoformat()
+                               if grant["expires_at"] is not None else None),
+            "state": ("MISSING_EXPIRY" if grant["expires_at"] is None else
+                      "EXPIRED" if grant["expires_at"] <= now else "ACTIVE"),
+            "steward_approved": steward_approved,
+            "renewal_action": "Request a new exact grant through authenticated Steward approval; automatic renewal is disabled.",
+        }
+
+    def authorization_diagnostics(self, *, principal: str,
+                                  now: float | None = None,
+                                  warning_window: float = 50 * 60 * 60) -> dict:
+        """Return only the caller's exact Grace proposal grants and expiry state."""
+        if not isinstance(principal, str) or not principal.startswith("resident:"):
+            raise CapabilityDenied("Authenticated resident identity required")
+        now = time.time() if now is None else now
+        try:
+            with self._connect() as db:
+                db.row_factory = sqlite3.Row
+                rows = db.execute("""SELECT * FROM capability_grants WHERE principal=?
+                    AND resource_ref='riverview:institutional-proposals'
+                    AND scope_ref='institution:proposal-drafts'
+                    AND ((action='proposal.draft.submit' AND operation='write')
+                         OR (action='proposal.status.read' AND operation='read'))
+                    AND active=1 AND revoked_at IS NULL
+                    ORDER BY action,created_at,grant_id""", (principal,)).fetchall()
+                grants = []
+                for row in rows:
+                    item = self._grant_diagnostic(row, now)
+                    if not item["steward_approved"]:
+                        item["state"] = "INVALID_APPROVAL"
+                    elif row["effective_at"] is not None and row["effective_at"] > now:
+                        item["state"] = "NOT_YET_EFFECTIVE"
+                    elif row["expires_at"] is None:
+                        item["state"] = "MISSING_EXPIRY"
+                        item["warning"] = "This proposal grant has no expiry although the authorized term is seven days; request Steward remediation."
+                    elif row["expires_at"] > now and row["expires_at"] <= now + warning_window:
+                        item["state"] = "EXPIRING_SOON"
+                        item["warning"] = "Grant expires within 50 hours; hourly alerts begin at least 48 hours before expiry. Request a new exact grant through Steward approval."
+                    elif row["expires_at"] > now:
+                        item["state"] = "ACTIVE"
+                    grants.append(item)
+                return {"principal": principal, "checked_at": now,
+                        "checked_at_utc": datetime.fromtimestamp(now, timezone.utc).isoformat(),
+                        "warning_window_seconds": warning_window,
+                        "grants": grants,
+                        "renewal_action": "Request a new exact grant through authenticated Steward approval; automatic renewal is disabled."}
+        except sqlite3.Error as exc:
+            raise AuthorityUnavailable("Canonical R3 authority unavailable") from exc
+
+    def expiring_proposal_grants(self, *, now: float | None = None,
+                                 warning_window: float = 50 * 60 * 60) -> list[dict]:
+        """Read-only expiry scan for the two exact proposal capabilities."""
+        now = time.time() if now is None else now
+        try:
+            with self._connect() as db:
+                db.row_factory = sqlite3.Row
+                rows = db.execute("""SELECT * FROM capability_grants WHERE
+                    resource_ref='riverview:institutional-proposals'
+                    AND scope_ref='institution:proposal-drafts'
+                    AND ((action='proposal.draft.submit' AND operation='write')
+                         OR (action='proposal.status.read' AND operation='read'))
+                    AND active=1 AND revoked_at IS NULL
+                    AND approved_by GLOB 'human:steward:*'
+                    AND (effective_at IS NULL OR effective_at<=?)
+                    AND (expires_at IS NULL OR expires_at<=?)""",
+                    (now, now + warning_window)).fetchall()
+                return [self._grant_diagnostic(row, now) for row in rows]
         except sqlite3.Error as exc:
             raise AuthorityUnavailable("Canonical R3 authority unavailable") from exc
 

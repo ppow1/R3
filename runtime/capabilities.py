@@ -25,6 +25,22 @@ class CapabilityDenied(RuntimeError):
     pass
 
 
+class AuthorizationExpired(CapabilityDenied):
+    """A matching exact grant exists, but its approved lifetime has ended."""
+
+    def __init__(self, grant: dict):
+        self.grant = dict(grant)
+        super().__init__("Exact capability grant expired")
+
+
+class GrantExpiryMissing(CapabilityDenied):
+    """A proposal grant violates the required temporary seven-day term."""
+
+    def __init__(self, grant: dict):
+        self.grant = dict(grant)
+        super().__init__("Temporary proposal grant has no expiry")
+
+
 class AuthorityUnavailable(CapabilityDenied):
     pass
 
@@ -121,6 +137,16 @@ class CapabilityRegistry:
             event["outcome"] = "AUTHORIZED"
             # Fail closed when the durable authorization audit cannot be written.
             self.audit(dict(event))
+        except AuthorizationExpired as exc:
+            event["grant_id"] = exc.grant.get("grant_id")
+            event["outcome"] = "AUTHORIZATION_EXPIRED"
+            self.audit(dict(event))
+            raise
+        except GrantExpiryMissing as exc:
+            event["grant_id"] = exc.grant.get("grant_id")
+            event["outcome"] = "GRANT_EXPIRY_MISSING"
+            self.audit(dict(event))
+            raise
         except Exception:
             event["outcome"] = "DENIED"
             self.audit(dict(event))

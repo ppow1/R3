@@ -26,15 +26,26 @@ class NativeBrokerComposerTests(unittest.TestCase):
         base = root / "base"
         (base / "runtime").mkdir(parents=True)
         source = ("import argparse\nfrom pathlib import Path\n"
+                  "from runtime.capabilities import CapabilityDenied\n"
                   "def main():\n    parser = argparse.ArgumentParser()\n"
                   "    parser.add_argument(\"--institution-db\", type=Path, "
                   "help=\"Existing R3 institution journal for governed evidence writes\")\n"
                   "    if args.authority_db:\n"
                   "        register_grace_operational_tools(gateway, evidence_journal=evidence)\n"
                   + REGISTER_ANCHOR
-                  + "    router = ToolRouter()\n")
+                  + "    router = ToolRouter()\n"
+                  + "def handler_for(router):\n    class Handler:\n        def do_GET(self):\n            pass\n"
+                  + "class ToolRouter:\n    def invoke(self):\n        if True:\n            try:\n                pass\n"
+                  + "            except CapabilityDenied:\n"
+                  + "                code, outcome, result = 403, \"DENIED\", {\"ok\": False, \"error\": \"Resident authorization denied\"}\n"
+                  + "            except Exception:\n                pass\n")
+        governed = ("from runtime.capabilities import AuthorityUnavailable, CapabilityDenied\n"
+                    "class Gateway:\n    def auth(self):\n        try:\n            pass\n"
+                    "        except Exception:\n            event[\"outcome\"] = \"DENIED\"\n"
+                    "            self.audit(dict(event))\n            raise\n")
         path = base / "runtime" / "tool_server.py"
         path.write_text(source, encoding="utf-8")
+        (base / "runtime" / "governed_tools.py").write_text(governed, encoding="utf-8")
         return base, hashlib.sha256(path.read_bytes()).hexdigest()
 
     def test_composes_additively_and_preserves_existing_registration_calls(self):
@@ -48,11 +59,15 @@ class NativeBrokerComposerTests(unittest.TestCase):
             self.assertIn("register_hr_governed_tools(", server)
             self.assertIn(REGISTER_OVERLAY_EXPECTATION, server)
             self.assertIn("register_internal_proposal_tools(gateway, proposal_client)", server)
+            self.assertIn("/v1/diagnostics/authorization", server)
+            self.assertIn("AUTHORIZATION_EXPIRED", server)
             self.assertIn("--institutional-proposal-credential-file", server)
             self.assertEqual(manifest["added_capabilities"],
                              ["r3.proposal.submit", "r3.proposal.status"])
             self.assertFalse(manifest["credential_values_included"])
             compile(server, str(target / "runtime" / "tool_server.py"), "exec")
+            compile((target / "runtime" / "governed_tools.py").read_text(),
+                    str(target / "runtime" / "governed_tools.py"), "exec")
 
     def test_unexpected_base_digest_fails_before_creating_destination(self):
         with tempfile.TemporaryDirectory(prefix="r3-broker-composer-") as tmp:

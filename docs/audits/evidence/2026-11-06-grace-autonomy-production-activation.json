@@ -66,6 +66,20 @@
     "reason": "No exact proposal authorization; resident identity mapping remains unresolved",
     "website_or_engineering_side_effect": false
   },
+  "temporary_grant_expiration": {
+    "operational_warning": "The two R3 and two institutional-registry proposal grants are temporary seven-day non-delegable grants; expiration can disable proposal operations while services remain healthy. This is a temporary operational limitation, not a permanent architectural requirement.",
+    "grant_ids_and_timestamps": "pending_authenticated_steward_issuance; no grants were issued by this work session",
+    "grants": [
+      {"authority": "R3", "principal": "resident:Grace", "resource": "riverview:institutional-proposals", "action": "proposal.draft.submit", "scope": "institution:proposal-drafts", "operation": "write", "grant_id": null, "issued_at": null, "expires_at": null, "delegable": false},
+      {"authority": "R3", "principal": "resident:Grace", "resource": "riverview:institutional-proposals", "action": "proposal.status.read", "scope": "institution:proposal-drafts", "operation": "read", "grant_id": null, "issued_at": null, "expires_at": null, "delegable": false},
+      {"authority": "Riverview institutional registry", "principal": "resident:grace", "resource": "riverview:institutional-proposals", "action": "proposal.draft.submit", "scope": "institution:proposal-drafts", "operation": "write", "grant_id": null, "issued_at": null, "expires_at": null, "delegable": false},
+      {"authority": "Riverview institutional registry", "principal": "resident:grace", "resource": "riverview:institutional-proposals", "action": "proposal.status.read", "scope": "institution:proposal-drafts", "operation": "read", "grant_id": null, "issued_at": null, "expires_at": null, "delegable": false}
+    ],
+    "diagnostics": "resident-authenticated GET /v1/diagnostics/authorization on the native broker; hourly read-only warning inside the 48-hour window; expired invocations return AUTHORIZATION_EXPIRED and the grant ID",
+    "renewal": "New exact seven-day request and authenticated Steward approval; automatic renewal is disabled",
+    "runbook": "docs/runbooks/GRACE_AUTONOMY_OPERATIONS.md",
+    "operational_log": "docs/operations/GRACE_AUTONOMY_OPERATIONAL_LOG.md"
+  },
   "steward_actions_prepared": {
     "identity": "Through the authorized HR identity mechanism, bind existing HR record r3:grace (revision 1) to canonical principal resident:grace and establish that mapping for the current R3 principal resident:Grace without rotating the existing credential or removing its existing HR grants. Existing R3 runtime has no populated authoritative crosswalk for this relation.",
     "r3_grants": [

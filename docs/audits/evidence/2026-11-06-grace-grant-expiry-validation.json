@@ -1,0 +1,70 @@
+{
+  "evidence": "temporary Grace proposal grant expiration visibility",
+  "observed_at_utc": "2026-11-06",
+  "repository": "ppow1/R3",
+  "branch": "engineering/grace-autonomy-recovery-20261106",
+  "production_changes": false,
+  "isolated_composed_broker": {
+    "release_path": "/home/admin1/.local/share/r3/releases/grace-proposal-native-expiry-20261106-r4",
+    "base_release": "/home/admin1/.local/share/r3/releases/hr-native-010c2d971828",
+    "base_tool_server_sha256": "dd0a8758be94e4c8bd04c83e1b206e5a8e3faf2b9bfd4b5816378f55949f181c",
+    "staged_tool_server_sha256": "ca34ee63b5e6527f297a34a578a150116b34b9f6e4a0c00fc13952e46fa05810",
+    "staged_module_sha256": {
+      "governed_tools.py": "6bc61b69d7a3a1adaa2a67a439dd06e1a7f8c7a44219807993f25be40f2f45ed",
+      "capability_authority.py": "479f42758d83b95a526cd767a04b5fbdb4e2c5abdb934e7d271af0822a2de916",
+      "capabilities.py": "ae2523678e17fc340a02f653ee8ff33199631aeec2474f5c9016ea091482271f",
+      "grant_expiry_monitor.py": "465a8386df102fab5b835f5fd64efd4b74b4e9779490e276a875a30c8e3d59a7"
+    },
+    "activated": false,
+    "tools_discovered": [
+      "r3.status",
+      "r3.host.uptime",
+      "r3.resources.local_snapshot",
+      "r3.resources.assess_gpu_capacity",
+      "r3.evidence.record",
+      "hr.directory",
+      "hr.read",
+      "hr.save",
+      "r3.proposal.submit",
+      "r3.proposal.status"
+    ]
+  },
+  "isolated_runtime_acceptance": {
+    "test_identity": "resident:Grace",
+    "test_grants": [
+      {"grant_id": "expired-draft", "action": "proposal.draft.submit", "state": "EXPIRED"},
+      {"grant_id": "soon-status", "action": "proposal.status.read", "state": "EXPIRING_SOON"}
+    ],
+    "diagnostic_endpoint": "GET /v1/diagnostics/authorization",
+    "diagnostic_authentication": "resident bearer validated by the R3 identity resolver",
+    "diagnostic_identity_scope": "only exact proposal grants belonging to the authenticated resident are returned",
+    "expired_tool_call": {
+      "http_status": 403,
+      "error": "AUTHORIZATION_EXPIRED",
+      "grant_id": "expired-draft",
+      "renewal_action": "Request a new exact grant through authenticated Steward approval; automatic renewal is disabled.",
+      "durable_capability_audit_outcome": "AUTHORIZATION_EXPIRED",
+      "proposal_service_invoked": false
+    },
+    "warning_window_seconds": 180000,
+    "monitor_interval_seconds": 3600,
+    "minimum_warning_lead_seconds_with_hourly_polling": 176400,
+    "integration_observed_expiring_soon_at_hours_remaining": 49,
+    "automatic_renewal": false,
+    "database": "temporary test database only",
+    "credential": "temporary test-only credential; not recorded"
+  },
+  "authorization_state": {
+    "production_grants_issued": false,
+    "production_identity_association_verified": false,
+    "reason": "No authenticated Steward session or resident-association endpoint was available to this execution; no authority record was changed."
+  },
+  "live_grace_assignment": {
+    "run": false,
+    "reason": "The identity crosswalk and exact seven-day production grants are not active."
+  },
+  "operational_documents": [
+    "docs/runbooks/GRACE_AUTONOMY_OPERATIONS.md",
+    "docs/operations/GRACE_AUTONOMY_OPERATIONAL_LOG.md"
+  ]
+}

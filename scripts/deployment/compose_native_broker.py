@@ -47,6 +47,68 @@ _REGISTER_OVERLAY = '''
             )
             register_internal_proposal_tools(gateway, proposal_client)
 '''
+_EXPIRY_OVERLAY = '''
+        from runtime.grant_expiry_monitor import start_monitor
+        start_monitor(authority)
+'''
+_DENIAL_ANCHOR = '''            except CapabilityDenied:
+                code, outcome, result = 403, "DENIED", {"ok": False, "error": "Resident authorization denied"}
+'''
+_DENIAL_OVERLAY = '''            except GrantExpiryMissing as exc:
+                code, outcome, result = 403, "GRANT_EXPIRY_MISSING", {
+                    "ok": False, "error": "GRANT_EXPIRY_MISSING",
+                    "grant": exc.grant,
+                    "renewal_action": "Ask the Steward to replace this with an exact seven-day grant.",
+                }
+            except AuthorizationExpired as exc:
+                code, outcome, result = 403, "AUTHORIZATION_EXPIRED", {
+                    "ok": False, "error": "AUTHORIZATION_EXPIRED",
+                    "grant": exc.grant,
+                    "renewal_action": exc.grant["renewal_action"],
+                }
+            except CapabilityDenied:
+                code, outcome, result = 403, "DENIED", {"ok": False, "error": "Resident authorization denied"}
+'''
+_DIAGNOSTIC_ROUTE = '''
+            if self.path == "/v1/diagnostics/authorization":
+                if router.governed is None:
+                    return self.respond(503, {"error": "Authorization diagnostics unavailable"})
+                header = self.headers.get("Authorization")
+                if not isinstance(header, str) or not header.startswith("Bearer "):
+                    return self.respond(401, {"error": "Resident authentication required"})
+                token = header[len("Bearer "):]
+                try:
+                    principal = router.governed.identity_resolver(token)
+                    if not isinstance(principal, str) or not principal.startswith("resident:"):
+                        return self.respond(401, {"error": "Resident authentication required"})
+                    from runtime.grant_expiry_monitor import scan_once
+                    scan_once(router.governed.verifier)
+                    return self.respond(200, router.governed.verifier.authorization_diagnostics(
+                        principal=principal))
+                except Exception:
+                    return self.respond(503, {"error": "Authorization diagnostics unavailable"})
+'''
+_GOVERNED_IMPORT = "from runtime.capabilities import AuthorityUnavailable, CapabilityDenied\n"
+_GOVERNED_DENIAL = '''        except Exception:
+            event["outcome"] = "DENIED"
+            self.audit(dict(event))
+            raise
+'''
+_GOVERNED_EXPIRY = '''        except GrantExpiryMissing as exc:
+            event["grant_id"] = exc.grant.get("grant_id")
+            event["outcome"] = "GRANT_EXPIRY_MISSING"
+            self.audit(dict(event))
+            raise
+        except AuthorizationExpired as exc:
+            event["grant_id"] = exc.grant.get("grant_id")
+            event["outcome"] = "AUTHORIZATION_EXPIRED"
+            self.audit(dict(event))
+            raise
+        except Exception:
+            event["outcome"] = "DENIED"
+            self.audit(dict(event))
+            raise
+'''
 
 
 class CompositionError(ValueError):
@@ -73,15 +135,37 @@ def compose(base_release: Path, destination: Path, *, expected_sha256: str = BAS
     shutil.copytree(runtime_dir, destination / "runtime", symlinks=False)
     staged_server = destination / "runtime" / "tool_server.py"
     text = staged_server.read_text(encoding="utf-8")
+    staged_governed = destination / "runtime" / "governed_tools.py"
+    if not staged_governed.is_file():
+        shutil.rmtree(destination)
+        raise CompositionError("native broker governed gateway is missing")
+    governed_text = staged_governed.read_text(encoding="utf-8")
     if (text.count(_ARGS_ANCHOR) != 1 or text.count(_REGISTER_ANCHOR) != 1
-            or text.count(_HR_PATH_ANCHOR) != 1):
+            or text.count(_HR_PATH_ANCHOR) != 1 or text.count(_DENIAL_ANCHOR) != 1
+            or text.count("        def do_GET(self):\n") != 1
+            or text.count("from runtime.capabilities import CapabilityDenied\n") != 1
+            or governed_text.count(_GOVERNED_IMPORT) != 1
+            or governed_text.count(_GOVERNED_DENIAL) != 1):
         shutil.rmtree(destination)
         raise CompositionError("native broker overlay anchors are absent or ambiguous")
     text = text.replace(_ARGS_ANCHOR, _ARGS_ANCHOR + _ARGS_OVERLAY, 1)
     text = text.replace(_REGISTER_ANCHOR, _REGISTER_ANCHOR + _REGISTER_OVERLAY, 1)
+    text = text.replace(_REGISTER_ANCHOR + _REGISTER_OVERLAY,
+                        _REGISTER_ANCHOR + _REGISTER_OVERLAY + _EXPIRY_OVERLAY, 1)
     text = text.replace(_HR_PATH_ANCHOR, "            str(args.hr_database),\n", 1)
+    text = text.replace(_DENIAL_ANCHOR, _DENIAL_OVERLAY, 1)
+    text = text.replace("from runtime.capabilities import CapabilityDenied\n",
+                        "from runtime.capabilities import AuthorizationExpired, CapabilityDenied, GrantExpiryMissing\n", 1)
+    text = text.replace("        def do_GET(self):\n",
+                        "        def do_GET(self):\n" + _DIAGNOSTIC_ROUTE, 1)
     staged_server.write_text(text, encoding="utf-8")
+    governed_text = governed_text.replace(_GOVERNED_IMPORT,
+        "from runtime.capabilities import AuthorizationExpired, AuthorityUnavailable, CapabilityDenied, GrantExpiryMissing\n", 1)
+    governed_text = governed_text.replace(_GOVERNED_DENIAL, _GOVERNED_EXPIRY, 1)
+    staged_governed.write_text(governed_text, encoding="utf-8")
     repository_root = Path(__file__).resolve().parents[2]
+    for module in ("capabilities.py", "capability_authority.py", "grant_expiry_monitor.py"):
+        shutil.copy2(repository_root / "runtime" / module, destination / "runtime" / module)
     shutil.copy2(repository_root / "runtime" / "institutional_proposals.py",
                  destination / "runtime" / "institutional_proposals.py")
     shutil.copy2(repository_root / "runtime" / "proposal_gateway_adapter.py",
@@ -93,6 +177,8 @@ def compose(base_release: Path, destination: Path, *, expected_sha256: str = BAS
         "staged_tool_server_sha256": _sha256(staged_server),
         "added_capabilities": ["r3.proposal.submit", "r3.proposal.status"],
         "preserved_registrations": ["register_grace_operational_tools", "register_hr_governed_tools"],
+        "authorization_expiry_diagnostics": "/v1/diagnostics/authorization",
+        "authorization_expiry_warning_seconds": 180000,
         "credential_values_included": False,
     }
     (destination / "GRACE_PROPOSAL_OVERLAY.json").write_text(
