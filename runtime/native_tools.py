@@ -1,16 +1,19 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/native_tools.py
 # Component: R3-NATIVE-TOOLS
-# File Revision: 1.0.0
+# File Revision: 1.1.0
 # Created: 2026-11-02 UTC
-# Purpose: R3-owned discovery and invocation client.
+# Purpose: R3-owned discovery and invocation client with per-call correlation metadata.
 # Contracts: docs/r3-native-tool-contract.md
-# Tests: tests/test_native_tools.py
-"""R3-native tool client; read-only execution until server-side grants exist."""
+# Changed: 2026-11-06T02:24:00Z | GRACE-AUTONOMY-P2 | Codex GPT-6 | Attach correlation metadata to every invocation for durable exact-grant auditing.
+# Supersedes: Revision 1.0.0; read operations now receive generated correlation IDs when the caller has none.
+# Tests: tests/test_native_tools.py; tests/test_native_correlation_contract.py; tests/test_proposal_submission_integration.py
+"""R3-native tool client; every invocation remains subject to server-side grants."""
 from __future__ import annotations
 
 import json
 import urllib.request
+import uuid
 from dataclasses import dataclass
 
 
@@ -77,7 +80,11 @@ class NativeTools:
         if descriptor.get("read_only") is not True:
             if not isinstance(correlation_id, str) or not correlation_id:
                 raise ToolContractError("Write tool requires correlation_id")
-            payload["correlation_id"] = correlation_id
+        elif correlation_id is None:
+            correlation_id = "read-" + uuid.uuid4().hex
+        if not isinstance(correlation_id, str) or not correlation_id:
+            raise ToolContractError("Invocation correlation_id must be nonempty text")
+        payload["correlation_id"] = correlation_id
         response = self._request("POST", "/v1/tools/invoke", payload)
         if not isinstance(response, dict) or not isinstance(response.get("ok"), bool):
             raise ToolContractError("Invalid invocation response")

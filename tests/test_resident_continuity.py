@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_resident_continuity.py
 # Component: R3-RESIDENT-CONTINUITY-REGRESSION
-# File Revision: 1.0.3
+# File Revision: 1.1.0
 # Created: Unknown (existing file)
 # Created By: Unknown (existing file)
 # Purpose: Permanent resident-neutral regression for durable activity/objective distinction.
@@ -12,6 +12,7 @@
 # Changed: 2026-11-02 UTC | R3-VERIFY-LEARN-006 | Verify assignment continuity through review submission.
 # Changed: 2026-11-03T02:24:59.876Z | R3-VERIFY-FEEDBACK-LOOP-001 | Codex | Verify review feedback resumes the assignment and queues a new review.
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-006 | Make inference fixtures asynchronous and deterministic across event-loop shutdown.
+# Changed: 2026-11-06T02:31:00Z | GRACE-AUTONOMY-P3 | Codex GPT-6 | Prove continuation chains block and escalate at configured limit.
 # Supersedes: None
 # Tests: This file
 # History/Predecessor: Git blob 944dce6ff5075fdc75f80d048bb461dced0cf2af
@@ -166,6 +167,30 @@ class ResidentContinuityTests(unittest.TestCase):
                                    continuation_event_types=("RESIDENT_ACTIVITY",))
         asyncio.run(worker("Grace"))
         self.assertEqual(self.result(event_id)[1]["objective_status"], "REPORTED_VERIFIED")
+
+    def test_continuation_chain_is_bounded_and_escalates_durably(self):
+        endpoint = FakeEndpoint([
+            {"state": "continue", "next_step": "Check status", "evidence": "No acceptance evidence"},
+            {"state": "continue", "next_step": "Check status again", "evidence": "Still pending"},
+            {"state": "continue", "next_step": "Retry status", "evidence": "Still pending"},
+        ])
+        first = self.inbox.enqueue("Grace", "REVIEW_FEEDBACK", {"objective": "Finish objective"})
+        worker = ResidentInference(
+            self.inbox, endpoint, system_prompt="Resident",
+            continuation_event_types=("REVIEW_FEEDBACK",), max_continuations=2,
+        )
+        asyncio.run(worker("Grace"))
+        second = self.result(first)[1]["continuation_event_id"]
+        asyncio.run(worker("Grace"))
+        third = self.result(second)[1]["continuation_event_id"]
+        asyncio.run(worker("Grace"))
+        status, result = self.result(third)
+        self.assertEqual(status, "BLOCKED")
+        self.assertEqual(result["continuation_depth"], 2)
+        self.assertEqual(result["continuation_limit"], 2)
+        self.assertTrue(result["escalation_required"])
+        self.assertEqual(result["dependency"], "Bounded continuation limit reached; Steward review required")
+        self.assertIsNone(self.inbox.next("Grace"))
 
 
 if __name__ == "__main__":

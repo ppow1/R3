@@ -47,7 +47,11 @@ class NativeToolTests(unittest.TestCase):
     def test_invokes_allowed_read_only_tool(self):
         with patch.object(NativeTools, "_request", return_value={"ok": True, "result": {"healthy": True}}) as request:
             self.assertEqual(self.client.invoke(self.descriptor, {}), '{"healthy": true}')
-            request.assert_called_once_with("POST", "/v1/tools/invoke", {"tool": "status", "params": {}})
+            request.assert_called_once()
+            payload = request.call_args.args[2]
+            self.assertEqual(payload["tool"], "status")
+            self.assertEqual(payload["params"], {})
+            self.assertRegex(payload["correlation_id"], r"^read-[0-9a-f]{32}$")
 
 
 if __name__ == "__main__":

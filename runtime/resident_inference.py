@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/resident_inference.py
 # Component: R3-RESIDENT-INFERENCE
-# File Revision: 1.3.5
+# File Revision: 1.4.0
 # Created: 2026-11-02 UTC (exact time unverified)
 # Created By: ChatGPT GPT-6
 # Purpose: Reusable event-driven resident inference against an existing OpenAI-compatible endpoint.
@@ -18,8 +18,9 @@
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-004 | Include tool results observed during the active inference turn.
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-005 | Authority-referenced idempotent blocked activity resumption.\n# Supersedes: None
 # Changed: 2026-11-05 UTC | R3-GRACE-RECOVERY-006 | Require canonical exact-grant authorization and audit for blocked activity resumption.
+# Changed: 2026-11-06T02:31:00Z | GRACE-AUTONOMY-P3 | Codex GPT-6 | Bound durable continuation chains and escalate exhausted work instead of looping.
 # Contracts: docs/PROJECT_CHARTER_REVISION_2_REVIEW.md; hints/engineering-test-policy.md
-# Tests: tests/test_inference_http_errors.py (permanent transport diagnostic contract).
+# Tests: tests/test_inference_http_errors.py; tests/test_resident_continuity.py
 # Changed: 2026-11-02 UTC | R3-GRACE-005 | Preserve safe upstream HTTP error codes without leaking request content.
 # History/Predecessor: Git blob 1e433f2ddb10f439ef7599bf48a19c6fb11ea2c0; immediate predecessor blob 82761cbeb022e623295237b3aed3048694fe51cf.
 """Durable resident inbox and inference adapter; tool routing uses existing llama.cpp /tools adapter."""
@@ -184,6 +185,28 @@ class Inbox:
         ).fetchall()
         return [(kind, json.loads(content)) for kind, content in rows]
 
+    def continuation_depth(self, payload: dict) -> int:
+        """Count durable continuation links, stopping at an authorized resume root."""
+        if not isinstance(payload, dict):
+            return 0
+        resume_root = payload.get("resumed_from_blocked_event_id")
+        cursor = payload.get("previous_event_id")
+        visited = set()
+        depth = 0
+        while isinstance(cursor, int) and not isinstance(cursor, bool):
+            if cursor in visited or (isinstance(resume_root, int) and cursor == resume_root):
+                break
+            visited.add(cursor)
+            depth += 1
+            row = self.db.execute(
+                "SELECT payload FROM resident_inbox WHERE id=?", (cursor,)
+            ).fetchone()
+            if row is None:
+                break
+            previous = json.loads(row[0]).get("previous_event_id")
+            cursor = previous if isinstance(previous, int) else None
+        return depth
+
     def record(self, event_id: int, kind: str, content: dict) -> None:
         with self.db:
             self.db.execute(
@@ -251,13 +274,16 @@ class ResidentInference:
     def __init__(self, inbox: Inbox, endpoint: InferenceEndpoint, *,
                  system_prompt: str, tools: LlamaTools | None = None,
                  continuation_event_types: tuple[str, ...] = (),
-                 conversation_store=None):
+                 conversation_store=None, max_continuations: int = 8):
+        if isinstance(max_continuations, bool) or not isinstance(max_continuations, int) or max_continuations < 1:
+            raise ValueError("max_continuations must be a positive integer")
         self.inbox = inbox
         self.endpoint = endpoint
         self.system_prompt = system_prompt
         self.tools = tools
         self.continuation_event_types = frozenset(continuation_event_types)
         self.conversation_store = conversation_store
+        self.max_continuations = max_continuations
 
     async def __call__(self, resident: str) -> None:
         event = self.inbox.next(resident)
@@ -275,6 +301,8 @@ class ResidentInference:
             "are supported by observed evidence; otherwise omit it or set false. "
             "Never invent a next action or repeat an ineffective step."
         ) if event_type in self.continuation_event_types else ""
+        continuation_depth = 0
+        continuation_limit_reached = False
         if event_type == "CONVERSATION_MESSAGE":
             if self.conversation_store is None:
                 raise RuntimeError("Conversation storage is not configured")
@@ -282,8 +310,16 @@ class ResidentInference:
             messages.extend(self.conversation_store.prompt_history(
                 payload["conversation_id"], payload["message_id"]))
         else:
+            continuation_depth = self.inbox.continuation_depth(payload)
+            continuation_limit_reached = (
+                event_type in self.continuation_event_types
+                and continuation_depth >= self.max_continuations
+            )
             messages = [
-                {"role": "system", "content": self.system_prompt + continuity_contract},
+                {"role": "system", "content": self.system_prompt + continuity_contract + (
+                    " Continuation budget is exhausted; use existing evidence to report complete or blocked, "
+                    "and request escalation if criteria are unmet." if continuation_limit_reached else ""
+                )},
                 {"role": "user", "content": json.dumps({"event_type": event_type, "payload": payload})},
             ]
         try:
@@ -302,6 +338,8 @@ class ResidentInference:
             if pending:
                 raise RuntimeError("Uncertain tool outcome requires reconciliation; no replay")
             descriptors = await asyncio.to_thread(self.tools.discover) if self.tools else []
+            if continuation_limit_reached:
+                descriptors = []
             definitions = [d["definition"] for d in descriptors]
             by_name = {d["tool"]: d for d in descriptors}
             while True:
@@ -316,6 +354,16 @@ class ResidentInference:
                 calls = message.get("tool_calls") or []
                 self.inbox.record(event_id, "ASSISTANT", message)
                 messages.append(message)
+                if continuation_limit_reached and calls:
+                    self.inbox.finish(event_id, "BLOCKED", {
+                        "decision": {"state": "blocked", "reason": "Continuation budget exhausted"},
+                        "objective_status": "BLOCKED",
+                        "dependency": "Bounded continuation limit reached; Steward review required",
+                        "continuation_depth": continuation_depth,
+                        "continuation_limit": self.max_continuations,
+                        "escalation_required": True,
+                    })
+                    return
                 if not calls and event_type in self.continuation_event_types:
                     try:
                         decision = json.loads(message.get("content") or "")
@@ -324,6 +372,16 @@ class ResidentInference:
                     if not isinstance(decision, dict) or decision.get("state") not in ("continue", "complete", "blocked"):
                         raise RuntimeError("Invalid activity state")
                     if decision["state"] == "continue":
+                        if continuation_limit_reached:
+                            self.inbox.finish(event_id, "BLOCKED", {
+                                "decision": decision,
+                                "objective_status": "BLOCKED",
+                                "dependency": "Bounded continuation limit reached; Steward review required",
+                                "continuation_depth": continuation_depth,
+                                "continuation_limit": self.max_continuations,
+                                "escalation_required": True,
+                            })
+                            return
                         next_step = decision.get("next_step")
                         if not isinstance(next_step, str) or not next_step.strip():
                             raise RuntimeError("Continuing activity requires next_step")

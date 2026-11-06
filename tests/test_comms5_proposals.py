@@ -1,7 +1,7 @@
 # R3 CONTROLLED TEST
 # File: tests/test_comms5_proposals.py
 # Component: R3-COMMS5-PROPOSAL-ADAPTER-TESTS
-# File Revision: 1.0.2
+# File Revision: 1.1.0
 # Created: 2026-11-06T01:39:36Z
 # Created By: Codex GPT-6, acting on Steward instruction
 # Purpose: Verify the narrow proposal-draft Comms5 contract, safe status reporting, and idempotency.
@@ -12,6 +12,7 @@
 # Changed: 2026-11-06T01:39:36Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Add permanent adapter contract tests.
 # Changed: 2026-11-06T01:48:39Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Assert proposal progress and lifecycle truthfulness remain in Grace's loaded prompt.
 # Changed: 2026-11-06T01:48:39Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Verify a readback's lifecycle controls approval claims.
+# Changed: 2026-11-06T02:15:00Z | GRACE-AUTONOMY-P2 | Codex GPT-6 | Verify bounded read-only proposal/objective lifecycle projections.
 # Supersedes: None
 # Contracts: riverview-comms-contract:5.0; hints/engineering-test-policy.md
 # Tests: `python -m unittest tests.test_comms5_proposals -v`
@@ -23,6 +24,8 @@ from pathlib import Path
 from runtime.comms5_proposals import (
     Comms5DraftClient,
     ProposalSubmissionError,
+    objective_status_capability,
+    proposal_status_capability,
     read_bearer_token,
 )
 from runtime.configuration import load_configuration
@@ -58,6 +61,16 @@ class Comms5DraftClientTests(unittest.TestCase):
                 }
             if operation == "seed_status":
                 return self.readback
+            if operation == "objective_status":
+                return {
+                    "status": "available", "executed": True,
+                    "objective": {"objective_id": "objective:test-1", "state": "WORK_ORDER_CREATED",
+                                  "revision": 3, "evidence": {"must_not_escape": "private"}},
+                    "assignment": {"state": "rework_required", "description": "must not escape"},
+                    "verification": {"decision": "INCONCLUSIVE", "summary": "must not escape"},
+                    "execution_intents": [{"status": "succeeded", "command": "must not escape"}],
+                    "event_lineage": [{"event_type": "work", "details": "must not escape"}],
+                }
             raise AssertionError("Unexpected Comms5 operation")
 
         self.client = Comms5DraftClient(
@@ -118,6 +131,33 @@ class Comms5DraftClientTests(unittest.TestCase):
         self.assertTrue(result["approval_granted"])
         self.assertFalse(result["steward_decision_required"])
 
+    def test_proposal_status_is_read_only_and_omits_protected_content(self):
+        result = self.client.proposal_status("seed:test-1")
+        self.assertEqual(self.calls, [("seed_status", {"seed_id": "seed:test-1"})])
+        self.assertEqual(result["seed_id"], "seed:test-1")
+        self.assertEqual(result["lifecycle_status"], "DRAFT")
+        self.assertNotIn("revision_record", result)
+
+    def test_objective_status_returns_bounded_execution_and_review_state(self):
+        result = self.client.objective_status("objective:test-1")
+        self.assertEqual(self.calls, [("objective_status", {"objective_id": "objective:test-1"})])
+        self.assertEqual(result["lifecycle_status"], "WORK_ORDER_CREATED")
+        self.assertEqual(result["assignment_status"], "rework_required")
+        self.assertEqual(result["verification_status"], "INCONCLUSIVE")
+        self.assertEqual(result["execution_status"], "succeeded")
+        self.assertNotIn("evidence", result)
+        self.assertNotIn("event_lineage", result)
+
+    def test_lifecycle_capabilities_are_fixed_read_only_operations(self):
+        proposal = proposal_status_capability(self.client)
+        objective = objective_status_capability(self.client)
+        self.assertTrue(proposal.read_only)
+        self.assertTrue(objective.read_only)
+        self.assertEqual(proposal.action, "proposal.status.read")
+        self.assertEqual(objective.action, "objective.status.read")
+        self.assertEqual(proposal.scope_ref, "institution:proposal-drafts")
+        self.assertEqual(objective.scope_ref, "institution:objective-status")
+
     def test_oversized_or_invalid_drafts_never_call_comms5(self):
         with self.assertRaises(ProposalSubmissionError):
             self.client.submit("é" * 4001, principal="resident:Grace", correlation_id="call-3")
@@ -153,6 +193,8 @@ class Comms5DraftClientTests(unittest.TestCase):
         self.assertIn("make substantive progress on the draft", prompt)
         self.assertIn("drafted, durably persisted, submitted for Steward decision", prompt)
         self.assertIn("Claim each state only when the corresponding authoritative operation returns evidence", prompt)
+        self.assertIn("use the corresponding read-only Comms5 status tool", prompt)
+        self.assertIn("a queued work order is not execution", prompt)
 
 
 if __name__ == "__main__":

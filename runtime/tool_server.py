@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/tool_server.py
 # Component: R3-NATIVE-TOOL-SERVER
-# File Revision: 1.2.1
+# File Revision: 1.3.0
 # Created: 2026-11-02 UTC
 # Created By: Unknown (legacy source)
 # Purpose: Independent R3 tool router, exact-grant capabilities, and durable audit.
@@ -11,7 +11,8 @@
 # Authority: R3 exact-grant contract; narrow Comms5 draft submission requires a separate authenticated Comms5 transport.
 # Changed: 2026-11-06T01:39:36Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Add opt-in, single-operation Comms5 proposal adapter.
 # Changed: 2026-11-06T01:48:39Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Report authorized backend failures separately from authorization denials.
-# Supersedes: Revision 1.1.0; preserves existing routes and capabilities.
+# Changed: 2026-11-06T02:15:00Z | GRACE-AUTONOMY-P2 | Codex GPT-6 | Add exact-grant Comms5 proposal and objective status reads.
+# Supersedes: Revision 1.2.1; preserves existing routes and write capability.
 # Contracts: docs/r3-native-tool-contract.md; riverview-comms-contract:5.0
 # Tests: tests/test_tool_server.py; tests/test_proposal_submission_integration.py
 # History/Predecessor: Git blob 36e9f176584d51b98f86ff3c88c30582712687e0
@@ -173,14 +174,19 @@ def build_router(*, audit_db, catalog=None, hosts=None, authority_db=None,
     capabilities = ()
     if comms5_proposal_url is not None:
         from runtime.comms5_proposals import (
-            Comms5DraftClient, proposal_submission_capability, read_bearer_token,
+            Comms5DraftClient, objective_status_capability,
+            proposal_status_capability, proposal_submission_capability, read_bearer_token,
         )
         client = Comms5DraftClient(
             comms5_proposal_url,
             read_bearer_token(comms5_proposal_token_file),
             classification=comms5_proposal_classification,
         )
-        capabilities = (proposal_submission_capability(client),)
+        capabilities = (
+            proposal_submission_capability(client),
+            proposal_status_capability(client),
+            objective_status_capability(client),
+        )
     return ToolRouter(audit_db, executor, authority=authority, capabilities=capabilities)
 
 

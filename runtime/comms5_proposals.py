@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: runtime/comms5_proposals.py
 # Component: R3-COMMS5-PROPOSAL-ADAPTER
-# File Revision: 1.0.4
+# File Revision: 1.1.0
 # Created: 2026-11-06T01:39:36Z
 # Created By: Codex GPT-6, acting on Steward instruction
 # Purpose: Narrowly submit Grace-authored proposal drafts to Comms5's authoritative draft store.
@@ -14,7 +14,8 @@
 # Changed: 2026-11-06T01:48:39Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Derive review/approval reporting from authoritative lifecycle state.
 # Changed: 2026-11-06T01:48:39Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Use the maintained Streamable HTTP client entrypoint.
 # Changed: 2026-11-06T01:48:39Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Document the Comms5 draft byte limit in tool discovery.
-# Supersedes: None
+# Changed: 2026-11-06T02:15:00Z | GRACE-AUTONOMY-P2 | Codex GPT-6 | Add bounded read-only proposal/objective lifecycle capabilities.
+# Supersedes: Revision 1.0.4; adds no proposal approval or work-order mutation.
 # Contracts: riverview-comms-contract:5.0; docs/r3-native-tool-contract.md
 # Tests: tests/test_comms5_proposals.py; tests/test_proposal_submission_integration.py
 # History/Predecessor: New file; no predecessor.
@@ -241,6 +242,94 @@ class Comms5DraftClient:
         ).as_dict()
 
     @staticmethod
+    def _status_metadata(data: dict, identifier_field: str, identifier: str) -> dict[str, object]:
+        """Return lifecycle identifiers and states without forwarding protected content."""
+        safe_fields = {
+            "status", "lifecycle_status", "revision", "content_sha256",
+            "specification_id", "specification_revision", "specification_sha256",
+            "objective_id", "objective_status", "promotion_status",
+            "authority_id", "work_order_id", "work_order_status",
+            "assignment_id", "assignment_status", "verification_status",
+            "decision", "steward_attention_required", "independently_accepted",
+        }
+        result: dict[str, object] = {
+            identifier_field: identifier,
+            "available": True,
+        }
+        for source in (data, *(value for value in data.values() if isinstance(value, dict))):
+            for key in safe_fields:
+                if key == "status" and source is not data:
+                    continue
+                value = source.get(key)
+                if isinstance(value, (str, bool, int)):
+                    if isinstance(value, str) and len(value) > 256:
+                        continue
+                    result[key] = value
+        return result
+
+    def proposal_status(self, seed_id: str) -> dict[str, object]:
+        if not isinstance(seed_id, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", seed_id):
+            raise ProposalSubmissionError("Comms5 seed identifier is invalid")
+        data = self._call("seed_status", {"seed_id": seed_id})
+        returned_id = self._record_id(data, "seed_id", "proposal_id", "record_id")
+        if returned_id != seed_id and data.get("seed_id") != seed_id:
+            raise ProposalSubmissionError("Comms5 status did not match the requested seed")
+        return self._status_metadata(data, "seed_id", seed_id)
+
+    def objective_status(self, objective_id: str) -> dict[str, object]:
+        if not isinstance(objective_id, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", objective_id):
+            raise ProposalSubmissionError("Comms5 objective identifier is invalid")
+        data = self._call("objective_status", {"objective_id": objective_id})
+        objective = data.get("objective")
+        returned_id = objective.get("objective_id") if isinstance(objective, dict) else data.get("objective_id")
+        if returned_id != objective_id:
+            raise ProposalSubmissionError("Comms5 status did not match the requested objective")
+        result = self._status_metadata(data, "objective_id", objective_id)
+        if isinstance(objective, dict):
+            result["lifecycle_status"] = objective.get("state")
+            result["revision"] = objective.get("revision")
+            assignment_id = objective.get("assignment_id")
+            if isinstance(assignment_id, str):
+                result["assignment_id"] = assignment_id
+        for key, source in (("assignment", data.get("assignment")),
+                             ("verification", data.get("verification"))):
+            if isinstance(source, dict):
+                state = source.get("state") or source.get("status") or source.get("decision")
+                if isinstance(state, str):
+                    result[f"{key}_status"] = state
+                if key == "assignment":
+                    assignment_id = source.get("id")
+                    if isinstance(assignment_id, str):
+                        result["assignment_id"] = assignment_id
+                    for field in ("workflow_id", "workflow_step", "correlation_id"):
+                        value = source.get(field)
+                        if isinstance(value, str) and len(value) <= 256:
+                            result[field] = value
+                elif isinstance(source.get("verifier_revision"), (str, int)):
+                    result["verifier_revision"] = source["verifier_revision"]
+        steps = data.get("steps")
+        if isinstance(steps, list):
+            result["steps"] = [
+                {key: item[key] for key in ("step_id", "order", "state", "assignment_id", "dispatch_count")
+                 if isinstance(item.get(key), (str, int)) and not isinstance(item.get(key), bool)}
+                for item in steps[:32]
+                if isinstance(item, dict)
+            ]
+        intents = data.get("execution_intents")
+        if isinstance(intents, list):
+            result["execution_intents"] = [
+                {key: item[key] for key in (
+                    "assignment_id", "worker_id", "capability", "status", "attempt_id", "failure_class"
+                ) if isinstance(item.get(key), str) and len(item[key]) <= 256}
+                for item in intents[:32]
+                if isinstance(item, dict)
+            ]
+            statuses = [item.get("status") for item in result["execution_intents"]]
+            if statuses:
+                result["execution_status"] = statuses[-1]
+        return result
+
+    @staticmethod
     def _record_id(data: dict, *keys: str) -> str:
         for key in keys:
             value = data.get(key)
@@ -289,4 +378,55 @@ def proposal_submission_capability(client: Comms5DraftClient):
         read_only=False,
         resource_ref="comms5:steward-proposals",
         scope_ref="institution:proposal-drafts",
+    )
+
+
+def proposal_status_capability(client: Comms5DraftClient):
+    from runtime.capabilities import Capability
+
+    def status(params, _context):
+        if set(params) != {"seed_id"}:
+            raise ProposalSubmissionError("Proposal status received unsupported fields")
+        return client.proposal_status(params["seed_id"])
+
+    return Capability(
+        name="r3.proposal.status",
+        action="proposal.status.read",
+        description="Read authoritative Comms5 proposal lifecycle metadata by seed ID; protected content is omitted.",
+        parameters={
+            "type": "object",
+            "properties": {"seed_id": {"type": "string", "minLength": 1}},
+            "required": ["seed_id"],
+            "additionalProperties": False,
+        },
+        contextual_executor=status,
+        read_only=True,
+        resource_ref="comms5:steward-proposals",
+        scope_ref="institution:proposal-drafts",
+    )
+
+
+def objective_status_capability(client: Comms5DraftClient):
+    from runtime.capabilities import Capability
+
+    def status(params, _context):
+        if set(params) != {"objective_id"}:
+            raise ProposalSubmissionError("Objective status received unsupported fields")
+        return client.objective_status(params["objective_id"])
+
+    return Capability(
+        name="r3.objective.status",
+        action="objective.status.read",
+        description=("Read authoritative Comms5 objective, assignment, execution, and independent verification "
+                     "states by objective ID; protected content is omitted."),
+        parameters={
+            "type": "object",
+            "properties": {"objective_id": {"type": "string", "minLength": 1}},
+            "required": ["objective_id"],
+            "additionalProperties": False,
+        },
+        contextual_executor=status,
+        read_only=True,
+        resource_ref="comms5:institutional-objectives",
+        scope_ref="institution:objective-status",
     )

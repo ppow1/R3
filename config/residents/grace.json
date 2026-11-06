@@ -16,7 +16,9 @@
     "allowed_tools": [
       "r3.status",
       "r3.host.uptime",
-      "r3.proposal.submit"
+      "r3.proposal.submit",
+      "r3.proposal.status",
+      "r3.objective.status"
     ]
   },
   "continuation_event_types": [

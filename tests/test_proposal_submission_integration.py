@@ -28,7 +28,12 @@ from pathlib import Path
 from urllib.error import HTTPError
 
 from runtime.capability_authority import R3Authority, initialize_empty_schema
-from runtime.comms5_proposals import Comms5DraftClient, proposal_submission_capability
+from runtime.comms5_proposals import (
+    Comms5DraftClient,
+    objective_status_capability,
+    proposal_status_capability,
+    proposal_submission_capability,
+)
 from runtime.native_tools import NativeTools
 from runtime.resident_identity import PREFIX, digest_secret
 from runtime.tool_server import ToolRouter, handler_for
@@ -75,17 +80,30 @@ class ProposalSubmissionIntegrationTests(unittest.TestCase):
                     "revision": 1, "lifecycle_status": "DRAFT",
                     "revision_record": {"title": "Clock", "objective": "Show date and time"},
                 }
+            if operation == "objective_status":
+                return {
+                    "status": "available", "executed": True,
+                    "objective": {"objective_id": "objective:integration-1",
+                                  "state": "WORK_ORDER_CREATED", "revision": 2},
+                    "assignment": {"state": "accepted"},
+                    "verification": {"decision": "ACCEPTED"},
+                    "execution_intents": [{"status": "succeeded", "command": "private"}],
+                }
             raise AssertionError("No approval or work-order operation may be called")
 
         comms_client = Comms5DraftClient(
             "https://comms.example/mcp", "test-bearer", call_tool=fake_comms5,
         )
-        proposal_capability = proposal_submission_capability(comms_client)
+        proposal_capabilities = (
+            proposal_submission_capability(comms_client),
+            proposal_status_capability(comms_client),
+            objective_status_capability(comms_client),
+        )
         self.tool_db = root / "tools.db"
         self.router = ToolRouter(
             self.tool_db,
             authority=self.authority,
-            capabilities=(proposal_capability,),
+            capabilities=proposal_capabilities,
         )
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler_for(self.router))
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -96,24 +114,33 @@ class ProposalSubmissionIntegrationTests(unittest.TestCase):
         self.client = NativeTools(
             f"http://127.0.0.1:{self.server.server_port}",
             timeout=5,
-            allowed_tools=("r3.proposal.submit",),
+            allowed_tools=("r3.proposal.submit", "r3.proposal.status", "r3.objective.status"),
             credential=self.token,
         )
         self.fail_submission = False
 
-    def descriptor(self):
-        matches = [x for x in self.client.discover() if x["tool"] == "r3.proposal.submit"]
+    def descriptor(self, name="r3.proposal.submit"):
+        matches = [x for x in self.client.discover() if x["tool"] == name]
         self.assertEqual(len(matches), 1)
         return matches[0]
 
-    def grant(self):
+    def grant(self, name="r3.proposal.submit"):
+        values = {
+            "r3.proposal.submit": ("comms5:steward-proposals", "proposal.draft.submit", "write",
+                                   "institution:proposal-drafts"),
+            "r3.proposal.status": ("comms5:steward-proposals", "proposal.status.read", "read",
+                                   "institution:proposal-drafts"),
+            "r3.objective.status": ("comms5:institutional-objectives", "objective.status.read", "read",
+                                    "institution:objective-status"),
+        }
+        resource, action, operation, scope = values[name]
         with sqlite3.connect(self.authority_path) as db:
             db.execute(
                 """INSERT INTO capability_grants
                    (grant_id,principal,resource_ref,action,operation,scope_ref,active,approved_by)
                    VALUES (?,?,?,?,?,?,?,?)""",
-                ("grant:proposal-test", "resident:Grace", "comms5:steward-proposals",
-                 "proposal.draft.submit", "write", "institution:proposal-drafts", 1,
+                ("grant:" + name, "resident:Grace", resource,
+                 action, operation, scope, 1,
                  "human:steward:test"),
             )
 
@@ -185,6 +212,28 @@ class ProposalSubmissionIntegrationTests(unittest.TestCase):
         self.assertEqual(outcomes, [("AUTHORIZED",), ("FAILED",)])
         with sqlite3.connect(self.tool_db) as db:
             self.assertEqual(db.execute("SELECT outcome FROM tool_audit").fetchall(), [("FAILED",)])
+
+    def test_exact_grants_expose_authoritative_proposal_and_objective_state(self):
+        self.grant("r3.proposal.status")
+        self.grant("r3.objective.status")
+        proposal = self.descriptor("r3.proposal.status")
+        self.assertTrue(proposal["read_only"])
+        proposal_result = json.loads(self.client.invoke(
+            proposal, {"seed_id": "seed:integration-1"},
+        ))["result"]
+        self.assertEqual(proposal_result["lifecycle_status"], "DRAFT")
+
+        objective = self.descriptor("r3.objective.status")
+        self.assertTrue(objective["read_only"])
+        objective_result = json.loads(self.client.invoke(
+            objective, {"objective_id": "objective:integration-1"},
+        ))["result"]
+        self.assertEqual(objective_result["lifecycle_status"], "WORK_ORDER_CREATED")
+        self.assertEqual(objective_result["assignment_status"], "accepted")
+        self.assertEqual(objective_result["execution_status"], "succeeded")
+        self.assertEqual(objective_result["verification_status"], "ACCEPTED")
+        self.assertNotIn("command", objective_result)
+        self.assertEqual([name for name, _ in self.comms_calls], ["seed_status", "objective_status"])
 
 
 if __name__ == "__main__":

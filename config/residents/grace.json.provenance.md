@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: config/residents/grace.json.provenance.md
 Component: R3-GRACE-CONFIGURATION
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-03T02:24:45.188Z
 Created By: Codex
 Purpose: Record provenance for Grace's resident runtime configuration.
@@ -13,6 +13,7 @@ Authority: R3 Steward-approved resident role and assignment continuity.
 Changed: 2026-11-03T02:24:45.188Z | R3-VERIFY-FEEDBACK-LOOP-001 | Codex | Configure Grace to resume durable independent-review feedback.
 Changed: 2026-11-06T01:39:36Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Add the narrowly scoped proposal draft capability to Grace's future model-visible list.
 Changed: 2026-11-06T01:48:39Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Correct and verify the predecessor config blob reference.
+Changed: 2026-11-06T02:15:00Z | GRACE-AUTONOMY-P2 | Codex GPT-6 | Add opt-in proposal and objective lifecycle read tools to Grace's future model-visible list.
 Supersedes: None
 Contracts: hints/file-provenance.md; hints/engineering-test-policy.md
 Tests: tests/test_resident_continuity.py; tests/test_configuration.py
@@ -20,4 +21,4 @@ History/Predecessor: Git blob 3175715dca43479f05d91a05b4534653fa2c8f84; predeces
 -->
 # Grace configuration provenance
 
-The configuration enables `REVIEW_FEEDBACK` as a durable continuation event and adds the optional R3 proposal-draft capability. The capability is only discoverable when the tool server is explicitly configured with its endpoint and restricted Comms5 service credential; R3 authority and Comms5 transport authorization remain independently required.
+The configuration enables `REVIEW_FEEDBACK` as a durable continuation event and adds optional R3 Comms5 proposal submission and lifecycle reads. These tools are only discoverable when the tool server is explicitly configured with its endpoint and restricted Comms5 service credential; R3 exact grants and Comms5 transport authorization remain independently required.

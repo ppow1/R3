@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/r3-native-tool-contract.md
 Component: R3-NATIVE-TOOL-CONTRACT
-File Revision: 1.1.1
+File Revision: 1.2.2
 Created: 2026-11-02 UTC (exact time unverified)
 Created By: Unknown (legacy source)
 Purpose: Define discovery, authorization, invocation, and external workflow adapter boundaries for R3-native tools.
@@ -12,14 +12,17 @@ Dependencies: runtime/native_tools.py; runtime/tool_server.py; runtime/capabilit
 Authority: R3 canonical exact-grant authority; Steward-directed Grace Autonomy P1 permits one narrowly scoped Comms5 draft adapter.
 Changed: 2026-11-06T01:39:36Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Document the explicit proposal-draft adapter exception and state boundaries.
 Changed: 2026-11-06T01:48:39Z | GRACE-PROPOSAL-P1 | Codex GPT-6 | Distinguish authorization denials from authorized backend failures.
-Supersedes: Revision 1.0.0; no other tool catalog or approval contract is exposed.
+Changed: 2026-11-06T02:15:00Z | GRACE-AUTONOMY-P2 | Codex GPT-6 | Add narrow proposal and objective lifecycle reads for durable continuation.
+Changed: 2026-11-06T02:24:00Z | GRACE-AUTONOMY-P2 | Codex GPT-6 | Require correlation metadata for read and write invocations.
+Changed: 2026-11-06T02:36:00Z | GRACE-AUTONOMY-P2 | Codex GPT-6 | Record the deployed Steward-only Comms5 ingress and resident service identity prerequisite.
+Supersedes: Revision 1.1.1; no broad Comms tool catalog or Steward-gated operation is exposed.
 Contracts: riverview-comms-contract:5.0; hints/engineering-test-policy.md
 Tests: tests/test_proposal_submission_integration.py
 History/Predecessor: Git blob 92a7abf6bcfa53d0eb998ca983fb47aa26a34038
 -->
 # R3 Native Tool Contract
 
-A descriptor includes a tool name, an OpenAI-compatible function definition, and a read-only flag. Invocation takes a tool name and JSON arguments and returns a structured outcome. The R3 server independently authorizes execution against the exact resident, resource, action, operation, and scope, then audits authorization and outcome. Uncertain outcomes must not be automatically replayed. Configurable transport settings belong in external configuration. No total task-duration cap.
+A descriptor includes a tool name, an OpenAI-compatible function definition, and a read-only flag. Invocation takes a tool name and JSON arguments and returns a structured outcome. Every invocation carries correlation metadata; a resident tool-call ID is used when present and read-only calls otherwise receive a generated ID. The R3 server independently authorizes execution against the exact resident, resource, action, operation, and scope, then audits authorization and outcome. Uncertain outcomes must not be automatically replayed. Configurable transport settings belong in external configuration. No total task-duration cap.
 
 ## Comms5 proposal draft adapter
 
@@ -28,3 +31,9 @@ The explicitly Steward-authorized Grace recovery adapter may expose only `r3.pro
 The resident supplies only proposal text. R3 derives authenticated principal and correlation from the verified invocation context and derives an idempotency key from that context. Comms5 remains authoritative for durable proposal identity and lifecycle status. R3 returns the Comms5 proposal ID, revision, and actual lifecycle state after a matching readback. Readback failure is reported as unverified and must be reconciled before retry; it is not reported as successful persistence.
 
 Draft submission does not approve or promote a proposal and does not create an objective or work order. `prepare_proposal_for_decision`, promotion, and work-order operations remain outside Grace's capability catalog and retain their existing Steward gates. A Comms5 draft status must not be presented as Steward approval or as `READY_FOR_STEWARD_DECISION` unless the authoritative Comms5 response says so. R3 returns 403 for authentication/authorization denials and 502 for an authorized capability's backend failure; both are durably audited under their distinct outcomes.
+
+When the integration is enabled, R3 may also expose `r3.proposal.status` and `r3.objective.status`, each protected by its own exact read grant. These fixed operations call only Comms5 `seed_status` and `objective_status`. Responses are reduced to bounded lifecycle identifiers, state, execution, and verification metadata; proposal or specification text is never forwarded. This supports explicit continuation from durable state without granting Grace proposal-decision, promotion, or work-queue authority.
+
+## Deployed Comms5 identity boundary
+
+The currently observed Camrui Comms5 ingress is Steward-authenticated: OAuth/Caddy attests the `steward` principal and the local adapter also requires a separate backend-hop credential. The R3 adapter's optional bearer-file transport is for a controlled endpoint that explicitly supports an R3 service identity. Do not point it at the Steward-only Camrui route or use the Steward backend credential as Grace's service credential. Production enablement requires a Comms5-side service identity with exact draft-write and status-read authorization, plus a matching exact R3 resident grant. The current R3 branch does not configure or activate that identity.
