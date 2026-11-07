@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/provider_runtime.py
 Component: R3A-CAPABILITY-MODULE-RUNTIME
-File Revision: 1.0.0
+File Revision: 1.1.0
 Created: 2026-11-07
 Created By: Codex GPT-6
 Purpose: Supervise generic manifest-declared capability provider processes.
@@ -11,6 +11,7 @@ Observability: Durable module lifecycle records and health handshake diagnostics
 Dependencies: r3a_runtime.protocol; r3a_runtime.capability_contracts; Store module lifecycle.
 Authority: Steward directive, "Implement the Approved Modular Foundation", 2026-11-07.
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Implement install, activation, invocation, deactivation, replacement, and failure handling for provider versions.
+Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-002 | Close admission and drain in-flight provider invocations before checkpoint and stop.
 Supersedes: None.
 Contracts: MOD-001–MOD-010; module.lifecycle v2; r3a.capability-provider.v1.
 Tests: tests/test_r3a_capability_integration_demo.py.
@@ -25,7 +26,7 @@ import json
 import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +66,12 @@ class ProviderProcess:
     socket: Path
     process: asyncio.subprocess.Process
     operation: RegisteredOperation
+    admission_open: bool = True
+    inflight: int = 0
+    drained: asyncio.Event = field(default_factory=asyncio.Event)
+
+    def __post_init__(self) -> None:
+        self.drained.set()
 
 
 class ProviderProcessManager:
@@ -135,6 +142,8 @@ class ProviderProcessManager:
         async with self._lock:
             existing = self.processes.get(key)
             if existing and existing.process.returncode is None:
+                if not existing.admission_open:
+                    raise RuntimeError("provider is stopping and no longer accepting activation or invocation")
                 return existing
             manifest = self._manifest(operation)
             rows = await self.store.rows(
@@ -236,10 +245,21 @@ class ProviderProcessManager:
     async def invoke(self, operation: RegisteredOperation, arguments: dict[str, Any],
                      context: dict[str, Any]) -> Any:
         binding = await self._ensure_active(operation)
-        response = await request(binding.socket, binding.module_id, binding.version, "execute",
-                                 {"arguments": arguments, "context": context},
-                                 timeout=operation.descriptor["execution"]["timeout_seconds"])
-        return response["result"]["provider_result"]
+        async with self._lock:
+            if self.processes.get((binding.module_id, binding.version)) is not binding or not binding.admission_open:
+                raise RuntimeError("provider is closing admission for lifecycle transition")
+            binding.inflight += 1
+            binding.drained.clear()
+        try:
+            response = await request(binding.socket, binding.module_id, binding.version, "execute",
+                                     {"arguments": arguments, "context": context},
+                                     timeout=operation.descriptor["execution"]["timeout_seconds"])
+            return response["result"]["provider_result"]
+        finally:
+            async with self._lock:
+                binding.inflight -= 1
+                if binding.inflight == 0:
+                    binding.drained.set()
 
     async def activate(self, operation: RegisteredOperation) -> dict[str, Any]:
         binding = await self._ensure_active(operation)
@@ -253,12 +273,23 @@ class ProviderProcessManager:
             if binding is None or binding.process.returncode is not None:
                 rows = await self.store.rows(
                     "SELECT lifecycle_state FROM r3a.module_registry WHERE module_id=%s AND module_version=%s", key)
+                if rows and rows[0]["lifecycle_state"] in {"ACTIVE", "ACTIVATING", "REPLACING", "STOPPING"}:
+                    await self._state(*key, "FAILED", "unavailable",
+                                      {"reason": "provider process exited before stop request"})
                 if rows and rows[0]["lifecycle_state"] != "STOPPED":
                     await self._state(*key, "STOPPED", "stopped", {"already_stopped": True})
                 self.registry.set_provider_state(*key, "STOPPED", {"already_stopped": True})
                 return {"module_id": module_id, "version": version, "stopped": True,
                         "already_stopped": True}
-            await self._state(*key, "STOPPING", "stopping")
+            binding.admission_open = False
+            await self._state(*key, "STOPPING", "draining", {"inflight_invocations": binding.inflight})
+
+        # Existing invocations own a durable CME request and are allowed to finish before stop.
+        await binding.drained.wait()
+        async with self._lock:
+            if self.processes.get(key) is not binding:
+                return {"module_id": module_id, "version": version, "stopped": True,
+                        "already_stopped": True}
             try:
                 await request(binding.socket, *key, "checkpoint")
                 await request(binding.socket, *key, "stop")
