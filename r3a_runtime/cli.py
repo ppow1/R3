@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cli.py
 Component: R3A-OPERATOR-CLI
-File Revision: 1.3.0
+File Revision: 1.4.0
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Expose operator-invoked AP0 diagnostics, CME controls and isolated backup actions.
@@ -17,6 +17,10 @@ Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Allow role- and 
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add provider-readiness reporting through the existing local CME control interface.
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Replace caller-authored readiness reports with provider-triggered checks.
 Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Accept structured objective criteria through normal durable intake.
+Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Support explicit activity-scoped grants and caller-assigned activity IDs for bounded authorization setup.
+Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Permit configured objective-reasoning or vision task class on durable objective intake.
+Changed: 2026-11-07 | R3A-AP1-N1 | Codex GPT-6 | Add idempotent, source-bound institution-event notification intake.
+Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Expose generic registered provider install, activation, deactivation, replacement and status operations through CME control.
 Supersedes: None.
 Contracts: AP0-007/008/010/013; R3A-019; AP0-M1 D8/D9; r3a.model-route-decision.v1; r3a.model-readiness.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; no model inference in this slice.
@@ -57,6 +61,15 @@ async def _run(args: argparse.Namespace) -> Any:
     if args.command in {"module-install", "module-activate", "module-replace"}:
         if args.version is not None:
             payload["version"] = args.version
+    if args.command.startswith("capability-module-"):
+        payload = {"operation_id": args.operation_id,
+                   "contract_version": args.contract_version}
+        if args.provider_version:
+            payload["provider_version"] = args.provider_version
+        if args.command == "capability-module-replace":
+            payload.update({"old_module_id": args.old_module_id,
+                            "old_version": args.old_version,
+                            "new_provider_version": args.new_provider_version})
     if args.command == "module-activate":
         payload["module_id"] = args.module_id
     elif args.command == "capability-check":
@@ -110,6 +123,17 @@ def main() -> None:
         cmd.add_argument("--version", required=name != "module-install", default=None)
         if name == "module-activate":
             cmd.add_argument("--module-id", required=True)
+    for name in ("capability-module-install", "capability-module-activate",
+                 "capability-module-deactivate", "capability-module-status",
+                 "capability-module-replace"):
+        cmd = commands.add_parser(name)
+        cmd.add_argument("--operation-id", required=True)
+        cmd.add_argument("--contract-version", default="1.0.0")
+        cmd.add_argument("--provider-version")
+        if name == "capability-module-replace":
+            cmd.add_argument("--old-module-id", required=True)
+            cmd.add_argument("--old-version", required=True)
+            cmd.add_argument("--new-provider-version", required=True)
     for name in ("capability-check", "capability-grant"):
         cmd = commands.add_parser(name)
         cmd.add_argument("--module-id", required=True)
@@ -117,7 +141,9 @@ def main() -> None:
         if name == "capability-grant":
             cmd.add_argument("--reason", required=True)
     for name in ("module-install", "module-activate", "module-stop", "module-replace",
-                 "capability-check", "capability-grant", "config-reload"):
+                 "capability-check", "capability-grant", "capability-module-install",
+                 "capability-module-activate", "capability-module-deactivate",
+                 "capability-module-status", "capability-module-replace", "config-reload"):
         commands.choices[name].add_argument("--idempotency-key")
     backup = commands.add_parser("backup")
     backup.add_argument("--output")
