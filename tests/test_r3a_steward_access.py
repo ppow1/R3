@@ -2,7 +2,7 @@
 R3 CONTROLLED TEST SOURCE
 File: tests/test_r3a_steward_access.py
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.0.8
+File Revision: 1.1.1
 Created: 2026-11-07T21:37:42Z
 Created By: Codex GPT-6
 Purpose: Verify Steward assertion validation, opaque sessions, revocation, CSRF origin policy, and CME identity delegation.
@@ -18,8 +18,11 @@ Changed: 2026-11-07T21:56:49Z | AP3-M1 | Codex GPT-6 | Assert strict config vali
 Changed: 2026-11-07T22:00:10Z | AP3-M1 | Codex GPT-6 | Verify Bitwarden remote revision and machine principal provenance persist without the secret.
 Changed: 2026-11-07T22:02:18Z | AP3-M1 | Codex GPT-6 | Assert durable denial events for invalid origins and post-logout access.
 Changed: 2026-11-07T22:03:19Z | AP3-M1 | Codex GPT-6 | Verify remote configuration rejects non-Secure session cookies.
+Changed: 2026-11-07T23:43:25Z | AP3-M1 | Codex GPT-6 | Verify replacement identity-provider binding, published principal/session response, and shared CME path.
+Changed: 2026-11-07T23:43:25Z | AP3-M1 | Codex GPT-6 | Reject malformed replacement-provider results.
+Changed: 2026-11-07T23:43:25Z | AP3-M1 | Codex GPT-6 | Verify the website session read returns the trusted provider principal.
 Supersedes: None.
-Contracts: r3a.steward-identity.v1; r3a.steward-session.v1; r3a.capability-invocation.v1.
+Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1; r3a.capability-invocation.v1.
 Tests: python -m unittest tests.test_r3a_steward_access.
 History/Predecessor: New file; initial publication recorded in Git.
 """
@@ -37,7 +40,9 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from fastapi import FastAPI
 
-from r3a_runtime.steward_access import StewardAccess, load_access_config
+from r3a_runtime.steward_access import (
+    AccessUnavailable, HmacIngressIdentityProvider, IdentityAssertion, StewardAccess, load_access_config,
+)
 
 
 class MemorySessionStore:
@@ -135,10 +140,77 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.store = MemorySessionStore()
         self.secret_provider = self.SecretProvider()
-        self.access = StewardAccess(config(), self.store, self.secret_provider, config()["identity"]["assertion_secret_ref"])
+        self.identity_provider = HmacIngressIdentityProvider(
+            config(), self.secret_provider, config()["identity"]["assertion_secret_ref"])
+        self.access = StewardAccess(config(), self.store, self.identity_provider)
         self.app = FastAPI()
         self.app.include_router(self.access.router())
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://testserver")
+
+    async def test_replaceable_identity_provider_uses_shared_session_and_grant_path(self):
+        now = datetime.now(timezone.utc)
+        class ReplacementProvider:
+            contract_id = "r3a.identity-provider.v1"
+            contract_version = "1.4.2"
+            calls = []
+
+            def authenticate(inner_self, request, *, correlation_id):
+                inner_self.calls.append(correlation_id)
+                return IdentityAssertion("portal-oidc", "steward:replacement", "oidc-jti-1",
+                                         int(time.time()), now, ("webauthn",), {"adapter": "oidc-test"})
+
+        replacement = ReplacementProvider()
+        self.access = StewardAccess(config(), self.store, replacement)
+        app = FastAPI()
+        app.include_router(self.access.router())
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://testserver") as client:
+            response = await client.post("/api/v1/steward/session",
+                                         headers={"Origin": "http://testserver",
+                                                  "X-Correlation-ID": str(uuid.uuid4())})
+            self.assertEqual(200, response.status_code)
+            payload = response.json()
+            self.assertEqual("r3a.steward-session.v1", payload["contract"])
+            self.assertEqual({"contract": "r3a.steward-principal.v1",
+                              "principal_id": "steward:replacement", "issuer": "portal-oidc",
+                              "authenticated_at": now.isoformat(), "factor_refs": ["webauthn"]},
+                             payload["principal"])
+            self.assertEqual(1, len(replacement.calls))
+            self.assertEqual("steward:replacement",
+                             next(iter(self.store.sessions.values()))["principal_id"])
+            current = await client.get("/api/v1/steward/session")
+            self.assertEqual(200, current.status_code)
+            self.assertEqual("steward:replacement", current.json()["principal"]["principal_id"])
+            invocation = {"contract_id": "r3a.capability-invocation.v1",
+                          "operation_id": "institution.directory.discover",
+                          "operation_contract_version": "1.0.0", "invocation_id": str(uuid.uuid4()),
+                          "idempotency_key": str(uuid.uuid4()), "caller": {"principal_id": "browser:fake"},
+                          "input": {}}
+
+            async def fake_control(_socket, operation, payload, idempotency_key, timeout):
+                self.assertEqual("capability.invoke", operation)
+                self.assertEqual("steward:replacement", payload["request"]["caller"]["principal_id"])
+                return {"state": "SUCCEEDED", "authorization": {"audit_event_id": "cme-audit"}}
+
+            with patch("r3a_runtime.control.control_request", new=AsyncMock(side_effect=fake_control)):
+                result = await client.post("/api/v1/steward/operations/invoke",
+                                           json={"request": invocation},
+                                           headers={"Origin": "http://testserver"})
+            self.assertEqual(200, result.status_code)
+            ended = await client.delete("/api/v1/steward/session", headers={"Origin": "http://testserver"})
+            self.assertEqual({"contract": "r3a.steward-session.v1", "state": "revoked",
+                              "revoked": True, "principal_id": "steward:replacement",
+                              "correlation_id": ended.json()["correlation_id"]}, ended.json())
+
+    def test_rejects_unknown_identity_provider_contract_version(self):
+        provider = type("WrongProvider", (), {"contract_id": "r3a.identity-provider.v1",
+                                                "contract_version": "2.0.0"})()
+        with self.assertRaisesRegex(AccessUnavailable, "identity_provider_contract_unsupported"):
+            StewardAccess(config(), self.store, provider)
+
+    def test_rejects_malformed_identity_provider_result(self):
+        with self.assertRaisesRegex(AccessUnavailable, "identity_provider_contract_result_invalid"):
+            StewardAccess._validate_provider_assertion({"principal_id": "browser:forged"})
 
     async def asyncTearDown(self):
         await self.client.aclose()
@@ -162,6 +234,7 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post("/api/v1/steward/session", headers=assertion_headers())
         self.assertEqual(200, response.status_code)
         self.assertEqual("steward:test", response.json()["principal_id"])
+        self.assertEqual("r3a.steward-principal.v1", response.json()["principal"]["contract"])
         self.assertEqual([], response.json()["factor_refs"])
         self.assertTrue(self.secret_provider.leases[-1].closed)
         token = self.client.cookies.get("r3_steward_session")

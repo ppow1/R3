@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.steward-session.v1",
+  "title": "R3A Steward session and principal contract",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/sessionAuthenticated" },
+    { "$ref": "#/$defs/sessionRevoked" }
+  ],
+  "$defs": {
+    "sessionAuthenticated": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "state", "principal", "principal_id", "authenticated_at", "factor_refs", "expires_at", "freshness", "correlation_id"],
+      "properties": {
+        "contract": { "const": "r3a.steward-session.v1" },
+        "state": { "const": "authenticated" },
+        "principal": { "$ref": "steward-principal.v1.schema.json" },
+        "principal_id": { "type": "string", "minLength": 1 },
+        "authenticated_at": { "type": "string", "format": "date-time" },
+        "factor_refs": { "type": "array", "items": { "type": "string" } },
+        "expires_at": { "type": "string", "format": "date-time" },
+        "freshness": { "const": "current" },
+        "correlation_id": { "type": "string", "format": "uuid" }
+      }
+    },
+    "sessionRevoked": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "state", "revoked", "principal_id", "correlation_id"],
+      "properties": {
+        "contract": { "const": "r3a.steward-session.v1" },
+        "state": { "const": "revoked" },
+        "revoked": { "const": true },
+        "principal_id": { "type": "string", "minLength": 1 },
+        "correlation_id": { "type": "string", "format": "uuid" }
+      }
+    }
+  }
+}

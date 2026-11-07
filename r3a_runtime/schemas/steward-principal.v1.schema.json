@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.steward-principal.v1",
+  "title": "R3A authenticated Steward principal projection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "principal_id", "issuer", "authenticated_at", "factor_refs"],
+  "properties": {
+    "contract": { "const": "r3a.steward-principal.v1" },
+    "principal_id": { "type": "string", "minLength": 1 },
+    "issuer": { "type": "string", "minLength": 1 },
+    "authenticated_at": { "type": "string", "format": "date-time" },
+    "factor_refs": { "type": "array", "items": { "type": "string" } }
+  }
+}
