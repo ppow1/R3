@@ -57,6 +57,9 @@ from .contracts import (ContractEnvelope, ContractOutcome, ReadinessObservation,
 from .readiness import (READINESS_PROVIDER_CONTRACT_ID, ReadinessCheckRequest,
                         ModelReadinessProvider, create_readiness_provider)
 from .db import InvalidTransition, Store, utcnow
+from .capability_contracts import (validate_invocation_request, validate_invocation_result,
+                                   CapabilityContractError, validate_json)
+from .engineering import EngineeringWorkOrder, VerificationResult, validate_completion
 from .diagnostics import make_server
 from .knowledge import retrieve
 from .acceptance import (AcceptanceCriteriaRequired, OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
@@ -853,8 +856,9 @@ class CME:
             query = arguments["query"]
             if not isinstance(query, str) or not query.strip():
                 raise ValueError("institution.knowledge.read query must be nonempty text")
+        registry = getattr(self.settings, "capability_registry", None)
         try:
-            registered_operation = self.settings.capability_registry.resolve(capability_id)
+            registered_operation = registry.resolve(capability_id) if registry is not None else None
         except KeyError:
             registered_operation = None
         if capability_id != "institution.knowledge.read" and registered_operation is None and arguments:
@@ -898,12 +902,133 @@ class CME:
                 "arguments": arguments, "evidence": evidence,
                 "authorization": authorization, "observed_at": utcnow().isoformat()}
 
+    async def invoke_capability(self, request: dict[str, Any], *,
+                                work_order: EngineeringWorkOrder) -> dict[str, Any]:
+        """CME-only canonical dispatcher for AP2 operations, including isolated writes."""
+        if not isinstance(work_order, EngineeringWorkOrder):
+            raise TypeError("canonical Engineering invocation requires a validated work order")
+        if request.get("contract_id") != "r3a.capability-invocation.v1":
+            raise CapabilityContractError("CME requires r3a.capability-invocation.v1")
+        operation = self.settings.capability_registry.resolve(
+            request.get("operation_id", ""), request.get("operation_contract_version", ""))
+        descriptor = operation.descriptor
+        checked = validate_invocation_request(request, descriptor)
+        order = work_order.to_dict()
+        if (checked["work_order"] != {"work_order_id": work_order.work_order_id,
+                                     "version": work_order.work_order_version}
+                or checked["activity_id"] != work_order.activity_id
+                or checked["attempt_id"] != work_order.attempt_id
+                or checked["correlation_id"] != work_order.correlation_id
+                or checked["caller"]["resident_id"] != work_order.resident_id
+                or checked["config_revision"] != work_order.config_revision):
+            raise PermissionError("invocation lineage does not match its immutable Engineering work order")
+        if not any(ref.to_dict()["operation_id"] == descriptor["operation_id"]
+                   and ref.contract_version == descriptor["contract_version"]
+                   and ref.effect_class == descriptor["effect_class"]
+                   and ref.target == checked["target"] and ref.inputs == checked["input"]
+                   for ref in work_order.operation_refs):
+            raise PermissionError("operation, inputs, target, or effect are outside the authorized work order")
+        stored = await self.store.get_engineering_work_order(work_order.work_order_id)
+        if (stored is None or stored.get("state") != "EXECUTING"
+                or stored.get("details", {}).get("work_order") != order):
+            raise PermissionError("invocation requires the matching durable EXECUTING work order")
+        if descriptor["effect_class"] == "external_write":
+            raise PermissionError("this isolated Engineering dispatcher does not execute external_write")
+        started_at = utcnow().isoformat()
+        authorization = await self._authorize_capability(
+            descriptor["operation_id"], activity_id=work_order.activity_id,
+            attempt_id=work_order.attempt_id, request_id=checked["invocation_id"],
+            resident_id=work_order.resident_id,
+            context={"dispatcher": "CME", "invocation_id": checked["invocation_id"],
+                     "idempotency_key": checked["idempotency_key"],
+                     "effect_class": descriptor["effect_class"],
+                     "required_grants": descriptor["required_grants"],
+                     "target": checked["target"], "work_order_id": work_order.work_order_id,
+                     "work_order_version": work_order.work_order_version,
+                     "config_revision": work_order.config_revision})
+        auth_ref = {"provider_id": authorization["provider_id"], "allowed": True,
+                    "decision_id": authorization["decision_id"],
+                    "audit_event_id": authorization["audit_event_id"],
+                    "policy_revision": authorization["policy_revision"],
+                    "config_revision": authorization["config_revision"]}
+        canonical_digest = hashlib.sha256(json.dumps(checked, sort_keys=True,
+                                                    separators=(",", ":")).encode()).hexdigest()
+        existing = await self.store.begin_capability_invocation(checked, canonical_digest, auth_ref)
+        if existing["state"] == "SUCCEEDED" and existing.get("result") is not None:
+            return existing["result"]
+        if existing["state"] != "STARTED":
+            raise RuntimeError(f"invocation requires reconciliation from durable state {existing['state']}")
+        if not descriptor["recovery"]["replay_safe"]:
+            raise RuntimeError("interrupted invocation is not replay safe; reconciliation is required")
+        provider = operation.load_provider()
+        try:
+            output = await asyncio.to_thread(provider.invoke, checked["input"], context={
+                "invocation_id": checked["invocation_id"], "idempotency_key": checked["idempotency_key"],
+                "activity_id": checked["activity_id"], "attempt_id": checked["attempt_id"],
+                "correlation_id": checked["correlation_id"], "target": checked["target"],
+                "work_order": order, "effect_class": descriptor["effect_class"]})
+        except Exception as exc:
+            finished = utcnow().isoformat()
+            result = {"contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+                      "invocation_id": checked["invocation_id"], "operation_id": descriptor["operation_id"],
+                      "operation_contract_version": descriptor["contract_version"],
+                      "activity_id": checked["activity_id"], "attempt_id": checked["attempt_id"],
+                      "correlation_id": checked["correlation_id"],
+                      "provider": {k: descriptor["provider"][k] for k in
+                                   ("provider_id", "provider_version", "artifact_sha256")},
+                      "outcome": "FAILED", "started_at": started_at, "finished_at": finished,
+                      "authorization": auth_ref, "effect_disposition": "UNKNOWN", "output": None,
+                      "error": {"type": type(exc).__name__, "message": str(exc)}, "evidence": [],
+                      "retryable": descriptor["recovery"]["replay_safe"],
+                      "reconciliation_ref": checked["idempotency_key"]}
+            await self.store.finish_capability_invocation(checked["idempotency_key"], canonical_digest, result)
+            raise
+        validate_json(output, descriptor["output_schema"], path="$.output")
+        finished_at = utcnow().isoformat()
+        result = {"contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+                  "invocation_id": checked["invocation_id"], "operation_id": descriptor["operation_id"],
+                  "operation_contract_version": descriptor["contract_version"],
+                  "activity_id": checked["activity_id"], "attempt_id": checked["attempt_id"],
+                  "correlation_id": checked["correlation_id"],
+                  "provider": {k: descriptor["provider"][k] for k in
+                               ("provider_id", "provider_version", "artifact_sha256")},
+                  "outcome": "SUCCEEDED", "started_at": started_at, "finished_at": finished_at,
+                  "authorization": auth_ref,
+                  "effect_disposition": "NOT_STARTED" if descriptor["effect_class"] == "read" else "COMMITTED",
+                  "output": output, "error": None,
+                  "evidence": [{"kind": "provider_output", "operation_id": descriptor["operation_id"]}],
+                  "retryable": False, "reconciliation_ref": None}
+        validate_invocation_result(result, descriptor)
+        await self.store.finish_capability_invocation(checked["idempotency_key"], canonical_digest, result)
+        return result
+
+    async def complete_engineering_work_order(self, work_order: EngineeringWorkOrder,
+                                              verification: VerificationResult) -> bool:
+        """Let CME advance an Engineering order only after the independent PASS gate validates."""
+        if not isinstance(work_order, EngineeringWorkOrder) or not isinstance(verification, VerificationResult):
+            raise TypeError("CME completion requires typed work-order and verification contracts")
+        validate_completion(work_order, verification)
+        stored = await self.store.get_engineering_work_order(work_order.work_order_id)
+        if (stored is None or stored.get("state") != "VERIFYING"
+                or stored.get("details", {}).get("work_order") != work_order.to_dict()):
+            raise PermissionError("CME completion requires the matching durable VERIFYING work order")
+        return await self.store.transition_engineering_work_order(
+            work_order.work_order_id, "COMPLETED", work_order.activity_id, work_order.attempt_id,
+            work_order.correlation_id, "CME accepted independent verification PASS",
+            {"verification_id": verification.verification_id,
+             "verifier_id": verification.verifier_id,
+             "artifact_digests": list(verification.artifact_digests)},
+            work_order=work_order, verification=verification)
+
     def _resident_tools(self) -> tuple[dict[str, Any], ...]:
         tools = list(_RESIDENT_TOOLS)
         # This is the temporary resident-capability-tool compatibility projection.
         # AP2's canonical dispatcher consumes all registered effect classes.
-        for discovery in self.settings.capability_registry.discover():
-            operation = self.settings.capability_registry.resolve(
+        registry = getattr(self.settings, "capability_registry", None)
+        if registry is None:
+            return tuple(tools)
+        for discovery in registry.discover():
+            operation = registry.resolve(
                 discovery["descriptor"]["operation_id"], discovery["descriptor"]["contract_version"])
             if operation.descriptor["effect_class"] == "read":
                 tools.append(operation.resident_tool_projection())

@@ -780,6 +780,63 @@ class Store:
                                      {"module_id": module_id, "result": result, **(details or {})},
                                      outcome="accepted" if result == "allowed" else "denied")
 
+    async def get_capability_invocation(self, idempotency_key: str) -> dict[str, Any] | None:
+        """Load a durable canonical invocation by its stable idempotency key."""
+        rows = await self.rows(
+            "SELECT idempotency_key,request_digest,state,result,evidence,updated_at "
+            "FROM r3a.capability_invocations WHERE idempotency_key=%s", (idempotency_key,))
+        return rows[0] if rows else None
+
+    async def begin_capability_invocation(self, request: dict[str, Any], request_digest: str,
+                                          authorization: dict[str, Any]) -> dict[str, Any]:
+        """Persist authorization and STARTED before effects; conflicting key reuse fails closed."""
+        key = request.get("idempotency_key")
+        if not isinstance(key, str) or not key:
+            raise ValueError("canonical invocation requires an idempotency key")
+        async with self.pool.connection() as conn, conn.transaction():
+            existing = await (await conn.execute(
+                "SELECT idempotency_key,request_digest,state,result,evidence,updated_at "
+                "FROM r3a.capability_invocations WHERE idempotency_key=%s FOR UPDATE", (key,))).fetchone()
+            if existing:
+                if existing["request_digest"] != request_digest:
+                    raise ValueError("idempotency key already belongs to a different canonical request")
+                return existing
+            await conn.execute(
+                "INSERT INTO r3a.capability_invocations(idempotency_key,invocation_id,operation_id,"
+                "request_digest,state,request,authorization,evidence) VALUES (%s,%s,%s,%s,'STARTED',%s,%s,%s)",
+                (key, request["invocation_id"], request["operation_id"], request_digest,
+                 json.dumps(request), json.dumps(authorization), json.dumps({"phase": "authorized"})))
+            await self._event(conn, "capability.invocation.started", "capability_invocation",
+                              request["invocation_id"], None, None, None, "STARTED",
+                              "CME authorized canonical invocation before provider execution",
+                              {"idempotency_key": key, "operation_id": request["operation_id"],
+                               "authorization": authorization}, correlation_id=uuid.UUID(request["correlation_id"]))
+            return {"idempotency_key": key, "request_digest": request_digest,
+                    "state": "STARTED", "result": None, "evidence": {"phase": "authorized"}}
+
+    async def finish_capability_invocation(self, idempotency_key: str, request_digest: str,
+                                           result: dict[str, Any]) -> None:
+        """Commit canonical invocation result and audit evidence atomically."""
+        async with self.pool.connection() as conn, conn.transaction():
+            row = await (await conn.execute(
+                "SELECT invocation_id,operation_id,request_digest,state,result FROM r3a.capability_invocations "
+                "WHERE idempotency_key=%s FOR UPDATE", (idempotency_key,))).fetchone()
+            if row is None or row["request_digest"] != request_digest:
+                raise ValueError("canonical invocation STARTED record is missing or mismatched")
+            if row["state"] == "SUCCEEDED":
+                if row["result"] != result:
+                    raise ValueError("completed idempotent invocation result changed")
+                return
+            await conn.execute(
+                "UPDATE r3a.capability_invocations SET state=%s,result=%s,evidence=%s,updated_at=clock_timestamp() "
+                "WHERE idempotency_key=%s",
+                (result["outcome"], json.dumps(result), json.dumps(result["evidence"]), idempotency_key))
+            await self._event(conn, "capability.invocation.finished", "capability_invocation",
+                              row["invocation_id"], None, None, "STARTED", result["outcome"],
+                              "CME persisted canonical invocation result",
+                              {"idempotency_key": idempotency_key, "operation_id": row["operation_id"],
+                               "invocation_result": result}, outcome=result["outcome"].lower())
+
     async def register_module(self, manifest: dict[str, Any], lifecycle: str = "INSTALLED",
                               health: str = "unknown", diagnostic: dict[str, Any] | None = None) -> None:
         async with self.pool.connection() as conn, conn.transaction():
