@@ -29,12 +29,20 @@ class CapabilityContractError(ValueError):
     """A capability operation, invocation, result, or registration is invalid."""
 
 
+@dataclass(frozen=True)
+class CapabilityProviderResult:
+    """Typed provider boundary for operations whose output differs from its evidence."""
+
+    output: Any
+    evidence: Any
+
+
 @runtime_checkable
 class CapabilityProvider(Protocol):
     """Provider API. CME performs auth/dispatch, then invokes this typed boundary."""
 
     def invoke(self, arguments: dict[str, Any], *, context: dict[str, Any]) -> Any:
-        """Execute one operation and return the value validated against output_schema."""
+        """Execute one operation; return output or CapabilityProviderResult(output, evidence)."""
 
 
 def _load_schema(name: str) -> dict[str, Any]:
@@ -250,6 +258,13 @@ def validate_invocation_result(result: Any, descriptor: dict[str, Any]) -> dict[
     elif result["outcome"] in {"FAILED", "DENIED", "DEFERRED", "UNKNOWN"}:
         if result["error"] is None or result["output"] is not None:
             raise CapabilityContractError("non-success result requires error and forbids output")
+    if result["outcome"] == "SUCCEEDED":
+        evidence_schema = descriptor["evidence"]["schema"]
+        if evidence_schema.get("type") == "array":
+            validate_json(result["evidence"], evidence_schema, path="$.evidence")
+        else:
+            for index, item in enumerate(result["evidence"]):
+                validate_json(item, evidence_schema, path=f"$.evidence[{index}]")
     if result["outcome"] == "DENIED" and result["effect_disposition"] != "NOT_STARTED":
         raise CapabilityContractError("DENIED invocation must have NOT_STARTED effect disposition")
     if result["outcome"] == "SUCCEEDED" and (result["authorization"] is None
@@ -270,6 +285,28 @@ def validate_invocation_result(result: Any, descriptor: dict[str, Any]) -> dict[
     if result["outcome"] == "UNKNOWN" and result["effect_disposition"] != "UNKNOWN":
         raise CapabilityContractError("UNKNOWN result requires UNKNOWN effect disposition")
     return copy.deepcopy(result)
+
+
+def normalize_provider_result(value: Any, descriptor: dict[str, Any]) -> tuple[Any, Any]:
+    """Validate provider output and evidence without inventing evidence fields.
+
+    Existing providers may return their evidence as the output when it satisfies both
+    schemas. Providers with distinct shapes return CapabilityProviderResult explicitly.
+    """
+    if isinstance(value, CapabilityProviderResult):
+        output, evidence = value.output, value.evidence
+    else:
+        output = evidence = value
+    validate_json(output, descriptor["output_schema"], path="$.output")
+    evidence_schema = descriptor["evidence"]["schema"]
+    if evidence_schema.get("type") == "array":
+        validate_json(evidence, evidence_schema, path="$.evidence")
+    elif isinstance(evidence, list):
+        for index, item in enumerate(evidence):
+            validate_json(item, evidence_schema, path=f"$.evidence[{index}]")
+    else:
+        validate_json(evidence, evidence_schema, path="$.evidence")
+    return copy.deepcopy(output), copy.deepcopy(evidence)
 
 
 @dataclass(frozen=True)

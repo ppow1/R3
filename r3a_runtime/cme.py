@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.6.0
+File Revision: 1.6.1
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -28,6 +28,7 @@ Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | En
 Changed: 2026-11-07T02:41:51Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Persist and validate a versioned acceptance envelope on objective intake.
 Changed: 2026-11-07T03:59:26Z | R3A-019-SUSTAINED-OPERATION | Codex GPT-6 | Block legacy or bypassed objectives that lack explicit acceptance criteria.
 Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Expose authorization decision identity separately from audit-event identity.
+Changed: 2026-11-07 | R3A-MODULAR-CONFORMANCE | Codex GPT-6 | Normalize typed provider output/evidence through existing CME invocation adapters.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py; tests/test_r3a_telemetry_providers.py; tests/test_r3a_capability_contracts.py; tests/test_r3a_engineering.py.
@@ -58,7 +59,7 @@ from .readiness import (READINESS_PROVIDER_CONTRACT_ID, ReadinessCheckRequest,
                         ModelReadinessProvider, create_readiness_provider)
 from .db import InvalidTransition, Store, utcnow
 from .capability_contracts import (validate_invocation_request, validate_invocation_result,
-                                   CapabilityContractError, validate_json)
+                                   CapabilityContractError, validate_json, normalize_provider_result)
 from .engineering import EngineeringWorkOrder, VerificationResult, validate_completion
 from .diagnostics import make_server
 from .knowledge import retrieve
@@ -891,9 +892,10 @@ class CME:
                                                          "correlation_id": str(activity.get("correlation_id")
                                                                                or activity["activity_id"]),
                                                          "operation_id": capability_id})
-            from .capability_contracts import validate_json
-            validate_json(provided, registered_operation.descriptor["output_schema"], path="$.output")
-            evidence.extend(provided)
+            _, provider_evidence = normalize_provider_result(
+                provided, registered_operation.descriptor)
+            evidence.extend(provider_evidence if isinstance(provider_evidence, list)
+                            else [provider_evidence])
         else:
             evidence.extend(await self._read_runtime_capability(capability_id))
         return {"contract_id": tool["contract_id"],
@@ -983,7 +985,7 @@ class CME:
                       "reconciliation_ref": checked["idempotency_key"]}
             await self.store.finish_capability_invocation(checked["idempotency_key"], canonical_digest, result)
             raise
-        validate_json(output, descriptor["output_schema"], path="$.output")
+        output, provider_evidence = normalize_provider_result(output, descriptor)
         finished_at = utcnow().isoformat()
         result = {"contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
                   "invocation_id": checked["invocation_id"], "operation_id": descriptor["operation_id"],
@@ -996,7 +998,7 @@ class CME:
                   "authorization": auth_ref,
                   "effect_disposition": "NOT_STARTED" if descriptor["effect_class"] == "read" else "COMMITTED",
                   "output": output, "error": None,
-                  "evidence": [{"kind": "provider_output", "operation_id": descriptor["operation_id"]}],
+                  "evidence": provider_evidence if isinstance(provider_evidence, list) else [provider_evidence],
                   "retryable": False, "reconciliation_ref": None}
         validate_invocation_result(result, descriptor)
         await self.store.finish_capability_invocation(checked["idempotency_key"], canonical_digest, result)

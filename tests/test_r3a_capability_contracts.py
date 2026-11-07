@@ -7,10 +7,12 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from r3a_runtime.capability_contracts import (
-    CapabilityContractError, CapabilityRegistry, validate_invocation_request,
-    validate_invocation_result, validate_operation, operation_from_manifest,
+    CapabilityContractError, CapabilityProviderResult, CapabilityRegistry, validate_invocation_request,
+    validate_invocation_result, validate_operation, operation_from_manifest, validate_json,
+    normalize_provider_result,
 )
 from r3a_runtime.config import load_settings
 
@@ -46,10 +48,56 @@ class CapabilityContractTests(unittest.TestCase):
         self.assertEqual(1, len(discovered))
         self.assertEqual("registered", discovered[0]["registry_observation"]["state"])
         self.assertNotIn("authorized", discovered[0]["registry_observation"])
+        discovered_descriptor = discovered[0]["descriptor"]
+        self.assertEqual(self.descriptor["input_schema"], discovered_descriptor["input_schema"])
+        self.assertEqual(self.descriptor["output_schema"], discovered_descriptor["output_schema"])
+        self.assertEqual("read", discovered_descriptor["effect_class"])
+        self.assertEqual(self.descriptor["required_grants"], discovered_descriptor["required_grants"])
+        self.assertEqual(self.descriptor["target_scope_schema"], discovered_descriptor["target_scope_schema"])
         provider = self.registered.load_provider()
         self.assertTrue(callable(provider.invoke))
         self.assertEqual("octominer_telemetry_read",
                          self.registered.resident_tool_projection()["name"])
+
+    def test_octominer_resolves_and_runs_through_common_provider_and_result_contract(self):
+        provider = self.registered.load_provider()
+        source_output = [{"source_id": "gpu.telemetry.fixture",
+                          "content": {"available": False, "error": "fixture_only"},
+                          "sha256": "a" * 64}]
+        with patch("r3a_plugins.octominer_telemetry.plugin.read_telemetry",
+                   return_value=source_output):
+            output = provider.invoke({}, context={"invocation_id": "fixture-01"})
+        validate_json(output, self.descriptor["output_schema"], path="$.output")
+        validate_json(output, self.descriptor["evidence"]["schema"], path="$.evidence")
+        result = fixture("octominer.invocation.result.v1.json")
+        result["output"] = output
+        result["evidence"] = output
+        self.assertEqual("SUCCEEDED", validate_invocation_result(result, self.descriptor)["outcome"])
+
+    def test_provider_resolution_rejects_artifact_digest_mismatch(self):
+        invalid = json.loads(json.dumps(self.descriptor))
+        invalid["provider"]["artifact_sha256"] = "0" * 64
+        registry = CapabilityRegistry()
+        registered = registry.register(invalid, {"host_id": "fixture"})
+        with self.assertRaisesRegex(CapabilityContractError, "source does not match"):
+            registered.load_provider()
+
+    def test_provider_can_return_distinct_typed_output_and_evidence(self):
+        descriptor = json.loads(json.dumps(self.descriptor))
+        descriptor["output_schema"] = {"type": "object", "required": ["count"],
+                                        "properties": {"count": {"type": "integer"}},
+                                        "additionalProperties": False}
+        descriptor["evidence"]["schema"] = {"type": "object", "required": ["source_id", "sha256"],
+                                              "properties": {"source_id": {"type": "string"},
+                                                             "sha256": {"type": "string"}},
+                                              "additionalProperties": False}
+        result = normalize_provider_result(
+            CapabilityProviderResult({"count": 3}, {"source_id": "fixture", "sha256": "a" * 64}),
+            descriptor)
+        self.assertEqual({"count": 3}, result[0])
+        self.assertEqual({"source_id": "fixture", "sha256": "a" * 64}, result[1])
+        with self.assertRaisesRegex(CapabilityContractError, r"\$\.evidence"):
+            normalize_provider_result({"count": 3}, descriptor)
 
     def test_contract_validation_rejects_unknown_fields_wrong_version_and_scope(self):
         request = fixture("octominer.invocation.request.v1.json")
@@ -100,6 +148,34 @@ class CapabilityContractTests(unittest.TestCase):
         result["authorization"] = None
         with self.assertRaises(CapabilityContractError):
             validate_invocation_result(result, self.descriptor)
+
+    def test_result_evidence_schema_and_error_outcomes_are_conformance_checked(self):
+        descriptor = json.loads(json.dumps(self.descriptor))
+        descriptor["evidence"]["schema"] = {
+            "type": "array", "items": {"type": "object", "required": ["source_id", "sha256"],
+                                           "properties": {"source_id": {"type": "string"},
+                                                          "sha256": {"type": "string"}},
+                                           "additionalProperties": True}}
+        result = fixture("octominer.invocation.result.v1.json")
+        self.assertEqual("SUCCEEDED", validate_invocation_result(result, descriptor)["outcome"])
+        malformed = json.loads(json.dumps(result))
+        malformed["evidence"][0].pop("sha256")
+        with self.assertRaisesRegex(CapabilityContractError, "missing required fields"):
+            validate_invocation_result(malformed, descriptor)
+
+        failed = json.loads(json.dumps(result))
+        failed.update({"outcome": "FAILED", "effect_disposition": "NOT_STARTED",
+                       "output": None, "error": {"type": "TimeoutError", "message": "fixture timeout"},
+                       "retryable": True})
+        self.assertEqual("FAILED", validate_invocation_result(failed, descriptor)["outcome"])
+        failed["output"] = []
+        with self.assertRaisesRegex(CapabilityContractError, "forbids output"):
+            validate_invocation_result(failed, descriptor)
+
+        wrong_provider = json.loads(json.dumps(result))
+        wrong_provider["provider"]["artifact_sha256"] = "0" * 64
+        with self.assertRaisesRegex(CapabilityContractError, "provider provenance"):
+            validate_invocation_result(wrong_provider, descriptor)
 
     def test_canonical_manifest_needs_no_read_only_family_fields(self):
         canonical = {"schema_version": 1, "plugin_id": self.manifest["plugin_id"],
