@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.0.8
+File Revision: 1.0.9
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -18,10 +18,11 @@ Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-001 | ChatGPT GPT-6 | Index manifes
 Changed: 2026-11-04 UTC | R3-GRANT-RUNBOOK-MIGRATION | ChatGPT GPT-6 | Direct all new grant/delegation runbooks to R3
 Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Index resident avatar implementation notes
 Changed: 2026-10-31 UTC | R3-COMMS-001 | ChatGPT GPT-6 | Index mandatory Comms incident capture
+Changed: 2026-11-07T21:44:36Z | AP3-M1 | Codex GPT-6 | Index the Steward authentication/session contract and portal prototype.
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Manual source/index review; no automated tests run.
-History/Predecessor: Git blob 7747ef612528c990621bfb9e907473ac68da925a
+History/Predecessor: Git blob a076a5ad0a13433a4e4ad1ccf7b8f029a5c6d06d at commit db46df7a04c694f0e7508d181a3a65b296cc6d16.
 -->
 # AI_HINTS.md — Riverview 3
 
@@ -56,5 +57,6 @@ Start with [the hints index](hints/README.md). Keep this root file short; put de
 - [R3A architecture baseline, AP0 specification, roadmap, and contracts](docs/architecture/R3A_ARCHITECTURE_CHARTER.md)
 - [Deployment and command execution](hints/deployment.md) — [manifest-driven runbook](docs/runbooks/R3_MANIFEST_DEPLOYMENT.md) and [deployment scripts](scripts/deployment/Deploy-R3.ps1) (currently plan-only; no live activation)
 - [Resident avatar system](hints/resident-avatar-system.md) — replaceable website avatar runtime, browser animation API, and pending authorized backend connection
+- [AP3 Steward access](docs/architecture/R3A_AP3_STEWARD_ACCESS.md) — authenticated ingress/session boundary, CME authorization delegation, and transport availability.
 
 When asked to add material to AI_HINTS, update a focused `hints/` document and add or adjust a concise pointer here only if needed.

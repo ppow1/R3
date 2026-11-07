@@ -1,0 +1,74 @@
+<!--
+R3 CONTROLLED DOCUMENT
+File: web/steward.html
+Component: R3A-AP3-STEWARD-ACCESS
+File Revision: 1.0.1
+Created: 2026-11-07T21:43:17Z
+Created By: Codex GPT-6
+Purpose: Provide a same-origin, touch-friendly Steward session and CME operation interface.
+Execution Model: Browser calls the optional same-origin Steward API; identity assertion is supplied by configured ingress.
+Observability: Shows current session, freshness, operation response, and correlation/audit identifiers.
+Dependencies: /api/v1/steward/session; /api/v1/steward/status; /api/v1/steward/operations/invoke.
+Authority: AP3-M1 Issue #49; no public access default.
+Changed: 2026-11-07T21:43:17Z | AP3-M1 | Codex GPT-6 | Add the mobile-friendly authenticated access surface.
+Changed: 2026-11-07T21:48:11Z | AP3-M1 | Codex GPT-6 | Load controls from same-origin script under a restrictive CSP.
+Supersedes: None.
+Contracts: r3a.steward-session.v1; r3a.steward-operation-result.v1; r3a.steward-access-status.v1.
+Tests: tests/test_r3a_steward_access.py; remote interface verification awaits configured transport.
+History/Predecessor: New file; initial publication recorded in Git.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>R3 Steward Access</title>
+  <style>
+    :root{font:16px system-ui,sans-serif;color:#edf4fc;background:#091522;color-scheme:dark}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;padding:clamp(16px,4vw,40px);background:radial-gradient(ellipse at top,#1b3853,#091522 62%)}
+    main{width:min(760px,100%);margin:0 auto}
+    h1{font-size:clamp(1.5rem,4vw,2rem);margin:.2rem 0}
+    p{color:#c8d9ea;line-height:1.55}
+    section{margin:18px 0;padding:18px;border:1px solid #9dbce544;border-radius:14px;background:#102238aa}
+    button{min-height:46px;padding:10px 16px;border:1px solid #9dbce577;border-radius:9px;background:#244566;color:#fff;font:inherit;cursor:pointer}
+    button:focus-visible,textarea:focus-visible{outline:3px solid #acd3ff;outline-offset:2px}
+    .actions{display:flex;gap:10px;flex-wrap:wrap}
+    .state{font-weight:650;color:#d6c79a}
+    label{display:block;margin:14px 0 6px;font-weight:600}
+    textarea{width:100%;min-height:220px;resize:vertical;padding:12px;border:1px solid #9dbce555;border-radius:9px;background:#071421;color:#eaf4ff;font:13px ui-monospace,monospace;line-height:1.5}
+    pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:45vh;overflow:auto;padding:12px;border-radius:9px;background:#071421;color:#d5e7f8}
+    .small{font-size:.86rem;color:#abc0d4}
+    @media(max-width:480px){body{padding:12px}section{padding:14px}.actions{display:grid;grid-template-columns:1fr 1fr}button{padding:9px 10px}textarea{min-height:180px}}
+  </style>
+</head>
+<body>
+<main>
+  <h1>Steward Access</h1>
+  <p>Authenticated operations use the existing identity ingress and CME grants. Session freshness and service availability are checked on each request.</p>
+  <section aria-labelledby="session-heading">
+    <h2 id="session-heading">Session</h2>
+    <p id="session-state" class="state" aria-live="polite">Status not checked.</p>
+    <div class="actions">
+      <button id="begin" type="button">Begin session</button>
+      <button id="refresh" type="button">Refresh status</button>
+      <button id="end" type="button">End session</button>
+    </div>
+  </section>
+  <section aria-labelledby="operation-heading">
+    <h2 id="operation-heading">Authorized CME operation</h2>
+    <p class="small">Paste one canonical <code>r3a.capability-invocation.v1</code> request. Your session identity replaces browser-supplied caller identity; CME evaluates the current grant and effect rules.</p>
+    <label for="invocation">Capability invocation JSON</label>
+    <textarea id="invocation" spellcheck="false" autocapitalize="off" autocomplete="off" aria-describedby="invocation-help"></textarea>
+    <p id="invocation-help" class="small">Do not paste secrets or bearer tokens. The browser does not store the session token in page storage.</p>
+    <button id="invoke" type="button">Run authorized operation</button>
+  </section>
+  <section aria-labelledby="result-heading">
+    <h2 id="result-heading">Result</h2>
+    <pre id="result" aria-live="polite">No operation submitted.</pre>
+  </section>
+</main>
+<script src="/web/steward.js" defer></script>
+</body>
+</html>

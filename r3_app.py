@@ -1,14 +1,15 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.10
+# File Revision: 1.0.14
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
-# Purpose: Initial shared read-only institutional API
+# Purpose: Initial shared institutional API with optional AP3 Steward access router
 # Execution Model: Request-driven FastAPI service
-# Observability: HTTP health endpoint; no deployed verification
-# Dependencies: FastAPI, Git checkout, local artwork folder
-# Authority: R3 engineering guidance; approved charter prevails
+# Observability: HTTP health endpoint; AP3 sessions and operations are durably audited by R3A when enabled
+# Dependencies: FastAPI, Git checkout, local artwork folder; optional r3a_runtime Steward access module
+# Authority: R3 engineering guidance; AP3-M1 Issue #49; approved charter prevails
+# Changed: 2026-11-07T21:48:11Z | AP3-M1 | Codex GPT-6 | Apply no-store headers and keep the authenticated status response freshness-aware.
 # Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Serve the fixed resident avatar frontend module
 # Changed: 2026-11-01 UTC | R3-PANEL-INTERACTION-002 | ChatGPT GPT-6 | Align snapshot anchors and report dragged Infrastructure marker
 # Supersedes: None
@@ -39,6 +40,23 @@ ROOT = Path(os.environ.get("R3_REPO", Path(__file__).resolve().parent)).resolve(
 ART = (ROOT / "assets" / "artwork").resolve()
 EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 app = FastAPI(title="R3 Institutional Capabilities", version="0.1.0")
+
+
+@app.middleware("http")
+async def steward_no_store_headers(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/v1/steward/"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+# Authenticated access is opt-in and fails closed when explicitly configured but invalid.
+# There is no default listener, identity, credential, session store, or public route exposure.
+if os.environ.get("R3A_STEWARD_ACCESS_CONFIG"):
+    from r3a_runtime.steward_access import create_router_from_environment
+    app.include_router(create_router_from_environment())
 
 def git(*args):
     p = subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True,
@@ -112,6 +130,29 @@ def resident_avatar_module():
     if not module.is_file():
         raise HTTPException(404, "Resident avatar module unavailable")
     return FileResponse(module, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/steward")
+def steward_access_page():
+    """Serve the same-origin mobile-friendly Steward access interface."""
+    page = ROOT / "web" / "steward.html"
+    if not page.is_file():
+        raise HTTPException(404, "Steward access interface unavailable")
+    return FileResponse(page, media_type="text/html", headers={
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+    })
+
+
+@app.get("/web/steward.js")
+def steward_access_script():
+    script = ROOT / "web" / "steward.js"
+    if not script.is_file():
+        raise HTTPException(404, "Steward access interface unavailable")
+    return FileResponse(script, media_type="text/javascript", headers={"Cache-Control": "no-cache",
+                       "X-Content-Type-Options": "nosniff"})
 
 
 
