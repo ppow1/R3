@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.8.0
+File Revision: 1.9.0
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -34,6 +34,7 @@ Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Park object
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Snapshot the configured escalation policy on each durable objective so continuation uses its original budget and allowed routes.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Persist activity-scoped capability grants and atomically reserve per-activity external invocation budgets.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Persist objective task class and selected role with durable intake for route-safe recovery.
+Changed: 2026-11-07 | R3A-AP1-CME-OBSERVER-QUEUE | Codex GPT-6 | Keep one pending durable observer activity instead of replenishing an existing backlog.
 Supersedes: None.
 Contracts: AP0-003–010; R3A-019; R3A-011/R3A-012; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1; r3a.engineering-work-order.v1; r3a.capability-invocation.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_engineering.py; tests/test_r3a_capability_integration_demo.py.
@@ -1048,27 +1049,40 @@ class Store:
                               {"module_id": module_id, "old_version": old_version,
                                "new_version": new_version})
 
+    async def _schedule_observer_activity_on_conn(self, conn, delay_seconds: float = 0,
+                                                  reason: str = "observer activity queued") -> bool:
+        """Keep one durable observer pending across concurrent CME completion/startup paths."""
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended('r3a.foundation-observer-activity', 0))"
+        )
+        active = await (await conn.execute(
+            "SELECT activity_id FROM r3a.activities "
+            "WHERE state IN ('QUEUED','RUNNING','WAITING','RECOVERING','BLOCKED') "
+            "AND activity_type='foundation.observe' LIMIT 1"
+        )).fetchone()
+        if active:
+            return False
+        activity_id = uuid.uuid4()
+        key = f"foundation.observe:{activity_id}"
+        config = await (await conn.execute(
+            "SELECT revision_id FROM r3a.config_current WHERE singleton=true"
+        )).fetchone()
+        await conn.execute(
+            "INSERT INTO r3a.activities(activity_id,activity_type,idempotency_key,machine_id,machine_version,state,available_at,recovery_policy,config_revision) "
+            "VALUES (%s,'foundation.observe',%s,'activity.generic',1,'QUEUED',"
+            "clock_timestamp()+(%s * interval '1 second'),'idempotent',%s)",
+            (activity_id, key, delay_seconds, config["revision_id"] if config else None),
+        )
+        accepted = await self._transition_on_conn(conn, "activity", str(activity_id), "activity.generic", 1,
+                                                  "QUEUED", reason,
+                                                  {"idempotency_key": key}, initial=True)
+        if not accepted:
+            raise InvalidTransition("Observer activity could not enter QUEUED")
+        return True
+
     async def ensure_observer_activity(self) -> None:
         async with self.pool.connection() as conn, conn.transaction():
-            active = await (await conn.execute(
-                "SELECT activity_id FROM r3a.activities WHERE activity_type='foundation.observe' "
-                "AND state IN ('QUEUED','RUNNING','WAITING','RECOVERING','BLOCKED') LIMIT 1"
-            )).fetchone()
-            if active:
-                return
-            activity_id = uuid.uuid4()
-            key = f"foundation.observe:{activity_id}"
-            config = await (await conn.execute("SELECT revision_id FROM r3a.config_current WHERE singleton=true")).fetchone()
-            await conn.execute(
-                "INSERT INTO r3a.activities(activity_id,activity_type,idempotency_key,machine_id,machine_version,state,available_at,recovery_policy,config_revision) "
-                "VALUES (%s,'foundation.observe',%s,'activity.generic',1,'QUEUED',clock_timestamp(),'idempotent',%s)",
-                (activity_id, key, config["revision_id"] if config else None),
-            )
-            accepted = await self._transition_on_conn(conn, "activity", str(activity_id), "activity.generic", 1,
-                                                      "QUEUED", "observer activity queued",
-                                                      {"idempotency_key": key}, initial=True)
-            if not accepted:
-                raise InvalidTransition("Observer activity could not enter QUEUED")
+            await self._schedule_observer_activity_on_conn(conn)
 
     async def submit_grace_objective(self, objective: str, idempotency_key: str,
                                      event_kind: str = "objective",
@@ -1437,19 +1451,9 @@ class Store:
                                                       "activity completed with evidence", result)
             if not accepted:
                 raise InvalidTransition(f"Cannot complete activity {activity['activity_id']}")
-            activity_id = uuid.uuid4()
-            key = f"foundation.observe:{activity_id}"
-            config = await (await conn.execute("SELECT revision_id FROM r3a.config_current WHERE singleton=true")).fetchone()
-            await conn.execute(
-                "INSERT INTO r3a.activities(activity_id,activity_type,idempotency_key,machine_id,machine_version,state,available_at,recovery_policy,config_revision) "
-                "VALUES (%s,'foundation.observe',%s,'activity.generic',1,'QUEUED',clock_timestamp()+(%s * interval '1 second'),'idempotent',%s)",
-                (activity_id, key, self.settings.observer_interval_seconds, config["revision_id"] if config else None),
-            )
-            accepted = await self._transition_on_conn(conn, "activity", str(activity_id), "activity.generic", 1,
-                                                      "QUEUED", "next observer activity scheduled",
-                                                      {"idempotency_key": key}, initial=True)
-            if not accepted:
-                raise InvalidTransition("Next observer activity could not enter QUEUED")
+            await self._schedule_observer_activity_on_conn(
+                conn, delay_seconds=self.settings.observer_interval_seconds,
+                reason="next observer activity scheduled")
 
     async def recover_expired_activities(self) -> int:
         async with self.pool.connection() as conn, conn.transaction():
