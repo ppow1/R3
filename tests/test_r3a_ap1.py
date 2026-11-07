@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.4.0
+File Revision: 1.5.0
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -32,6 +32,7 @@ Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Verify Grace escal
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Verify diagnostics context does not pre-authorize unused capabilities.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Cover observer activity context while preserving capability authorization at actual invocation.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Keep escalation regression on the configured primary reasoning route.
+Changed: 2026-11-07 | R3A-AP1-CME-OBSERVER-QUEUE | Codex GPT-6 | Prevent terminal activities from multiplying an already pending durable observer queue.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
@@ -48,6 +49,7 @@ from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 import hashlib
+from r3a_runtime.db import Store
 
 from r3a_runtime.acceptance import (AcceptanceCriteriaRequired, validate_acceptance,
                                     validate_criteria, validate_required_criteria)
@@ -72,6 +74,59 @@ class ModelRouteTests(unittest.TestCase):
         self.assertEqual(resolve_model_route(routes, "local", "escalated").model, "reasoner")
         with self.assertRaises(ConfigurationError):
             resolve_model_route(routes, "local", "unconfigured")
+
+
+class ObserverSchedulingTests(unittest.TestCase):
+    class Result:
+        def __init__(self, row=None):
+            self.row = row
+
+        async def fetchone(self):
+            return self.row
+
+    class Connection:
+        def __init__(self, active=None):
+            self.active = active
+            self.statements = []
+
+        async def execute(self, query, params=()):
+            self.statements.append((query, params))
+            if "SELECT activity_id FROM r3a.activities" in query:
+                return ObserverSchedulingTests.Result(self.active)
+            if "SELECT revision_id FROM r3a.config_current" in query:
+                return ObserverSchedulingTests.Result({"revision_id": "config-r1"})
+            return ObserverSchedulingTests.Result()
+
+    def test_activity_completion_does_not_enqueue_another_observer_if_one_is_pending(self):
+        async def exercise():
+            store = Store.__new__(Store)
+            store._transition_on_conn = AsyncMock(return_value=True)
+            conn = self.Connection(active={"activity_id": "already-queued"})
+            queued = await store._schedule_observer_activity_on_conn(conn, delay_seconds=2)
+            return store, conn, queued
+
+        store, conn, queued = asyncio.run(exercise())
+        self.assertFalse(queued)
+        self.assertTrue(any("pg_advisory_xact_lock" in query for query, _ in conn.statements))
+        self.assertFalse(any("INSERT INTO r3a.activities" in query for query, _ in conn.statements))
+        store._transition_on_conn.assert_not_awaited()
+
+    def test_observer_is_created_when_none_is_pending_using_configured_delay(self):
+        async def exercise():
+            store = Store.__new__(Store)
+            store._transition_on_conn = AsyncMock(return_value=True)
+            conn = self.Connection()
+            queued = await store._schedule_observer_activity_on_conn(
+                conn, delay_seconds=2, reason="next observer activity scheduled")
+            return store, conn, queued
+
+        store, conn, queued = asyncio.run(exercise())
+        self.assertTrue(queued)
+        inserts = [(query, params) for query, params in conn.statements
+                   if "INSERT INTO r3a.activities" in query]
+        self.assertEqual(len(inserts), 1)
+        self.assertEqual(inserts[0][1][2], 2)
+        store._transition_on_conn.assert_awaited_once()
 
 
 class KnowledgeRetrievalTests(unittest.TestCase):
