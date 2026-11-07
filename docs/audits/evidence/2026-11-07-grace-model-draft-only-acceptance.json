@@ -1,0 +1,59 @@
+{
+  "audit": "Grace live model-driven clock proposal attempt",
+  "observed_at_utc": "2026-11-07T00:35:00Z",
+  "repository": "ppow1/R3",
+  "branch": "engineering/grace-autonomy-recovery-20261106",
+  "source_commit": "d77434d261c2756982a5432f66b58c669bbb147c",
+  "scope": "Draft-only live model invocation; no proposal submission, approval, execution, or website change",
+  "live_model_turn": {
+    "endpoint": "POST /api/v1/resident/conversations",
+    "authority": "Existing resident.conversation.send credential for resident:grace",
+    "request_id": "d97a8871-3024-499d-8273-c6d0577b24fe",
+    "conversation_id": "7fb57e57-6468-44f9-85ae-2c8a76124310",
+    "http_status": 201,
+    "response_status": "completed",
+    "model": "/root/Qwen3-Next-80B-A3B-Instruct-Q4_K_M.gguf",
+    "reasoning_stage": "reasoning",
+    "provisional": false,
+    "model_revision": "608aa519346c4643050b1dff6bc0f0a4d65d2cb9d64b9c07cf1d8faeae3b8c7e",
+    "response_sha256": "f8f803e289a088459b72011075255923495f5f4a4cf91829d996e58cd35d6576",
+    "durable_events": [
+      {"sequence": 1, "event_type": "user_message", "body_sha256": "1084c3a5ce0dbbc13de0c558d216219139ecaf192b8360c08b332ff622295277"},
+      {"sequence": 2, "event_type": "assistant_message", "body_sha256": "f8f803e289a088459b72011075255923495f5f4a4cf91829d996e58cd35d6576"}
+    ],
+    "provider": "local.inference.v1",
+    "provider_attempt_count": 1,
+    "internal_tool_results": [],
+    "native_tool_discovery_or_invocation": false,
+    "response_assessment": "The model produced a draft concept with design and acceptance points, but the content is not sufficiently grounded in the R/3 website architecture. It did not discover or invoke a native proposal tool and made no durable institutional proposal claim."
+  },
+  "authoritative_authorization_observations": {
+    "canonical_principal": "resident:grace",
+    "observed_current_grants": [
+      {"action": "resident.conversation.send", "scope": "office:office:grace"}
+    ],
+    "resident_conversation_read": "Not granted; resident GET readback returned HTTP 403 resident_conversation_not_authorized.",
+    "proposal_capability_catalog": "No proposal.draft.submit or proposal.status.read actions are registered in the active central capability catalog.",
+    "proposal_exact_grants": [],
+    "profile_policy_evaluation": "proposal.draft.submit evaluation reported legacy_exact_grant_only; this does not create a missing catalog action or an exact grant.",
+    "proposal_endpoint": {
+      "route": "GET /api/v1/internal/resident-proposals/{proposal_id}",
+      "result": "HTTP 403 resident_proposal_not_authorized",
+      "request_ids_from_prior_read_only_checks": ["a63d9338f8eb085428aac7dc", "e017452d160adb98ee64aa32"]
+    },
+    "identity_boundary": "R/3's existing resident credential identifies resident:Grace; the central Riverview resident runtime uses resident:grace. The resident proposal endpoint authenticates its registered credential principal directly and does not consult the R/3 HR crosswalk. The R/3 HR record r3:grace remains revision 1 with no explicit crosswalk."
+  },
+  "state_changes": {
+    "conversation": "One authorized, durable draft-only model turn was created at the user's direction.",
+    "proposal_registry": "No proposal was created or submitted.",
+    "approval_or_work_order": "No approval decision, work order, or assignment was created.",
+    "website_or_deployment": "No website change, broker activation, service restart, or deployment occurred.",
+    "credentials_grants_hr": "No credentials, grants, or HR records were modified."
+  },
+  "acceptance_status": "NOT_ACCEPTED_CAPABILITY_AND_IDENTITY_PATH_UNAVAILABLE",
+  "minimum_authoritative_resolution": [
+    "Register proposal.draft.submit and proposal.status.read, with their approved resource and scope mapping, in Riverview's existing central capability catalog and policy mechanism, or document the existing registered capabilities that govern resident proposal submission if these action names are adapter-only.",
+    "Establish through the existing authoritative identity mechanism which already-authorized credential represents Grace for that operation; do not infer resident:Grace equals resident:grace or copy credentials.",
+    "After the authoritative capability/identity path resolves, re-run the resident proposal read authorization and only then activate the additive broker and repeat the live model test."
+  ]
+}
