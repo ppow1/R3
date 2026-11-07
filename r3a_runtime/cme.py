@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.2.0
+File Revision: 1.3.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -22,9 +22,10 @@ Changed: 2026-11-06T19:14:04Z | R3A-019 | Codex GPT-6 | Verify exhaustive transi
 Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add versioned resident envelopes, configurable model-role readiness routing, and pluggable authorization provider use.
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Enforce role configuration pinning, freshness-aware deferral, and typed outcomes.
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Run configured readiness providers, validate identity, persist evidence, and recover deferred work.
+Changed: 2026-11-07 | R3A-019 | Codex GPT-6 | Dispatch resident-selected read capabilities and persist model/tool continuation evidence.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
-Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; no model inference in this slice.
+Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; automated inference responses are fixtures.
 History/Predecessor: Git blob 5ed7c9bd82dc5fa02c3595ad5bb8409cfd274dd6 at commit ad16700f1e94dd36c81cac5383f9f2e2771a98a1.
 """
 from __future__ import annotations
@@ -54,6 +55,28 @@ from .db import InvalidTransition, Store, utcnow
 from .diagnostics import make_server
 from .knowledge import retrieve
 from .protocol import PROTOCOL_MAJOR, PROTOCOL_MINOR, request as module_request
+
+
+_RESIDENT_TOOLS = (
+    {"contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
+     "capability_id": "institution.knowledge.read", "name": "institution_knowledge_read",
+     "description": "Search configured read-only institutional knowledge sources for facts relevant to a query. Returns source IDs, paths, content, and SHA-256 digests.",
+     "arguments_schema": {"type": "object", "properties": {
+         "query": {"type": "string", "description": "The specific question or fact to retrieve."}},
+         "required": ["query"], "additionalProperties": False}},
+    {"contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
+     "capability_id": "institution.diagnostics.read", "name": "institution_diagnostics_read",
+     "description": "Read current durable R3A process, module, and database observations with freshness and timestamps.",
+     "arguments_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    {"contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
+     "capability_id": "host.process.read", "name": "host_process_read",
+     "description": "Read Ring0 and CME process identities, health, heartbeats, and liveness.",
+     "arguments_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    {"contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
+     "capability_id": "postgres.readiness", "name": "postgres_readiness",
+     "description": "Read PostgreSQL availability, database identity, server version, and recovery state.",
+     "arguments_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
+)
 
 
 def _requires_runtime_evidence(objective: str) -> bool:
@@ -741,83 +764,118 @@ class CME:
                                   resident_id=decision.resident_id,
                                   evaluated_at=utcnow().isoformat()),
                     next(role.deferral_seconds for role in roles if role.role_id == event_input["role_id"]))
-        if saved.get("evidence_format") == "r3a.knowledge-evidence.v1":
-            route = self.settings.model_route(route_id)
-            saved_route = saved["model_route"]
-            effective_route = {"route_id": route.route_id, "provider": route.provider,
-                               "model": route.model, "endpoint": route.endpoint,
-                               "timeout_seconds": route.timeout_seconds, "max_tokens": route.max_tokens}
-            if saved_route != effective_route:
-                raise RuntimeError("Configured model route changed during durable activity continuation")
-            return {"activity_type": "grace.objective", "activity_id": str(activity["activity_id"]),
-                    "attempt_id": str(activity["attempt_id"]), "objective": event_input["objective"],
-                    "event_kind": event_input.get("event_kind", "objective"),
-                    "route_id": route.route_id, "model_route": saved_route,
-                    "role_id": selected_role_id or saved.get("selected_role_id"),
-                    "route_decision": decision.__dict__ if selected_role_id else
-                                      saved.get("route_decision"),
-                    "evidence": saved["evidence"], "evidence_format": saved["evidence_format"],
-                    "required_evidence_refs": saved.get(
-                        "required_evidence_refs", sorted({item["source_id"] for item in saved["evidence"]
-                                                           if item["source_id"].startswith("knowledge.")})),
-                    "request_ref": str(uuid.uuid4()),
-                    "config_revision": saved["config_revision"]}
-        processes = await self.store.rows(
-            "SELECT component_id,pid,state,health,heartbeat_at FROM r3a.process_observations "
-            "WHERE component_id IN ('ring0','cme') ORDER BY component_id"
-        )
-        now = datetime.now(timezone.utc)
-        live = [{"component_id": row["component_id"], "pid": row["pid"],
-                 "process_exists": process_alive(row["pid"]), "state": row["state"],
-                 "health": row["health"] if (now-row["heartbeat_at"]).total_seconds() <= self.settings.heartbeat_stale_after_seconds else "stale",
-                 "heartbeat_age_seconds": (now-row["heartbeat_at"]).total_seconds()}
-                for row in processes]
-        db = await self.store.rows(
-            "SELECT current_setting('server_version') AS server_version,clock_timestamp() AS observed_at,"
-            "pg_is_in_recovery() AS in_recovery,current_database() AS database"
-        )
-        module_rows = await self.store.rows(
-            "SELECT module_id,module_version,lifecycle_state,health,observed_at,diagnostic "
-            "FROM r3a.module_registry WHERE module_id=%s AND module_version=%s",
-            (self.module_id, self.module_version)
-        )
-        live_modules = [{"module_id": row["module_id"], "module_version": row["module_version"],
-                         "lifecycle_state": row["lifecycle_state"], "health": row["health"],
-                         "pid": row["diagnostic"].get("pid") if isinstance(row["diagnostic"], dict) else None,
-                         "observed_at": row["observed_at"].isoformat() if row["observed_at"] else None}
-                        for row in module_rows]
-        runtime_evidence = [{"source_id": "runtime.processes", "sha256": hashlib.sha256(
-            json.dumps(live, sort_keys=True, default=str).encode()).hexdigest(), "content": live},
-                    {"source_id": "runtime.postgres", "sha256": hashlib.sha256(
-            json.dumps(db[0], sort_keys=True, default=str).encode()).hexdigest(),
-                     "content": {**db[0], "ready": True, "observed_at": db[0]["observed_at"].isoformat()}}]
-        runtime_evidence.append({"source_id": "runtime.modules", "sha256": hashlib.sha256(
-            json.dumps(live_modules, sort_keys=True).encode()).hexdigest(), "content": live_modules})
-        objective = event_input["objective"]
-        knowledge_evidence = []
-        for index, path in enumerate(self.settings.knowledge_sources):
-            knowledge_evidence.extend(retrieve(path, f"knowledge.{index+1}", objective))
-        if knowledge_evidence and not _requires_runtime_evidence(objective):
-            evidence = knowledge_evidence
-        else:
-            evidence = runtime_evidence + knowledge_evidence
-        request_ref = str(uuid.uuid4())
         route = self.settings.model_route(route_id)
+        effective_route = {"route_id": route.route_id, "provider": route.provider,
+                           "model": route.model, "endpoint": route.endpoint,
+                           "timeout_seconds": route.timeout_seconds, "max_tokens": route.max_tokens}
+        saved_route = saved.get("model_route")
+        if saved_route is not None and saved_route != effective_route:
+            raise RuntimeError("Configured model route changed during durable activity continuation")
+        reasoning_state = saved.get("reasoning_state") or {}
+        if not isinstance(reasoning_state, dict):
+            raise RuntimeError("Persisted Grace reasoning continuation is malformed")
+        available_tools = [tool for tool in _RESIDENT_TOOLS
+                           if tool["capability_id"] in self.settings.module_capabilities]
+        evidence = saved.get("evidence", [])
+        if not isinstance(evidence, list):
+            raise RuntimeError("Persisted resident evidence is malformed")
         return {"activity_type": "grace.objective", "activity_id": str(activity["activity_id"]),
                 "attempt_id": str(activity["attempt_id"]),
-                "objective": objective, "event_kind": event_input.get("event_kind", "objective"),
+                "objective": event_input["objective"], "event_kind": event_input.get("event_kind", "objective"),
                 "route_id": route.route_id,
-                "model_route": {"route_id": route.route_id, "provider": route.provider,
-                                "model": route.model, "endpoint": route.endpoint,
-                                "timeout_seconds": route.timeout_seconds,
-                                "max_tokens": route.max_tokens},
+                "model_route": effective_route,
                 "evidence_format": "r3a.knowledge-evidence.v1",
-                "required_evidence_refs": sorted({item["source_id"] for item in evidence
-                                                   if item["source_id"].startswith("knowledge.")}),
+                "required_evidence_refs": saved.get("required_evidence_refs", []),
                 "selected_role_id": selected_role_id,
                 "route_decision": decision.__dict__ if selected_role_id else None,
                 "evidence": evidence,
-                "request_ref": request_ref, "config_revision": self.settings.source_digest}
+                "available_tools": available_tools,
+                "conversation": reasoning_state.get("conversation", []),
+                "reasoning_state": reasoning_state,
+                "pending_final": reasoning_state.get("pending_final"),
+                "request_ref": str(uuid.uuid4()), "config_revision": self.settings.source_digest}
+
+    async def _invoke_resident_capability(self, activity: dict[str, Any],
+                                          request: dict[str, Any]) -> dict[str, Any]:
+        capability_id = request.get("capability_id")
+        arguments = request.get("arguments")
+        tool = next((entry for entry in _RESIDENT_TOOLS
+                     if entry["capability_id"] == capability_id), None)
+        if tool is None:
+            raise PermissionError("resident requested a capability without an execution adapter")
+        if capability_id not in self.settings.module_capabilities:
+            raise PermissionError("resident requested a capability absent from its configured manifest")
+        if (request.get("contract_id") != tool["contract_id"]
+                or request.get("contract_version") != tool["contract_version"]):
+            raise ValueError("resident capability request contract does not match the registered tool")
+        if not isinstance(arguments, dict):
+            raise ValueError("resident capability arguments must be an object")
+        if capability_id == "institution.knowledge.read":
+            if set(arguments) != {"query"}:
+                raise ValueError("institution.knowledge.read requires exactly one query argument")
+            query = arguments["query"]
+            if not isinstance(query, str) or not query.strip():
+                raise ValueError("institution.knowledge.read query must be nonempty text")
+        elif arguments:
+            raise ValueError(f"{capability_id} accepts no arguments")
+        authorization = await self._authorize_capability(
+            capability_id, activity_id=str(activity["activity_id"]),
+            attempt_id=str(activity["attempt_id"]),
+            context={"invocation_source": "resident_selected_action",
+                     "tool_contract_id": tool["contract_id"],
+                     "query_sha256": hashlib.sha256(query.encode()).hexdigest()
+                     if capability_id == "institution.knowledge.read" else None})
+        evidence = []
+        if capability_id == "institution.knowledge.read":
+            for index, path in enumerate(self.settings.knowledge_sources):
+                evidence.extend(retrieve(path, f"knowledge.{index+1}", query))
+        else:
+            evidence.extend(await self._read_runtime_capability(capability_id))
+        return {"contract_id": tool["contract_id"],
+                "contract_version": tool["contract_version"],
+                "capability_id": capability_id, "outcome": "succeeded",
+                "arguments": arguments, "evidence": evidence,
+                "authorization": authorization, "observed_at": utcnow().isoformat()}
+
+    async def _read_runtime_capability(self, capability_id: str) -> list[dict[str, Any]]:
+        evidence: list[dict[str, Any]] = []
+        if capability_id in {"host.process.read", "institution.diagnostics.read"}:
+            rows = await self.store.rows(
+                "SELECT component_id,pid,state,health,heartbeat_at FROM r3a.process_observations "
+                "WHERE component_id IN ('ring0','cme') ORDER BY component_id")
+            now = datetime.now(timezone.utc)
+            processes = [{"component_id": row["component_id"], "pid": row["pid"],
+                          "process_exists": process_alive(row["pid"]), "state": row["state"],
+                          "health": row["health"] if (now-row["heartbeat_at"]).total_seconds()
+                          <= self.settings.heartbeat_stale_after_seconds else "stale",
+                          "heartbeat_at": row["heartbeat_at"].isoformat(),
+                          "heartbeat_age_seconds": (now-row["heartbeat_at"]).total_seconds()}
+                         for row in rows]
+            evidence.append(self._runtime_evidence("runtime.processes", processes))
+        if capability_id in {"postgres.readiness", "institution.diagnostics.read"}:
+            rows = await self.store.rows(
+                "SELECT current_setting('server_version') AS server_version,clock_timestamp() AS observed_at,"
+                "pg_is_in_recovery() AS in_recovery,current_database() AS database")
+            postgres = {**rows[0], "ready": True,
+                        "observed_at": rows[0]["observed_at"].isoformat()}
+            evidence.append(self._runtime_evidence("runtime.postgres", postgres))
+        if capability_id == "institution.diagnostics.read":
+            modules = await self.store.rows(
+                "SELECT module_id,module_version,lifecycle_state,health,observed_at,diagnostic "
+                "FROM r3a.module_registry ORDER BY module_id,module_version")
+            module_content = [{"module_id": row["module_id"], "module_version": row["module_version"],
+                               "lifecycle_state": row["lifecycle_state"], "health": row["health"],
+                               "pid": row["diagnostic"].get("pid") if isinstance(row["diagnostic"], dict) else None,
+                               "observed_at": row["observed_at"].isoformat() if row["observed_at"] else None}
+                              for row in modules]
+            evidence.append(self._runtime_evidence("runtime.modules", module_content))
+        return evidence
+
+    @staticmethod
+    def _runtime_evidence(source_id: str, content: Any) -> dict[str, Any]:
+        digest = hashlib.sha256(json.dumps(content, sort_keys=True, default=str).encode()).hexdigest()
+        return {"source_id": source_id, "source_path": source_id, "content": content,
+                "sha256": digest}
 
     async def _lease_heartbeat(self, activity: dict[str, Any]) -> None:
         interval = max(1.0, self.settings.lease_seconds / 3.0)
@@ -834,41 +892,153 @@ class CME:
                        else await self._observer_context(activity))
             if activity["activity_type"] == "grace.objective":
                 model_route = context["model_route"]
-                await self.store.record_progress(activity,
-                    {"phase": "model.requested", "at": utcnow().isoformat(),
-                     "route_id": model_route["route_id"],
-                     "provider": model_route["provider"], "model": model_route["model"],
-                     "request_ref": context["request_ref"], "objective_sha256": hashlib.sha256(
-                         activity["input"]["objective"].encode()).hexdigest()},
-                    {"activity_input": activity["input"], "model_route": model_route,
-                     "evidence_format": context["evidence_format"],
-                     "required_evidence_refs": context["required_evidence_refs"],
-                     "config_revision": context["config_revision"],
-                     "selected_role_id": context.get("selected_role_id"),
-                     "evidence": context["evidence"], "evidence_refs": [
-                         {"source_id": item["source_id"], "source_path": item.get("source_path"),
-                          "sha256": item["sha256"], "source_sha256": item.get("source_sha256")}
-                         for item in context["evidence"]]})
+                reasoning_state = dict(context.get("reasoning_state") or {})
+                conversation = list(context.get("conversation") or [])
+                turns = list(reasoning_state.get("model_turns") or [])
+                invocations = list(reasoning_state.get("capability_invocations") or [])
+                evidence = list(context.get("evidence") or [])
+                required_evidence_refs = list(context.get("required_evidence_refs") or [])
+
+                def durable_checkpoint() -> dict[str, Any]:
+                    return {"activity_input": activity["input"], "model_route": model_route,
+                            "evidence_format": context["evidence_format"],
+                            "required_evidence_refs": required_evidence_refs,
+                            "config_revision": context["config_revision"],
+                            "selected_role_id": context.get("selected_role_id"),
+                            "route_decision": context.get("route_decision"),
+                            "evidence": evidence,
+                            "evidence_refs": [{"source_id": item["source_id"],
+                                               "source_path": item.get("source_path"),
+                                               "sha256": item["sha256"],
+                                               "source_sha256": item.get("source_sha256")}
+                                              for item in evidence],
+                            "reasoning_state": {"conversation": conversation,
+                                                "model_turns": turns,
+                                                "capability_invocations": invocations,
+                                                "pending_final": context.get("pending_final")}}
+
                 lease_task = asyncio.create_task(self._lease_heartbeat(activity),
                                                  name=f"lease-heartbeat:{activity['activity_id']}")
+                observations = context.get("pending_final")
+                while observations is None:
+                    context["conversation"] = conversation
+                    context["evidence"] = evidence
+                    context["required_evidence_refs"] = required_evidence_refs
+                    context["request_ref"] = str(uuid.uuid4())
+                    await self.store.record_progress(
+                        activity,
+                        {"phase": "resident.inference.requested", "at": utcnow().isoformat(),
+                         "route_id": model_route["route_id"], "provider": model_route["provider"],
+                         "model": model_route["model"], "request_ref": context["request_ref"],
+                         "turn": len(turns) + 1,
+                         "objective_sha256": hashlib.sha256(
+                             activity["input"]["objective"].encode()).hexdigest()},
+                        durable_checkpoint())
+                    result = await self._module_call("execute", context,
+                        timeout=context["model_route"]["timeout_seconds"] + 15)
+                    observations = result["result"]
+                    turn_model = observations.get("model", {})
+                    turn_record = {"turn": len(turns) + 1, "request_ref": turn_model.get("request_ref"),
+                                   "request_sha256": turn_model.get("request_sha256"),
+                                   "result_ref": turn_model.get("result_ref"),
+                                   "result_sha256": turn_model.get("result_sha256"),
+                                   "usage": turn_model.get("usage"),
+                                   "action": observations.get("action"),
+                                   "observed_at": utcnow().isoformat()}
+                    turns.append(turn_record)
+                    model_content = observations.get("model_content")
+                    if not isinstance(model_content, str):
+                        raise RuntimeError("Grace omitted the recorded model action content")
+                    conversation.append({"role": "assistant", "content": model_content})
+                    if observations.get("action") == "invoke_capability":
+                        capability_request = observations.get("capability_request")
+                        if not isinstance(capability_request, dict):
+                            raise RuntimeError("Grace returned an incomplete capability request")
+                        capability_result = await self._invoke_resident_capability(activity,
+                                                                                   capability_request)
+                        invocations.append({"capability_request": capability_request,
+                                            "result": capability_result})
+                        evidence.extend(capability_result["evidence"])
+                        required_evidence_refs = sorted(set(required_evidence_refs) |
+                                                        {item["source_id"] for item in
+                                                         capability_result["evidence"]})
+                        conversation.append({"role": "user", "content": json.dumps(
+                            {"capability_result": capability_result}, separators=(",", ":"))})
+                        await self.store.record_progress(
+                            activity,
+                            {"phase": "resident.capability.completed", "at": utcnow().isoformat(),
+                             "turn": len(turns), "capability_id": capability_request["capability_id"],
+                             "authorization_audit_event_id": capability_result["authorization"].get(
+                                 "audit_event_id"),
+                             "evidence_count": len(capability_result["evidence"])},
+                            durable_checkpoint())
+                        observations = None
+                        continue
+                    if observations.get("action") != "final":
+                        raise RuntimeError("Grace returned an unsupported resident action")
+                    context["pending_final"] = observations
+                    await self.store.record_progress(
+                        activity,
+                        {"phase": "resident.decision.ready", "at": utcnow().isoformat(),
+                         "turn": len(turns), "status": (observations.get("decision") or {}).get("status"),
+                         "result_ref": (observations.get("model") or {}).get("result_ref")},
+                        durable_checkpoint())
+                    break
             else:
                 await self.store.record_progress(activity,
                     {"phase": "capabilities_read", "at": utcnow().isoformat()},
                                              {"capability_observations": context})
-            result = await self._module_call("execute", context,
-                timeout=context["model_route"]["timeout_seconds"] + 15
-                if activity["activity_type"] == "grace.objective" else 5.0)
-            observations = result["result"]
+                result = await self._module_call("execute", context, timeout=5.0)
+                observations = result["result"]
             decision = observations.get("decision", {}) if isinstance(observations, dict) else {}
             answer_issues = (_knowledge_answer_issues(context["objective"], context["evidence"], decision)
                              if activity["activity_type"] == "grace.objective" else [])
-            if answer_issues:
+            if activity["activity_type"] != "grace.objective":
+                await self.store.finish_activity(activity, observations)
+            elif decision.get("status") != "healthy":
+                await self.store.block_activity(activity,
+                    "Grace did not conclude the objective with a fully supported answer",
+                    {"decision": decision, "model": observations.get("model"),
+                     "reasoning_trace": {"model_turns": turns,
+                                          "capability_invocations": invocations,
+                                          "evidence": evidence}})
+            elif not decision.get("evidence_refs"):
+                await self.store.block_activity(activity,
+                    "Grace final response did not cite any returned evidence",
+                    {"validation": "r3a.resident-evidence-citation.v1", "decision": decision,
+                     "model": observations.get("model"),
+                     "reasoning_trace": {"model_turns": turns,
+                                          "capability_invocations": invocations,
+                                          "evidence": evidence}})
+            elif (not set(decision.get("evidence_refs", [])).issubset(
+                        {item.get("source_id") for item in evidence})
+                  or not set(context.get("required_evidence_refs", [])).issubset(
+                        decision.get("evidence_refs", []))):
+                await self.store.block_activity(activity,
+                    "Grace final response cited missing or incomplete source evidence",
+                    {"validation": "r3a.resident-evidence-citation.v1", "decision": decision,
+                     "known_source_ids": sorted({item.get("source_id") for item in evidence}),
+                     "required_evidence_refs": context.get("required_evidence_refs", []),
+                     "reasoning_trace": {"model_turns": turns,
+                                          "capability_invocations": invocations,
+                                          "evidence": evidence}})
+            elif answer_issues:
                 await self.store.block_activity(
                     activity, "Grace response did not satisfy the evidence-backed transition request",
                     {"validation": "r3a.transition-answer.v1", "missing_destinations": answer_issues,
                      "decision": decision, "model": observations.get("model"),
+                     "reasoning_trace": {"model_turns": turns,
+                                          "capability_invocations": invocations,
+                                          "evidence": evidence},
                      "request_ref": (observations.get("model") or {}).get("request_ref")})
             else:
+                observations["reasoning_trace"] = {"model_turns": turns,
+                                                    "capability_invocations": invocations,
+                                                    "evidence": [{"source_id": item["source_id"],
+                                                                  "source_path": item.get("source_path"),
+                                                                  "sha256": item["sha256"],
+                                                                  "source_sha256": item.get("source_sha256")}
+                                                                 for item in evidence]}
                 await self.store.finish_activity(activity, observations)
         except PermissionError as exc:
             await self.store.block_activity(activity, "capability grant required", {"error": str(exc)})

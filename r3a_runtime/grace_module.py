@@ -2,10 +2,10 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.1.0
+File Revision: 1.2.0
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
-Purpose: Execute bounded read-only Grace objectives with the configured real model and supplied authorized evidence.
+Purpose: Execute read-only Grace objectives through configured inference and resident-selected authorized capabilities.
 Execution Model: Versioned JSON-lines resident module process supervised by CME.
 Observability: Provider/model, request/result references and digests, citations, and failures are returned to durable activity state.
 Dependencies: Python standard library; explicitly configured OpenAI-compatible model endpoint.
@@ -19,9 +19,10 @@ Changed: 2026-11-06T18:31:45Z | R3A-019 | Codex GPT-6 | Clarify that model asses
 Changed: 2026-11-06T18:38:00Z | R3A-019 | Codex GPT-6 | Request schema-constrained JSON and report missing decision fields precisely.
 Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Validate optional versioned execution envelopes and retain selected role provenance.
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Complete execution envelope identity checks and role provenance propagation.
+Changed: 2026-11-07 | R3A-019 | Codex GPT-6 | Let Grace select authorized read capabilities and reason over returned evidence through durable continuation turns.
 Supersedes: None.
 Contracts: R3A-019; AP1-M1 Issue #43 acceptance; r3a.resident.execution.v1.
-Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; no model inference in this slice.
+Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; automated inference responses are fixtures.
 History/Predecessor: Git blob 90399a473bb6c7f88d5200e4d18fef004fcbbcbb at commit cc7f662c04a4ba8eb327edd134e2ded92ef9786c.
 """
 from __future__ import annotations
@@ -42,15 +43,28 @@ from .config import load_settings
 from .protocol import ModuleProtocolServer
 
 
-DECISION_SCHEMA = {
+RESIDENT_ACTION_SCHEMA = {
     "type": "object",
     "properties": {
-        "assessment": {"type": "string"},
-        "status": {"type": "string", "enum": ["healthy", "degraded", "blocked"]},
-        "evidence_refs": {"type": "array", "items": {"type": "string"}, "minItems": 1},
-        "recommended_action": {"type": "string"},
+        "action": {"type": "string", "enum": ["invoke_capability", "final"]},
+        "contract_id": {"type": "string"},
+        "contract_version": {"type": "string"},
+        "capability_id": {"type": "string"},
+        "arguments": {"type": "object"},
+        "rationale": {"type": "string"},
+        "decision": {
+            "type": "object",
+            "properties": {
+                "assessment": {"type": "string"},
+                "status": {"type": "string", "enum": ["healthy", "degraded", "blocked"]},
+                "evidence_refs": {"type": "array", "items": {"type": "string"}},
+                "recommended_action": {"type": "string"},
+            },
+            "required": ["assessment", "status", "evidence_refs", "recommended_action"],
+            "additionalProperties": False,
+        },
     },
-    "required": ["assessment", "status", "evidence_refs", "recommended_action"],
+    "required": ["action"],
     "additionalProperties": False,
 }
 
@@ -126,35 +140,49 @@ class GraceResident:
             if payload.get("activity_type") != "grace.objective":
                 raise ValueError("unsupported activity type")
             objective = payload.get("objective")
-            evidence = payload.get("evidence")
-            if not isinstance(objective, str) or not objective.strip() or not isinstance(evidence, list) or not evidence:
-                raise ValueError("objective and authorized evidence are required")
+            evidence = payload.get("evidence", [])
+            if (not isinstance(objective, str) or not objective.strip()
+                    or not isinstance(evidence, list)):
+                raise ValueError("objective and evidence collection are required")
             request_ref = str(payload["request_ref"])
             route = self.settings.model_route(payload.get("route_id"))
-            evidence_ids = {item["source_id"] for item in evidence}
-            prompt_evidence = [{key: item[key] for key in ("source_id", "source_path", "content") if key in item}
-                               for item in evidence]
+            tools = payload.get("available_tools", [])
+            if not isinstance(tools, list):
+                raise ValueError("available_tools must be an array")
+            conversation = payload.get("conversation", [])
+            if not isinstance(conversation, list) or any(
+                    not isinstance(message, dict) or message.get("role") not in {"assistant", "user"}
+                    or not isinstance(message.get("content"), str) for message in conversation):
+                raise ValueError("conversation must contain assistant/user text messages")
             request = {
                 "model": route.model,
                 "temperature": 0,
                 "max_tokens": route.max_tokens,
-                "response_format": {"type": "json_object", "schema": DECISION_SCHEMA},
+                "response_format": {"type": "json_object", "schema": RESIDENT_ACTION_SCHEMA},
                 "chat_template_kwargs": {"enable_thinking": False},
                 "messages": [
                     {"role": "system", "content": (
-                        "You are Grace. Use only supplied evidence. The assessment field must directly answer the objective. "
-                        "Use status healthy when the evidence fully supports that answer, degraded when it only partly supports it, "
-                        "and blocked only when the needed evidence is missing or ambiguous. Do not return an instruction to check facts "
-                        "that are already stated in the evidence. Return one compact JSON object exactly shaped as "
-                        "{\"assessment\":\"short\",\"status\":\"healthy|degraded|blocked\","
-                        "\"evidence_refs\":[\"source_id\"],\"recommended_action\":\"short\"}. "
-                        "Use only supplied source IDs and include every required evidence reference. "
-                        "Missing facts => blocked. For notifications, record an assessment and recommended next action; "
-                        "do not claim an external delivery. Keep under 70 tokens." )},
+                        "You are Grace, the resident responsible for reasoning about the assigned objective. "
+                        "Select actions yourself. You may request a capability only from the supplied available_tools list; "
+                        "the institutional runtime will enforce authorization and return its result. Do not claim a capability "
+                        "was used until its result appears in the conversation. Use only evidence returned by the runtime. "
+                        "If evidence is empty and the objective asks for institutional facts, do not guess or return a healthy answer. "
+                        "Request a relevant listed capability; if none can supply the facts, return a justified blocked decision. "
+                        "When more information is needed, return {\"action\":\"invoke_capability\","
+                        "\"contract_id\":\"r3a.resident-capability-tool\",\"contract_version\":\"1.0.0\","
+                        "\"capability_id\":\"exact capability_id\",\"arguments\":{...},"
+                        "\"rationale\":\"why this helps the objective\"}. When ready, return "
+                        "{\"action\":\"final\",\"decision\":{\"assessment\":\"answer the objective\","
+                        "\"status\":\"healthy|degraded|blocked\",\"evidence_refs\":[\"source_id\"],"
+                        "\"recommended_action\":\"next action or none\"}}. For final answers cite only returned source IDs. "
+                        "Use blocked only when required facts remain unavailable or ambiguous; explain why in assessment. "
+                        "Never imply external actions were performed. Return one compact JSON object." )},
+                    *conversation,
                     {"role": "user", "content": json.dumps({"event_kind": payload.get("event_kind", "objective"),
                                                                   "objective": objective,
+                                                                  "available_tools": tools,
                                                                   "required_evidence_refs": payload.get("required_evidence_refs", []),
-                                                                  "evidence": prompt_evidence},
+                                                                  "evidence": evidence},
                                                                  separators=(",", ":"))},
                 ],
             }
@@ -175,19 +203,43 @@ class GraceResident:
                     result_text = result_text[:-3]
                 result_text = result_text.strip()
                 decision = json.loads(result_text)
-                required_fields = {"assessment", "status", "evidence_refs", "recommended_action"}
                 if not isinstance(decision, dict):
                     raise ValueError("model result must be a JSON object")
-                missing_fields = required_fields - decision.keys()
-                if missing_fields:
-                    raise ValueError(f"model result is missing decision fields: {sorted(missing_fields)}")
-                if decision["status"] not in {"healthy", "degraded", "blocked"}:
-                    raise ValueError("model returned an unsupported status")
-                if not isinstance(decision["evidence_refs"], list) or not decision["evidence_refs"] or not set(decision["evidence_refs"]).issubset(evidence_ids):
-                    raise ValueError("model cited missing or unauthorized evidence")
-                required_refs = payload.get("required_evidence_refs", [])
-                if not isinstance(required_refs, list) or not set(required_refs).issubset(decision["evidence_refs"]):
-                    raise ValueError("model omitted required evidence citations")
+                if decision.get("action") == "invoke_capability":
+                    if set(decision) != {"action", "contract_id", "contract_version",
+                                         "capability_id", "arguments", "rationale"}:
+                        raise ValueError("capability request fields are invalid")
+                    version_parts = str(decision["contract_version"]).split(".")
+                    if (decision["contract_id"] != "r3a.resident-capability-tool"
+                            or len(version_parts) != 3 or not all(part.isdigit() for part in version_parts)
+                            or version_parts[0] != "1"):
+                        raise ValueError("capability request contract is incompatible")
+                    if (not isinstance(decision["capability_id"], str)
+                            or not isinstance(decision["arguments"], dict)
+                            or not isinstance(decision["rationale"], str)
+                            or not decision["rationale"].strip()):
+                        raise ValueError("capability request is incomplete")
+                    tool_ids = {tool.get("capability_id") for tool in tools if isinstance(tool, dict)}
+                    if decision["capability_id"] not in tool_ids:
+                        raise ValueError("model requested a capability not present in its tool manifest")
+                    final_decision = None
+                elif decision.get("action") == "final":
+                    if set(decision) != {"action", "decision"} or not isinstance(decision["decision"], dict):
+                        raise ValueError("final action fields are invalid")
+                    final_decision = decision["decision"]
+                    required_fields = {"assessment", "status", "evidence_refs", "recommended_action"}
+                    missing_fields = required_fields - final_decision.keys()
+                    if missing_fields:
+                        raise ValueError(f"model result is missing decision fields: {sorted(missing_fields)}")
+                    if final_decision["status"] not in {"healthy", "degraded", "blocked"}:
+                        raise ValueError("model returned an unsupported status")
+                    if (not isinstance(final_decision["assessment"], str)
+                            or not isinstance(final_decision["recommended_action"], str)
+                            or not isinstance(final_decision["evidence_refs"], list)
+                            or any(not isinstance(ref, str) for ref in final_decision["evidence_refs"])):
+                        raise ValueError("model final decision contains invalid or unauthorized evidence")
+                else:
+                    raise ValueError("model returned an unsupported action")
                 finish_reason = response["choices"][0].get("finish_reason")
                 if finish_reason == "length":
                     raise ValueError("model response reached max_tokens before completing")
@@ -196,14 +248,16 @@ class GraceResident:
                 self.last_activity = {
                     "activity_id": payload["activity_id"], "attempt_id": payload["attempt_id"],
                     "objective": objective, "event_kind": payload.get("event_kind", "objective"),
-                    "decision": decision,
+                    "action": decision["action"], "decision": final_decision,
+                    "capability_request": (decision if decision["action"] == "invoke_capability" else None),
+                    "model_content": choice,
                     "model": {"route_id": route.route_id, "provider": route.provider, "name": route.model,
                               "role_id": payload.get("selected_role_id"),
                               "request_ref": request_ref, "request_sha256": request_hash,
                               "result_ref": result_ref, "result_sha256": result_hash,
                               "usage": response.get("usage"), "finish_reason": finish_reason},
                     "evidence": [{"source_id": item["source_id"], "sha256": item["sha256"]} for item in evidence
-                                 if item["source_id"] in decision["evidence_refs"]],
+                                 if item.get("source_id") in (final_decision or {}).get("evidence_refs", [])],
                     "completed_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
                 }
                 return self.last_activity
@@ -211,7 +265,7 @@ class GraceResident:
                 result_ref = response.get("id") if isinstance(response, dict) else None
                 finish = (response.get("choices") or [{}])[0].get("finish_reason") if isinstance(response, dict) else None
                 result_hash = hashlib.sha256(choice.encode()).hexdigest() if isinstance(choice, str) and choice else None
-                raise RuntimeError(f"Grace model execution failed route={route.route_id} provider={route.provider} model={route.model} request_ref={request_ref} result_ref={result_ref} finish_reason={finish} result_sha256={result_hash}: {type(exc).__name__}: {str(exc)[:1000]}") from exc
+                raise RuntimeError(f"Grace model execution failed route={route.route_id} provider={route.provider} model={route.model} request_ref={request_ref} result_ref={result_ref} finish_reason={finish} result_sha256={result_hash} model_content_prefix={choice[:1000]!r}: {type(exc).__name__}: {str(exc)[:1000]}") from exc
         if operation == "checkpoint":
             return {"state": self.state, "last_activity": self.last_activity}
         if operation == "stop":

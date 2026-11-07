@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.0.10
+File Revision: 1.1.0
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -20,6 +20,7 @@ Changed: 2026-11-06T19:01:13Z | R3A-019 | Codex GPT-6 | Cover the after-state wo
 Changed: 2026-11-06T19:05:07Z | R3A-019 | Codex GPT-6 | Test evidence selection for knowledge-only and runtime objectives.
 Changed: 2026-11-06T19:14:04Z | R3A-019 | Codex GPT-6 | Check exhaustive transition answer completeness and truthful blockers.
 Changed: 2026-11-06T19:16:11Z | R3A-019 | Codex GPT-6 | Cover explicit transitions.STATE knowledge references.
+Changed: 2026-11-07 | R3A-019 | Codex GPT-6 | Verify resident-selected capability actions and authorized knowledge dispatch.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
@@ -29,10 +30,15 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import asyncio
+import json
+from types import SimpleNamespace
 from pathlib import Path
+from unittest.mock import AsyncMock
 
-from r3a_runtime.cme import _knowledge_answer_issues, _requires_runtime_evidence
+from r3a_runtime.cme import CME, _RESIDENT_TOOLS, _knowledge_answer_issues, _requires_runtime_evidence
 from r3a_runtime.config import ConfigurationError, ModelRoute, resolve_model_route
+from r3a_runtime.grace_module import GraceResident
 from r3a_runtime.knowledge import retrieve
 
 
@@ -97,6 +103,152 @@ class KnowledgeRetrievalTests(unittest.TestCase):
             source = Path(directory) / "machine.json"
             source.write_text('{"machine_id":"process.lifecycle","states":["RUNNING"]}', encoding="utf-8")
             self.assertEqual(retrieve(source, "knowledge.1", "Quest avatar rendering"), [])
+
+
+class ResidentCapabilityReasoningTests(unittest.TestCase):
+    def _resident(self, model_content):
+        resident = GraceResident.__new__(GraceResident)
+        resident.module_id = "resident.grace"
+        resident.module_version = "test"
+        resident.state = "ACTIVE"
+        resident.last_activity = None
+        route = ModelRoute("local", "fixture", "http://127.0.0.1:1/chat", "fixture-model", 1, 128)
+        resident.settings = SimpleNamespace(model_route=lambda _route_id=None: route)
+        resident._model_request = AsyncMock(return_value={
+            "id": "fixture-response", "usage": {"prompt_tokens": 8, "completion_tokens": 5},
+            "choices": [{"finish_reason": "stop", "message": {"content": model_content}}]})
+        return resident
+
+    def _payload(self, tools):
+        return {"activity_id": "activity-1", "attempt_id": "attempt-1", "request_ref": "request-1",
+                "config_revision": "config-1", "activity_type": "grace.objective",
+                "objective": "Identify the valid successors from STOPPING", "evidence": [],
+                "available_tools": tools, "conversation": [], "route_id": "local"}
+
+    def test_model_selected_capability_call_is_returned_as_resident_action(self):
+        tool = {"capability_id": "institution.knowledge.read"}
+        resident = self._resident(
+            '{"action":"invoke_capability","contract_id":"r3a.resident-capability-tool",'
+            '"contract_version":"1.0.0","capability_id":"institution.knowledge.read",'
+            '"arguments":{"query":"List successors after STOPPING"},'
+            '"rationale":"Need authoritative transition facts"}')
+        result = asyncio.run(resident.handle("execute", self._payload([tool])))
+        self.assertEqual(result["action"], "invoke_capability")
+        self.assertEqual(result["capability_request"]["arguments"]["query"],
+                         "List successors after STOPPING")
+        actual_request = resident._model_request.await_args.args[2]
+        self.assertIn("available_tools", actual_request["messages"][-1]["content"])
+
+    def test_model_cannot_request_capability_outside_supplied_manifest(self):
+        resident = self._resident(
+            '{"action":"invoke_capability","contract_id":"r3a.resident-capability-tool",'
+            '"contract_version":"1.0.0","capability_id":"institution.write",'
+            '"arguments":{"query":"x"},"rationale":"unsupported"}')
+        with self.assertRaisesRegex(RuntimeError, "not present in its tool manifest"):
+            asyncio.run(resident.handle("execute", self._payload([])))
+
+    def test_cme_returns_source_digested_knowledge_only_after_authorization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "process.json"
+            source.write_text('{"transitions":{"STOPPING":["STOPPED","FAILED"]}}', encoding="utf-8")
+            cme = CME.__new__(CME)
+            cme.settings = SimpleNamespace(module_capabilities=("institution.knowledge.read",),
+                                           knowledge_sources=(source,))
+            cme._authorize_capability = AsyncMock(return_value={"audit_event_id": "audit-1"})
+            result = asyncio.run(cme._invoke_resident_capability(
+                {"activity_id": "activity-1", "attempt_id": "attempt-1"},
+                {"contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
+                 "capability_id": "institution.knowledge.read",
+                 "arguments": {"query": "List successors after STOPPING"},
+                 "rationale": "Need source fact"}))
+            cme._authorize_capability.assert_awaited_once()
+            self.assertEqual(result["outcome"], "succeeded")
+            self.assertEqual(result["evidence"][0]["content"], "Transitions from STOPPING: STOPPED, FAILED")
+            self.assertEqual(result["authorization"]["audit_event_id"], "audit-1")
+
+    def test_cme_persists_tool_result_before_resident_continuation(self):
+        class StoreFake:
+            def __init__(self):
+                self.progress = []
+                self.completed = None
+                self.blocked = None
+
+            async def record_progress(self, _activity, progress, checkpoint):
+                self.progress.append((dict(progress), json.loads(json.dumps(checkpoint))))
+
+            async def renew_activity_lease(self, _activity):
+                return None
+
+            async def finish_activity(self, _activity, result):
+                self.completed = result
+
+            async def block_activity(self, _activity, reason, details):
+                self.blocked = (reason, details)
+
+            async def fail_activity(self, _activity, error, _retry):
+                raise AssertionError(f"unexpected failure: {error}")
+
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                source = Path(directory) / "process.json"
+                source.write_text('{"transitions":{"STOPPING":["STOPPED","FAILED"]}}', encoding="utf-8")
+                cme = CME.__new__(CME)
+                cme.settings = SimpleNamespace(module_capabilities=("institution.knowledge.read",),
+                                               knowledge_sources=(source,), lease_seconds=30,
+                                               restart_initial_seconds=1, restart_max_seconds=3)
+                cme.store = StoreFake()
+                cme.module_process = SimpleNamespace(returncode=None)
+                cme.module_id = "resident.grace"
+                cme.module_version = "1.2.0"
+                cme.authorization_provider = None
+                cme.active_activities = {}
+                cme._objective_context = AsyncMock(return_value={
+                    "activity_type": "grace.objective", "activity_id": "activity-1",
+                    "attempt_id": "attempt-1", "objective": "List every state after STOPPING",
+                    "event_kind": "objective", "route_id": "local",
+                    "model_route": {"route_id": "local", "provider": "fixture", "model": "fixture",
+                                    "endpoint": "http://127.0.0.1:1/chat", "timeout_seconds": 1,
+                                    "max_tokens": 128},
+                    "evidence_format": "r3a.knowledge-evidence.v1", "required_evidence_refs": [],
+                    "evidence": [], "available_tools": [_RESIDENT_TOOLS[0]], "conversation": [],
+                    "reasoning_state": {}, "pending_final": None, "config_revision": "config-1"})
+                cme._authorize_capability = AsyncMock(return_value={"audit_event_id": "audit-1"})
+                first_action = {"action": "invoke_capability",
+                                "contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
+                                "capability_id": "institution.knowledge.read",
+                                "arguments": {"query": "List every state after STOPPING"},
+                                "rationale": "Need the authoritative transition record"}
+                final_decision = {"assessment": "STOPPED and FAILED are the successors",
+                                  "status": "healthy", "evidence_refs": ["knowledge.1"],
+                                  "recommended_action": "none"}
+                responses = [
+                    {"result": {"action": "invoke_capability", "capability_request": first_action,
+                                 "model_content": json.dumps(first_action),
+                                 "model": {"request_ref": "model-1", "request_sha256": "a" * 64,
+                                           "result_ref": "result-1", "result_sha256": "b" * 64}}},
+                    {"result": {"action": "final", "decision": final_decision,
+                                 "model_content": json.dumps({"action": "final", "decision": final_decision}),
+                                 "model": {"request_ref": "model-2", "request_sha256": "c" * 64,
+                                           "result_ref": "result-2", "result_sha256": "d" * 64}}},
+                ]
+
+                async def module_call(*_args, **_kwargs):
+                    return responses.pop(0)
+
+                cme._module_call = module_call
+                activity = {"activity_type": "grace.objective", "activity_id": "activity-1",
+                            "attempt_id": "attempt-1", "attempt_count": 0,
+                            "input": {"objective": "List every state after STOPPING"}, "checkpoint": {}}
+                await cme._run_activity(activity)
+                self.assertIsNone(cme.store.blocked)
+                self.assertEqual(cme.store.completed["decision"], final_decision)
+                self.assertEqual(len(cme.store.completed["reasoning_trace"]["capability_invocations"]), 1)
+                tool_checkpoint = next(checkpoint for progress, checkpoint in cme.store.progress
+                                       if progress["phase"] == "resident.capability.completed")
+                self.assertEqual(tool_checkpoint["evidence"][0]["source_path"], "transitions.STOPPING")
+                self.assertEqual(len(tool_checkpoint["reasoning_state"]["conversation"]), 2)
+
+        asyncio.run(exercise())
 
 
 if __name__ == "__main__":
