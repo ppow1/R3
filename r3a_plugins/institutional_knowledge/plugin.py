@@ -57,21 +57,11 @@ class InstitutionalKnowledgeProvider:
         query = arguments["query"].strip()
         if not query or len(query) > 2000:
             raise ValueError("query must contain 1 to 2000 non-whitespace characters")
-        source_filter = arguments.get("source_id")
         limit = arguments.get("limit", self.max_results)
         observed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         results: list[dict[str, Any]] = []
         observations: list[dict[str, Any]] = []
-        if source_filter and source_filter not in {item["source_id"] for item in self.sources}:
-            observations.append({"source_id": source_filter, "uri": None,
-                                 "availability": "unavailable", "freshness": "unavailable",
-                                 "error": "source_id_not_configured"})
-            return CapabilityProviderResult(
-                {"schema_id": "r3a.institutional-knowledge-results.v1", "schema_version": 1,
-                 "query": query, "observed_at": observed_at, "sources": observations, "results": []}, [])
         for source in self.sources:
-            if source_filter and source["source_id"] != source_filter:
-                continue
             path = Path(source["path"]).expanduser().resolve()
             try:
                 with path.open("rb") as document:
