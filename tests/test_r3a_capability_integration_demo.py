@@ -144,7 +144,7 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             registry = CapabilityRegistry()
             registry.register(registered_descriptor, {"workspace_root": "/tmp"})
             instance = CME.__new__(CME)
-            instance.settings = SimpleNamespace(capability_registry=registry)
+            instance.settings = SimpleNamespace(capability_registry=registry, source_digest="cfg-demo")
             result = await instance._control_request("capability.discover", {}, "discover-all")
             self.assertFalse(result["authorization_evaluated"])
             self.assertEqual("none; discovery does not authorize invocation", result["effect"])
@@ -171,7 +171,7 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             registry = CapabilityRegistry()
             registry.register(read_descriptor, {"workspace_root": str(root)})
             instance = CME.__new__(CME)
-            instance.settings = SimpleNamespace(capability_registry=registry)
+            instance.settings = SimpleNamespace(capability_registry=registry, source_digest="cfg-demo")
             instance.store = DurableFixtureStore(order)
             instance.store.fail_finish_once = False
             instance._authorize_capability = AsyncMock(return_value={
@@ -228,7 +228,7 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 "idempotency_key": f"{ORDER}:1:1", "deadline": None, "config_revision": "cfg-demo"}
             validate_invocation_request(request, descriptor_value)
             instance = CME.__new__(CME)
-            instance.settings = SimpleNamespace(capability_registry=registry)
+            instance.settings = SimpleNamespace(capability_registry=registry, source_digest="cfg-demo")
             instance.store = DurableFixtureStore(order)
             artifact = root / "artifacts/result.txt"
             authorization_observed = []

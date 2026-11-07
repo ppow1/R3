@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.institutional-responsibility-catalog.v1",
+  "type": "object",
+  "required": ["schema_id", "schema_version", "source_id", "source_revision", "updated_at", "offices"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_id": {"const": "r3a.institutional-responsibility-catalog.v1"},
+    "schema_version": {"type": "integer", "const": 1},
+    "source_id": {"type": "string", "minLength": 1},
+    "source_revision": {"type": "string", "minLength": 1},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "offices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["office", "responsibilities"],
+        "additionalProperties": false,
+        "properties": {
+          "office": {"type": "string", "minLength": 1},
+          "responsibilities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["responsibility_id", "description", "capability_ids"],
+              "additionalProperties": false,
+              "properties": {
+                "responsibility_id": {"type": "string", "minLength": 1},
+                "description": {"type": "string", "minLength": 1},
+                "capability_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

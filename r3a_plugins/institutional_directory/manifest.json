@@ -1,0 +1,428 @@
+{
+  "schema_version": 1,
+  "plugin_id": "r3a.institutional-directory",
+  "plugin_version": "1.0.0",
+  "artifact_ref": "plugin.py",
+  "artifact_sha256": "bcf48b29d672715b0c532adc0bbdf6e00098e3e70a441e97ae4be1ff2cef5fca",
+  "supporting_artifacts": [
+    {
+      "artifact_ref": "responsibility_catalog.schema.json",
+      "artifact_sha256": "6c6afa14fe6d8546d95531836112d19f611c35e36c84a85ea1c4384c14354ef9"
+    }
+  ],
+  "configuration_schema": {
+    "schema_id": "r3a.institutional-directory.config.v1",
+    "type": "object",
+    "required": [
+      "database_path_env",
+      "max_age_seconds",
+      "responsibility_catalog_path_env"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "database_path_env": {
+        "type": "string",
+        "pattern": "[A-Z][A-Z0-9_]*"
+      },
+      "max_age_seconds": {
+        "type": "integer",
+        "minimum": 60,
+        "maximum": 604800
+      },
+      "responsibility_catalog_path_env": {
+        "type": "string",
+        "pattern": "[A-Z][A-Z0-9_]*"
+      }
+    }
+  },
+  "provider": {
+    "provider_id": "r3a.institutional-directory",
+    "provider_version": "1.0.0",
+    "entrypoint": "r3a_plugins.institutional_directory.plugin:create_provider",
+    "artifact_sha256": "bcf48b29d672715b0c532adc0bbdf6e00098e3e70a441e97ae4be1ff2cef5fca"
+  },
+  "operation": {
+    "contract_id": "r3a.capability-operation.v1",
+    "contract_version": "1.0.0",
+    "operation_id": "institutional.directory.discover",
+    "operation_revision": "1.0.0",
+    "provider": {
+      "provider_id": "r3a.institutional-directory",
+      "provider_version": "1.0.0",
+      "entrypoint": "r3a_plugins.institutional_directory.plugin:create_provider",
+      "artifact_sha256": "bcf48b29d672715b0c532adc0bbdf6e00098e3e70a441e97ae4be1ff2cef5fca"
+    },
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "resident_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "office": {
+          "type": "string",
+          "minLength": 1
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        }
+      },
+      "additionalProperties": false
+    },
+    "output_schema": {
+      "type": "object",
+      "required": [
+        "schema_id",
+        "schema_version",
+        "observed_at",
+        "source",
+        "residents",
+        "offices",
+        "capabilities",
+        "responsibility_catalog"
+      ],
+      "properties": {
+        "schema_id": {
+          "const": "r3a.institutional-directory.v1",
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source": {
+          "type": "object",
+          "required": [
+            "source_id",
+            "source_contract",
+            "source_sha256",
+            "source_modified_at",
+            "observed_at",
+            "age_seconds",
+            "max_age_seconds",
+            "freshness",
+            "availability",
+            "error",
+            "record_count",
+            "complete_inventory",
+            "total_matching_records",
+            "source_timestamp_basis"
+          ],
+          "properties": {
+            "source_id": {
+              "type": "string"
+            },
+            "source_contract": {
+              "type": "string"
+            },
+            "source_sha256": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "source_modified_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "observed_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "age_seconds": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "max_age_seconds": {
+              "type": "number",
+              "minimum": 1
+            },
+            "freshness": {
+              "type": "string",
+              "enum": [
+                "fresh",
+                "stale",
+                "unavailable"
+              ]
+            },
+            "availability": {
+              "type": "string",
+              "enum": [
+                "measured",
+                "unavailable"
+              ]
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "record_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "complete_inventory": {
+              "type": "boolean"
+            },
+            "total_matching_records": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "source_timestamp_basis": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "residents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "resident_id",
+              "display_name",
+              "office",
+              "status",
+              "schema_version",
+              "record_revision",
+              "role_description",
+              "availability",
+              "availability_state",
+              "responsibilities",
+              "responsibility_state"
+            ],
+            "properties": {
+              "resident_id": {
+                "type": "string"
+              },
+              "display_name": {
+                "type": "string"
+              },
+              "office": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "schema_version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "record_revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "role_description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "availability": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "availability_state": {
+                "type": "string",
+                "enum": [
+                  "measured",
+                  "unavailable"
+                ]
+              },
+              "responsibilities": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "responsibility_state": {
+                "type": "string",
+                "enum": [
+                  "measured",
+                  "unavailable"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "offices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "office",
+              "resident_ids",
+              "responsibilities",
+              "responsibility_state"
+            ],
+            "properties": {
+              "office": {
+                "type": "string"
+              },
+              "resident_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "responsibilities": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "responsibility_state": {
+                "type": "string",
+                "enum": [
+                  "measured",
+                  "unavailable"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "descriptor",
+              "presentation",
+              "registry_observation",
+              "authorization_evaluated"
+            ],
+            "properties": {
+              "descriptor": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "presentation": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "registry_observation": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "authorization_evaluated": {
+                "const": false,
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "responsibility_catalog": {
+          "type": "object",
+          "required": [
+            "schema_id",
+            "state",
+            "source_sha256",
+            "source_revision",
+            "error"
+          ],
+          "properties": {
+            "schema_id": {
+              "const": "r3a.institutional-responsibility-catalog.v1",
+              "type": "string"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "measured",
+                "unavailable"
+              ]
+            },
+            "source_sha256": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "source_revision": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "effect_class": "read",
+    "caller_constraints": {
+      "allowed_principals": [],
+      "allowed_residents": [],
+      "allowed_services": []
+    },
+    "target_scope_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "required_grants": [
+      "institutional.directory.read"
+    ],
+    "evidence": {
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "verification_obligations": [
+        "preserve_hr_source_digest_and_record_revisions",
+        "report_source_freshness_and_timestamp_basis",
+        "do_not_infer_responsibilities_availability_or_authorization",
+        "preserve_dynamic_capability_descriptors"
+      ]
+    },
+    "recovery": {
+      "idempotency_required": false,
+      "idempotency_scope": "invocation",
+      "replay_safe": true,
+      "reconciliation_operation_id": null
+    },
+    "execution": {
+      "timeout_seconds": 20,
+      "retry_disposition": "safe_retry"
+    },
+    "lifecycle": {
+      "desired_state": "enabled"
+    },
+    "resident_tool": {
+      "name": "Institutional Directory Discovery",
+      "description": "Read authoritative HR resident/office records, configured responsibility bindings, and dynamically registered R3A capability descriptors; this operation does not authorize their invocation."
+    }
+  }
+}

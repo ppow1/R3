@@ -1,0 +1,5 @@
+{
+  "database_path_env": "R3A_HR_DIRECTORY_DATABASE",
+  "max_age_seconds": 86400,
+  "responsibility_catalog_path_env": "R3A_DIRECTORY_RESPONSIBILITY_CATALOG"
+}

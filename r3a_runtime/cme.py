@@ -945,9 +945,11 @@ class CME:
                      "query_sha256": hashlib.sha256(query.encode()).hexdigest()
                      if capability_id == "institution.knowledge.read" else None})
         evidence = []
+        capability_output: Any = None
         if capability_id == "institution.knowledge.read":
             for index, path in enumerate(self.settings.knowledge_sources):
                 evidence.extend(retrieve(path, f"knowledge.{index+1}", query))
+            capability_output = evidence
         elif registered_operation is not None:
             provider = registered_operation.load_provider()
             provided = await asyncio.to_thread(provider.invoke, arguments,
@@ -955,17 +957,20 @@ class CME:
                                                          "attempt_id": str(activity["attempt_id"]),
                                                          "correlation_id": str(activity.get("correlation_id")
                                                                                or activity["activity_id"]),
-                                                         "operation_id": capability_id})
-            _, provider_evidence = normalize_provider_result(
+                                                         "operation_id": capability_id,
+                                                         "config_revision": self.settings.source_digest,
+                                                         "capability_catalog": list(registry.discover())})
+            capability_output, provider_evidence = normalize_provider_result(
                 provided, registered_operation.descriptor)
             evidence.extend(provider_evidence if isinstance(provider_evidence, list)
                             else [provider_evidence])
         else:
             evidence.extend(await self._read_runtime_capability(capability_id))
+            capability_output = evidence
         return {"contract_id": tool["contract_id"],
                 "contract_version": tool["contract_version"],
                 "capability_id": capability_id, "outcome": "succeeded",
-                "arguments": arguments, "evidence": evidence,
+                "arguments": arguments, "output": capability_output, "evidence": evidence,
                 "authorization": authorization, "observed_at": utcnow().isoformat()}
 
     async def invoke_capability(self, request: dict[str, Any], *,
@@ -1041,7 +1046,9 @@ class CME:
                 "invocation_id": checked["invocation_id"], "idempotency_key": persistence_key,
                 "activity_id": checked["activity_id"], "attempt_id": checked["attempt_id"],
                 "correlation_id": checked["correlation_id"], "target": checked["target"],
-                "work_order": order, "effect_class": descriptor["effect_class"]})
+                "work_order": order, "effect_class": descriptor["effect_class"],
+                "config_revision": self.settings.source_digest,
+                "capability_catalog": list(self.settings.capability_registry.discover())})
         except Exception as exc:
             finished = utcnow().isoformat()
             result = {"contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
