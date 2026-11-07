@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_modular_autonomy.py
 Component: R3A-AP1-MODULAR-AUTONOMY-REGRESSION
-File Revision: 1.1.2
+File Revision: 1.2.0
 Created: 2026-11-06T23:19:46Z
 Created By: Codex GPT-6
 Purpose: Permanently verify versioned autonomy contracts, external model roles, readiness routing, deferral, and authorization-provider compatibility.
@@ -15,6 +15,7 @@ Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Cover legacy con
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Extend Slice 1 regressions for provider configuration, identity, stale state and recovery routing.
 Changed: 2026-11-07T05:45:10Z | AP2-IMPLEMENTATION | Codex GPT-6 | Give the model deferral compatibility fixture valid required acceptance criteria.
 Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Assert authorization decision identity remains distinct from its audit event.
+Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Verify versioned activity dependency identity and validation.
 Supersedes: None.
 Contracts: AP0-003–010; R3A-019; MOD-006; r3a.contract-envelope.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
 Tests: This test module.
@@ -35,7 +36,7 @@ from r3a_runtime.authorization import (AuthorizationDecision, AuthorizationReque
                                        CapabilityGrantAuthorizationProvider,
                                        create_authorization_provider, register_authorization_provider)
 from r3a_runtime.config import ConfigurationError, load_settings, sanitized_config
-from r3a_runtime.contracts import (ContractEnvelope, ContractOutcome, ContractValidationError,
+from r3a_runtime.contracts import (ActivityDependencySet, ContractEnvelope, ContractOutcome, ContractValidationError,
                                    ReadinessObservation, resolve_role)
 from r3a_runtime.cme import CME
 from r3a_runtime.diagnostics import project_resource_readiness
@@ -43,6 +44,22 @@ from r3a_runtime.protocol import ModuleProtocolServer, request as module_request
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class ActivityDependencyContractTests(unittest.TestCase):
+    def test_versioned_dependency_set_normalizes_and_rejects_invalid_sets(self):
+        activity_id = "A0B1C2D3-E4F5-4678-9012-123456789ABC"
+        contract = ActivityDependencySet((activity_id,))
+        self.assertEqual([activity_id.lower()], contract.to_dict()["activity_ids"])
+        self.assertEqual(contract, ActivityDependencySet.from_value(contract.to_dict()))
+        with self.assertRaises(ContractValidationError):
+            ActivityDependencySet.from_value({"contract_id": "r3a.activity-dependencies",
+                                              "contract_version": "2.0.0",
+                                              "activity_ids": [activity_id]})
+        with self.assertRaises(ContractValidationError):
+            ActivityDependencySet((activity_id, activity_id.lower()))
+        with self.assertRaises(ContractValidationError):
+            ActivityDependencySet(("not-a-uuid",))
 
 
 def make_config(directory: Path, *, primary_model: str = "reasoner-a",

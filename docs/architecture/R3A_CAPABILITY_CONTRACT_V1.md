@@ -1,5 +1,7 @@
 # R3A unified capability contract v1
 
+The Continuous Momentum Engine (CME) owns scheduling, authorization enforcement, continuity, and invocation dispatch. Registry discovery separates stable machine-readable operation IDs from human-readable name/description presentation. Presentation never changes the canonical ID used in requests, grants, or audit records. A registered provider's availability remains `not_probed` until provider evidence establishes otherwise.
+
 The canonical contract is shared by read, isolated-write, and external-write operations. Effect is descriptor metadata that the invocation dispatcher must enforce with operation, caller, target, grant, and work-order context. Registry discovery makes no authorization decision.
 
 ## Published schemas and provider API

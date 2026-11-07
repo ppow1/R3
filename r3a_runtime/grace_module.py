@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.3.2
+File Revision: 1.4.1
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
 Purpose: Execute read-only Grace objectives through configured inference and resident-selected authorized capabilities.
@@ -27,7 +27,9 @@ Changed: 2026-11-07T03:34:34Z | R3A-019-INBOX-LOOP | Codex GPT-6 | Constrain cap
 Supersedes: None.
 Contracts: R3A-019; AP1-M1 Issue #43 acceptance; r3a.resident.execution.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; automated inference responses are fixtures.
-History/Predecessor: Git blob 79b5db5747b261cbb3d8807988e8c63043e1d9ae at commit 111c7661e9aad796a5f6752878c809d551f94884.
+Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Support model-selected registered Engineering operations, typed proposals and post-execution resident assessment.
+Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Require evidence-bounded Engineering assessments and prohibit unsupported artifact claims.
+History/Predecessor: Prior revision at baseline 3355abe96524a5260e9ba8395a9dfef5bfdd9422, blob 79b5db5747b261cbb3d8807988e8c63043e1d9ae.
 """
 from __future__ import annotations
 
@@ -52,12 +54,34 @@ from .protocol import ModuleProtocolServer
 RESIDENT_ACTION_SCHEMA = {
     "type": "object",
     "properties": {
-        "action": {"type": "string", "enum": ["invoke_capability", "final"]},
+        "action": {"type": "string", "enum": ["invoke_capability", "propose_engineering", "engineering_assess", "final"]},
         "contract_id": {"type": "string"},
         "contract_version": {"type": "string"},
         "capability_id": {"type": "string"},
         "arguments": {"type": "object"},
         "rationale": {"type": "string"},
+        "proposal": {
+            "type": "object",
+            "properties": {
+                "operation_id": {"type": "string"},
+                "contract_version": {"type": "string"},
+                "target": {"type": "object"},
+                "inputs": {"type": "object"},
+                "verification_plan": {"type": "object"},
+            },
+            "required": ["operation_id", "contract_version", "target", "inputs", "verification_plan"],
+            "additionalProperties": False,
+        },
+        "engineering_assessment": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["ready_for_verification", "blocked"]},
+                "assessment": {"type": "string"},
+                "evidence_refs": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["status", "assessment", "evidence_refs"],
+            "additionalProperties": False,
+        },
         "decision": {
             "type": "object",
             "properties": {
@@ -75,13 +99,18 @@ RESIDENT_ACTION_SCHEMA = {
 }
 
 
-def resident_action_schema(available_tools: list[dict[str, Any]]) -> dict[str, Any]:
+def resident_action_schema(available_tools: list[dict[str, Any]],
+                           available_operations: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Constrain capability selection to exact identifiers in this execution's manifest."""
     schema = json.loads(json.dumps(RESIDENT_ACTION_SCHEMA))
     capability_ids = [tool.get("capability_id") for tool in available_tools
                       if isinstance(tool, dict) and isinstance(tool.get("capability_id"), str)]
     if capability_ids:
         schema["properties"]["capability_id"]["enum"] = list(dict.fromkeys(capability_ids))
+    operation_ids = [operation.get("operation_id") for operation in (available_operations or [])
+                     if isinstance(operation, dict) and isinstance(operation.get("operation_id"), str)]
+    if operation_ids:
+        schema["properties"]["proposal"]["properties"]["operation_id"]["enum"] = list(dict.fromkeys(operation_ids))
     return schema
 
 
@@ -182,6 +211,10 @@ class GraceResident:
             tools = payload.get("available_tools", [])
             if not isinstance(tools, list):
                 raise ValueError("available_tools must be an array")
+            available_operations = payload.get("available_engineering_operations", [])
+            engineering_assignment = payload.get("engineering_assignment")
+            if not isinstance(available_operations, list):
+                raise ValueError("available_engineering_operations must be an array")
             conversation = payload.get("conversation", [])
             if not isinstance(conversation, list) or any(
                     not isinstance(message, dict) or message.get("role") not in {"assistant", "user"}
@@ -191,19 +224,22 @@ class GraceResident:
                 "model": route.model,
                 "temperature": 0,
                 "max_tokens": route.max_tokens,
-                "response_format": {"type": "json_object", "schema": resident_action_schema(tools)},
+                "response_format": {"type": "json_object", "schema": resident_action_schema(tools, available_operations)},
                 "chat_template_kwargs": {"enable_thinking": False},
                 "messages": [
                     {"role": "system", "content": (
                         "You are Grace, the resident responsible for reasoning about the assigned objective. "
                         "Select actions yourself. You may request a capability only from the supplied available_tools list; "
                         "copy its capability_id verbatim, including punctuation; never replace periods with underscores. "
+                        "Human-readable capability names and descriptions are for comprehension; always select by the stable machine identifier. "
                         "The institutional runtime will enforce authorization and return its result. Do not claim a capability "
                         "was used until its result appears in the conversation. Use only evidence returned by the runtime. "
                         "If evidence is empty and the objective asks for institutional facts, do not guess or return a healthy answer. "
                         "Request a relevant listed capability; if none can supply the facts, return a justified blocked decision. "
                         "If the institutional runtime rejects a proposed completion with acceptance feedback, reassess the original objective "
                         "against all returned evidence and continue with an authorized capability when useful; do not repeat an unsupported final. "
+                        "For a continuation that lists dependency_context, treat those durable prerequisite outcomes as prior institutional evidence, "
+                        "and continue the current objective without claiming the prerequisite's work as your own. "
                         "When more information is needed, return {\"action\":\"invoke_capability\","
                         "\"contract_id\":\"r3a.resident-capability-tool\",\"contract_version\":\"1.0.0\","
                         "\"capability_id\":\"exact capability_id\",\"arguments\":{...},"
@@ -211,12 +247,17 @@ class GraceResident:
                         "{\"action\":\"final\",\"decision\":{\"assessment\":\"answer the objective\","
                         "\"status\":\"healthy|degraded|blocked\",\"evidence_refs\":[\"source_id\"],"
                         "\"recommended_action\":\"next action or none\"}}. For final answers cite only returned source IDs. "
+                        "For an Engineering assignment, independently inspect the objective, acceptance criteria, and listed canonical operation descriptors. Select an operation and typed target/inputs yourself, then return {\"action\":\"propose_engineering\",\"rationale\":\"why this operation and approach fit\",\"proposal\":{\"operation_id\":\"registered operation ID\",\"contract_version\":\"1.0.0\",\"target\":{},\"inputs\":{},\"verification_plan\":{}}}. The CME validates scope and authorization before execution. After the runtime returns execution evidence, assess that evidence and return {\"action\":\"engineering_assess\",\"engineering_assessment\":{\"status\":\"ready_for_verification|blocked\",\"assessment\":\"evidence-grounded assessment\",\"evidence_refs\":[\"execution evidence references\"]}}. Mention only facts present in supplied evidence and criteria; do not claim checks, signatures, or properties that were not performed or verified. This assessment does not itself accept the deliverable. "
                         "Use blocked only when required facts remain unavailable or ambiguous; explain why in assessment. "
                         "Never imply external actions were performed. Return one compact JSON object." )},
                     *conversation,
                     {"role": "user", "content": json.dumps({"event_kind": payload.get("event_kind", "objective"),
                                                                   "objective": objective,
                                                                   "acceptance_contract": payload.get("acceptance_contract", {}),
+                                                                  "engineering_assignment": engineering_assignment,
+                                                                  "available_engineering_operations": available_operations,
+                                                                  "engineering_execution_result": payload.get("engineering_execution_result"),
+                                                                  "dependency_context": payload.get("dependency_context", []),
                                                                   "available_tools": tools,
                                                                   "required_evidence_refs": payload.get("required_evidence_refs", []),
                                                                   "evidence": evidence},
@@ -275,6 +316,30 @@ class GraceResident:
                     if decision["capability_id"] not in tool_ids:
                         raise ValueError("model requested a capability not present in its tool manifest")
                     final_decision = None
+                elif decision.get("action") == "propose_engineering":
+                    if set(decision) != {"action", "proposal", "rationale"} or not isinstance(decision["proposal"], dict):
+                        raise ValueError("Engineering proposal action fields are invalid")
+                    if not isinstance(decision["rationale"], str) or not decision["rationale"].strip():
+                        raise ValueError("Engineering proposal requires a rationale")
+                    proposed = decision["proposal"]
+                    required = {"operation_id", "contract_version", "target", "inputs", "verification_plan"}
+                    if set(proposed) != required or not isinstance(proposed["target"], dict) or \
+                            not isinstance(proposed["inputs"], dict) or not isinstance(proposed["verification_plan"], dict):
+                        raise ValueError("Engineering proposal payload is malformed")
+                    if proposed["operation_id"] not in {op.get("operation_id") for op in available_operations}:
+                        raise ValueError("Grace selected an operation absent from canonical discovery")
+                    final_decision = None
+                elif decision.get("action") == "engineering_assess":
+                    if set(decision) != {"action", "engineering_assessment"} or not isinstance(decision["engineering_assessment"], dict):
+                        raise ValueError("Engineering assessment action fields are invalid")
+                    assessment = decision["engineering_assessment"]
+                    if set(assessment) != {"status", "assessment", "evidence_refs"} or \
+                            assessment["status"] not in {"ready_for_verification", "blocked"} or \
+                            not isinstance(assessment["assessment"], str) or not assessment["assessment"].strip() or \
+                            not isinstance(assessment["evidence_refs"], list) or \
+                            any(not isinstance(ref, str) for ref in assessment["evidence_refs"]):
+                        raise ValueError("Engineering assessment payload is invalid")
+                    final_decision = None
                 elif decision.get("action") == "final":
                     if set(decision) != {"action", "decision"} or not isinstance(decision["decision"], dict):
                         raise ValueError("final action fields are invalid")
@@ -306,6 +371,9 @@ class GraceResident:
                     "objective": objective, "event_kind": payload.get("event_kind", "objective"),
                     "action": decision["action"], "decision": final_decision,
                     "capability_request": (decision if decision["action"] == "invoke_capability" else None),
+                    "engineering_proposal": decision.get("proposal") if decision["action"] == "propose_engineering" else None,
+                    "engineering_assessment": decision.get("engineering_assessment") if decision["action"] == "engineering_assess" else None,
+                    "rationale": decision.get("rationale"),
                     "model_content": choice,
                     "model": {"route_id": route.route_id, "provider": route.provider, "name": route.model,
                               "role_id": payload.get("selected_role_id"),

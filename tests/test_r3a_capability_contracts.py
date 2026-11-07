@@ -57,8 +57,11 @@ class CapabilityContractTests(unittest.TestCase):
         self.assertEqual("read", discovered_descriptor["effect_class"])
         self.assertEqual(self.descriptor["required_grants"], discovered_descriptor["required_grants"])
         self.assertEqual(self.descriptor["target_scope_schema"], discovered_descriptor["target_scope_schema"])
+        self.assertEqual(self.descriptor["operation_id"], discovered_descriptor["operation_id"])
+        self.assertEqual("not_probed", discovered[0]["registry_observation"]["provider_availability"])
         provider = self.registered.load_provider()
         self.assertTrue(callable(provider.invoke))
+        self.assertEqual(self.descriptor["operation_id"], self.registered.descriptor["operation_id"])
         self.assertEqual("OctoMiner GPU Telemetry",
                          self.registered.resident_tool_projection()["name"])
 

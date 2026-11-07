@@ -157,7 +157,7 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 "discover-one")
             self.assertEqual(registered_descriptor,
                              selected["operations"][0]["descriptor"])
-            self.assertEqual("engineering_workspace_apply_patch",
+            self.assertEqual("Engineering Workspace Apply Patch",
                              selected["operations"][0]["presentation"]["name"])
 
         asyncio.run(scenario())

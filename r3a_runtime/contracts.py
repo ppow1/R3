@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/contracts.py
 Component: R3A-VERSIONED-AUTONOMY-CONTRACTS
-File Revision: 1.1.0
+File Revision: 1.2.0
 Created: 2026-11-06T23:19:46Z
 Created By: Codex GPT-6
 Purpose: Define versioned resident execution, model-role, readiness, routing, and authorization envelopes.
@@ -13,6 +13,7 @@ Authority: R3A AP0/AP1 Modular Autonomy Implementation Slices 1–2; isolated de
 Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add typed versioned contracts and configurable role selection semantics.
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add typed contract outcomes, provider-backed readiness evidence, and freshness-aware role selection.
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Version provider-backed readiness as v2 with identity evidence and fail-closed freshness routing.
+Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Add typed versioned durable activity dependency references.
 Supersedes: None.
 Contracts: AP0-003–010; R3A-019; MOD-006; STM-003/005/006; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
 Tests: tests/test_r3a_modular_autonomy.py.
@@ -38,6 +39,8 @@ ROUTE_CONTRACT_ID = "r3a.model-route-decision"
 ROUTE_CONTRACT_VERSION = "1.0.0"
 AUTHORIZATION_CONTRACT_ID = "r3a.authorization-decision"
 AUTHORIZATION_CONTRACT_VERSION = "1.0.0"
+ACTIVITY_DEPENDENCIES_CONTRACT_ID = "r3a.activity-dependencies"
+ACTIVITY_DEPENDENCIES_CONTRACT_VERSION = "1.0.0"
 
 ReadinessStatus = Literal["ready", "degraded", "unavailable", "stale", "unknown"]
 RouteAction = Literal["route", "defer", "block"]
@@ -45,6 +48,50 @@ RouteAction = Literal["route", "defer", "block"]
 
 class ContractValidationError(ValueError):
     """A versioned contract envelope or observation is malformed or incompatible."""
+
+
+@dataclass(frozen=True)
+class ActivityDependencySet:
+    """Durable prerequisite activity references; completion is evaluated by CME."""
+
+    activity_ids: tuple[str, ...]
+    contract_id: str = ACTIVITY_DEPENDENCIES_CONTRACT_ID
+    contract_version: str = ACTIVITY_DEPENDENCIES_CONTRACT_VERSION
+
+    def __post_init__(self) -> None:
+        if self.contract_id != ACTIVITY_DEPENDENCIES_CONTRACT_ID:
+            raise ContractValidationError("activity dependency contract identity mismatch")
+        if self.contract_version != ACTIVITY_DEPENDENCIES_CONTRACT_VERSION:
+            raise ContractValidationError("unsupported activity dependency contract version")
+        if not isinstance(self.activity_ids, tuple) or not self.activity_ids:
+            raise ContractValidationError("activity dependency set must be a nonempty tuple")
+        normalized = []
+        for activity_id in self.activity_ids:
+            try:
+                normalized.append(str(UUID(_required_text(activity_id, "activity_id"))))
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ContractValidationError("activity dependency IDs must be UUIDs") from exc
+        if len(normalized) != len(set(normalized)):
+            raise ContractValidationError("activity dependency IDs must be unique")
+        object.__setattr__(self, "activity_ids", tuple(normalized))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"contract_id": self.contract_id, "contract_version": self.contract_version,
+                "activity_ids": list(self.activity_ids)}
+
+    @classmethod
+    def from_value(cls, value: Any) -> "ActivityDependencySet | None":
+        if value is None or value == [] or value == ():
+            return None
+        if isinstance(value, dict):
+            if set(value) != {"contract_id", "contract_version", "activity_ids"}:
+                raise ContractValidationError("activity dependency contract fields are invalid")
+            if not isinstance(value["activity_ids"], list):
+                raise ContractValidationError("activity dependency activity_ids must be an array")
+            return cls(tuple(value["activity_ids"]), value["contract_id"], value["contract_version"])
+        if not isinstance(value, (list, tuple)):
+            raise ContractValidationError("activity dependencies must be an array or versioned contract")
+        return cls(tuple(value))
 
 
 def _required_text(value: Any, name: str) -> str:
