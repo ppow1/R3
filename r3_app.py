@@ -1,21 +1,23 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.11
+# File Revision: 1.0.13
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
-# Purpose: Initial shared read-only institutional API
+# Purpose: Serve visual estate UI and authenticated, canonical R3A Steward API adapters
 # Execution Model: Request-driven FastAPI service
-# Observability: HTTP health endpoint; no deployed verification
+# Observability: HTTP diagnostics, correlated CME results, and durable activity/event references
 # Dependencies: FastAPI, Git checkout, local artwork folder
 # Authority: R3 engineering guidance; approved charter prevails
 # Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Serve the fixed resident avatar frontend module
 # Changed: 2026-11-01 UTC | R3-PANEL-INTERACTION-002 | ChatGPT GPT-6 | Align snapshot anchors and report dragged Infrastructure marker
 # Supersedes: None
 # Contracts: hints/file-provenance.md
-# Tests: Not run for this source change; module route and browser verification pending
+# Tests: tests.test_r3a_website; API responses mocked at Unix socket boundary; live/browser verification pending
 # History/Predecessor: Git blob b3195f5a0ea8bacc030b642bc3dbb76258a4e747
 # Changed: 2026-11-07T21:40:20Z | R3A-007/R3A-010/R3A-013/R3A-017/R3A-019 | Codex GPT-6 | Add configurable Steward-authenticated AP1 diagnostics and durable Grace objective gateway.
+# Changed: 2026-11-07T21:58:03Z | R3A-007/R3A-013 | Codex GPT-6 | Expose read-only effective sanitized configuration and bounded activation history from authoritative diagnostics.
+# Changed: 2026-11-07T22:02:09Z | R3A-007/R3A-013 | Codex GPT-6 | Record focused API test coverage and current verification limits in provenance.
 
 """R3 first vertical slice: shared read-only capabilities, not UI-owned logic.
 
@@ -86,6 +88,37 @@ async def steward_r3a_events(authorization: str | None = Header(default=None, al
         return await control_request(settings.diagnostics_socket, "events", timeout=4.0)
     except Exception as exc:
         raise HTTPException(503, f"R3A event history unavailable: {type(exc).__name__}") from exc
+
+
+@app.get("/api/v1/steward/r3a/configuration")
+async def steward_r3a_configuration(authorization: str | None = Header(default=None, alias="Authorization")):
+    settings = _steward_settings(authorization)
+    from r3a_runtime.control import control_request
+    try:
+        current, history = await asyncio.gather(
+            control_request(settings.diagnostics_socket, "status", timeout=4.0),
+            control_request(settings.diagnostics_socket, "events", timeout=4.0),
+        )
+    except Exception as exc:
+        raise HTTPException(503, f"R3A configuration diagnostics unavailable: {type(exc).__name__}") from exc
+    configuration = current.get("configuration")
+    if not isinstance(configuration, dict):
+        raise HTTPException(503, "R3A configuration revision is unavailable")
+    activations = [event for event in history.get("events", [])
+                   if event.get("event_type") == "config.activated"]
+    return {
+        "observed_at": current.get("observed_at"),
+        "source": current.get("source", "unknown"),
+        "revision": {key: configuration.get(key) for key in
+                     ("revision_id", "schema_version", "source_digest", "activated_at", "actor")},
+        "effective_values": configuration.get("config", {}),
+        "activation_history": [{key: event.get(key) for key in
+                                ("event_id", "occurred_at", "actor", "config_revision", "reason")}
+                               for event in activations],
+        "history_window": len(history.get("events", [])),
+        "history_complete": False,
+        "write_available": False,
+    }
 
 
 @app.post("/api/v1/steward/r3a/objectives", status_code=202)
