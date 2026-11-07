@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.2.1
+File Revision: 1.3.1
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
 Purpose: Execute read-only Grace objectives through configured inference and resident-selected authorized capabilities.
@@ -21,10 +21,12 @@ Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Validate optiona
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Complete execution envelope identity checks and role provenance propagation.
 Changed: 2026-11-07 | R3A-019 | Codex GPT-6 | Let Grace select authorized read capabilities and reason over returned evidence through durable continuation turns.
 Changed: 2026-11-07 | R3A-019 | Codex GPT-6 | Normalize omitted arguments to an empty object only for no-argument capability manifests.
+Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Give Grace explicit objective criteria and continuation feedback.
+Changed: 2026-11-07T02:41:51Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Deliver the versioned acceptance envelope in the resident inference context.
 Supersedes: None.
 Contracts: R3A-019; AP1-M1 Issue #43 acceptance; r3a.resident.execution.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; automated inference responses are fixtures.
-History/Predecessor: Git blob 90399a473bb6c7f88d5200e4d18fef004fcbbcbb at commit cc7f662c04a4ba8eb327edd134e2ded92ef9786c.
+History/Predecessor: Git blob 267e9a55f5b8721e0e17c841e2e4b6dfca648fbd at commit 0d5f950efc2318774bb95a8dad3b5a498d3f8ce3.
 """
 from __future__ import annotations
 
@@ -169,6 +171,8 @@ class GraceResident:
                         "was used until its result appears in the conversation. Use only evidence returned by the runtime. "
                         "If evidence is empty and the objective asks for institutional facts, do not guess or return a healthy answer. "
                         "Request a relevant listed capability; if none can supply the facts, return a justified blocked decision. "
+                        "If the institutional runtime rejects a proposed completion with acceptance feedback, reassess the original objective "
+                        "against all returned evidence and continue with an authorized capability when useful; do not repeat an unsupported final. "
                         "When more information is needed, return {\"action\":\"invoke_capability\","
                         "\"contract_id\":\"r3a.resident-capability-tool\",\"contract_version\":\"1.0.0\","
                         "\"capability_id\":\"exact capability_id\",\"arguments\":{...},"
@@ -181,6 +185,7 @@ class GraceResident:
                     *conversation,
                     {"role": "user", "content": json.dumps({"event_kind": payload.get("event_kind", "objective"),
                                                                   "objective": objective,
+                                                                  "acceptance_contract": payload.get("acceptance_contract", {}),
                                                                   "available_tools": tools,
                                                                   "required_evidence_refs": payload.get("required_evidence_refs", []),
                                                                   "evidence": evidence},

@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.2.0
+File Revision: 1.3.0
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -20,10 +20,11 @@ Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Preserve role re
 Changed: 2026-11-06T23:46:49Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Consolidate model-role deferral operations into one durable state-transition method.
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Persist provider/model identity and evidence; invalidate incompatible prior readiness in the existing registry.
 Changed: 2026-11-07T01:30:00Z | R3A-019 | Codex GPT-6 | Return the resolved configured route ID from durable objective intake.
+Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Persist validated objective acceptance criteria in the existing activity input.
 Supersedes: None.
 Contracts: AP0-003–010; R3A-019; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py.
-History/Predecessor: Git blob 89d7a15f1b63874846bd036ed0acfcbd1b68d2f8 at commit ad16700f1e94dd36c81cac5383f9f2e2771a98a1.
+History/Predecessor: Git blob 6acab79fceaf1e2d3e4c81ad01537e7e628d631d at commit 0d5f950efc2318774bb95a8dad3b5a498d3f8ce3.
 """
 from __future__ import annotations
 
@@ -40,6 +41,8 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from .config import Settings, sanitized_config
+from .acceptance import (OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
+                         OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, validate_criteria)
 from .contracts import ReadinessObservation, parse_timestamp
 
 
@@ -618,7 +621,8 @@ class Store:
                                      route_id: str | None = None,
                                      role_id: str | None = None,
                                      required_capabilities: tuple[str, ...] = (),
-                                     required_modalities: tuple[str, ...] = ()) -> dict[str, Any]:
+                                     required_modalities: tuple[str, ...] = (),
+                                     acceptance_criteria: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         """Durably enqueue one objective/notification; duplicate keys return the same activity."""
         if not objective.strip() or len(objective) > 4000:
             raise ValueError("event content must contain 1 to 4000 characters")
@@ -636,6 +640,7 @@ class Store:
             raise ValueError("required_modalities must be modality identifiers")
         if len(set(required_modalities)) != len(required_modalities):
             raise ValueError("required_modalities must be unique")
+        acceptance_criteria = validate_criteria(acceptance_criteria)
         if role_id is None and self.settings.model_roles:
             if route_id is None:
                 role_id = self.settings.default_model_role
@@ -660,6 +665,9 @@ class Store:
                        "role_id": selected_role_id,
                        "required_capabilities": list(required_capabilities),
                        "required_modalities": list(required_modalities),
+                       "acceptance_contract": {"contract_id": OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
+                                                "contract_version": OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION,
+                                                "criteria": acceptance_criteria},
                        "role_config_revision": self.settings.source_digest if selected_role_id else None}
         async with self.pool.connection() as conn, conn.transaction():
             existing = await (await conn.execute(
@@ -673,6 +681,10 @@ class Store:
                 prior_input.setdefault("role_id", None)
                 prior_input.setdefault("required_capabilities", [])
                 prior_input.setdefault("required_modalities", [])
+                prior_input.setdefault("acceptance_contract", {
+                    "contract_id": OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
+                    "contract_version": OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION,
+                    "criteria": []})
                 prior_input.setdefault("role_config_revision", None)
                 prior_input.pop("authorized_capability", None)
                 if existing["activity_type"] != "grace.objective" or prior_input != event_input:
@@ -698,7 +710,8 @@ class Store:
                                           "event_kind": event_kind, "route_id": selected_route_id,
                                           "role_id": selected_role_id,
                                           "required_capabilities": list(required_capabilities),
-                                          "required_modalities": list(required_modalities)},
+                                          "required_modalities": list(required_modalities),
+                                          "acceptance_contract": event_input["acceptance_contract"]},
                                          correlation_id=correlation_id)
             accepted = await self._transition_on_conn(conn, "activity", str(activity_id),
                                                        "activity.generic", 1, "QUEUED",

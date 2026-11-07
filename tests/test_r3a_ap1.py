@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.1.0
+File Revision: 1.2.3
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -21,10 +21,12 @@ Changed: 2026-11-06T19:05:07Z | R3A-019 | Codex GPT-6 | Test evidence selection 
 Changed: 2026-11-06T19:14:04Z | R3A-019 | Codex GPT-6 | Check exhaustive transition answer completeness and truthful blockers.
 Changed: 2026-11-06T19:16:11Z | R3A-019 | Codex GPT-6 | Cover explicit transitions.STATE knowledge references.
 Changed: 2026-11-07 | R3A-019 | Codex GPT-6 | Verify resident-selected capability actions and authorized knowledge dispatch.
+Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Reproduce false completion and prove same-activity evidence continuation.
+Changed: 2026-11-07T02:41:51Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Assert actionable missing-edge feedback and verify the durable tool-result checkpoint.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
-History/Predecessor: Git blob a1c2e1c4e3898fa967e6677429ec606a6dcfa4bb at commit 362510b7d32edd1eabdcb07c9677f1b6a47f2adf.
+History/Predecessor: Git blob c7b470dfc129378cc459d1339981afe253c8a5bb at commit 0d5f950efc2318774bb95a8dad3b5a498d3f8ce3.
 """
 from __future__ import annotations
 
@@ -35,7 +37,9 @@ import json
 from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import AsyncMock
+import hashlib
 
+from r3a_runtime.acceptance import validate_acceptance, validate_criteria
 from r3a_runtime.cme import CME, _RESIDENT_TOOLS, _knowledge_answer_issues, _requires_runtime_evidence
 from r3a_runtime.config import ConfigurationError, ModelRoute, resolve_model_route
 from r3a_runtime.grace_module import GraceResident
@@ -97,6 +101,47 @@ class KnowledgeRetrievalTests(unittest.TestCase):
             explicit = retrieve(source, "knowledge.1",
                                 "Name all destinations in the transitions.RUNNING knowledge fact")
             self.assertEqual([item["source_path"] for item in explicit], ["transitions.RUNNING"])
+
+    def test_transition_path_acceptance_rejects_missing_edge_then_accepts_cited_complete_path(self):
+        source_digest = "a" * 64
+        running = {"source_id": "knowledge.1", "source": "process.json",
+                   "source_path": "transitions.RUNNING",
+                   "content": "Transitions from RUNNING: STOPPING, FAILED",
+                   "sha256": hashlib.sha256(
+                       b"Transitions from RUNNING: STOPPING, FAILED").hexdigest(),
+                   "source_sha256": source_digest}
+        stopping = {"source_id": "knowledge.1", "source": "process.json",
+                    "source_path": "transitions.STOPPING",
+                    "content": "Transitions from STOPPING: STOPPED, FAILED",
+                    "sha256": hashlib.sha256(
+                        b"Transitions from STOPPING: STOPPED, FAILED").hexdigest(),
+                    "source_sha256": source_digest}
+        criterion = [{"criterion_id": "shutdown-route", "type": "transition_path",
+                      "from_state": "RUNNING", "to_state": "STOPPED"}]
+        trusted = {"process.json": {source_digest}}
+        incomplete = validate_acceptance(
+            validate_criteria(criterion), [running],
+            {"status": "healthy", "assessment": "RUNNING cannot transition directly to STOPPED.",
+             "evidence_refs": ["knowledge.1"]}, trusted)
+        self.assertEqual(incomplete[0]["code"], "evidence_path_incomplete")
+        complete = validate_acceptance(
+            validate_criteria(criterion), [running, stopping],
+            {"status": "healthy", "assessment": "Supported route: RUNNING -> STOPPING -> STOPPED.",
+             "evidence_refs": ["knowledge.1"]}, trusted)
+        self.assertEqual(complete, [])
+        uncited = validate_acceptance(
+            validate_criteria(criterion), [running, stopping],
+            {"status": "healthy", "assessment": "RUNNING -> STOPPING -> STOPPED.",
+             "evidence_refs": []}, trusted)
+        self.assertEqual(uncited[0]["code"], "evidence_path_incomplete")
+
+    def test_acceptance_criteria_reject_unsupported_or_ambiguous_contracts(self):
+        with self.assertRaisesRegex(ValueError, "unsupported acceptance criterion"):
+            validate_criteria([{"criterion_id": "one", "type": "model_says_ok",
+                                "from_state": "RUNNING", "to_state": "STOPPED"}])
+        with self.assertRaisesRegex(ValueError, "must be unique"):
+            validate_criteria([{"criterion_id": "one", "type": "transition_path",
+                                "from_state": "RUNNING", "to_state": "STOPPED"}] * 2)
 
     def test_unmatched_query_returns_no_knowledge_claim(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -166,7 +211,7 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
             self.assertEqual(result["evidence"][0]["content"], "Transitions from STOPPING: STOPPED, FAILED")
             self.assertEqual(result["authorization"]["audit_event_id"], "audit-1")
 
-    def test_cme_persists_tool_result_before_resident_continuation(self):
+    def test_cme_rejects_false_completion_and_resumes_same_activity_for_missing_evidence(self):
         class StoreFake:
             def __init__(self):
                 self.progress = []
@@ -191,7 +236,20 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         async def exercise():
             with tempfile.TemporaryDirectory() as directory:
                 source = Path(directory) / "process.json"
-                source.write_text('{"transitions":{"STOPPING":["STOPPED","FAILED"]}}', encoding="utf-8")
+                source.write_text('{"transitions":{"RUNNING":["STOPPING","FAILED"],'
+                                  '"STOPPING":["STOPPED","FAILED"]}}', encoding="utf-8")
+                source_digest = hashlib.sha256(source.read_bytes()).hexdigest()
+                running_content = "Transitions from RUNNING: STOPPING, FAILED"
+                initial_evidence = [
+                    {"source_id": "runtime.processes", "source_path": "runtime.processes",
+                     "sha256": "1" * 64, "content": [{"component_id": "ring0", "state": "RUNNING"}]},
+                    {"source_id": "knowledge.1", "source": "process.json",
+                     "source_path": "transitions.RUNNING", "content": running_content,
+                     "sha256": hashlib.sha256(running_content.encode()).hexdigest(),
+                     "source_sha256": source_digest},
+                ]
+                criteria = [{"criterion_id": "shutdown-route", "type": "transition_path",
+                             "from_state": "RUNNING", "to_state": "STOPPED"}]
                 cme = CME.__new__(CME)
                 cme.settings = SimpleNamespace(module_capabilities=("institution.knowledge.read",),
                                                knowledge_sources=(source,), lease_seconds=30,
@@ -204,49 +262,70 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
                 cme.active_activities = {}
                 cme._objective_context = AsyncMock(return_value={
                     "activity_type": "grace.objective", "activity_id": "activity-1",
-                    "attempt_id": "attempt-1", "objective": "List every state after STOPPING",
+                    "attempt_id": "attempt-1",
+                    "objective": "Prepare the same on-call reference and prove the process route "
+                                "from RUNNING to STOPPED using authoritative evidence.",
+                    "acceptance_criteria": criteria,
                     "event_kind": "objective", "route_id": "local",
                     "model_route": {"route_id": "local", "provider": "fixture", "model": "fixture",
                                     "endpoint": "http://127.0.0.1:1/chat", "timeout_seconds": 1,
                                     "max_tokens": 128},
-                    "evidence_format": "r3a.knowledge-evidence.v1", "required_evidence_refs": [],
-                    "evidence": [], "available_tools": [_RESIDENT_TOOLS[0]], "conversation": [],
+                    "evidence_format": "r3a.knowledge-evidence.v1",
+                    "required_evidence_refs": ["runtime.processes", "knowledge.1"],
+                    "evidence": initial_evidence, "available_tools": [_RESIDENT_TOOLS[0]], "conversation": [],
                     "reasoning_state": {}, "pending_final": None, "config_revision": "config-1"})
                 cme._authorize_capability = AsyncMock(return_value={"audit_event_id": "audit-1"})
-                first_action = {"action": "invoke_capability",
-                                "contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
-                                "capability_id": "institution.knowledge.read",
-                                "arguments": {"query": "List every state after STOPPING"},
-                                "rationale": "Need the authoritative transition record"}
-                final_decision = {"assessment": "STOPPED and FAILED are the successors",
-                                  "status": "healthy", "evidence_refs": ["knowledge.1"],
-                                  "recommended_action": "none"}
+                next_action = {"action": "invoke_capability",
+                               "contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
+                               "capability_id": "institution.knowledge.read",
+                               "arguments": {"query": "What transitions are permitted after STOPPING?"},
+                               "rationale": "The evidence so far ends at STOPPING and does not prove the route reaches STOPPED."}
+                incomplete = {"assessment": "RUNNING cannot transition directly to STOPPED; RUNNING -> STOPPING.",
+                              "status": "healthy", "evidence_refs": ["runtime.processes", "knowledge.1"],
+                              "recommended_action": "none"}
+                complete = {"assessment": "The evidenced route is RUNNING -> STOPPING -> STOPPED.",
+                            "status": "healthy", "evidence_refs": ["runtime.processes", "knowledge.1"],
+                            "recommended_action": "none"}
                 responses = [
-                    {"result": {"action": "invoke_capability", "capability_request": first_action,
-                                 "model_content": json.dumps(first_action),
+                    {"result": {"action": "final", "decision": incomplete,
+                                 "model_content": json.dumps({"action": "final", "decision": incomplete}),
                                  "model": {"request_ref": "model-1", "request_sha256": "a" * 64,
                                            "result_ref": "result-1", "result_sha256": "b" * 64}}},
-                    {"result": {"action": "final", "decision": final_decision,
-                                 "model_content": json.dumps({"action": "final", "decision": final_decision}),
+                    {"result": {"action": "invoke_capability", "capability_request": next_action,
+                                 "model_content": json.dumps(next_action),
                                  "model": {"request_ref": "model-2", "request_sha256": "c" * 64,
                                            "result_ref": "result-2", "result_sha256": "d" * 64}}},
+                    {"result": {"action": "final", "decision": complete,
+                                 "model_content": json.dumps({"action": "final", "decision": complete}),
+                                 "model": {"request_ref": "model-3", "request_sha256": "e" * 64,
+                                           "result_ref": "result-3", "result_sha256": "f" * 64}}},
                 ]
+                continuation_contexts = []
 
-                async def module_call(*_args, **_kwargs):
+                async def module_call(_operation, payload, **_kwargs):
+                    continuation_contexts.append(json.loads(json.dumps(payload)))
                     return responses.pop(0)
 
                 cme._module_call = module_call
                 activity = {"activity_type": "grace.objective", "activity_id": "activity-1",
                             "attempt_id": "attempt-1", "attempt_count": 0,
-                            "input": {"objective": "List every state after STOPPING"}, "checkpoint": {}}
+                            "input": {"objective": "Prepare the same on-call reference and prove the process route "
+                                               "from RUNNING to STOPPED using authoritative evidence.",
+                                      "acceptance_criteria": criteria}, "checkpoint": {}}
                 await cme._run_activity(activity)
                 self.assertIsNone(cme.store.blocked)
-                self.assertEqual(cme.store.completed["decision"], final_decision)
+                self.assertEqual(cme.store.completed["decision"], complete)
                 self.assertEqual(len(cme.store.completed["reasoning_trace"]["capability_invocations"]), 1)
+                rejection = next((progress, checkpoint) for progress, checkpoint in cme.store.progress
+                                 if progress["phase"] == "resident.completion.rejected")
+                self.assertEqual(rejection[0]["criteria_gaps"][0]["code"], "evidence_path_incomplete")
+                self.assertIn("STOPPING", continuation_contexts[1]["conversation"][-1]["content"])
+                self.assertIn("RUNNING -> STOPPING", continuation_contexts[1]["conversation"][0]["content"])
                 tool_checkpoint = next(checkpoint for progress, checkpoint in cme.store.progress
                                        if progress["phase"] == "resident.capability.completed")
-                self.assertEqual(tool_checkpoint["evidence"][0]["source_path"], "transitions.STOPPING")
-                self.assertEqual(len(tool_checkpoint["reasoning_state"]["conversation"]), 2)
+                self.assertIn("transitions.STOPPING",
+                              [item["source_path"] for item in tool_checkpoint["evidence"]])
+                self.assertEqual(len(tool_checkpoint["reasoning_state"]["conversation"]), 4)
 
         asyncio.run(exercise())
 

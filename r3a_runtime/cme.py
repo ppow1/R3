@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.3.0
+File Revision: 1.4.1
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -23,10 +23,12 @@ Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add versioned re
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Enforce role configuration pinning, freshness-aware deferral, and typed outcomes.
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Run configured readiness providers, validate identity, persist evidence, and recover deferred work.
 Changed: 2026-11-07 | R3A-019 | Codex GPT-6 | Dispatch resident-selected read capabilities and persist model/tool continuation evidence.
+Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Enforce structured evidence criteria and resume reasoning after rejected completion.
+Changed: 2026-11-07T02:41:51Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Persist and validate a versioned acceptance envelope on objective intake.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; automated inference responses are fixtures.
-History/Predecessor: Git blob 5ed7c9bd82dc5fa02c3595ad5bb8409cfd274dd6 at commit ad16700f1e94dd36c81cac5383f9f2e2771a98a1.
+History/Predecessor: Git blob b89e6cbe7e3f05d7edf9c73f1bf2549f97830d75 at commit 0d5f950efc2318774bb95a8dad3b5a498d3f8ce3.
 """
 from __future__ import annotations
 
@@ -54,6 +56,9 @@ from .readiness import (READINESS_PROVIDER_CONTRACT_ID, ReadinessCheckRequest,
 from .db import InvalidTransition, Store, utcnow
 from .diagnostics import make_server
 from .knowledge import retrieve
+from .acceptance import (OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
+                         OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, evidence_fingerprint,
+                         validate_acceptance, validate_criteria)
 from .protocol import PROTOCOL_MAJOR, PROTOCOL_MINOR, request as module_request
 
 
@@ -538,7 +543,8 @@ class CME:
                 str(payload["route_id"]) if payload.get("route_id") is not None else None,
                 str(payload["role_id"]) if payload.get("role_id") is not None else None,
                 tuple(payload.get("required_capabilities", ())),
-                tuple(payload.get("required_modalities", ())))
+                tuple(payload.get("required_modalities", ())),
+                payload.get("acceptance_criteria", []))
         if operation == "config.reload":
             if any(not task.done() for task in self.active_activities.values()):
                 raise RuntimeError("Config reload waits for in-flight activity to reach a safe boundary")
@@ -722,6 +728,13 @@ class CME:
             await self._authorize_capability(capability_id, activity_id=str(activity["activity_id"]),
                                               attempt_id=str(activity["attempt_id"]))
         event_input = activity["input"]
+        acceptance_contract = event_input.get("acceptance_contract") or {
+            "contract_id": OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
+            "contract_version": OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, "criteria": []}
+        if (acceptance_contract.get("contract_id") != OBJECTIVE_ACCEPTANCE_CONTRACT_ID
+                or acceptance_contract.get("contract_version") != OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION):
+            raise ValueError("objective acceptance contract identity or version is unsupported")
+        acceptance_criteria = validate_criteria(acceptance_contract.get("criteria"))
         saved = activity.get("checkpoint") or {}
         route_id = event_input.get("route_id")
         selected_role_id = event_input.get("role_id")
@@ -782,6 +795,10 @@ class CME:
         return {"activity_type": "grace.objective", "activity_id": str(activity["activity_id"]),
                 "attempt_id": str(activity["attempt_id"]),
                 "objective": event_input["objective"], "event_kind": event_input.get("event_kind", "objective"),
+                "acceptance_contract": {"contract_id": OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
+                                        "contract_version": OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION,
+                                        "criteria": acceptance_criteria},
+                "acceptance_criteria": acceptance_criteria,
                 "route_id": route.route_id,
                 "model_route": effective_route,
                 "evidence_format": "r3a.knowledge-evidence.v1",
@@ -898,6 +915,8 @@ class CME:
                 invocations = list(reasoning_state.get("capability_invocations") or [])
                 evidence = list(context.get("evidence") or [])
                 required_evidence_refs = list(context.get("required_evidence_refs") or [])
+                acceptance_rejections = list(reasoning_state.get("acceptance_rejections") or [])
+                last_rejected_fingerprint = reasoning_state.get("last_rejected_evidence_fingerprint")
 
                 def durable_checkpoint() -> dict[str, Any]:
                     return {"activity_input": activity["input"], "model_route": model_route,
@@ -915,6 +934,8 @@ class CME:
                             "reasoning_state": {"conversation": conversation,
                                                 "model_turns": turns,
                                                 "capability_invocations": invocations,
+                                                "acceptance_rejections": acceptance_rejections,
+                                                "last_rejected_evidence_fingerprint": last_rejected_fingerprint,
                                                 "pending_final": context.get("pending_final")}}
 
                 lease_task = asyncio.create_task(self._lease_heartbeat(activity),
@@ -976,6 +997,46 @@ class CME:
                         continue
                     if observations.get("action") != "final":
                         raise RuntimeError("Grace returned an unsupported resident action")
+                    candidate_decision = observations.get("decision") or {}
+                    if candidate_decision.get("status") == "healthy":
+                        final_issues = self._final_evidence_issues(context, evidence, candidate_decision)
+                        if final_issues:
+                            fingerprint = evidence_fingerprint(evidence)
+                            if fingerprint == last_rejected_fingerprint:
+                                await self.store.block_activity(
+                                    activity, "Grace repeated an unsupported completion without new evidence",
+                                    {"validation": "r3a.objective-acceptance.v1",
+                                     "criteria_gaps": final_issues,
+                                     "decision": candidate_decision,
+                                     "model": observations.get("model"),
+                                     "reasoning_trace": {"model_turns": turns,
+                                                          "capability_invocations": invocations,
+                                                          "acceptance_rejections": acceptance_rejections,
+                                                          "evidence": evidence}})
+                                return
+                            last_rejected_fingerprint = fingerprint
+                            rejection = {"turn": len(turns), "observed_at": utcnow().isoformat(),
+                                         "criteria_gaps": final_issues,
+                                         "evidence_fingerprint": fingerprint,
+                                         "result_ref": (observations.get("model") or {}).get("result_ref")}
+                            acceptance_rejections.append(rejection)
+                            conversation.append({"role": "user", "content": json.dumps(
+                                {"institutional_acceptance": "rejected",
+                                 "message": "The proposed COMPLETED result does not yet satisfy the "
+                                            "objective's evidence criteria. Reassess the original objective "
+                                            "against all evidence collected. Continue with any relevant "
+                                            "authorized read capability you judge necessary, or return a "
+                                            "truthful blocked final if the evidence cannot be obtained.",
+                                 "gaps": final_issues}, separators=(",", ":"))})
+                            context["pending_final"] = None
+                            await self.store.record_progress(
+                                activity,
+                                {"phase": "resident.completion.rejected", "at": utcnow().isoformat(),
+                                 "turn": len(turns), "criteria_gaps": final_issues,
+                                 "evidence_fingerprint": fingerprint},
+                                durable_checkpoint())
+                            observations = None
+                            continue
                     context["pending_final"] = observations
                     await self.store.record_progress(
                         activity,
@@ -1034,6 +1095,7 @@ class CME:
             else:
                 observations["reasoning_trace"] = {"model_turns": turns,
                                                     "capability_invocations": invocations,
+                                                    "acceptance_rejections": acceptance_rejections,
                                                     "evidence": [{"source_id": item["source_id"],
                                                                   "source_path": item.get("source_path"),
                                                                   "sha256": item["sha256"],
@@ -1081,6 +1143,35 @@ class CME:
                 lease_task.cancel()
                 await asyncio.gather(lease_task, return_exceptions=True)
             self.active_activities.pop(activity["activity_id"], None)
+
+    def _final_evidence_issues(self, context: dict[str, Any], evidence: list[dict[str, Any]],
+                               decision: dict[str, Any]) -> list[dict[str, Any]]:
+        """Check citations and objective acceptance against independently returned evidence."""
+        known_sources = {item.get("source_id") for item in evidence}
+        citations = decision.get("evidence_refs")
+        if not isinstance(citations, list) or not citations:
+            return [{"code": "evidence_citations_missing",
+                     "message": "Cite the returned source IDs that support the deliverable."}]
+        if (not set(citations).issubset(known_sources)
+                or not set(context.get("required_evidence_refs", [])).issubset(citations)):
+            return [{"code": "evidence_citations_incomplete",
+                     "known_source_ids": sorted(str(item) for item in known_sources if item),
+                     "required_source_ids": context.get("required_evidence_refs", []),
+                     "message": "Citations do not cover the required returned evidence sources."}]
+        answer_issues = _knowledge_answer_issues(context["objective"], evidence, decision)
+        if answer_issues:
+            return [{"code": "knowledge_answer_incomplete", "missing_facts": answer_issues,
+                     "message": "The deliverable omits facts required by the cited knowledge evidence."}]
+        trusted_digests: dict[str, set[str]] = {}
+        for path in self.settings.knowledge_sources:
+            try:
+                source_path = Path(path)
+                trusted_digests.setdefault(source_path.name, set()).add(
+                    hashlib.sha256(source_path.read_bytes()).hexdigest())
+            except OSError:
+                continue
+        return validate_acceptance(validate_criteria(context.get("acceptance_criteria", [])),
+                                   evidence, decision, trusted_digests)
 
     async def _scheduler_loop(self) -> None:
         while not self.shutdown.is_set():

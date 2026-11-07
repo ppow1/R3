@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cli.py
 Component: R3A-OPERATOR-CLI
-File Revision: 1.2.0
+File Revision: 1.3.0
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Expose operator-invoked AP0 diagnostics, CME controls and isolated backup actions.
@@ -16,10 +16,11 @@ Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Expose durable notificat
 Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Allow role- and capability/modality-qualified durable Grace objective submissions.
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add provider-readiness reporting through the existing local CME control interface.
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Replace caller-authored readiness reports with provider-triggered checks.
+Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Accept structured objective criteria through normal durable intake.
 Supersedes: None.
 Contracts: AP0-007/008/010/013; R3A-019; AP0-M1 D8/D9; r3a.model-route-decision.v1; r3a.model-readiness.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; no model inference in this slice.
-History/Predecessor: Git blob aa8cc532bfc1cc0f6d5e8ec8df9784f55458285e at commit ad16700f1e94dd36c81cac5383f9f2e2771a98a1.
+History/Predecessor: Git blob 6e2450c1329b7c1efec6b35f63c534468c4c4571 at commit 0d5f950efc2318774bb95a8dad3b5a498d3f8ce3.
 """
 from __future__ import annotations
 
@@ -66,7 +67,8 @@ async def _run(args: argparse.Namespace) -> Any:
     elif args.command == "grace-objective-submit":
         payload = {"objective": args.objective, "event_kind": args.event_kind,
                    "required_capabilities": args.required_capability,
-                   "required_modalities": args.required_modality}
+                   "required_modalities": args.required_modality,
+                   "acceptance_criteria": json.loads(args.acceptance_criteria_json)}
         if args.route_id:
             payload["route_id"] = args.route_id
         if args.role_id:
@@ -96,6 +98,8 @@ def main() -> None:
                            help="Required model capability for role selection; may be repeated")
     objective.add_argument("--required-modality", action="append", default=[],
                            help="Required input modality for role selection; may be repeated")
+    objective.add_argument("--acceptance-criteria-json", default="[]",
+                           help="Versioned, machine-checkable completion criteria as a JSON array")
     objective.add_argument("--idempotency-key", required=True)
     readiness = commands.add_parser("model-readiness-refresh",
                                     help="Ask CME to perform a configured model-provider readiness check")
