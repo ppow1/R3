@@ -4,7 +4,7 @@
   "title": "R3A notification delivery envelope v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contract_id", "contract_version", "delivery_id", "idempotency_key", "notification_event_id", "source_id", "source_event_id", "correlation_id", "recipient", "severity", "urgency", "requires_action", "status", "created_at", "acknowledged_at", "resolved_at", "evidence_refs"],
+  "required": ["contract_id", "contract_version", "delivery_id", "idempotency_key", "notification_event_id", "source_id", "source_event_id", "correlation_id", "recipient", "severity", "urgency", "requires_action", "status", "created_at", "acknowledged_at", "resolved_at", "resolution_disposition", "evidence_refs"],
   "properties": {
     "contract_id": {"const": "r3a.notification-delivery"},
     "contract_version": {"const": "1.0.0"},
@@ -30,6 +30,7 @@
     "created_at": {"type": "string", "format": "date-time"},
     "acknowledged_at": {"type": ["string", "null"], "format": "date-time"},
     "resolved_at": {"type": ["string", "null"], "format": "date-time"},
+    "resolution_disposition": {"type": ["string", "null"], "minLength": 1},
     "evidence_refs": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
   }
 }

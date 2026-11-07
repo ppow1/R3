@@ -1315,6 +1315,8 @@ class Store:
         async with self.pool.connection() as conn, conn.transaction():
             for delivery in deliveries:
                 delivery = validate_delivery_envelope(delivery)
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                                   (delivery["idempotency_key"],))
                 existing = await (await conn.execute(
                     "SELECT evidence FROM r3a.institution_events "
                     "WHERE event_type='grace.notification.delivery.queued' "
@@ -1337,7 +1339,9 @@ class Store:
     async def transition_notification_delivery(self, delivery_id: str, operation: str, *,
                                                principal_id: str, request: Any,
                                                decision: AuthorizationDecision,
-                                               directory: dict[str, Any]) -> dict[str, Any]:
+                                               directory: dict[str, Any],
+                                               disposition: str | None = None,
+                                               resolution_evidence_refs: list[str] | None = None) -> dict[str, Any]:
         """Append an authorized acknowledgment/resolution to the CME event ledger."""
         try:
             delivery_uuid = uuid.UUID(delivery_id)
@@ -1361,7 +1365,7 @@ class Store:
             fields = ("contract_id", "contract_version", "delivery_id", "idempotency_key",
                       "notification_event_id", "source_id", "source_event_id", "correlation_id",
                       "recipient", "severity", "urgency", "requires_action", "status", "created_at",
-                      "acknowledged_at", "resolved_at", "evidence_refs")
+                      "acknowledged_at", "resolved_at", "resolution_disposition", "evidence_refs")
             delivery = validate_delivery_envelope({key: latest_evidence[key] for key in fields})
             # Replays of one authorization request return its already-appended outcome.
             request_id = getattr(request, "request_id", None)
@@ -1371,7 +1375,9 @@ class Store:
                     if evidence.get("authorization_request_id") == request_id:
                         return {**evidence, "duplicate": True}
             updated = transition_delivery(delivery, operation, principal_id=principal_id,
-                                         request=request, decision=decision, directory=directory)
+                                         request=request, decision=decision, directory=directory,
+                                         disposition=disposition,
+                                         resolution_evidence_refs=resolution_evidence_refs)
             await self._event(
                 conn, event_type, "notification_delivery", str(delivery_uuid),
                 "r3a.notification-delivery", 1, delivery["status"], updated["status"],
@@ -1414,7 +1420,7 @@ class Store:
             fields = ("contract_id", "contract_version", "delivery_id", "idempotency_key",
                       "notification_event_id", "source_id", "source_event_id", "correlation_id",
                       "recipient", "severity", "urgency", "requires_action", "status", "created_at",
-                      "acknowledged_at", "resolved_at", "evidence_refs")
+                      "acknowledged_at", "resolved_at", "resolution_disposition", "evidence_refs")
             delivery = validate_delivery_envelope({key: evidence[key] for key in fields})
             if delivery_visible_to(delivery, principal_id, directory):
                 visible.append({**delivery,

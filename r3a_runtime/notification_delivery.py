@@ -136,6 +136,7 @@ def route_notification(notification: dict[str, Any], directory: dict[str, Any],
             "created_at": delivered_at,
             "acknowledged_at": None,
             "resolved_at": None,
+            "resolution_disposition": None,
             "evidence_refs": [notification["payload_ref"], source["snapshot_sha256"]],
         })
     return output
@@ -145,7 +146,7 @@ def validate_delivery_envelope(value: Any) -> dict[str, Any]:
     required = {"contract_id", "contract_version", "delivery_id", "idempotency_key",
                 "notification_event_id", "source_id", "source_event_id", "correlation_id",
                 "recipient", "severity", "urgency", "requires_action", "status",
-                "created_at", "acknowledged_at", "resolved_at", "evidence_refs"}
+                "created_at", "acknowledged_at", "resolved_at", "resolution_disposition", "evidence_refs"}
     if not isinstance(value, dict) or set(value) != required:
         raise ValueError("notification delivery envelope fields are invalid")
     if value["contract_id"] != DELIVERY_CONTRACT_ID or value["contract_version"] != DELIVERY_CONTRACT_VERSION:
@@ -177,6 +178,11 @@ def validate_delivery_envelope(value: Any) -> dict[str, Any]:
     for field in ("acknowledged_at", "resolved_at"):
         if value[field] is not None:
             parse_timestamp(value[field], f"notification_delivery.{field}")
+    disposition = value["resolution_disposition"]
+    if disposition is not None and (not isinstance(disposition, str) or not disposition.strip()):
+        raise ValueError("notification resolution disposition must be nonempty text or null")
+    if value["status"] == "resolved" and not disposition:
+        raise ValueError("resolved notification delivery requires a disposition")
     if value["notification_event_id"] != value["source_event_id"]:
         raise ValueError("notification delivery event references must identify the source event")
     expected_key = (f"notification-delivery:{value['notification_event_id']}:{recipient['kind']}"
@@ -191,7 +197,8 @@ def validate_delivery_envelope(value: Any) -> dict[str, Any]:
 
 def transition_delivery(value: dict[str, Any], operation: str, *, principal_id: str,
                         request: Any, decision: Any, directory: dict[str, Any],
-                        at: str | None = None) -> dict[str, Any]:
+                        at: str | None = None, disposition: str | None = None,
+                        resolution_evidence_refs: list[str] | None = None) -> dict[str, Any]:
     """Validate recipient scope and a matching CME authorization decision.
 
     Persistence and audit-event append remain the caller's CME transaction.
@@ -224,6 +231,14 @@ def transition_delivery(value: dict[str, Any], operation: str, *, principal_id: 
             allowed_states.update({"queued", "delivered"})
         if current not in allowed_states:
             raise ValueError(f"cannot resolve notification in {current} state")
+        if not isinstance(disposition, str) or not disposition.strip():
+            raise ValueError("notification resolution requires a disposition")
+        if (not isinstance(resolution_evidence_refs, list) or not resolution_evidence_refs
+                or any(not isinstance(item, str) or not item.strip()
+                       for item in resolution_evidence_refs)):
+            raise ValueError("notification resolution requires evidence references")
         value["status"] = "resolved"
         value["resolved_at"] = at or datetime.now(timezone.utc).isoformat()
+        value["resolution_disposition"] = disposition.strip()
+        value["evidence_refs"] = list(dict.fromkeys(value["evidence_refs"] + resolution_evidence_refs))
     return validate_delivery_envelope(value)

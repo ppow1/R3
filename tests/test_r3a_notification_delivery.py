@@ -136,8 +136,11 @@ class NotificationDeliveryTests(unittest.TestCase):
         req, decision = self.authorization("resident.alpha", "notification.delivery.resolve")
         resolved = transition_delivery(acked, "resolve", principal_id="resident.alpha",
                                        request=req, decision=decision, directory=directory(),
-                                       at="2026-11-07T12:04:00Z")
+                                       at="2026-11-07T12:04:00Z",
+                                       disposition="Restarted and service health restored",
+                                       resolution_evidence_refs=["r3a.institution_events/recovery-event"])
         self.assertEqual("resolved", resolved["status"])
+        self.assertEqual("Restarted and service health restored", resolved["resolution_disposition"])
 
     def test_acknowledgment_requires_recipient_scope_and_matching_authorization(self):
         delivery = route_notification(notification(), directory(), policy())[0]
