@@ -1,3 +1,21 @@
+"""
+R3 CONTROLLED SOURCE
+File: tests/test_r3a_institutional_knowledge.py
+Component: R3A-KNOWLEDGE-RETRIEVAL-TESTS
+File Revision: 1.1.0
+Created: Unknown (legacy)
+Created By: Unknown (legacy)
+Purpose: Verify registered institutional knowledge retrieval, authorization, freshness, and provenance.
+Execution Model: unittest; local deterministic provider and CME test doubles.
+Observability: Test names and assertion failures.
+Dependencies: R3A capability contracts, CME, knowledge provider, configured source files.
+Authority: AP1 / R3A-019; read-only capability regression tests.
+Changed: 2026-11-07T22:00:34Z | AP1-K2 | Codex GPT-6 | Cover Markdown source citations and multi-source institutional retrieval.
+Supersedes: None.
+Contracts: institution.knowledge.read@1.1.0; R3A capability-operation v1.
+Tests: This module; tests.test_r3a_capability_contracts; tests.test_r3a_ap1.
+History/Predecessor: Git blob cac6af338b7aff900bf47a64cadd685ea762eb60 at commit 4fe86ba4158e0f1f4b134114af276c942456c77c.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -34,7 +52,7 @@ class InstitutionalKnowledgeProviderTests(unittest.TestCase):
             registered = registry.register(operation_from_manifest(manifest), config,
                                            legacy_manifest=manifest)
             self.assertEqual("institution.knowledge.read", registered.descriptor["operation_id"])
-            self.assertEqual("1.0.1", registered.descriptor["operation_revision"])
+            self.assertEqual("1.1.0", registered.descriptor["operation_revision"])
             tool = registered.resident_tool_projection()
             cme = CME.__new__(CME)
             cme.settings = SimpleNamespace(module_capabilities=("institution.knowledge.read",),
@@ -127,6 +145,94 @@ class InstitutionalKnowledgeProviderTests(unittest.TestCase):
                 {"query": "quest avatars"}, context={})
             self.assertEqual([], result.output["results"])
             self.assertEqual([], result.evidence)
+
+    def test_markdown_retrieval_cites_section_and_exact_source_lines(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "office-policy.md"
+            source.write_text(
+                "# Institutional roles\n\n"
+                "## Responsibilities\n\n"
+                "- Grace prioritizes operational work and maintains autonomous operation.\n"
+                "- Helen owns personnel records, staffing, and resident development.\n",
+                encoding="utf-8")
+            result = create_provider(self._configuration(source)).invoke(
+                {"query": "Who owns personnel records and staffing?"}, context={})
+            fact = result.output["results"][0]
+            self.assertEqual("- Helen owns personnel records, staffing, and resident development.",
+                             fact["content"])
+            self.assertIn("h2.responsibilities@L3", fact["source_path"])
+            self.assertTrue(fact["source_path"].endswith("@L6-L6"))
+            self.assertEqual(fact["source_id"], result.evidence[0]["evidence_id"])
+            self.assertEqual(fact["document_sha256"], result.evidence[0]["document_sha256"])
+
+    def test_multiple_configured_documents_keep_distinct_source_lineage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            charter = Path(directory) / "charter.md"
+            procedures = Path(directory) / "procedures.md"
+            charter.write_text("# Charter\n\nRecords must be retained for institutional continuity.\n",
+                               encoding="utf-8")
+            procedures.write_text("# Procedure\n\nRecords must be retained for operational review.\n",
+                                  encoding="utf-8")
+            config = {"sources": [
+                {"source_id": "knowledge.test.charter", "path": str(charter),
+                 "freshness_max_age_seconds": 86400},
+                {"source_id": "knowledge.test.procedures", "path": str(procedures),
+                 "freshness_max_age_seconds": 86400},
+            ], "max_results": 10, "max_document_bytes": 1024 * 1024}
+            result = create_provider(config).invoke(
+                {"query": "records retained institutional continuity operational review"}, context={})
+            facts = result.output["results"]
+            self.assertEqual({"knowledge.test.charter", "knowledge.test.procedures"},
+                             {item["source_id"] for item in facts})
+            self.assertEqual({charter.as_uri(), procedures.as_uri()},
+                             {item["uri"] for item in facts})
+            self.assertEqual({item["source_id"] for item in facts},
+                             {item["evidence_id"] for item in result.evidence})
+            self.assertTrue(all(item["document_revision"] == item["document_sha256"]
+                                and item["excerpt_sha256"] for item in facts))
+
+    def test_markdown_fenced_examples_do_not_change_document_section_context(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "spec.md"
+            source.write_text(
+                "# Verified section\n\n"
+                "```markdown\n## Example-only heading\nExample retention value.\n```\n\n"
+                "The verified retention value is thirty days.\n",
+                encoding="utf-8")
+            result = create_provider(self._configuration(source)).invoke(
+                {"query": "Example retention value"}, context={})
+            fact = result.output["results"][0]
+            self.assertIn("Example retention value.", fact["content"])
+            self.assertIn("h1.verified-section@L1", fact["source_path"])
+            self.assertNotIn("example-only-heading", fact["source_path"])
+
+    def test_approved_charter_and_roadmap_are_real_retrievable_sources(self):
+        charter = ROOT / "docs/PROJECT_CHARTER_REVISION_2_REVIEW.md"
+        roadmap = ROOT / "docs/architecture/R3A_MASTER_ROADMAP_AP0_AP6.md"
+        config = {"sources": [
+            {"source_id": "knowledge.r3.charter.revision-2", "path": str(charter),
+             "freshness_max_age_seconds": 86400},
+            {"source_id": "knowledge.r3a.master-roadmap.baseline-1", "path": str(roadmap),
+             "freshness_max_age_seconds": 86400},
+        ], "max_results": 10, "max_document_bytes": 1024 * 1024}
+        provider = create_provider(config)
+        charter_result = provider.invoke({"query": "Grace Director of Operations"}, context={})
+        roadmap_result = provider.invoke({"query": "AP1 knowledge grounding retrieval"}, context={})
+        self.assertIn("knowledge.r3.charter.revision-2",
+                      {item["source_id"] for item in charter_result.output["results"]})
+        self.assertIn("knowledge.r3a.master-roadmap.baseline-1",
+                      {item["source_id"] for item in roadmap_result.output["results"]})
+        roadmap_fact = next(item for item in roadmap_result.output["results"]
+                            if item["source_id"] == "knowledge.r3a.master-roadmap.baseline-1")
+        self.assertIn("AP1 — Grace autonomy and institutional continuity", roadmap_fact["content"])
+        self.assertIn("table-row", roadmap_fact["source_path"])
+        self.assertNotIn("AP0 — Institutional foundation", roadmap_fact["content"])
+        for result in (charter_result, roadmap_result):
+            fact = result.output["results"][0]
+            self.assertRegex(fact["source_path"], r"markdown\..+@L\d+-L\d+$")
+            self.assertEqual(fact["document_sha256"], fact["document_revision"])
+            self.assertEqual(fact["excerpt_sha256"], fact["sha256"])
+            self.assertTrue(result.evidence)
 
 
 if __name__ == "__main__":
