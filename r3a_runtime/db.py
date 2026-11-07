@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.3.5
+File Revision: 1.4.0
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -28,9 +28,10 @@ Changed: 2026-11-07T05:28:24Z | AP2-IMPLEMENTATION | Codex GPT-6 | Allow generic
 Changed: 2026-11-07T05:45:10Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist authorized work orders and guard terminal order completion with independent verifier evidence.
 Changed: 2026-11-07T05:52:05Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist stable objective correlation and immutable Grace proposal revisions in existing activity checkpoints/events.
 Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist authorization decision and audit identities as separate provenance fields.
+Changed: 2026-11-07T13:20:00Z | R3A-AP2-CAPABILITY-INTEGRATION | Codex GPT-6 | Store canonical invocation authorization in a nonreserved evidence column and verify durable SQL recovery against isolated PostgreSQL.
 Supersedes: None.
-Contracts: AP0-003–010; R3A-019; R3A-011/R3A-012; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1; r3a.engineering-work-order.v1.
-Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_engineering.py.
+Contracts: AP0-003–010; R3A-019; R3A-011/R3A-012; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1; r3a.engineering-work-order.v1; r3a.capability-invocation.v1.
+Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_engineering.py; tests/test_r3a_capability_integration_demo.py.
 History/Predecessor: Prior revision at AP2 commit 600020fd81b4b1e5ed4d938f95592560963a616d, blob a71a534e88a20df82ae2ea7989ca706dbb283c6e; earlier baseline blob f2cffbc6f44a47b10f6262ee469bd310ca652683.
 """
 from __future__ import annotations
@@ -803,7 +804,7 @@ class Store:
                 return existing
             await conn.execute(
                 "INSERT INTO r3a.capability_invocations(idempotency_key,invocation_id,operation_id,"
-                "request_digest,state,request,authorization,evidence) VALUES (%s,%s,%s,%s,'STARTED',%s,%s,%s)",
+                "request_digest,state,request,authorization_evidence,evidence) VALUES (%s,%s,%s,%s,'STARTED',%s,%s,%s)",
                 (key, request["invocation_id"], request["operation_id"], request_digest,
                  json.dumps(request), json.dumps(authorization), json.dumps({"phase": "authorized"})))
             await self._event(conn, "capability.invocation.started", "capability_invocation",
