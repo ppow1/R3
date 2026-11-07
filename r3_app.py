@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.10
+# File Revision: 1.0.11
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Initial shared read-only institutional API
@@ -15,6 +15,7 @@
 # Contracts: hints/file-provenance.md
 # Tests: Not run for this source change; module route and browser verification pending
 # History/Predecessor: Git blob b3195f5a0ea8bacc030b642bc3dbb76258a4e747
+# Changed: 2026-11-07T21:40:20Z | R3A-007/R3A-010/R3A-013/R3A-017/R3A-019 | Codex GPT-6 | Add configurable Steward-authenticated AP1 diagnostics and durable Grace objective gateway.
 
 """R3 first vertical slice: shared read-only capabilities, not UI-owned logic.
 
@@ -30,15 +31,78 @@ import platform
 import sys
 import struct
 import math
+import asyncio
+import hmac
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, Header
 from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel, Field
 
 ROOT = Path(os.environ.get("R3_REPO", Path(__file__).resolve().parent)).resolve()
 ART = (ROOT / "assets" / "artwork").resolve()
 EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 app = FastAPI(title="R3 Institutional Capabilities", version="0.1.0")
+
+
+class GraceObjectiveRequest(BaseModel):
+    objective: str = Field(min_length=1, max_length=4000)
+    acceptance_criteria: list[dict] = Field(min_length=1, max_length=20)
+    idempotency_key: str = Field(min_length=8, max_length=200)
+
+
+def _steward_settings(authorization: str | None):
+    """Resolve an externally configured bearer identity and isolated R3A runtime."""
+    expected = os.environ.get("R3A_WEBSITE_STEWARD_TOKEN")
+    config_path = os.environ.get("R3A_CONFIG")
+    if not expected or not config_path:
+        raise HTTPException(503, "Steward operations are unavailable: R3A website authentication or runtime configuration is missing")
+    supplied = authorization.removeprefix("Bearer ") if authorization and authorization.startswith("Bearer ") else ""
+    if not hmac.compare_digest(supplied, expected):
+        raise HTTPException(401, "Steward authentication required")
+    try:
+        from r3a_runtime.config import load_settings
+        return load_settings(config_path)
+    except Exception as exc:
+        raise HTTPException(503, f"R3A runtime configuration unavailable: {type(exc).__name__}") from exc
+
+
+@app.get("/api/v1/steward/r3a/status")
+async def steward_r3a_status(authorization: str | None = Header(default=None, alias="Authorization")):
+    settings = _steward_settings(authorization)
+    from r3a_runtime.control import control_request
+    try:
+        return await control_request(settings.diagnostics_socket, "status", timeout=4.0)
+    except Exception as exc:
+        raise HTTPException(503, f"R3A diagnostics unavailable: {type(exc).__name__}") from exc
+
+
+@app.get("/api/v1/steward/r3a/events")
+async def steward_r3a_events(authorization: str | None = Header(default=None, alias="Authorization")):
+    settings = _steward_settings(authorization)
+    from r3a_runtime.control import control_request
+    try:
+        return await control_request(settings.diagnostics_socket, "events", timeout=4.0)
+    except Exception as exc:
+        raise HTTPException(503, f"R3A event history unavailable: {type(exc).__name__}") from exc
+
+
+@app.post("/api/v1/steward/r3a/objectives", status_code=202)
+async def submit_grace_objective(request: GraceObjectiveRequest,
+                                 authorization: str | None = Header(default=None, alias="Authorization")):
+    settings = _steward_settings(authorization)
+    from r3a_runtime.control import control_request
+    try:
+        result = await control_request(settings.control_socket, "grace.objective.submit", {
+            "objective": request.objective,
+            "event_kind": "objective",
+            "acceptance_criteria": request.acceptance_criteria,
+            "task_class": "objective_reasoning",
+        }, idempotency_key=request.idempotency_key, timeout=6.0)
+        return {**result, "correlation_id": request.idempotency_key}
+    except Exception as exc:
+        raise HTTPException(503, f"Grace objective was not accepted: {type(exc).__name__}") from exc
 
 def git(*args):
     p = subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True,
