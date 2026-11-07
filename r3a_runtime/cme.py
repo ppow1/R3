@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.7.0
+File Revision: 1.8.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -35,6 +35,7 @@ Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Resume typed proposals fr
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Use the validated operation reference's target after proposal normalization during work-order authorization.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Accept only invocation, workspace, or actual authorization-audit references in Grace's execution assessment.
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Expose separate capability presentation metadata and drive durable dependency resumption from the CME scheduler.
+Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Enforce Grace-requested reasoning escalation through existing authorization, readiness, durable checkpoint and per-activity token-budget paths.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py; tests/test_r3a_telemetry_providers.py; tests/test_r3a_capability_contracts.py; tests/test_r3a_engineering.py.
@@ -877,6 +878,40 @@ class CME:
         evidence = saved.get("evidence", [])
         if not isinstance(evidence, list):
             raise RuntimeError("Persisted resident evidence is malformed")
+        escalation_offer = {"enabled": False}
+        policy = event_input.get("reasoning_escalation")
+        if policy and policy.get("enabled") is True:
+            if (policy.get("contract_id") != "r3a.reasoning-escalation-policy"
+                    or not str(policy.get("contract_version", "")).startswith("1.")
+                    or policy.get("config_revision") != self.settings.source_digest):
+                raise RuntimeError("Persisted reasoning escalation policy is incompatible with this activity")
+            observations = await self._model_readiness_observations()
+            escalation_state = reasoning_state.get("escalation") or {"requests": []}
+            charged = sum(int(item.get("charged_completion_tokens", 0))
+                          for item in escalation_state.get("requests", []))
+            allowed_ids = set(policy.get("allowed_role_ids", []))
+            role_offers = []
+            for role in self.settings.model_roles:
+                if role.role_id not in allowed_ids or role.role_id == selected_role_id:
+                    continue
+                readiness = resolve_role(
+                    self.settings.model_roles, role.role_id, set(), observations,
+                    config_revision=self.settings.source_digest, permit_fallback=False)
+                role_offers.append({"role_id": role.role_id, "route_id": role.route_id,
+                                    "capabilities": list(role.capabilities),
+                                    "readiness": "ready" if readiness.action == "route" else "unavailable",
+                                    "readiness_reason": readiness.reason,
+                                    "readiness_observed_at": readiness.readiness_observed_at})
+            escalation_offer = {
+                "enabled": True,
+                "contract_id": policy["contract_id"],
+                "contract_version": policy["contract_version"],
+                "authorization_capability_id": policy["authorization_capability_id"],
+                "max_requests_per_activity": policy["max_requests_per_activity"],
+                "max_completion_tokens_per_activity": policy["max_completion_tokens_per_activity"],
+                "charged_completion_tokens": charged,
+                "available_roles": role_offers,
+            }
         return {"activity_type": "grace.objective", "activity_id": str(activity["activity_id"]),
                 "attempt_id": str(activity["attempt_id"]),
                 "objective": event_input["objective"], "event_kind": event_input.get("event_kind", "objective"),
@@ -895,6 +930,7 @@ class CME:
                 "available_tools": available_tools,
                 "engineering_assignment": engineering_assignment,
                 "available_engineering_operations": available_engineering_operations,
+                "reasoning_escalation": escalation_offer,
                 "conversation": reasoning_state.get("conversation", []),
                 "reasoning_state": reasoning_state,
                 "pending_final": reasoning_state.get("pending_final"),
@@ -1445,7 +1481,59 @@ class CME:
                 required_evidence_refs = list(context.get("required_evidence_refs") or [])
                 acceptance_rejections = list(reasoning_state.get("acceptance_rejections") or [])
                 last_rejected_fingerprint = reasoning_state.get("last_rejected_evidence_fingerprint")
+                escalation_state = dict(reasoning_state.get("escalation") or {"requests": []})
+                escalation_requests = list(escalation_state.get("requests") or [])
 
+                recovered_request = next((item for item in reversed(escalation_requests)
+                                          if item.get("status") == "REQUESTED"
+                                          and item.get("request_attempt_id") != str(activity["attempt_id"])), None)
+                if recovered_request is not None:
+                    # A provider call may have completed just before process loss. Charge its full
+                    # reserved completion budget and resume on the prior route; do not replay it.
+                    recovered_request["status"] = "UNKNOWN"
+                    recovered_request["unknown_at"] = utcnow().isoformat()
+                    previous_role = next((item for item in self.settings.model_roles
+                                          if item.role_id == recovered_request.get("previous_role_id")), None)
+                    if previous_role is None:
+                        raise RuntimeError("Cannot recover escalation because its previous configured role is missing")
+                    previous_route = self.settings.model_route(previous_role.route_id)
+                    model_route = {"route_id": previous_route.route_id, "provider": previous_route.provider,
+                                   "model": previous_route.model, "endpoint": previous_route.endpoint,
+                                   "timeout_seconds": previous_route.timeout_seconds,
+                                   "max_tokens": previous_route.max_tokens}
+                    context.update({"model_route": model_route, "route_id": previous_route.route_id,
+                                    "selected_role_id": previous_role.role_id,
+                                    "route_decision": {"action": "resume_previous_route_after_unknown_escalation",
+                                                       "target_role_id": recovered_request["target_role_id"]}})
+                    conversation.append({"role": "user", "content": json.dumps(
+                        {"reasoning_escalation": "outcome_unknown_after_interruption",
+                         "request_id": recovered_request["request_id"],
+                         "target_role_id": recovered_request["target_role_id"],
+                         "charged_completion_tokens": recovered_request["charged_completion_tokens"],
+                         "instruction": "The prior provider result was not durably observed. It was not replayed; its full reserved budget remains charged. Continue the original objective or request a new authorized escalation only within remaining budget."},
+                        separators=(",", ":"))})
+                    policy = activity["input"].get("reasoning_escalation") or {}
+                    readiness = await self._model_readiness_observations()
+                    charged = sum(int(item.get("charged_completion_tokens", 0))
+                                  for item in escalation_requests)
+                    allowed_ids = set(policy.get("allowed_role_ids", []))
+                    role_offers = []
+                    for role in self.settings.model_roles:
+                        if role.role_id not in allowed_ids or role.role_id == previous_role.role_id:
+                            continue
+                        decision = resolve_role(
+                            self.settings.model_roles, role.role_id, set(), readiness,
+                            config_revision=self.settings.source_digest, permit_fallback=False)
+                        role_offers.append({"role_id": role.role_id, "route_id": role.route_id,
+                                            "capabilities": list(role.capabilities),
+                                            "readiness": "ready" if decision.action == "route" else "unavailable",
+                                            "readiness_reason": decision.reason,
+                                            "readiness_observed_at": decision.readiness_observed_at})
+                    context["reasoning_escalation"] = {
+                        **context.get("reasoning_escalation", {}),
+                        "charged_completion_tokens": charged,
+                        "available_roles": role_offers,
+                    }
                 def durable_checkpoint() -> dict[str, Any]:
                     return {"activity_input": activity["input"], "model_route": model_route,
                             "evidence_format": context["evidence_format"],
@@ -1463,8 +1551,16 @@ class CME:
                                                 "model_turns": turns,
                                                 "capability_invocations": invocations,
                                                 "acceptance_rejections": acceptance_rejections,
+                                                "escalation": {"requests": escalation_requests},
                                                 "last_rejected_evidence_fingerprint": last_rejected_fingerprint,
                                                 "pending_final": context.get("pending_final")}}
+
+                if recovered_request is not None:
+                    await self.store.record_progress(
+                        activity, {"phase": "resident.reasoning_escalation.recovered_unknown",
+                                   "at": utcnow().isoformat(), "request_id": recovered_request["request_id"],
+                                   "charged_completion_tokens": recovered_request["charged_completion_tokens"],
+                                   "resumed_route_id": model_route["route_id"]}, durable_checkpoint())
 
                 lease_task = asyncio.create_task(self._lease_heartbeat(activity),
                                                  name=f"lease-heartbeat:{activity['activity_id']}")
@@ -1483,11 +1579,55 @@ class CME:
                          "objective_sha256": hashlib.sha256(
                              activity["input"]["objective"].encode()).hexdigest()},
                         durable_checkpoint())
-                    result = await self._module_call("execute", context,
-                        timeout=context["model_route"]["timeout_seconds"] + 15)
+                    try:
+                        result = await self._module_call("execute", context,
+                            timeout=context["model_route"]["timeout_seconds"] + 15)
+                    except Exception as exc:
+                        pending = next((item for item in reversed(escalation_requests)
+                                        if item.get("status") == "REQUESTED"
+                                        and item.get("target_role_id") == context.get("selected_role_id")), None)
+                        if pending is None:
+                            raise
+                        # An inference transport failure can occur after the provider accepted the
+                        # request. Retain the full reservation, avoid replay, and let Grace continue
+                        # on the prior configured route with the same durable conversation.
+                        pending.update({"status": "UNKNOWN", "unknown_at": utcnow().isoformat(),
+                                        "failure_type": type(exc).__name__,
+                                        "failure_ref": str(uuid.uuid4())})
+                        previous_role = next((item for item in self.settings.model_roles
+                                              if item.role_id == pending.get("previous_role_id")), None)
+                        if previous_role is None:
+                            raise RuntimeError("cannot recover failed escalation without its prior role") from exc
+                        previous_route = self.settings.model_route(previous_role.route_id)
+                        model_route = {"route_id": previous_route.route_id, "provider": previous_route.provider,
+                                       "model": previous_route.model, "endpoint": previous_route.endpoint,
+                                       "timeout_seconds": previous_route.timeout_seconds,
+                                       "max_tokens": previous_route.max_tokens}
+                        context.update({"model_route": model_route, "route_id": previous_route.route_id,
+                                        "selected_role_id": previous_role.role_id,
+                                        "route_decision": {"action": "resume_previous_route_after_provider_failure",
+                                                           "target_role_id": pending["target_role_id"]}})
+                        conversation.append({"role": "user", "content": json.dumps(
+                            {"reasoning_escalation": "provider_failure_outcome_unknown",
+                             "request_id": pending["request_id"],
+                             "role_id": pending["target_role_id"],
+                             "charged_completion_tokens": pending["charged_completion_tokens"],
+                             "error_type": type(exc).__name__,
+                             "instruction": "The provider outcome is unknown. The request was not replayed and its full reserved token budget remains charged. Continue the original objective on the prior route or return a truthful blocked result."},
+                            separators=(",", ":"))})
+                        await self.store.record_progress(
+                            activity, {"phase": "resident.reasoning_escalation.provider_failure",
+                                       "at": utcnow().isoformat(), "request_id": pending["request_id"],
+                                       "failure_type": type(exc).__name__,
+                                       "resumed_route_id": previous_route.route_id}, durable_checkpoint())
+                        observations = None
+                        continue
                     observations = result["result"]
                     turn_model = observations.get("model", {})
                     turn_record = {"turn": len(turns) + 1, "request_ref": turn_model.get("request_ref"),
+                                   "route_id": turn_model.get("route_id", model_route["route_id"]),
+                                   "provider": turn_model.get("provider", model_route["provider"]),
+                                   "model": turn_model.get("name", model_route["model"]),
                                    "request_sha256": turn_model.get("request_sha256"),
                                    "result_ref": turn_model.get("result_ref"),
                                    "result_sha256": turn_model.get("result_sha256"),
@@ -1495,6 +1635,29 @@ class CME:
                                    "action": observations.get("action"),
                                    "observed_at": utcnow().isoformat()}
                     turns.append(turn_record)
+                    pending_escalation = next((item for item in reversed(escalation_requests)
+                                               if item.get("status") == "REQUESTED"
+                                               and item.get("target_role_id") == context.get("selected_role_id")), None)
+                    if pending_escalation is not None:
+                        usage = turn_model.get("usage") or {}
+                        reported = usage.get("completion_tokens", usage.get("output_tokens"))
+                        charged = (reported if isinstance(reported, int) and not isinstance(reported, bool)
+                                   and reported >= 0 else pending_escalation["reserved_completion_tokens"])
+                        if charged > pending_escalation["reserved_completion_tokens"]:
+                            await self.store.block_activity(
+                                activity, "reasoning provider usage exceeded the reserved activity budget",
+                                {"validation": "r3a.reasoning-escalation-policy.v1",
+                                 "request_id": pending_escalation["request_id"],
+                                 "reserved_completion_tokens": pending_escalation["reserved_completion_tokens"],
+                                 "reported_completion_tokens": charged,
+                                 "reasoning_trace": {"model_turns": turns,
+                                                      "escalation_requests": escalation_requests}})
+                            return
+                        pending_escalation.update({"status": "SUCCEEDED", "charged_completion_tokens": charged,
+                                                   "model_request_ref": turn_model.get("request_ref"),
+                                                   "model_result_ref": turn_model.get("result_ref"),
+                                                   "model_result_sha256": turn_model.get("result_sha256"),
+                                                   "completed_at": utcnow().isoformat()})
                     model_content = observations.get("model_content")
                     if not isinstance(model_content, str):
                         raise RuntimeError("Grace omitted the recorded model action content")
@@ -1523,6 +1686,128 @@ class CME:
                             durable_checkpoint())
                         observations = None
                         continue
+                    if observations.get("action") == "escalate_reasoning":
+                        request = observations.get("reasoning_escalation_request")
+                        if not isinstance(request, dict):
+                            raise RuntimeError("Grace returned an incomplete reasoning escalation request")
+                        policy = activity["input"].get("reasoning_escalation") or {}
+                        target_role = next((item for item in self.settings.model_roles
+                                            if item.role_id == request.get("target_role_id")), None)
+                        reason = request.get("rationale")
+                        failure = None
+                        if (policy.get("enabled") is not True
+                                or request.get("target_role_id") not in policy.get("allowed_role_ids", [])):
+                            failure = "target_role_not_allowed_by_activity_policy"
+                        elif not isinstance(reason, str) or not reason.strip():
+                            failure = "reasoning_escalation_rationale_missing"
+                        elif target_role is None or target_role.role_id == context.get("selected_role_id"):
+                            failure = "target_role_unavailable_or_not_stronger"
+                        elif target_role.route_id == model_route["route_id"]:
+                            failure = "target_role_does_not_change_configured_route"
+                        elif len(escalation_requests) >= int(policy.get("max_requests_per_activity", 0)):
+                            failure = "activity_escalation_request_budget_exhausted"
+                        elif (sum(int(item.get("charged_completion_tokens", 0)) for item in escalation_requests)
+                              + self.settings.model_route(target_role.route_id).max_tokens
+                              > int(policy.get("max_completion_tokens_per_activity", 0))):
+                            failure = "activity_escalation_token_budget_exhausted"
+                        readiness = await self._model_readiness_observations() if target_role else {}
+                        if failure is None:
+                            decision = resolve_role(
+                                self.settings.model_roles, target_role.role_id, set(), readiness,
+                                config_revision=self.settings.source_digest, permit_fallback=False,
+                                request_id=str(uuid.uuid4()), activity_id=str(activity["activity_id"]),
+                                attempt_id=str(activity["attempt_id"]),
+                                correlation_id=str(activity.get("input", {}).get("correlation_id")
+                                                   or activity["activity_id"]), resident_id=self.module_id)
+                            if decision.action != "route":
+                                failure = "target_model_role_not_ready"
+                        request_id = str(uuid.uuid4())
+                        auth_record = None
+                        if failure is None:
+                            try:
+                                auth = await self._authorization_decision(
+                                    policy["authorization_capability_id"],
+                                    activity_id=str(activity["activity_id"]),
+                                    attempt_id=str(activity["attempt_id"]), request_id=request_id,
+                                    context={"action": "resident_reasoning_escalation",
+                                             "target_role_id": target_role.role_id,
+                                             "route_id": target_role.route_id,
+                                             "rationale_sha256": hashlib.sha256(str(reason).encode()).hexdigest(),
+                                             "reserved_completion_tokens": self.settings.model_route(
+                                                 target_role.route_id).max_tokens,
+                                             "activity_token_budget": policy[
+                                                 "max_completion_tokens_per_activity"],
+                                             "config_revision": self.settings.source_digest})
+                                auth_record = {"provider_id": auth.provider_id,
+                                               "allowed": auth.allowed,
+                                               "decision_id": auth.decision_id,
+                                               "audit_event_id": auth.audit_event_id,
+                                               "policy_revision": auth.policy_revision,
+                                               "config_revision": auth.config_revision,
+                                               "reason": auth.reason,
+                                               "observed_at": auth.observed_at}
+                                if not auth.allowed:
+                                    failure = "reasoning_escalation_authorization_denied"
+                                elif not auth.audit_event_id or not auth.decision_id:
+                                    failure = "reasoning_escalation_authorization_audit_missing"
+                            except PermissionError:
+                                failure = "reasoning_escalation_authorization_denied"
+                        if failure is not None:
+                            escalation_requests.append({"request_id": request_id,
+                                                        "target_role_id": request.get("target_role_id"),
+                                                        "rationale": reason, "authorization": auth_record,
+                                                        "status": "REFUSED",
+                                                        "reason": failure, "charged_completion_tokens": 0,
+                                                        "observed_at": utcnow().isoformat()})
+                            conversation.append({"role": "user", "content": json.dumps(
+                                {"reasoning_escalation": "refused", "reason": failure,
+                                 "instruction": "Continue the same objective using the available route or return a justified blocked result."},
+                                separators=(",", ":"))})
+                            await self.store.record_progress(
+                                activity, {"phase": "resident.reasoning_escalation.refused",
+                                           "at": utcnow().isoformat(), "request_id": request_id,
+                                           "reason": failure}, durable_checkpoint())
+                            observations = None
+                            continue
+                        target_route = self.settings.model_route(target_role.route_id)
+                        escalation_requests.append({"request_id": request_id,
+                                                    "target_role_id": target_role.role_id,
+                                                    "previous_role_id": context.get("selected_role_id"),
+                                                    "previous_route_id": model_route["route_id"],
+                                                    "route_id": target_route.route_id,
+                                                    "provider": target_route.provider,
+                                                    "model": target_route.model,
+                                                    "rationale": reason,
+                                                    "authorization": auth_record,
+                                                    "status": "REQUESTED",
+                                                    "reserved_completion_tokens": target_route.max_tokens,
+                                                    "charged_completion_tokens": target_route.max_tokens,
+                                                    "request_attempt_id": str(activity["attempt_id"]),
+                                                    "requested_at": utcnow().isoformat()})
+                        model_route = {"route_id": target_route.route_id, "provider": target_route.provider,
+                                       "model": target_route.model, "endpoint": target_route.endpoint,
+                                       "timeout_seconds": target_route.timeout_seconds,
+                                       "max_tokens": target_route.max_tokens}
+                        context["model_route"] = model_route
+                        context["route_id"] = target_route.route_id
+                        context["selected_role_id"] = target_role.role_id
+                        context["route_decision"] = decision.__dict__
+                        conversation.append({"role": "user", "content": json.dumps(
+                            {"reasoning_escalation": "authorized", "request_id": request_id,
+                             "role_id": target_role.role_id, "route_id": target_route.route_id,
+                             "rationale": reason,
+                             "instruction": "Continue the original objective with this authorized stronger reasoning route."},
+                            separators=(",", ":"))})
+                        await self.store.record_progress(
+                            activity, {"phase": "resident.reasoning_escalation.authorized",
+                                       "at": utcnow().isoformat(), "request_id": request_id,
+                                       "target_role_id": target_role.role_id,
+                                       "route_id": target_route.route_id,
+                                       "authorization_audit_event_id": auth_record["audit_event_id"],
+                                       "reserved_completion_tokens": target_route.max_tokens},
+                            durable_checkpoint())
+                        observations = None
+                        continue
                     if observations.get("action") != "final":
                         raise RuntimeError("Grace returned an unsupported resident action")
                     candidate_decision = observations.get("decision") or {}
@@ -1539,6 +1824,7 @@ class CME:
                                      "model": observations.get("model"),
                                      "reasoning_trace": {"model_turns": turns,
                                                           "capability_invocations": invocations,
+                                                          "escalation_requests": escalation_requests,
                                                           "acceptance_rejections": acceptance_rejections,
                                                           "evidence": evidence}})
                                 return
@@ -1590,6 +1876,7 @@ class CME:
                     {"decision": decision, "model": observations.get("model"),
                      "reasoning_trace": {"model_turns": turns,
                                           "capability_invocations": invocations,
+                                          "escalation_requests": escalation_requests,
                                           "evidence": evidence}})
             elif not decision.get("evidence_refs"):
                 await self.store.block_activity(activity,
@@ -1598,6 +1885,7 @@ class CME:
                      "model": observations.get("model"),
                      "reasoning_trace": {"model_turns": turns,
                                           "capability_invocations": invocations,
+                                          "escalation_requests": escalation_requests,
                                           "evidence": evidence}})
             elif (not set(decision.get("evidence_refs", [])).issubset(
                         {item.get("source_id") for item in evidence})
@@ -1610,6 +1898,7 @@ class CME:
                      "required_evidence_refs": context.get("required_evidence_refs", []),
                      "reasoning_trace": {"model_turns": turns,
                                           "capability_invocations": invocations,
+                                          "escalation_requests": escalation_requests,
                                           "evidence": evidence}})
             elif answer_issues:
                 await self.store.block_activity(
@@ -1618,11 +1907,13 @@ class CME:
                      "decision": decision, "model": observations.get("model"),
                      "reasoning_trace": {"model_turns": turns,
                                           "capability_invocations": invocations,
+                                          "escalation_requests": escalation_requests,
                                           "evidence": evidence},
                      "request_ref": (observations.get("model") or {}).get("request_ref")})
             else:
                 observations["reasoning_trace"] = {"model_turns": turns,
                                                     "capability_invocations": invocations,
+                                                    "escalation_requests": escalation_requests,
                                                     "acceptance_rejections": acceptance_rejections,
                                                     "evidence": [{"source_id": item["source_id"],
                                                                   "source_path": item.get("source_path"),

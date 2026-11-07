@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.4.1
+File Revision: 1.5.0
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
 Purpose: Execute read-only Grace objectives through configured inference and resident-selected authorized capabilities.
@@ -29,6 +29,7 @@ Contracts: R3A-019; AP1-M1 Issue #43 acceptance; r3a.resident.execution.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; automated inference responses are fixtures.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Support model-selected registered Engineering operations, typed proposals and post-execution resident assessment.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Require evidence-bounded Engineering assessments and prohibit unsupported artifact claims.
+Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Allow Grace to request a configured reasoning role with a rationale; CME remains the authorization and route gate.
 History/Predecessor: Prior revision at baseline 3355abe96524a5260e9ba8395a9dfef5bfdd9422, blob 79b5db5747b261cbb3d8807988e8c63043e1d9ae.
 """
 from __future__ import annotations
@@ -54,12 +55,13 @@ from .protocol import ModuleProtocolServer
 RESIDENT_ACTION_SCHEMA = {
     "type": "object",
     "properties": {
-        "action": {"type": "string", "enum": ["invoke_capability", "propose_engineering", "engineering_assess", "final"]},
+        "action": {"type": "string", "enum": ["invoke_capability", "propose_engineering", "engineering_assess", "escalate_reasoning", "final"]},
         "contract_id": {"type": "string"},
         "contract_version": {"type": "string"},
         "capability_id": {"type": "string"},
         "arguments": {"type": "object"},
         "rationale": {"type": "string"},
+        "target_role_id": {"type": "string"},
         "proposal": {
             "type": "object",
             "properties": {
@@ -100,9 +102,15 @@ RESIDENT_ACTION_SCHEMA = {
 
 
 def resident_action_schema(available_tools: list[dict[str, Any]],
-                           available_operations: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                           available_operations: list[dict[str, Any]] | None = None,
+                           escalation_role_ids: list[str] | None = None) -> dict[str, Any]:
     """Constrain capability selection to exact identifiers in this execution's manifest."""
     schema = json.loads(json.dumps(RESIDENT_ACTION_SCHEMA))
+    escalation_role_ids = list(dict.fromkeys(escalation_role_ids or []))
+    if not escalation_role_ids:
+        schema["properties"]["action"]["enum"].remove("escalate_reasoning")
+    else:
+        schema["properties"]["target_role_id"]["enum"] = escalation_role_ids
     capability_ids = [tool.get("capability_id") for tool in available_tools
                       if isinstance(tool, dict) and isinstance(tool.get("capability_id"), str)]
     if capability_ids:
@@ -215,6 +223,13 @@ class GraceResident:
             engineering_assignment = payload.get("engineering_assignment")
             if not isinstance(available_operations, list):
                 raise ValueError("available_engineering_operations must be an array")
+            escalation = payload.get("reasoning_escalation") or {}
+            escalation_roles = escalation.get("available_roles", []) if isinstance(escalation, dict) else []
+            if not isinstance(escalation_roles, list) or any(
+                    not isinstance(item, dict) or not isinstance(item.get("role_id"), str)
+                    for item in escalation_roles):
+                raise ValueError("reasoning escalation roles are malformed")
+            escalation_role_ids = [item["role_id"] for item in escalation_roles]
             conversation = payload.get("conversation", [])
             if not isinstance(conversation, list) or any(
                     not isinstance(message, dict) or message.get("role") not in {"assistant", "user"}
@@ -224,7 +239,8 @@ class GraceResident:
                 "model": route.model,
                 "temperature": 0,
                 "max_tokens": route.max_tokens,
-                "response_format": {"type": "json_object", "schema": resident_action_schema(tools, available_operations)},
+                "response_format": {"type": "json_object", "schema": resident_action_schema(
+                    tools, available_operations, escalation_role_ids)},
                 "chat_template_kwargs": {"enable_thinking": False},
                 "messages": [
                     {"role": "system", "content": (
@@ -240,6 +256,7 @@ class GraceResident:
                         "against all returned evidence and continue with an authorized capability when useful; do not repeat an unsupported final. "
                         "For a continuation that lists dependency_context, treat those durable prerequisite outcomes as prior institutional evidence, "
                         "and continue the current objective without claiming the prerequisite's work as your own. "
+                        "If a reasoning_escalation policy is supplied and your current reasoning route is insufficient, you may request one of its listed roles. This is your reasoning choice, not an automatic fallback; explain what uncertainty requires stronger reasoning. The runtime checks authorization, readiness, and the activity token budget, then returns its result or refusal in the same activity. Never claim an escalation succeeded unless the runtime reports its result. "
                         "When more information is needed, return {\"action\":\"invoke_capability\","
                         "\"contract_id\":\"r3a.resident-capability-tool\",\"contract_version\":\"1.0.0\","
                         "\"capability_id\":\"exact capability_id\",\"arguments\":{...},"
@@ -254,6 +271,7 @@ class GraceResident:
                     {"role": "user", "content": json.dumps({"event_kind": payload.get("event_kind", "objective"),
                                                                   "objective": objective,
                                                                   "acceptance_contract": payload.get("acceptance_contract", {}),
+                                                                  "reasoning_escalation": escalation,
                                                                   "engineering_assignment": engineering_assignment,
                                                                   "available_engineering_operations": available_operations,
                                                                   "engineering_execution_result": payload.get("engineering_execution_result"),
@@ -340,6 +358,14 @@ class GraceResident:
                             any(not isinstance(ref, str) for ref in assessment["evidence_refs"]):
                         raise ValueError("Engineering assessment payload is invalid")
                     final_decision = None
+                elif decision.get("action") == "escalate_reasoning":
+                    if set(decision) != {"action", "target_role_id", "rationale"}:
+                        raise ValueError("reasoning escalation request fields are invalid")
+                    if decision["target_role_id"] not in escalation_role_ids:
+                        raise ValueError("Grace requested a reasoning role not offered by policy")
+                    if not isinstance(decision["rationale"], str) or not decision["rationale"].strip():
+                        raise ValueError("reasoning escalation requires a rationale")
+                    final_decision = None
                 elif decision.get("action") == "final":
                     if set(decision) != {"action", "decision"} or not isinstance(decision["decision"], dict):
                         raise ValueError("final action fields are invalid")
@@ -373,6 +399,7 @@ class GraceResident:
                     "capability_request": (decision if decision["action"] == "invoke_capability" else None),
                     "engineering_proposal": decision.get("proposal") if decision["action"] == "propose_engineering" else None,
                     "engineering_assessment": decision.get("engineering_assessment") if decision["action"] == "engineering_assess" else None,
+                    "reasoning_escalation_request": (decision if decision["action"] == "escalate_reasoning" else None),
                     "rationale": decision.get("rationale"),
                     "model_content": choice,
                     "model": {"route_id": route.route_id, "provider": route.provider, "name": route.model,
