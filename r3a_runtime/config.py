@@ -108,6 +108,13 @@ class NotificationSourceSettings:
     event_types: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class NotificationDeliverySettings:
+    contract_id: str
+    contract_version: str
+    rules: tuple[dict[str, Any], ...]
+
+
 def resolve_model_route(routes: tuple[ModelRoute, ...], default_route: str,
                         requested_route: str | None = None) -> ModelRoute:
     selected = requested_route or default_route
@@ -271,6 +278,7 @@ class Settings:
     knowledge_sources: tuple[Path, ...]
     capability_registry: Any
     notification_sources: tuple[NotificationSourceSettings, ...]
+    notification_delivery: NotificationDeliverySettings | None
 
     def model_route(self, route_id: str | None = None) -> ModelRoute:
         return resolve_model_route(self.model_routes, self.default_model_route, route_id)
@@ -310,7 +318,8 @@ def load_settings(path: str | Path) -> Settings:
         raise ConfigurationError("bootstrap config must be a JSON object")
     expected_root = {"schema_version", "instance_id", "paths", "postgres", "module", "timing"}
     extra = value.keys() - expected_root - {
-        "grace", "authorization", "capability_plugins", "capability_operations", "notification_intake"}
+        "grace", "authorization", "capability_plugins", "capability_operations", "notification_intake",
+        "notification_delivery"}
     missing = expected_root - value.keys()
     if missing or extra:
         raise ConfigurationError(f"root keys invalid; missing={sorted(missing)}, unknown={sorted(extra)}")
@@ -349,6 +358,16 @@ def load_settings(path: str | Path) -> Settings:
                 raise ConfigurationError(f"{where}.event_types must be a unique text array")
             sources.append(NotificationSourceSettings(source_id, adapter, item["enabled"], tuple(event_types)))
         notification_sources = tuple(sources)
+    notification_delivery = None
+    if "notification_delivery" in value:
+        from .notification_delivery import validate_routing_policy
+        delivery = value["notification_delivery"]
+        try:
+            checked = validate_routing_policy(delivery)
+        except (TypeError, ValueError) as exc:
+            raise ConfigurationError(f"notification_delivery is invalid: {exc}") from exc
+        notification_delivery = NotificationDeliverySettings(
+            checked["contract_id"], checked["contract_version"], tuple(checked["rules"]))
     if value["schema_version"] != 1:
         raise ConfigurationError("schema_version must equal 1")
     instance_id = _text(value["instance_id"], "instance_id")
@@ -839,6 +858,7 @@ def load_settings(path: str | Path) -> Settings:
         knowledge_sources=knowledge_sources,
         capability_registry=capability_registry,
         notification_sources=notification_sources,
+        notification_delivery=notification_delivery,
     )
 
 
@@ -874,6 +894,10 @@ def sanitized_config(settings: Settings) -> dict[str, Any]:
                                              "enabled": source.enabled,
                                              "event_types": list(source.event_types)}
                                             for source in settings.notification_sources]},
+        "notification_delivery": (None if settings.notification_delivery is None else {
+            "contract_id": settings.notification_delivery.contract_id,
+            "contract_version": settings.notification_delivery.contract_version,
+            "rules": list(settings.notification_delivery.rules)}),
         "grace": ({"default_route": settings.default_model_route,
                    "routes": [{"route_id": route.route_id, "provider": route.provider,
                                "endpoint": route.endpoint, "model": route.model,

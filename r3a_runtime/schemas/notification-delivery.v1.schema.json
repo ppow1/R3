@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://r3a.local/schemas/notification-delivery.v1.schema.json",
+  "title": "R3A notification delivery envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_id", "contract_version", "delivery_id", "idempotency_key", "notification_event_id", "source_id", "source_event_id", "correlation_id", "recipient", "severity", "urgency", "requires_action", "status", "created_at", "acknowledged_at", "resolved_at", "evidence_refs"],
+  "properties": {
+    "contract_id": {"const": "r3a.notification-delivery"},
+    "contract_version": {"const": "1.0.0"},
+    "delivery_id": {"type": "string", "format": "uuid"},
+    "idempotency_key": {"type": "string", "minLength": 1},
+    "notification_event_id": {"type": "string", "format": "uuid"},
+    "source_id": {"type": "string", "minLength": 1},
+    "source_event_id": {"type": "string", "format": "uuid"},
+    "correlation_id": {"type": "string", "format": "uuid"},
+    "recipient": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "recipient_id", "office_id"],
+      "properties": {
+        "kind": {"enum": ["resident", "office", "steward"]},
+        "recipient_id": {"type": "string", "minLength": 1},
+        "office_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "severity": {"enum": ["info", "warning", "error"]},
+    "urgency": {"enum": ["low", "normal", "high", "critical"]},
+    "requires_action": {"type": "boolean"},
+    "status": {"enum": ["queued", "delivered", "acknowledged", "resolved", "blocked"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "acknowledged_at": {"type": ["string", "null"], "format": "date-time"},
+    "resolved_at": {"type": ["string", "null"], "format": "date-time"},
+    "evidence_refs": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+  }
+}

@@ -99,6 +99,27 @@ class NotificationConfigurationTests(unittest.TestCase):
             with self.assertRaisesRegex(ConfigurationError, "adapter is unsupported"):
                 load_settings(path)
 
+    def test_delivery_policy_is_external_strict_and_sanitized(self):
+        with TemporaryDirectory() as temporary:
+            path = make_config(Path(temporary))
+            config = json.loads(path.read_text(encoding="utf-8"))
+            config["notification_delivery"] = {
+                "contract_id": "r3a.notification-delivery", "contract_version": "1.0.0",
+                "rules": [{"source_id": INSTITUTION_EVENT_SOURCE,
+                           "event_type": "process.failed",
+                           "recipient": {"kind": "steward", "office_role": "Steward"},
+                           "urgency": "critical", "requires_action": True}],
+            }
+            path.write_text(json.dumps(config), encoding="utf-8")
+            settings = load_settings(path)
+            self.assertEqual(settings.notification_delivery.rules[0]["recipient"]["kind"], "steward")
+            self.assertEqual(sanitized_config(settings)["notification_delivery"]["rules"],
+                             list(settings.notification_delivery.rules))
+            config["notification_delivery"]["rules"][0]["recipient"]["resident_id"] = "resident.fixed"
+            path.write_text(json.dumps(config), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigurationError, "selector"):
+                load_settings(path)
+
 
 class NotificationIntakeTests(unittest.IsolatedAsyncioTestCase):
     async def test_source_outage_and_malformed_event_fail_without_queue_submission(self):
