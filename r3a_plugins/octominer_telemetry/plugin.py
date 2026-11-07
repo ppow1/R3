@@ -60,7 +60,7 @@ def _now() -> str:
 
 def _number(value: str) -> float | None:
     value = value.strip()
-    if not value or value.upper() in {"N/A", "[NOT SUPPORTED]"}:
+    if not value or value.upper() in {"N/A", "[N/A]", "[NOT SUPPORTED]"}:
         return None
     try:
         number = float(value)

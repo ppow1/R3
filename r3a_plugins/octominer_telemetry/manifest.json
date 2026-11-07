@@ -3,7 +3,7 @@
   "plugin_id": "r3a.octominer-telemetry",
   "plugin_version": "2.0.0",
   "artifact_ref": "plugin.py",
-  "artifact_sha256": "3c36854d4127ce22b44234991709d880bee43509e981dbf00164717d159f6b0e",
+  "artifact_sha256": "af8aae26cad6f603f69658fea6dde2b868eadf1f4bdce6106b46f4c561587a86",
   "supporting_artifacts": [
     {
       "artifact_ref": "http_providers.py",
@@ -116,7 +116,7 @@
     "provider_id": "r3a.octominer-telemetry",
     "provider_version": "2.0.0",
     "entrypoint": "r3a_plugins.octominer_telemetry.plugin:create_provider",
-    "artifact_sha256": "3c36854d4127ce22b44234991709d880bee43509e981dbf00164717d159f6b0e"
+    "artifact_sha256": "af8aae26cad6f603f69658fea6dde2b868eadf1f4bdce6106b46f4c561587a86"
   },
   "operation": {
     "contract_id": "r3a.capability-operation.v1",
@@ -127,7 +127,7 @@
       "provider_id": "r3a.octominer-telemetry",
       "provider_version": "2.0.0",
       "entrypoint": "r3a_plugins.octominer_telemetry.plugin:create_provider",
-      "artifact_sha256": "3c36854d4127ce22b44234991709d880bee43509e981dbf00164717d159f6b0e"
+      "artifact_sha256": "af8aae26cad6f603f69658fea6dde2b868eadf1f4bdce6106b46f4c561587a86"
     },
     "input_schema": {
       "type": "object",

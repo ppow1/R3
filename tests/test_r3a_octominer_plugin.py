@@ -33,7 +33,7 @@ from r3a_plugins.octominer_telemetry import plugin
 
 SAMPLE = (
     "GPU-111, NVIDIA Tesla P100, 00000000:04:00.0, 550.144.03, 16384, 1200, 15184, 35, 46, 82.5, 50\n"
-    "GPU-222, NVIDIA GeForce RTX 4090, 00000000:07:00.0, 550.144.03, 24564, 6000, 18564, 17, 41, 98.2, N/A\n"
+    "GPU-222, NVIDIA GeForce RTX 4090, 00000000:07:00.0, 550.144.03, 24564, 6000, 18564, 17, 41, 98.2, [N/A]\n"
 )
 DF_SAMPLE = "Filesystem  1B-blocks       Used Available Use% Mounted on\n/dev/sda4   117722342400 100777000000 12200000000  85% /\n"
 
