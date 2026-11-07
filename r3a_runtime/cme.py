@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.9.0
+File Revision: 1.10.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -38,8 +38,9 @@ Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Expose sepa
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Enforce Grace-requested reasoning escalation through existing authorization, readiness, durable checkpoint and per-activity token-budget paths.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Dispatch escalation inference through the unified capability invocation and durable budget-reservation path.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Resolve routes by configured task class and reject autonomic objective inference before model execution.
+Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Bind manifest-declared capability provider versions through the generic CME module lifecycle while preserving CME authorization and invocation persistence.
 Supersedes: None.
-Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
+Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; module.lifecycle v2; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py; tests/test_r3a_telemetry_providers.py; tests/test_r3a_capability_contracts.py; tests/test_r3a_engineering.py.
 History/Predecessor: Modular baseline ca2d29e47336dfb3d6a0e633c20bd31e1a200978; AP2 baseline b018578ea576813fed2c973236f35d82843daf14.
 """
@@ -80,6 +81,7 @@ from .acceptance import (AcceptanceCriteriaRequired, OBJECTIVE_ACCEPTANCE_CONTRA
                          OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, evidence_fingerprint,
                          validate_acceptance, validate_required_criteria)
 from .protocol import PROTOCOL_MAJOR, PROTOCOL_MINOR, request as module_request
+from .provider_runtime import ProviderProcessManager
 
 
 _RESIDENT_TOOLS = (
@@ -170,6 +172,7 @@ class CME:
         self.module_version = settings.module_version
         self.module_pid: int | None = None
         self.module_lock = asyncio.Lock()
+        self.provider_runtime = ProviderProcessManager(settings, self.store, settings.capability_registry)
         self.booted_at = utcnow()
 
     def manifest(self, version: str | None = None) -> dict[str, Any]:
@@ -234,6 +237,7 @@ class CME:
                           "evidence_contract": descriptor["evidence"],
                           "provider_availability": discovery["registry_observation"]["provider_availability"]},
                 health=discovery["registry_observation"]["provider_availability"])
+        await self.provider_runtime.install_all()
         escalation_policy = self.settings.reasoning_escalation
         if escalation_policy and escalation_policy.enabled:
             escalation_operation = self.settings.capability_registry.resolve(
@@ -285,6 +289,7 @@ class CME:
         if self.active_activities:
             await asyncio.gather(*self.active_activities.values(), return_exceptions=True)
         await self._stop_module()
+        await self.provider_runtime.close()
         if self.control:
             await self.control.close()
         if self.diagnostics:
@@ -557,6 +562,76 @@ class CME:
             return await self._stop_module()
         if operation == "module.replace":
             return await self._replace_module(str(payload["version"]))
+        if operation in {"capability.module.install", "capability.module.activate",
+                         "capability.module.deactivate", "capability.module.status"}:
+            operation_id = payload.get("operation_id")
+            contract_version = payload.get("contract_version", "1.0.0")
+            if not isinstance(operation_id, str) or not operation_id:
+                raise ValueError(f"{operation} requires operation_id")
+            provider_version = payload.get("provider_version")
+            if provider_version is not None and not isinstance(provider_version, str):
+                raise ValueError("provider_version must be text")
+            registered = (self.settings.capability_registry.resolve_provider(operation_id, provider_version)
+                          if provider_version else self.settings.capability_registry.resolve(
+                              operation_id, contract_version, include_stopped=True))
+            provider = registered.descriptor["provider"]
+            if operation == "capability.module.status":
+                modules = await self.store.rows(
+                    "SELECT lifecycle_state,health,observed_at,diagnostic FROM r3a.module_registry "
+                    "WHERE module_id=%s AND module_version=%s", (provider["provider_id"], provider["provider_version"]))
+                return {"operation_id": operation_id, "provider_id": provider["provider_id"],
+                        "provider_version": provider["provider_version"],
+                        "module": modules[0] if modules else None}
+            if operation == "capability.module.install":
+                manifest = self.provider_runtime._manifest(registered)
+                installed = await self.store.rows(
+                    "SELECT artifact_digest,lifecycle_state FROM r3a.module_registry "
+                    "WHERE module_id=%s AND module_version=%s", (provider["provider_id"], provider["provider_version"]))
+                if installed:
+                    if installed[0]["artifact_digest"].strip() != manifest["artifact_digest"]:
+                        raise RuntimeError("installed provider version is immutable; use a new provider version")
+                    return {"installed": True, "already_registered": True,
+                            "module_id": provider["provider_id"], "version": provider["provider_version"],
+                            "lifecycle_state": installed[0]["lifecycle_state"]}
+                await self.store.register_module(manifest, "INSTALLED", "unknown")
+                await self.store.module_state(provider["provider_id"], provider["provider_version"],
+                                              "INSTALLED", "unknown", {"source": "control.install",
+                                                                        "idempotency_key": idempotency_key},
+                                              machine_version=2)
+                self.settings.capability_registry.set_provider_state(provider["provider_id"],
+                                                                     provider["provider_version"],
+                                                                     "INSTALLED", {})
+                return {"installed": True, "module_id": provider["provider_id"],
+                        "version": provider["provider_version"], "artifact_digest": provider["artifact_sha256"]}
+            if operation == "capability.module.activate":
+                result = await self.provider_runtime.activate(registered)
+                self.settings.capability_registry.activate_provider(operation_id, provider["provider_version"])
+                return result
+            stopped = await self.provider_runtime.stop(provider["provider_id"], provider["provider_version"])
+            return stopped
+        if operation == "capability.module.replace":
+            new_id = payload.get("operation_id")
+            old_module_id, old_version = payload.get("old_module_id"), payload.get("old_version")
+            new_version = payload.get("new_provider_version")
+            if not all(isinstance(x, str) and x for x in (new_id, old_module_id, old_version, new_version)):
+                raise ValueError("capability.module.replace requires operation_id, old_module_id, old_version, and new_provider_version")
+            old_operation = self.settings.capability_registry.resolve_provider(new_id, old_version)
+            new_operation = self.settings.capability_registry.resolve_provider(new_id, new_version)
+            if old_operation.descriptor["provider"]["provider_id"] != old_module_id:
+                raise ValueError("old_module_id does not match the registered prior provider version")
+            await self.provider_runtime.activate(old_operation)
+            await self.provider_runtime.begin_replacement(old_module_id, old_version)
+            try:
+                result = await self.provider_runtime.activate(new_operation)
+            except Exception:
+                await self.provider_runtime.cancel_replacement(old_module_id, old_version)
+                raise
+            self.settings.capability_registry.activate_provider(new_id, new_version)
+            await self.provider_runtime.stop(old_module_id, old_version)
+            await self.store.record_module_replacement(old_module_id, old_version, new_version,
+                                                      machine_version=2)
+            result.update({"replaced": True, "prior_version": old_version})
+            return result
         if operation == "capability.grant":
             module_id = str(payload["module_id"])
             capability_id = str(payload["capability_id"])
@@ -1088,15 +1163,19 @@ class CME:
                 evidence.extend(retrieve(path, f"knowledge.{index+1}", query))
             capability_output = evidence
         elif registered_operation is not None:
-            provider = registered_operation.load_provider()
-            provided = await asyncio.to_thread(provider.invoke, arguments,
-                                                context={"activity_id": str(activity["activity_id"]),
+            provider_context = {"activity_id": str(activity["activity_id"]),
                                                          "attempt_id": str(activity["attempt_id"]),
                                                          "correlation_id": str(activity.get("correlation_id")
                                                                                or activity["activity_id"]),
                                                          "operation_id": capability_id,
                                                          "config_revision": self.settings.source_digest,
-                                                         "capability_catalog": list(registry.discover())})
+                                                         "capability_catalog": list(registry.discover())}
+            runtime = getattr(self, "provider_runtime", None)
+            if runtime is None:  # Narrow compatibility for isolated CME contract fixtures.
+                provider = registered_operation.load_provider()
+                provided = await asyncio.to_thread(provider.invoke, arguments, context=provider_context)
+            else:
+                provided = await runtime.invoke(registered_operation, arguments, context=provider_context)
             capability_output, provider_evidence = normalize_provider_result(
                 provided, registered_operation.descriptor)
             evidence.extend(provider_evidence if isinstance(provider_evidence, list)
@@ -1193,16 +1272,21 @@ class CME:
             raise RuntimeError(f"invocation requires reconciliation from durable state {existing['state']}")
         if not existing.get("created", False) and not descriptor["recovery"]["replay_safe"]:
             raise RuntimeError("interrupted invocation is not replay safe; reconciliation is required")
-        provider = operation.load_provider()
         try:
-            output = await asyncio.to_thread(provider.invoke, checked["input"], context={
+            provider_context = {
                 "invocation_id": checked["invocation_id"], "idempotency_key": persistence_key,
                 "activity_id": checked["activity_id"], "attempt_id": checked["attempt_id"],
                 "correlation_id": checked["correlation_id"], "target": checked["target"],
                 "work_order": order, "effect_class": descriptor["effect_class"],
                 "config_revision": self.settings.source_digest,
                 **(_provider_context or {}),
-                "capability_catalog": list(self.settings.capability_registry.discover())})
+                "capability_catalog": list(self.settings.capability_registry.discover())}
+            runtime = getattr(self, "provider_runtime", None)
+            if runtime is None:  # Narrow compatibility for isolated CME contract fixtures.
+                provider = operation.load_provider()
+                output = await asyncio.to_thread(provider.invoke, checked["input"], context=provider_context)
+            else:
+                output = await runtime.invoke(operation, checked["input"], context=provider_context)
         except Exception as exc:
             finished = utcnow().isoformat()
             result = {"contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",

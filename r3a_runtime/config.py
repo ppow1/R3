@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/config.py
 Component: R3A-BOOTSTRAP-CONFIG
-File Revision: 1.6.0
+File Revision: 1.7.0
 Created: 2026-11-06T15:04:00Z
 Created By: Codex GPT-6
 Purpose: Strictly validate external R3A AP0-M1 bootstrap and operating settings.
@@ -22,6 +22,7 @@ Changed: 2026-11-07 | R3A-PLUG-002 | Codex GPT-6 | Validate plug-in configuratio
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Add externally configured v1 escalation policy with per-activity request and completion-token budgets.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Bind configured model roles to task classes and reject cross-class fallback.
 Changed: 2026-11-07 | R3A-AP1-N1 | Codex GPT-6 | Add externally configured versioned service-event notification sources.
+Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Preserve immutable provider-version registrations and pass resolved pinned artifact paths to the generic CME binding.
 Supersedes: None.
 Contracts: AP0-001/008/009; R3A-019; Issue #46; AP0-M1 D7; r3a_runtime.contracts; hints/file-provenance.md.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py.
@@ -690,7 +691,7 @@ def load_settings(path: str | Path) -> Settings:
     from .capability_contracts import (CapabilityContractError, CapabilityRegistry,
                                        operation_from_manifest)
     capability_registry = CapabilityRegistry()
-    plugin_ids: set[str] = set()
+    plugin_ids: set[tuple[str, str, str]] = set()
     if "capability_plugins" in value and "capability_operations" in value:
         raise ConfigurationError("use one capability_operations registry input; capability_plugins is a compatibility alias")
     raw_plugins = value.get("capability_operations", value.get("capability_plugins", []))
@@ -747,6 +748,7 @@ def load_settings(path: str | Path) -> Settings:
             raise ConfigurationError(f"{where}.supporting_artifacts must be an array")
         seen_support: set[str] = set()
         pinned_digests = {artifact_digest}
+        artifact_paths = {artifact_digest: artifact_path}
         for support in support_files:
             if not isinstance(support, dict) or set(support) != {"artifact_ref", "artifact_sha256"}:
                 raise ConfigurationError(f"{where}.supporting_artifacts entry is invalid")
@@ -761,20 +763,27 @@ def load_settings(path: str | Path) -> Settings:
                     or hashlib.sha256(support_path.read_bytes()).hexdigest() != support_hash):
                 raise ConfigurationError(f"{where} supporting artifact digest does not match")
             pinned_digests.add(support_hash)
+            artifact_paths[support_hash] = support_path
         try:
             operation = operation_from_manifest(manifest)
             operation_id = operation["operation_id"]
             capability_id = manifest.get("capability_id", operation_id)
-            if capability_id in plugin_ids or capability_id not in capabilities:
-                raise CapabilityContractError("operation_id must be unique and explicitly declared in module.capabilities")
+            provider = operation["provider"]
+            plugin_identity = (capability_id, provider["provider_id"], provider["provider_version"])
+            if plugin_identity in plugin_ids or capability_id not in capabilities:
+                raise CapabilityContractError("operation provider version must be unique and operation_id declared in module.capabilities")
             if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", capability_id):
                 raise CapabilityContractError("operation_id is invalid")
             if operation["provider"]["artifact_sha256"] not in pinned_digests:
                 raise CapabilityContractError("operation provider digest must pin a declared artifact")
+            # Internal resolved path is carried only to the CME binding layer; it is not
+            # an external manifest field and never becomes an authorization decision.
+            manifest["_provider_artifact_path"] = str(artifact_paths[operation["provider"]["artifact_sha256"]])
+            manifest["_pinned_artifact_paths"] = {digest: str(path) for digest, path in artifact_paths.items()}
             capability_registry.register(operation, plugin_config, legacy_manifest=manifest)
         except (CapabilityContractError, KeyError, TypeError) as exc:
             raise ConfigurationError(f"{where}.manifest operation contract is invalid: {exc}") from exc
-        plugin_ids.add(capability_id)
+        plugin_ids.add(plugin_identity)
 
     timing = value["timing"]
     if not isinstance(timing, dict):

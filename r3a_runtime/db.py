@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.9.0
+File Revision: 1.10.0
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -36,8 +36,9 @@ Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Persist activity-s
 Changed: 2026-11-07 | R3A-AP1-N1 | Codex GPT-6 | Import identified institution events as correlated Grace notifications with durable lifecycle events.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Persist objective task class and selected role with durable intake for route-safe recovery.
 Changed: 2026-11-07 | R3A-AP1-CME-OBSERVER-QUEUE | Codex GPT-6 | Keep one pending durable observer activity instead of replenishing an existing backlog.
+Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-002 | Codex GPT-6 | Add versioned generic module replacement transitions while retaining immutable lifecycle machine v1.
 Supersedes: None.
-Contracts: AP0-003–010; R3A-019; R3A-011/R3A-012; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1; r3a.engineering-work-order.v1; r3a.capability-invocation.v1.
+Contracts: AP0-003–010; R3A-019; R3A-011/R3A-012; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; module.lifecycle v2; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1; r3a.engineering-work-order.v1; r3a.capability-invocation.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_engineering.py; tests/test_r3a_capability_integration_demo.py.
 History/Predecessor: Prior revision at AP2 commit 600020fd81b4b1e5ed4d938f95592560963a616d, blob a71a534e88a20df82ae2ea7989ca706dbb283c6e; earlier baseline blob f2cffbc6f44a47b10f6262ee469bd310ca652683.
 """
@@ -486,9 +487,9 @@ class Store:
         )).fetchone()
         if row:
             await conn.execute(
-                "UPDATE r3a.runtime_entities SET state=%s,details=%s,config_revision=%s,version=version+1,updated_at=clock_timestamp() "
+                "UPDATE r3a.runtime_entities SET machine_id=%s,machine_version=%s,state=%s,details=%s,config_revision=%s,version=version+1,updated_at=clock_timestamp() "
                 "WHERE entity_type=%s AND entity_id=%s",
-                (next_state, json.dumps(evidence or {}), current["revision_id"] if current else None,
+                (machine_id, machine_version, next_state, json.dumps(evidence or {}), current["revision_id"] if current else None,
                  entity_type, entity_id),
             )
         else:
@@ -1003,7 +1004,8 @@ class Store:
             )
 
     async def module_state(self, module_id: str, module_version: str, lifecycle: str,
-                           health: str, diagnostic: dict[str, Any] | None = None) -> None:
+                           health: str, diagnostic: dict[str, Any] | None = None,
+                           *, machine_version: int = 1) -> None:
         async with self.pool.connection() as conn, conn.transaction():
             entity_id = f"{module_id}@{module_version}"
             prior = await (await conn.execute(
@@ -1018,10 +1020,10 @@ class Store:
                 )
                 return
             if not prior and lifecycle != "INSTALLED":
-                await self._transition_on_conn(conn, "module", entity_id, "module.lifecycle", 1,
+                await self._transition_on_conn(conn, "module", entity_id, "module.lifecycle", machine_version,
                                                "INSTALLED", "module installation observed",
                                                {"version": module_version}, initial=True)
-            accepted = await self._transition_on_conn(conn, "module", entity_id, "module.lifecycle", 1,
+            accepted = await self._transition_on_conn(conn, "module", entity_id, "module.lifecycle", machine_version,
                                                       lifecycle, "module lifecycle observed",
                                                       {"version": module_version, "health": health,
                                                        **(diagnostic or {})},
@@ -1044,10 +1046,10 @@ class Store:
             )
 
     async def record_module_replacement(self, module_id: str, old_version: str,
-                                        new_version: str) -> None:
+                                        new_version: str, *, machine_version: int = 1) -> None:
         async with self.pool.connection() as conn, conn.transaction():
             await self._event(conn, "module.replaced", "module",
-                              f"{module_id}@{old_version}", "module.lifecycle", 1,
+                              f"{module_id}@{old_version}", "module.lifecycle", machine_version,
                               "STOPPED", "STOPPED", "module replacement completed",
                               {"module_id": module_id, "old_version": old_version,
                                "new_version": new_version})

@@ -392,43 +392,96 @@ class CapabilityRegistry:
     """Single in-process dynamic registry. Discovery makes no authorization decision."""
 
     def __init__(self) -> None:
-        self._operations: dict[str, RegisteredOperation] = {}
+        self._operations: dict[tuple[str, str, str], RegisteredOperation] = {}
+        self._active: dict[str, tuple[str, str, str]] = {}
+        self._provider_states: dict[tuple[str, str], tuple[str, dict[str, Any]]] = {}
 
     def register(self, descriptor: dict[str, Any], configuration: dict[str, Any], *,
                  legacy_manifest: dict[str, Any] | None = None) -> RegisteredOperation:
         checked = validate_operation(descriptor)
         operation_id = checked["operation_id"]
-        if operation_id in self._operations:
-            raise CapabilityContractError(f"operation already registered: {operation_id}")
+        provider = checked["provider"]
+        identity = (operation_id, provider["provider_id"], provider["provider_version"])
+        if identity in self._operations:
+            raise CapabilityContractError(f"operation provider version already registered: {identity}")
         if not isinstance(configuration, dict):
             raise CapabilityContractError("provider configuration must be an object")
         registered = RegisteredOperation(checked, copy.deepcopy(configuration), copy.deepcopy(legacy_manifest))
-        self._operations[operation_id] = registered
+        self._operations[identity] = registered
+        self._active.setdefault(operation_id, identity)
+        self._provider_states.setdefault((provider["provider_id"], provider["provider_version"]),
+                                         ("registered", {}))
         return self._copy(registered)
 
-    def discover(self, *, include_disabled: bool = False) -> tuple[dict[str, Any], ...]:
+    def set_provider_state(self, provider_id: str, provider_version: str, state: str,
+                           diagnostic: dict[str, Any] | None = None) -> None:
+        """Record an observed provider binding state without changing authorization."""
+        if not any(item.descriptor["provider"]["provider_id"] == provider_id
+                   and item.descriptor["provider"]["provider_version"] == provider_version
+                   for item in self._operations.values()):
+            raise KeyError(f"unknown provider: {provider_id}@{provider_version}")
+        self._provider_states[(provider_id, provider_version)] = (state, copy.deepcopy(diagnostic or {}))
+
+    def discover(self, *, include_disabled: bool = False,
+                 include_versions: bool = False) -> tuple[dict[str, Any], ...]:
         """Return stable operation identity plus a separate human presentation projection."""
         records = []
-        for item in sorted(self._operations.values(), key=lambda x: x.descriptor["operation_id"]):
+        items = self._operations.values() if include_versions else (
+            self._operations[key] for key in self._active.values())
+        for item in sorted(items, key=lambda x: (x.descriptor["operation_id"],
+                                                 x.descriptor["provider"]["provider_version"])):
             descriptor = item.descriptor
             if descriptor["lifecycle"]["desired_state"] == "disabled" and not include_disabled:
                 continue
+            provider_key = (descriptor["provider"]["provider_id"],
+                            descriptor["provider"]["provider_version"])
+            state, diagnostic = self._provider_states.get(provider_key, ("registered", {}))
             records.append({"descriptor": copy.deepcopy(descriptor),
                             "presentation": item.presentation_projection(),
-                            "registry_observation": {"state": "registered", "health": "not_probed",
+                            "registry_observation": {"state": state,
+                                                     "diagnostic": copy.deepcopy(diagnostic),
+                                                     "health": "not_probed",
                                                      "provider_availability": "not_probed",
                                                      "observed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}})
         return tuple(records)
 
-    def resolve(self, operation_id: str, contract_version: str = CONTRACT_VERSION) -> RegisteredOperation:
-        operation = self._operations.get(operation_id)
+    def resolve(self, operation_id: str, contract_version: str = CONTRACT_VERSION, *,
+                include_stopped: bool = False) -> RegisteredOperation:
+        identity = self._active.get(operation_id)
+        operation = self._operations.get(identity) if identity else None
         if operation is None:
             raise KeyError(f"unknown operation: {operation_id}")
         if operation.descriptor["contract_version"] != contract_version:
             raise CapabilityContractError("operation contract version mismatch")
         if operation.descriptor["lifecycle"]["desired_state"] != "enabled":
             raise CapabilityContractError("operation is disabled")
+        provider = operation.descriptor["provider"]
+        state = self._provider_states.get((provider["provider_id"], provider["provider_version"]),
+                                          ("registered", {}))[0]
+        if not include_stopped and state in {"STOPPED", "FAILED", "INCOMPATIBLE"}:
+            raise CapabilityContractError(f"provider is {state.lower()}")
         return self._copy(operation)
+
+    def resolve_provider(self, operation_id: str, provider_version: str) -> RegisteredOperation:
+        """Resolve an installed implementation version for lifecycle management."""
+        matches = [item for key, item in self._operations.items()
+                   if key[0] == operation_id and key[2] == provider_version]
+        if len(matches) != 1:
+            raise KeyError(f"unknown or ambiguous operation provider: {operation_id}@{provider_version}")
+        return self._copy(matches[0])
+
+    def activate_provider(self, operation_id: str, provider_version: str) -> RegisteredOperation:
+        """Select a previously discovered provider version after readiness succeeds."""
+        candidate = self.resolve_provider(operation_id, provider_version)
+        if candidate.descriptor["lifecycle"]["desired_state"] != "enabled":
+            raise CapabilityContractError("operation is disabled")
+        provider = candidate.descriptor["provider"]
+        state = self._provider_states.get((provider["provider_id"], provider["provider_version"]),
+                                          ("registered", {}))[0]
+        if state not in {"ACTIVE", "registered", "INSTALLED"}:
+            raise CapabilityContractError(f"provider is not ready for activation ({state})")
+        self._active[operation_id] = (operation_id, provider["provider_id"], provider["provider_version"])
+        return candidate
 
     @staticmethod
     def _copy(operation: RegisteredOperation) -> RegisteredOperation:
@@ -437,7 +490,7 @@ class CapabilityRegistry:
                                    copy.deepcopy(operation.legacy_manifest))
 
     def __len__(self) -> int:
-        return len(self._operations)
+        return len(self._active)
 
 
 def legacy_read_only_operation(manifest: dict[str, Any]) -> dict[str, Any]:
