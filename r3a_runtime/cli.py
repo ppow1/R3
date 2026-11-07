@@ -2,23 +2,24 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cli.py
 Component: R3A-OPERATOR-CLI
-File Revision: 1.1.0
+File Revision: 1.2.0
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Expose operator-invoked AP0 diagnostics, CME controls and isolated backup actions.
 Execution Model: Local command line using Unix sockets and PostgreSQL client utilities.
 Observability: JSON responses with explicit operation results and source revisions.
 Dependencies: r3a_runtime.config/control/diagnostics/backup.
-Authority: AP1 / R3A-019 and AP1 Slice 1 authorized by Steward; isolated R3A only.
+Authority: AP1 / R3A-019 and AP1 Slices 1–2 authorized by Steward; isolated R3A only.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Finalize local diagnostics, lifecycle and backup CLI.
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Add durable idempotent Grace objective submission.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Expose durable notification intake and configured model route selection.
 Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Allow role- and capability/modality-qualified durable Grace objective submissions.
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add provider-readiness reporting through the existing local CME control interface.
+Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Replace caller-authored readiness reports with provider-triggered checks.
 Supersedes: None.
 Contracts: AP0-007/008/010/013; R3A-019; AP0-M1 D8/D9; r3a.model-route-decision.v1; r3a.model-readiness.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; no model inference in this slice.
-History/Predecessor: Git blob 5014322a262cd49be5f04d0888ece975170b56b6 at commit cc7f662c04a4ba8eb327edd134e2ded92ef9786c.
+History/Predecessor: Git blob aa8cc532bfc1cc0f6d5e8ec8df9784f55458285e at commit ad16700f1e94dd36c81cac5383f9f2e2771a98a1.
 """
 from __future__ import annotations
 
@@ -26,8 +27,6 @@ import argparse
 import asyncio
 import json
 import sys
-import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -72,13 +71,8 @@ async def _run(args: argparse.Namespace) -> Any:
             payload["route_id"] = args.route_id
         if args.role_id:
             payload["role_id"] = args.role_id
-    elif args.command == "model-readiness-report":
-        payload = {"resident_id": args.resident_id, "role_id": args.role_id,
-                   "model_id": args.model_id, "status": args.status,
-                   "source": args.source, "observed_at": args.observed_at,
-                   "config_revision": args.config_revision or settings.source_digest,
-                   "observation_id": args.observation_id or str(uuid.uuid4()),
-                   "reason": args.reason or "", "evidence_ref": args.evidence_ref or ""}
+    elif args.command == "model-readiness-refresh":
+        payload = {"role_id": args.role_id}
     elif args.command == "config-reload":
         operation = "config.reload"
     return await control_request(settings.control_socket, operation, payload,
@@ -103,18 +97,9 @@ def main() -> None:
     objective.add_argument("--required-modality", action="append", default=[],
                            help="Required input modality for role selection; may be repeated")
     objective.add_argument("--idempotency-key", required=True)
-    readiness = commands.add_parser("model-readiness-report",
-                                    help="Persist an externally observed provider/model readiness result")
-    readiness.add_argument("--resident-id", required=True)
+    readiness = commands.add_parser("model-readiness-refresh",
+                                    help="Ask CME to perform a configured model-provider readiness check")
     readiness.add_argument("--role-id", required=True)
-    readiness.add_argument("--model-id", required=True)
-    readiness.add_argument("--status", choices=("ready", "degraded", "unavailable", "unknown"), required=True)
-    readiness.add_argument("--source", choices=("provider_model", "model_protocol"), required=True)
-    readiness.add_argument("--observed-at", default=datetime.now(timezone.utc).isoformat())
-    readiness.add_argument("--config-revision")
-    readiness.add_argument("--observation-id")
-    readiness.add_argument("--evidence-ref")
-    readiness.add_argument("--reason")
     readiness.add_argument("--idempotency-key", required=True)
     for name in ("module-install", "module-activate", "module-replace"):
         cmd = commands.add_parser(name)

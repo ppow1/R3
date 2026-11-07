@@ -2,14 +2,14 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.1.0
+File Revision: 1.2.0
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
 Execution Model: Async Psycopg 3 connection pool.
 Observability: PostgreSQL current-state projections, append-only events, migrations, and activity lineage.
 Dependencies: psycopg 3; PostgreSQL; r3a_runtime.config.
-Authority: AP0-M1 Issue #42, AP1-M1 Issue #43, and AP1 Slice 1 Issue #45 authorized by Steward; R3A database only.
+Authority: AP0-M1 Issue #42, AP1-M1 Issue #43, and AP1 Slices 1–2 Issue #45 authorized by Steward; R3A database only.
 Changed: 2026-11-06T15:06:00Z | R3A-AP0-M1 | Codex GPT-6 | Add durable PostgreSQL store.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Add validated machine definitions, idempotent grants/lifecycle, retry-safe leases and guarded state/event commits.
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Persist Grace objective inputs/results, deduplicate intake and renew activity/resource leases.
@@ -18,10 +18,11 @@ Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Return the durable activ
 Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Persist model-role observations and use existing WAITING lifecycle for durable role deferral.
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Preserve role readiness in existing registries and atomically requeue or block deferred activities.
 Changed: 2026-11-06T23:46:49Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Consolidate model-role deferral operations into one durable state-transition method.
+Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Persist provider/model identity and evidence; invalidate incompatible prior readiness in the existing registry.
 Supersedes: None.
-Contracts: AP0-003–010; R3A-019; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1.
+Contracts: AP0-003–010; R3A-019; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py.
-History/Predecessor: Git blob c3e74492248912e590ffabe6be2ab624132dd021 at commit cc7f662c04a4ba8eb327edd134e2ded92ef9786c.
+History/Predecessor: Git blob 89d7a15f1b63874846bd036ed0acfcbd1b68d2f8 at commit ad16700f1e94dd36c81cac5383f9f2e2771a98a1.
 """
 from __future__ import annotations
 
@@ -352,28 +353,42 @@ class Store:
             )
 
     async def register_model_role(self, role: Any, config_revision: str,
-                                  resident_id: str) -> None:
+                                  resident_id: str, model_id: str) -> None:
         """Persist a configured role in the existing resource registry, initially unknown."""
         resource_id = f"model-role:{role.role_id}"
         metadata = {"registry_contract": "r3a.model-role.v1", "resident_id": resident_id,
                     "role_id": role.role_id,
                     "route_id": role.route_id, "capabilities": list(role.capabilities),
+                    "configured_model_id": model_id,
+                    "readiness_provider_id": role.readiness.provider_id if role.readiness else None,
                     "modalities": list(role.modalities), "fallback_roles": list(role.fallback_roles),
                     "readiness_max_age_seconds": role.readiness_max_age_seconds,
                     "unavailable_action": role.unavailable_action,
                     "deferral_seconds": role.deferral_seconds,
                     "config_revision": config_revision}
+        preserve_readiness = (
+            "r3a.resource_registry.metadata->>'config_revision'=EXCLUDED.metadata->>'config_revision' "
+            "AND r3a.resource_registry.metadata->>'readiness_provider_id'="
+            "EXCLUDED.metadata->>'readiness_provider_id' "
+            "AND r3a.resource_registry.metadata->>'configured_model_id'="
+            "EXCLUDED.metadata->>'configured_model_id' "
+            "AND r3a.resource_registry.metadata#>>'{readiness,provider_id}'="
+            "EXCLUDED.metadata->>'readiness_provider_id' "
+            "AND r3a.resource_registry.metadata#>>'{readiness,model_id}'="
+            "EXCLUDED.metadata->>'configured_model_id' "
+            "AND jsonb_typeof(r3a.resource_registry.metadata#>'{readiness,evidence}')='object' "
+            "AND r3a.resource_registry.metadata#>'{readiness,evidence}' <> '{}'::jsonb")
         async with self.pool.connection() as conn, conn.transaction():
             await conn.execute(
                 "INSERT INTO r3a.resource_registry(resource_id,contract_version,owner,capacity,health,observed_at,metadata) "
                 "VALUES (%s,'1.0.0',%s,%s,'unknown',clock_timestamp(),%s) "
                 "ON CONFLICT(resource_id) DO UPDATE SET contract_version=EXCLUDED.contract_version,"
                 "owner=EXCLUDED.owner,capacity=EXCLUDED.capacity,"
-                "health=CASE WHEN r3a.resource_registry.metadata->>'config_revision'=EXCLUDED.metadata->>'config_revision' "
+                f"health=CASE WHEN {preserve_readiness} "
                 "THEN r3a.resource_registry.health ELSE 'unknown' END,"
-                "observed_at=CASE WHEN r3a.resource_registry.metadata->>'config_revision'=EXCLUDED.metadata->>'config_revision' "
+                f"observed_at=CASE WHEN {preserve_readiness} "
                 "THEN r3a.resource_registry.observed_at ELSE clock_timestamp() END,"
-                "metadata=CASE WHEN r3a.resource_registry.metadata->>'config_revision'=EXCLUDED.metadata->>'config_revision' "
+                f"metadata=CASE WHEN {preserve_readiness} "
                 "THEN r3a.resource_registry.metadata || EXCLUDED.metadata "
                 "ELSE (r3a.resource_registry.metadata - 'readiness') || EXCLUDED.metadata END",
                 (resource_id, resident_id, role.concurrency, json.dumps(metadata)),
@@ -396,11 +411,15 @@ class Store:
             if role_id:
                 valid = (isinstance(readiness, dict)
                          and readiness.get("source") in {"provider_model", "model_protocol"}
-                         and readiness.get("model_id")
+                         and readiness.get("provider_id") == metadata.get("readiness_provider_id")
+                         and readiness.get("model_id") == metadata.get("configured_model_id")
                          and readiness.get("evidence_ref")
-                         and readiness.get("evidence_ref")
+                         and isinstance(readiness.get("evidence"), dict)
+                         and bool(readiness.get("evidence"))
+                         and readiness.get("config_revision") == metadata.get("config_revision")
+                         and row["health"] in {"ready", "degraded", "unavailable", "stale", "unknown"}
                          and readiness.get("observed_at")
-                         and readiness.get("config_revision"))
+                         )
                 observations[role_id] = ({**readiness, "status": row["health"]}
                                          if valid else {"status": "unknown"})
         return observations
@@ -412,9 +431,10 @@ class Store:
             updated = await conn.execute(
                 "UPDATE r3a.resource_registry SET health=%s,observed_at=%s,"
                 "metadata=metadata || jsonb_build_object('readiness',%s::jsonb) "
-                "WHERE resource_id=%s AND metadata->>'config_revision'=%s",
+                "WHERE resource_id=%s AND metadata->>'config_revision'=%s "
+                "AND metadata->>'readiness_provider_id'=%s AND metadata->>'configured_model_id'=%s",
                 (observation.status, parse_timestamp(observation.observed_at), json.dumps(readiness),
-                 resource_id, observation.config_revision),
+                 resource_id, observation.config_revision, observation.provider_id, observation.model_id),
             )
             if updated.rowcount != 1:
                 raise ValueError("model role is not registered for this configuration revision")

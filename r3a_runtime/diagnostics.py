@@ -2,14 +2,14 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/diagnostics.py
 Component: R3A-TRUTHFUL-DIAGNOSTICS
-File Revision: 1.1.0
+File Revision: 1.2.0
 Created: 2026-11-06T15:18:00Z
 Created By: Codex GPT-6
 Purpose: Serve read-only process, activity, registry, event and machine diagnostics from PostgreSQL.
 Execution Model: Async local Unix socket projection.
 Observability: Durable snapshot with source timestamps and explicit freshness.
 Dependencies: r3a_runtime.db; r3a_runtime.control.
-Authority: AP1 / R3A-019 and AP1 Slice 1 authorized by Steward; local read-only diagnostics only.
+Authority: AP1 / R3A-019 and AP1 Slices 1–2 authorized by Steward; local read-only diagnostics only.
 Changed: 2026-11-06T15:18:00Z | R3A-AP0-M1 | Codex GPT-6 | Add truthful diagnostic projection.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Bound status payload and report module/process freshness from live observations.
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Expose objective progress, model references, completed decisions and failure diagnostics.
@@ -17,10 +17,11 @@ Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Expose event input kind 
 Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Project model-role readiness using provider evidence, configuration revision, and freshness.
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Ensure stale or unverified role observations do not appear healthy in diagnostics.
 Changed: 2026-11-06T23:46:49Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Correct predecessor provenance to the exact starting-branch blob.
+Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Project provider identity, evidence validity and explicit READY/UNAVAILABLE/STALE/UNKNOWN status.
 Supersedes: None.
-Contracts: AP0-010; R3A-019; AP0-M1 D8; STM-006; r3a.model-readiness.v1.
+Contracts: AP0-010; R3A-019; AP0-M1 D8; STM-006; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py.
-History/Predecessor: Git blob 68318dcd759050f0d863b35bb80e66b1780b08d6 at commit cc7f662c04a4ba8eb327edd134e2ded92ef9786c.
+History/Predecessor: Git blob 2deeabc652b2315bc5d489269a626acb554ca876 at commit ad16700f1e94dd36c81cac5383f9f2e2771a98a1.
 """
 from __future__ import annotations
 
@@ -58,19 +59,28 @@ def project_resource_readiness(row: dict[str, Any], now: datetime,
             timestamp = parse_timestamp(observation.get("observed_at"), "observed_at")
             age = (now - timestamp).total_seconds()
             max_age = float(metadata["readiness_max_age_seconds"])
-            valid = (observation.get("source") in {"provider_model", "model_protocol"}
-                     and bool(observation.get("model_id"))
-                     and bool(observation.get("evidence_ref"))
-                     and observation.get("config_revision") == config_revision
-                     and metadata.get("config_revision") == config_revision
-                     and 0 <= age <= max_age)
-            freshness = "fresh" if valid else "stale"
+            evidence_valid = (observation.get("source") in {"provider_model", "model_protocol"}
+                              and observation.get("provider_id") == metadata.get("readiness_provider_id")
+                              and observation.get("model_id") == metadata.get("configured_model_id")
+                              and bool(observation.get("evidence_ref"))
+                              and isinstance(observation.get("evidence"), dict)
+                              and bool(observation.get("evidence")))
+            if not evidence_valid or metadata.get("config_revision") != config_revision:
+                freshness = "unknown"
+            elif observation.get("config_revision") != config_revision:
+                freshness = "stale"
+            else:
+                freshness = "fresh" if 0 <= age <= max_age else "stale"
         except (KeyError, TypeError, ValueError, ContractValidationError):
             freshness = "unknown"
     projected["readiness_freshness"] = freshness
     projected["readiness_age_seconds"] = age
+    status = observation.get("status", "unknown") if isinstance(observation, dict) else "unknown"
+    projected["readiness_status"] = ("stale" if freshness == "stale"
+                                      else status if freshness == "fresh" else "unknown")
     if freshness != "fresh":
         projected["health"] = freshness
+    projected["readiness_provider_id"] = observation.get("provider_id") if isinstance(observation, dict) else None
     return projected
 
 

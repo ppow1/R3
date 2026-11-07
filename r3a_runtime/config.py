@@ -2,28 +2,30 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/config.py
 Component: R3A-BOOTSTRAP-CONFIG
-File Revision: 1.1.0
+File Revision: 1.2.0
 Created: 2026-11-06T15:04:00Z
 Created By: Codex GPT-6
 Purpose: Strictly validate external R3A AP0-M1 bootstrap and operating settings.
 Execution Model: Shared synchronous configuration parser.
 Observability: Configuration revision digest and validation errors.
 Dependencies: Python 3.12 standard library.
-Authority: AP1 / R3A-019 and AP1 Slice 1 authorized by Steward; isolated R3A only.
+Authority: AP1 / R3A-019 and AP1 Slices 1–2 authorized by Steward; isolated R3A only.
 Changed: 2026-11-06T15:04:00Z | R3A-AP0-M1 | Codex GPT-6 | Add fail-closed external configuration parser.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Restrict observer capabilities to the two AP0 read-only contracts.
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Validate Grace model, capability, and allowlisted knowledge configuration.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Add external model routes while retaining legacy single-route config compatibility.
 Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add validated configurable model roles and authorization provider selection.
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Preserve route-only configuration compatibility and finalize strict role/provider validation.
+Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Validate external provider endpoints, matching origins, private-network HTTP, freshness, timeouts and retries.
 Supersedes: None.
 Contracts: AP0-001/008/009; R3A-019; AP0-M1 D7; r3a_runtime.contracts; hints/file-provenance.md.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py.
-History/Predecessor: Git blob 01c6d0c93648ce63a93cf3e8fcbdda61a47e82a9 at commit cc7f662c04a4ba8eb327edd134e2ded92ef9786c.
+History/Predecessor: Git blob 189c6ef7ef3821f9140bddbeac8d04c177ca32ac at commit ad16700f1e94dd36c81cac5383f9f2e2771a98a1.
 """
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import math
 import os
@@ -31,6 +33,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 
 class ConfigurationError(ValueError):
@@ -58,6 +61,19 @@ class ModelRole:
     unavailable_action: str
     deferral_seconds: float
     concurrency: int
+    readiness: "ModelReadinessPolicy | None" = None
+
+
+@dataclass(frozen=True)
+class ModelReadinessPolicy:
+    provider_id: str
+    contract_version: str
+    endpoint: str
+    timeout_seconds: float
+    max_attempts: int
+    retry_delay_seconds: float
+    poll_interval_seconds: float
+    api_key_env: str | None = None
 
 
 @dataclass(frozen=True)
@@ -113,6 +129,26 @@ def _absolute_path(value: Any, where: str) -> Path:
     if not raw.is_absolute():
         raise ConfigurationError(f"{where} must be an absolute path")
     return raw.resolve()
+
+
+def _service_endpoint(value: Any, where: str) -> str:
+    endpoint = _text(value, where)
+    parsed = urlsplit(endpoint)
+    if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+            or parsed.username or parsed.password or parsed.fragment or parsed.query):
+        raise ConfigurationError(f"{where} must be an HTTP(S) endpoint without embedded credentials, query or fragment")
+    try:
+        parsed.port
+    except ValueError as exc:
+        raise ConfigurationError(f"{where} contains an invalid port") from exc
+    if parsed.scheme == "http" and parsed.hostname not in {"localhost"}:
+        try:
+            address = ipaddress.ip_address(parsed.hostname)
+        except ValueError as exc:
+            raise ConfigurationError(f"{where} may use plain HTTP only for loopback or a private IP") from exc
+        if not (address.is_loopback or address.is_private):
+            raise ConfigurationError(f"{where} may use plain HTTP only for loopback or a private IP")
+    return endpoint
 
 
 @dataclass(frozen=True)
@@ -311,9 +347,7 @@ def load_settings(path: str | Path) -> Settings:
             provider = _text(item["provider"], f"{where}.provider")
             if provider != "openai-compatible":
                 raise ConfigurationError(f"{where}.provider must equal openai-compatible")
-            endpoint = _text(item["endpoint"], f"{where}.endpoint")
-            if not endpoint.startswith(("http://127.0.0.1:", "http://localhost:", "https://")):
-                raise ConfigurationError(f"{where}.endpoint must use loopback HTTP or HTTPS")
+            endpoint = _service_endpoint(item["endpoint"], f"{where}.endpoint")
             model = _text(item["model"], f"{where}.model")
             timeout = _positive(item["timeout_seconds"], f"{where}.timeout_seconds")
             max_tokens = item["max_tokens"]
@@ -351,9 +385,49 @@ def load_settings(path: str | Path) -> Settings:
                 where = f"grace.role_registry.roles[{index}]"
                 if not isinstance(item, dict):
                     raise ConfigurationError(f"{where} must be an object")
-                _keys(item, {"role_id", "route_id", "capabilities", "modalities", "fallback_roles",
+                role_keys = {"role_id", "route_id", "capabilities", "modalities", "fallback_roles",
                              "readiness_max_age_seconds", "unavailable_action", "deferral_seconds",
-                             "concurrency"}, where)
+                             "concurrency"}
+                if "readiness" not in item:
+                    if item.keys() - role_keys or role_keys - item.keys():
+                        _keys(item, role_keys, where)
+                    readiness = None
+                else:
+                    if item.keys() - (role_keys | {"readiness"}) or role_keys - item.keys():
+                        _keys(item, role_keys | {"readiness"}, where)
+                    raw_readiness = item["readiness"]
+                    if not isinstance(raw_readiness, dict):
+                        raise ConfigurationError(f"{where}.readiness must be an object")
+                    required_readiness = {"provider_id", "contract_version", "endpoint", "timeout_seconds",
+                                          "max_attempts", "retry_delay_seconds", "poll_interval_seconds"}
+                    optional_readiness = {"api_key_env"}
+                    if (required_readiness - raw_readiness.keys()
+                            or raw_readiness.keys() - required_readiness - optional_readiness):
+                        raise ConfigurationError(f"{where}.readiness fields are invalid")
+                    provider_id = _text(raw_readiness["provider_id"], f"{where}.readiness.provider_id")
+                    provider_version = _text(raw_readiness["contract_version"],
+                                             f"{where}.readiness.contract_version")
+                    version_parts = provider_version.split(".")
+                    if (len(version_parts) != 3 or not all(part.isdigit() for part in version_parts)
+                            or version_parts[0] != "1"):
+                        raise ConfigurationError(f"{where}.readiness.contract_version must be v1 semver")
+                    readiness_endpoint = _service_endpoint(raw_readiness["endpoint"],
+                                                           f"{where}.readiness.endpoint")
+                    attempts = raw_readiness["max_attempts"]
+                    if isinstance(attempts, bool) or not isinstance(attempts, int) or not 1 <= attempts <= 5:
+                        raise ConfigurationError(f"{where}.readiness.max_attempts must be from 1 through 5")
+                    api_key_env = raw_readiness.get("api_key_env")
+                    if api_key_env is not None and (not isinstance(api_key_env, str)
+                                                    or not re.fullmatch(r"[A-Z][A-Z0-9_]*", api_key_env)):
+                        raise ConfigurationError(f"{where}.readiness.api_key_env must be an environment variable name")
+                    readiness = ModelReadinessPolicy(
+                        provider_id, provider_version, readiness_endpoint,
+                        _positive(raw_readiness["timeout_seconds"], f"{where}.readiness.timeout_seconds"),
+                        attempts,
+                        _positive(raw_readiness["retry_delay_seconds"],
+                                  f"{where}.readiness.retry_delay_seconds", minimum=0),
+                        _positive(raw_readiness["poll_interval_seconds"],
+                                  f"{where}.readiness.poll_interval_seconds"), api_key_env)
                 role_id = _text(item["role_id"], f"{where}.role_id")
                 if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", role_id) or role_id in role_ids:
                     raise ConfigurationError(f"{where}.role_id must be unique and use contract-safe characters")
@@ -361,6 +435,16 @@ def load_settings(path: str | Path) -> Settings:
                 route_id = _text(item["route_id"], f"{where}.route_id")
                 if route_id not in route_ids:
                     raise ConfigurationError(f"{where}.route_id must identify a configured route")
+                if readiness is not None:
+                    route_entry = next(entry for entry in parsed_routes if entry.route_id == route_id)
+                    model_origin = urlsplit(route_entry.endpoint)
+                    readiness_origin = urlsplit(readiness.endpoint)
+                    model_port = model_origin.port or (443 if model_origin.scheme == "https" else 80)
+                    readiness_port = readiness_origin.port or (
+                        443 if readiness_origin.scheme == "https" else 80)
+                    if (model_origin.scheme, model_origin.hostname, model_port) != (
+                            readiness_origin.scheme, readiness_origin.hostname, readiness_port):
+                        raise ConfigurationError(f"{where}.readiness.endpoint must use the configured model provider origin")
                 def string_list(field: str) -> tuple[str, ...]:
                     values = item[field]
                     if (not isinstance(values, list) or not values
@@ -388,7 +472,7 @@ def load_settings(path: str | Path) -> Settings:
                                                          f"{where}.readiness_max_age_seconds"),
                     unavailable_action=action,
                     deferral_seconds=_positive(item["deferral_seconds"], f"{where}.deferral_seconds"),
-                    concurrency=concurrency))
+                    concurrency=concurrency, readiness=readiness))
             if default_model_role not in role_ids:
                 raise ConfigurationError("grace.role_registry.default_role must identify a configured role")
             for role in parsed_roles:

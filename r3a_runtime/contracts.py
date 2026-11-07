@@ -2,20 +2,21 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/contracts.py
 Component: R3A-VERSIONED-AUTONOMY-CONTRACTS
-File Revision: 1.0.0
+File Revision: 1.1.0
 Created: 2026-11-06T23:19:46Z
 Created By: Codex GPT-6
 Purpose: Define versioned resident execution, model-role, readiness, routing, and authorization envelopes.
 Execution Model: Typed Python contracts shared by CME and replaceable providers.
 Observability: Validated identifiers, revisions, timestamps, readiness freshness, and typed route outcomes.
 Dependencies: Python 3.12 standard library.
-Authority: R3A AP0/AP1 Modular Autonomy Implementation Slice 1; isolated development branch only.
+Authority: R3A AP0/AP1 Modular Autonomy Implementation Slices 1–2; isolated development branch only.
 Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add typed versioned contracts and configurable role selection semantics.
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add typed contract outcomes, provider-backed readiness evidence, and freshness-aware role selection.
+Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Version provider-backed readiness as v2 with identity evidence and fail-closed freshness routing.
 Supersedes: None.
-Contracts: AP0-003–010; R3A-019; MOD-006; STM-003/005/006.
+Contracts: AP0-003–010; R3A-019; MOD-006; STM-003/005/006; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
 Tests: tests/test_r3a_modular_autonomy.py.
-History/Predecessor: New file; initial publication recorded in Git.
+History/Predecessor: Git blob ae768c8823cb8a56f82b2e879c7619932b884952 at commit ad16700f1e94dd36c81cac5383f9f2e2771a98a1.
 """
 from __future__ import annotations
 
@@ -30,13 +31,15 @@ CONTRACT_ENVELOPE_VERSION = "1.0.0"
 MODEL_ROLE_CONTRACT_ID = "r3a.model-role"
 MODEL_ROLE_CONTRACT_VERSION = "1.0.0"
 READINESS_CONTRACT_ID = "r3a.model-readiness"
-READINESS_CONTRACT_VERSION = "1.0.0"
+READINESS_CONTRACT_VERSION = "2.0.0"
+READINESS_REFRESH_CONTRACT_ID = "r3a.model-readiness-refresh"
+READINESS_REFRESH_CONTRACT_VERSION = "1.0.0"
 ROUTE_CONTRACT_ID = "r3a.model-route-decision"
 ROUTE_CONTRACT_VERSION = "1.0.0"
 AUTHORIZATION_CONTRACT_ID = "r3a.authorization-decision"
 AUTHORIZATION_CONTRACT_VERSION = "1.0.0"
 
-ReadinessStatus = Literal["ready", "degraded", "unavailable", "unknown"]
+ReadinessStatus = Literal["ready", "degraded", "unavailable", "stale", "unknown"]
 RouteAction = Literal["route", "defer", "block"]
 
 
@@ -185,18 +188,21 @@ class ReadinessObservation:
     observation_id: str
     reason: str = ""
     evidence_ref: str = ""
+    provider_id: str = ""
+    evidence: dict[str, Any] | None = None
     contract_id: str = READINESS_CONTRACT_ID
     contract_version: str = READINESS_CONTRACT_VERSION
 
     def __post_init__(self) -> None:
         for field in ("resident_id", "role_id", "model_id", "source", "config_revision", "observation_id"):
             _required_text(getattr(self, field), field)
-        if self.status not in {"ready", "degraded", "unavailable", "unknown"}:
+        if self.status not in {"ready", "degraded", "unavailable", "stale", "unknown"}:
             raise ContractValidationError("unsupported readiness status")
         if self.contract_id != READINESS_CONTRACT_ID:
             raise ContractValidationError("readiness contract identity mismatch")
         version = self.contract_version.split(".")
-        if len(version) != 3 or not all(part.isdigit() for part in version) or version[0] != "1":
+        if (len(version) != 3 or not all(part.isdigit() for part in version)
+                or version[0] != READINESS_CONTRACT_VERSION.split(".")[0]):
             raise ContractValidationError("unsupported readiness contract version")
         # A host or TCP probe is liveness evidence, not model readiness.
         if self.source not in {"provider_model", "model_protocol"}:
@@ -210,8 +216,12 @@ class ReadinessObservation:
             raise ContractValidationError("reason must be text")
         if not isinstance(self.evidence_ref, str):
             raise ContractValidationError("evidence_ref must be text")
-        if self.status == "ready" and not self.evidence_ref.strip():
-            raise ContractValidationError("ready status requires provider/model readiness evidence")
+        if not isinstance(self.provider_id, str) or not self.provider_id.strip():
+            raise ContractValidationError("provider_id must identify the readiness authority")
+        if not isinstance(self.evidence, dict):
+            raise ContractValidationError("evidence must be an object")
+        if not self.evidence_ref.strip() or not self.evidence:
+            raise ContractValidationError("readiness outcome requires provider evidence and reference")
 
     def to_dict(self) -> dict[str, Any]:
         return {"resident_id": self.resident_id, "role_id": self.role_id,
@@ -219,8 +229,20 @@ class ReadinessObservation:
                 "source": self.source, "observed_at": self.observed_at,
                 "config_revision": self.config_revision, "observation_id": self.observation_id,
                 "reason": self.reason, "evidence_ref": self.evidence_ref,
+                "provider_id": self.provider_id, "evidence": self.evidence,
                 "contract_id": self.contract_id,
                 "contract_version": self.contract_version}
+
+    @classmethod
+    def from_dict(cls, value: Any) -> "ReadinessObservation":
+        if not isinstance(value, dict):
+            raise ContractValidationError("readiness observation must be an object")
+        required = {"resident_id", "role_id", "model_id", "status", "source", "observed_at",
+                    "config_revision", "observation_id", "reason", "evidence_ref", "provider_id",
+                    "evidence", "contract_id", "contract_version"}
+        if set(value) != required:
+            raise ContractValidationError("readiness observation fields do not match contract v2")
+        return cls(**value)
 
 
 @dataclass(frozen=True)
@@ -298,13 +320,23 @@ def resolve_role(role_registry: tuple[Any, ...], requested_role_id: str,
         capable_candidates += 1
         observation = observations.get(role.role_id) or {}
         status = observation.get("status", "unknown")
+        configured_readiness = getattr(role, "readiness", None)
+        expected_provider = (configured_readiness.provider_id
+                             if configured_readiness is not None else None)
         observed_at = observation.get("observed_at")
-        freshness = observation.get("config_revision") == config_revision
+        evidence_valid = (bool(expected_provider)
+                          and observation.get("provider_id") == expected_provider
+                          and bool(observation.get("evidence_ref"))
+                          and isinstance(observation.get("evidence"), dict)
+                          and bool(observation.get("evidence")))
+        freshness = (observation.get("config_revision") == config_revision and evidence_valid)
+        stale = False
         if observed_at:
             try:
                 timestamp = parse_timestamp(observed_at, "observed_at")
                 age = (now - timestamp).total_seconds()
                 freshness = freshness and 0 <= age <= role.readiness_max_age_seconds
+                stale = not freshness
             except ContractValidationError:
                 freshness = False
         else:
@@ -313,7 +345,11 @@ def resolve_role(role_registry: tuple[Any, ...], requested_role_id: str,
             return decision("route", role.role_id, role.route_id,
                             "requested_role_ready" if role is requested else "configured_fallback_ready",
                             False, str(observed_at))
-        reasons.append(f"{role.role_id}:{status if freshness else 'stale_or_unknown'}")
+        if stale:
+            status = "stale"
+        elif not freshness:
+            status = "unknown"
+        reasons.append(f"{role.role_id}:{status}")
     if capability_candidates == 0:
         return decision("block", None, None, "unsupported_capability", False)
     if capable_candidates == 0:

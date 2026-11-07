@@ -2,14 +2,14 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.1.0
+File Revision: 1.2.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
 Execution Model: Async PostgreSQL-backed process supervised by Ring 0.
 Observability: Durable process/activity/module/resource/event state and local diagnostics socket.
 Dependencies: PostgreSQL; psycopg 3 pool; r3a_runtime.config/db/protocol/control/diagnostics.
-Authority: AP1 / R3A-019 and AP1 Slice 1 authorized by Steward; isolated R3A only.
+Authority: AP1 / R3A-019 and AP1 Slices 1–2 authorized by Steward; isolated R3A only.
 Changed: 2026-11-06T15:22:00Z | R3A-AP0-M1 | Codex GPT-6 | Implement CME process, scheduler, module worker and control plane.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Reconcile orphaned module processes, record live health and correct replacement status.
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Dispatch durable Grace objectives, authorize bounded evidence reads and renew long-running leases.
@@ -21,10 +21,11 @@ Changed: 2026-11-06T19:05:07Z | R3A-019 | Codex GPT-6 | Exclude unrelated runtim
 Changed: 2026-11-06T19:14:04Z | R3A-019 | Codex GPT-6 | Verify exhaustive transition answers before durable completion.
 Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add versioned resident envelopes, configurable model-role readiness routing, and pluggable authorization provider use.
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Enforce role configuration pinning, freshness-aware deferral, and typed outcomes.
+Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Run configured readiness providers, validate identity, persist evidence, and recover deferred work.
 Supersedes: None.
-Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1.
+Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; no model inference in this slice.
-History/Predecessor: Git blob 92c8ba177e341e21e38fb341b60de414697512fb at commit cc7f662c04a4ba8eb327edd134e2ded92ef9786c.
+History/Predecessor: Git blob 5ed7c9bd82dc5fa02c3595ad5bb8409cfd274dd6 at commit ad16700f1e94dd36c81cac5383f9f2e2771a98a1.
 """
 from __future__ import annotations
 
@@ -44,8 +45,11 @@ from typing import Any
 from .config import Settings, load_settings, sanitized_config
 from .authorization import AuthorizationRequest, AuthorizationProvider, create_authorization_provider
 from .control import ControlServer, control_request, process_alive
-from .contracts import (ContractEnvelope, ContractOutcome, ReadinessObservation, RouteDecision, resolve_role,
+from .contracts import (ContractEnvelope, ContractOutcome, ReadinessObservation, RouteDecision,
+                        READINESS_REFRESH_CONTRACT_ID, READINESS_REFRESH_CONTRACT_VERSION, resolve_role,
                         )
+from .readiness import (READINESS_PROVIDER_CONTRACT_ID, ReadinessCheckRequest,
+                        ModelReadinessProvider, create_readiness_provider)
 from .db import InvalidTransition, Store, utcnow
 from .diagnostics import make_server
 from .knowledge import retrieve
@@ -97,18 +101,21 @@ class ModelRoleUnavailable(RuntimeError):
 
 class CME:
     def __init__(self, settings: Settings,
-                 authorization_provider: AuthorizationProvider | None = None):
+                 authorization_provider: AuthorizationProvider | None = None,
+                 readiness_providers: dict[str, ModelReadinessProvider] | None = None):
         self.settings = settings
         self.store = Store(settings)
         self.authorization_provider = authorization_provider or create_authorization_provider(
             settings.authorization_provider.provider_id, settings.authorization_provider.options,
             settings.source_digest, self.store)
+        self.readiness_providers = dict(readiness_providers or {})
         self.control: ControlServer | None = None
         self.diagnostics: ControlServer | None = None
         self.shutdown = asyncio.Event()
         self.scheduler_tick = asyncio.get_running_loop().time()
         self.heartbeat_task: asyncio.Task | None = None
         self.scheduler_task: asyncio.Task | None = None
+        self.readiness_task: asyncio.Task | None = None
         self.active_activities: dict[uuid.UUID, asyncio.Task] = {}
         self.module_process: asyncio.subprocess.Process | None = None
         self.module_id = settings.module_id
@@ -157,8 +164,9 @@ class CME:
         await self.store.register_resource("foundation.observer", self.settings.worker_concurrency,
                                            owner="R3A-CME")
         for role in self.settings.model_roles:
+            configured_route = self.settings.model_route(role.route_id)
             await self.store.register_model_role(role, self.settings.source_digest,
-                                                 self.settings.module_id)
+                                                 self.settings.module_id, configured_route.model)
         await self._recover_startup()
         await self._ensure_registered_module()
         self.control = ControlServer(self.settings.control_socket, self._control_request, mode=0o600)
@@ -170,6 +178,7 @@ class CME:
                                               "CME control and scheduler ready")
         self.heartbeat_task = asyncio.create_task(self._heartbeat_loop(), name="cme-db-heartbeat")
         self.scheduler_task = asyncio.create_task(self._scheduler_loop(), name="cme-scheduler")
+        self.readiness_task = asyncio.create_task(self._model_readiness_loop(), name="cme-model-readiness")
 
     async def run(self) -> None:
         loop = asyncio.get_running_loop()
@@ -185,11 +194,12 @@ class CME:
     async def stop(self) -> None:
         await self.store.record_process_state("cme", os.getpid(), "STOPPING", "stopping",
                                               "CME shutdown requested")
-        for task in (self.scheduler_task, self.heartbeat_task):
+        for task in (self.scheduler_task, self.heartbeat_task, self.readiness_task):
             if task:
                 task.cancel()
-        if self.scheduler_task or self.heartbeat_task:
-            await asyncio.gather(*(t for t in (self.scheduler_task, self.heartbeat_task) if t),
+        if self.scheduler_task or self.heartbeat_task or self.readiness_task:
+            await asyncio.gather(*(t for t in (self.scheduler_task, self.heartbeat_task,
+                                                self.readiness_task) if t),
                                  return_exceptions=True)
         if self.active_activities:
             await asyncio.gather(*self.active_activities.values(), return_exceptions=True)
@@ -478,29 +488,23 @@ class CME:
                     "authorized": allowed, "reason": None if allowed else reason,
                     "authorization": provider,
                     "effect": "none; discovery/check is read-only"}
-        if operation == "model.readiness.report":
-            observation = ReadinessObservation(**payload)
-            role = next((entry for entry in self.settings.model_roles
-                         if entry.role_id == observation.role_id), None)
+        if operation == "model.readiness.refresh":
+            role_id = str(payload["role_id"])
+            role = next((entry for entry in self.settings.model_roles if entry.role_id == role_id), None)
             if role is None:
                 raise ValueError("model readiness references an unconfigured role")
-            if observation.resident_id != self.module_id:
-                raise ValueError("model readiness resident identity does not match the configured module")
-            route = self.settings.model_route(role.route_id)
-            if observation.model_id != route.model:
-                raise ValueError("model readiness identity does not match the configured route")
-            if observation.config_revision != self.settings.source_digest:
-                raise ValueError("model readiness configuration revision is stale")
-            await self.store.observe_model_role(observation)
-            queued = await self._requeue_ready_model_activities(observation.observation_id)
+            observation, queued = await self._observe_model_role(role)
             return {"role_id": role.role_id, "status": observation.status,
+                    "provider_id": observation.provider_id,
                     "config_revision": observation.config_revision,
+                    "observation_id": observation.observation_id,
                     "deferred_activities_requeued": queued,
                     "contract_outcome": ContractOutcome(
-                        "r3a.model-readiness", "1.0.0", idempotency_key,
+                        READINESS_REFRESH_CONTRACT_ID, READINESS_REFRESH_CONTRACT_VERSION, idempotency_key,
                         observation.observation_id, self.module_id,
                         self.settings.source_digest, utcnow().isoformat(), "succeeded", False,
                         result={"role_id": role.role_id, "status": observation.status,
+                                "provider_id": observation.provider_id,
                                 "deferred_activities_requeued": queued}).to_dict()}
         if operation == "grace.objective.submit":
             if self.settings.module_id != "resident.grace":
@@ -536,8 +540,9 @@ class CME:
             await self.store.register_resource("foundation.observer", new_settings.worker_concurrency,
                                                owner="R3A-CME")
             for role in new_settings.model_roles:
+                configured_route = new_settings.model_route(role.route_id)
                 await self.store.register_model_role(role, new_settings.source_digest,
-                                                     new_settings.module_id)
+                                                     new_settings.module_id, configured_route.model)
             return {"activated": True, "config_revision": revision,
                     "source_digest": new_settings.source_digest}
         raise ValueError(f"Unsupported CME control operation: {operation}")
@@ -577,11 +582,88 @@ class CME:
         for role in roles:
             observation = observations.get(role.role_id, {"status": "unknown"})
             route = self.settings.model_route(role.route_id)
+            expected_provider = role.readiness.provider_id if role.readiness else None
             if (observation.get("model_id") != route.model
                     or observation.get("config_revision") != self.settings.source_digest
+                    or not expected_provider
+                    or observation.get("provider_id") != expected_provider
                     or observation.get("source") not in {"provider_model", "model_protocol"}):
                 observations[role.role_id] = {"status": "unknown"}
         return observations
+
+    async def _observe_model_role(self, role) -> tuple[ReadinessObservation, int]:
+        policy = role.readiness
+        if policy is None:
+            raise ValueError(f"No readiness provider is configured for role {role.role_id}")
+        route = self.settings.model_route(role.route_id)
+        observation_id = str(uuid.uuid4())
+        try:
+            provider = self.readiness_providers.get(policy.provider_id)
+            if provider is None:
+                provider = create_readiness_provider(policy.provider_id)
+                self.readiness_providers[policy.provider_id] = provider
+            request = ReadinessCheckRequest(
+                READINESS_PROVIDER_CONTRACT_ID, policy.contract_version, self.module_id,
+                role, route, policy, self.settings.source_digest, observation_id)
+            if (provider.provider_id != policy.provider_id
+                    or provider.contract_id != READINESS_PROVIDER_CONTRACT_ID
+                    or provider.contract_version.split(".")[0] != "1"):
+                raise ValueError("readiness provider contract is incompatible with configured v1 policy")
+            observed = await provider.observe(request)
+            if (observed.role_id != role.role_id or observed.resident_id != self.module_id
+                    or observed.model_id != route.model
+                    or observed.config_revision != self.settings.source_digest
+                    or observed.provider_id != policy.provider_id
+                    or observed.observation_id != observation_id
+                    or observed.source not in {"provider_model", "model_protocol"}):
+                raise ValueError("readiness provider returned mismatched identity or configuration provenance")
+            observation = observed
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            observation = ReadinessObservation(
+                resident_id=self.module_id, role_id=role.role_id, model_id=route.model,
+                status="unknown", source="model_protocol", observed_at=utcnow().isoformat(),
+                config_revision=self.settings.source_digest, observation_id=observation_id,
+                reason="readiness_provider_contract_or_execution_error",
+                evidence_ref=f"provider-error:{policy.provider_id}:{observation_id}",
+                provider_id=policy.provider_id,
+                evidence={"error_type": type(exc).__name__, "error": "provider observation was rejected"})
+        await self.store.observe_model_role(observation)
+        queued = await self._requeue_ready_model_activities(observation.observation_id)
+        return observation, queued
+
+    async def _model_readiness_loop(self) -> None:
+        due_by_revision: dict[tuple[str, str], float] = {}
+        loop = asyncio.get_running_loop()
+        while not self.shutdown.is_set():
+            now = loop.time()
+            roles = self.settings.model_roles
+            active_keys = {(role.role_id, self.settings.source_digest)
+                           for role in roles if role.readiness is not None}
+            due_by_revision = {key: when for key, when in due_by_revision.items()
+                               if key in active_keys}
+            for role in roles:
+                policy = role.readiness
+                if policy is None:
+                    continue
+                key = (role.role_id, self.settings.source_digest)
+                if due_by_revision.get(key, 0.0) > loop.time():
+                    continue
+                due_by_revision[key] = loop.time() + policy.poll_interval_seconds
+                try:
+                    await self._observe_model_role(role)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # A failed persistence/probe cycle never creates a ready observation.
+                    continue
+            if not active_keys:
+                await asyncio.sleep(self.settings.scheduler_interval_seconds)
+            else:
+                now = loop.time()
+                delay = min((due - now for due in due_by_revision.values()), default=1.0)
+                await asyncio.sleep(max(0.05, delay))
 
     async def _observer_context(self, activity: dict[str, Any]) -> dict[str, Any]:
         for capability_id in self.settings.module_capabilities:

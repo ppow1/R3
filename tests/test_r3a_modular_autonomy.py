@@ -2,20 +2,21 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_modular_autonomy.py
 Component: R3A-AP1-MODULAR-AUTONOMY-REGRESSION
-File Revision: 1.0.0
+File Revision: 1.1.0
 Created: 2026-11-06T23:19:46Z
 Created By: Codex GPT-6
 Purpose: Permanently verify versioned autonomy contracts, external model roles, readiness routing, deferral, and authorization-provider compatibility.
 Execution Model: Python unittest with temporary configuration and in-memory provider fakes; no model inference or database connection.
 Observability: Deterministic assertions for config digests, contract outcomes, route decisions, and audited grant behavior.
 Dependencies: Python 3.12 standard library; r3a_runtime configuration/contracts/authorization modules.
-Authority: R3A AP0/AP1 Modular Autonomy Implementation Slice 1; isolated development branch only.
+Authority: R3A AP0/AP1 Modular Autonomy Implementation Slices 1–2; isolated development branch only.
 Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add focused permanent regression coverage for the first modular autonomy slice.
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Cover legacy configuration, durable deferral semantics, and stale readiness diagnostics.
+Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Extend Slice 1 regressions for provider configuration, identity, stale state and recovery routing.
 Supersedes: None.
-Contracts: AP0-003–010; R3A-019; MOD-006; r3a.contract-envelope.v1; r3a.model-role.v1; r3a.authorization-decision.v1.
+Contracts: AP0-003–010; R3A-019; MOD-006; r3a.contract-envelope.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
 Tests: This test module.
-History/Predecessor: New file; initial publication recorded in Git.
+History/Predecessor: Git blob ce77c005bfa4cb480b56d03ff15c0cc6e49b50ea at commit ad16700f1e94dd36c81cac5383f9f2e2771a98a1.
 """
 from __future__ import annotations
 
@@ -62,15 +63,27 @@ def make_config(directory: Path, *, primary_model: str = "reasoner-a",
         {"role_id": "resident.autonomic", "route_id": "autonomic-route",
          "capabilities": ["monitor.health"], "modalities": ["text"], "fallback_roles": [],
          "readiness_max_age_seconds": 30, "unavailable_action": "defer",
-         "deferral_seconds": 10, "concurrency": 1},
+         "deferral_seconds": 10, "concurrency": 1,
+         "readiness": {"provider_id": "openai-compatible.models", "contract_version": "1.0.0",
+                       "endpoint": "http://127.0.0.1:18001/v1/models", "timeout_seconds": 2,
+                       "max_attempts": 2, "retry_delay_seconds": 0.01,
+                       "poll_interval_seconds": 15}},
         {"role_id": "resident.primary", "route_id": "primary-route",
          "capabilities": ["reason.text", "plan"], "modalities": ["text"],
          "fallback_roles": ["resident.vision"], "readiness_max_age_seconds": 45,
-         "unavailable_action": "defer", "deferral_seconds": 12, "concurrency": 2},
+         "unavailable_action": "defer", "deferral_seconds": 12, "concurrency": 2,
+         "readiness": {"provider_id": "openai-compatible.models", "contract_version": "1.0.0",
+                       "endpoint": "https://models.example.invalid/v1/models", "timeout_seconds": 3,
+                       "max_attempts": 2, "retry_delay_seconds": 0.01,
+                       "poll_interval_seconds": 20}},
         {"role_id": "resident.vision", "route_id": "vision-route",
          "capabilities": ["reason.text", "vision.interpret"], "modalities": ["text", "image"],
          "fallback_roles": [], "readiness_max_age_seconds": 45,
-         "unavailable_action": "block", "deferral_seconds": 12, "concurrency": 1},
+         "unavailable_action": "block", "deferral_seconds": 12, "concurrency": 1,
+         "readiness": {"provider_id": "openai-compatible.models", "contract_version": "1.0.0",
+                       "endpoint": "https://vision.example.invalid/v1/models", "timeout_seconds": 3,
+                       "max_attempts": 2, "retry_delay_seconds": 0.01,
+                       "poll_interval_seconds": 20}},
     ]
     value = {
         "schema_version": 1,
@@ -152,6 +165,49 @@ class ModelRoleConfigAndRoutingTests(unittest.TestCase):
             self.assertIsNone(settings.default_model_role)
             self.assertEqual(settings.authorization_provider.provider_id, "capability_grants")
 
+    def test_private_network_http_model_endpoint_is_externally_configurable(self):
+        with TemporaryDirectory() as directory:
+            path = make_config(Path(directory))
+            value = json.loads(path.read_text(encoding="utf-8"))
+            route = value["grace"]["routes"][1]
+            route["endpoint"] = "http://10.20.30.40:8080/v1/chat/completions"
+            role = value["grace"]["role_registry"]["roles"][1]
+            role["readiness"]["endpoint"] = "http://10.20.30.40:8080/v1/models"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            settings = load_settings(path)
+            self.assertEqual(settings.model_route("primary-route").endpoint, route["endpoint"])
+            self.assertEqual(settings.model_roles[1].readiness.endpoint, role["readiness"]["endpoint"])
+
+    def test_role_without_provider_policy_remains_unknown_and_cannot_route(self):
+        with TemporaryDirectory() as directory:
+            path = make_config(Path(directory))
+            value = json.loads(path.read_text(encoding="utf-8"))
+            role_data = value["grace"]["role_registry"]["roles"][1]
+            role_data.pop("readiness")
+            path.write_text(json.dumps(value), encoding="utf-8")
+            settings = load_settings(path)
+            role = settings.model_roles[1]
+            self.assertIsNone(role.readiness)
+            decision = resolve_role((role,), role.role_id, {"plan"},
+                                    {role.role_id: {"status": "ready",
+                                                    "observed_at": datetime.now(timezone.utc).isoformat(),
+                                                    "config_revision": settings.source_digest,
+                                                    "provider_id": "forged-provider",
+                                                    "evidence_ref": "forged",
+                                                    "evidence": {"model_match": True}}},
+                                    config_revision=settings.source_digest)
+            self.assertNotEqual(decision.action, "route")
+
+    def test_readiness_endpoint_must_identify_the_configured_model_provider(self):
+        with TemporaryDirectory() as directory:
+            path = make_config(Path(directory))
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["grace"]["role_registry"]["roles"][1]["readiness"]["endpoint"] = (
+                "https://other.example.invalid/v1/models")
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaises(ConfigurationError):
+                load_settings(path)
+
     def test_bad_role_route_fallback_and_contract_versions_fail_closed(self):
         with TemporaryDirectory() as directory:
             path = make_config(Path(directory))
@@ -165,11 +221,16 @@ class ModelRoleConfigAndRoutingTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             settings = load_settings(make_config(Path(directory)))
             now = datetime.now(timezone.utc)
+            def observation(role_id, status, observed_at):
+                role = next(item for item in settings.model_roles if item.role_id == role_id)
+                route = settings.model_route(role.route_id)
+                return {"status": status, "observed_at": observed_at,
+                        "config_revision": settings.source_digest, "model_id": route.model,
+                        "provider_id": role.readiness.provider_id, "evidence_ref": "sha256:provider",
+                        "evidence": {"model_match": status == "ready"}}
             observations = {
-                "resident.primary": {"status": "unavailable", "observed_at": now.isoformat(),
-                                     "config_revision": settings.source_digest},
-                "resident.vision": {"status": "ready", "observed_at": now.isoformat(),
-                                    "config_revision": settings.source_digest},
+                "resident.primary": observation("resident.primary", "unavailable", now.isoformat()),
+                "resident.vision": observation("resident.vision", "ready", now.isoformat()),
             }
             fallback = resolve_role(settings.model_roles, "resident.primary", {"vision.interpret"},
                                     observations, config_revision=settings.source_digest, now=now)
@@ -178,9 +239,9 @@ class ModelRoleConfigAndRoutingTests(unittest.TestCase):
             unavailable = resolve_role(settings.model_roles, "resident.primary", {"plan"},
                                        observations, config_revision=settings.source_digest, now=now)
             self.assertEqual(unavailable.action, "defer")
-            stale = {"resident.primary": {"status": "ready",
-                                           "observed_at": (now - timedelta(minutes=2)).isoformat(),
-                                           "config_revision": settings.source_digest}}
+            self.assertIsNone(unavailable.selected_role_id)
+            stale = {"resident.primary": observation(
+                "resident.primary", "ready", (now - timedelta(minutes=2)).isoformat())}
             self.assertEqual(resolve_role(settings.model_roles, "resident.primary", {"plan"}, stale,
                                           config_revision=settings.source_digest, now=now).action, "defer")
             unsupported = resolve_role(settings.model_roles, "resident.primary", {"image.generate"},
@@ -193,21 +254,35 @@ class ModelRoleConfigAndRoutingTests(unittest.TestCase):
 
     def test_host_reachability_cannot_be_submitted_as_model_readiness(self):
         with self.assertRaises(ContractValidationError):
-            ReadinessObservation("resident.grace", "resident.primary", "reasoner-a", "ready",
-                                 "tcp", "2026-11-06T23:00:00Z", "revision", "00000000-0000-0000-0000-000000000001")
+            ReadinessObservation(resident_id="resident.grace", role_id="resident.primary",
+                                 model_id="reasoner-a", status="ready", source="tcp",
+                                 observed_at="2026-11-06T23:00:00Z", config_revision="revision",
+                                 observation_id="00000000-0000-0000-0000-000000000001",
+                                 evidence_ref="tcp:ok", provider_id="fake-provider",
+                                 evidence={"connected": True})
 
     def test_stale_model_readiness_is_not_projected_as_ready(self):
         now = datetime.now(timezone.utc)
         row = {"resource_id": "model-role:reasoner", "health": "ready",
                "metadata": {"registry_contract": "r3a.model-role.v1",
                             "config_revision": "revision", "readiness_max_age_seconds": 10,
+                            "readiness_provider_id": "provider-a", "configured_model_id": "model-x",
                             "readiness": {"status": "ready", "source": "provider_model",
                                           "model_id": "model-x", "evidence_ref": "probe:abc",
+                                          "provider_id": "provider-a", "evidence": {"model_match": True},
                                           "config_revision": "revision",
                                           "observed_at": (now - timedelta(seconds=20)).isoformat()}}}
         projected = project_resource_readiness(row, now, "revision")
         self.assertEqual(projected["readiness_freshness"], "stale")
+        self.assertEqual(projected["readiness_status"], "stale")
         self.assertEqual(projected["health"], "stale")
+        wrong_model = {**row, "metadata": {**row["metadata"],
+                                             "readiness": {**row["metadata"]["readiness"],
+                                                           "observed_at": now.isoformat(),
+                                                           "model_id": "unconfigured-model"}}}
+        mismatch = project_resource_readiness(wrong_model, now, "revision")
+        self.assertEqual(mismatch["readiness_status"], "unknown")
+        self.assertEqual(mismatch["health"], "unknown")
 
 
 class GrantAuthorizationCompatibilityTests(unittest.TestCase):
@@ -268,8 +343,8 @@ class GrantAuthorizationCompatibilityTests(unittest.TestCase):
 
 class NoDeploymentPolicyConstantsTests(unittest.TestCase):
     def test_core_and_resident_sources_do_not_embed_assigned_host_or_model_identities(self):
-        sources = [(ROOT / "r3a_runtime" / "cme.py").read_text(encoding="utf-8"),
-                   (ROOT / "r3a_runtime" / "grace_module.py").read_text(encoding="utf-8")]
+        sources = [(ROOT / "r3a_runtime" / name).read_text(encoding="utf-8")
+                   for name in ("cme.py", "grace_module.py", "readiness.py", "config.py")]
         for source in sources:
             for forbidden in ("192.168.1.155", "192.168.1.160", "192.168.1.162",
                               "OctoMiner1", "OctoMiner2", "Camrui"):
@@ -369,7 +444,7 @@ class ExistingModuleRpcCompatibilityTests(unittest.IsolatedAsyncioTestCase):
                         "checkpoint": {}}
             await cme._run_activity(activity)
             self.assertEqual(len(store.deferred), 1)
-            self.assertTrue(store.deferred[0][1].startswith("resident.primary:stale_or_unknown"))
+            self.assertTrue(store.deferred[0][1].startswith("resident.primary:unknown"))
             self.assertGreater(store.deferred[0][2], 0)
             self.assertFalse(store.completed)
 
