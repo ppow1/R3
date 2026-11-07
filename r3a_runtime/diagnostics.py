@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/diagnostics.py
 Component: R3A-TRUTHFUL-DIAGNOSTICS
-File Revision: 1.2.0
+File Revision: 1.3.0
 Created: 2026-11-06T15:18:00Z
 Created By: Codex GPT-6
 Purpose: Serve read-only process, activity, registry, event and machine diagnostics from PostgreSQL.
@@ -18,10 +18,13 @@ Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Project model-ro
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Ensure stale or unverified role observations do not appear healthy in diagnostics.
 Changed: 2026-11-06T23:46:49Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Correct predecessor provenance to the exact starting-branch blob.
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Project provider identity, evidence validity and explicit READY/UNAVAILABLE/STALE/UNKNOWN status.
+Changed: 2026-11-07T04:36:29Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Exclude event payloads from status snapshots and use indexed latest-event evidence.
+Changed: 2026-11-07T04:41:59Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Report active and blocked queue counts using the existing activity-state index.
+Changed: 2026-11-07T04:44:58Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Finalize bounded indexed status snapshot fields.
 Supersedes: None.
 Contracts: AP0-010; R3A-019; AP0-M1 D8; STM-006; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py.
-History/Predecessor: Git blob 2deeabc652b2315bc5d489269a626acb554ca876 at commit ad16700f1e94dd36c81cac5383f9f2e2771a98a1.
+History/Predecessor: Git blob 13259a5d883e7b69deba612113c25668dc85d797 at commit 8e89ada52fda4768782b712f23281150e71b11e3.
 """
 from __future__ import annotations
 
@@ -92,7 +95,7 @@ class DiagnosticProjection:
     async def handle(self, operation: str, payload: dict[str, Any], _key: str) -> dict[str, Any]:
         if operation not in {"status", "events", "definitions"}:
             raise ValueError("Diagnostic API is read-only and does not support this operation")
-        snapshot = await self.store.snapshot()
+        snapshot = await self.store.snapshot(include_events=operation == "events")
         now = datetime.now(timezone.utc)
         if operation == "events":
             return {"observed_at": now.isoformat(), "events": snapshot["events"][:20]}
@@ -124,10 +127,18 @@ class DiagnosticProjection:
                                   "diagnostic": row["diagnostic"], "observation_age_seconds": age,
                                   "freshness": freshness,
                                   "health": row["health"] if freshness == "fresh" else freshness})
-        event_summary = await self.store.rows(
-            "SELECT count(*) AS retained_events, max(persisted_at) AS latest_event_at "
-            "FROM r3a.institution_events"
+        latest_event = await self.store.rows(
+            "SELECT event_id AS latest_event_id, event_type AS latest_event_type, "
+            "persisted_at AS latest_event_at FROM r3a.institution_events "
+            "ORDER BY persisted_at DESC LIMIT 1"
         )
+        activity_states = await self.store.rows(
+            "SELECT state,count(*) AS activity_count FROM r3a.activities "
+            "WHERE state IN ('QUEUED','RUNNING','WAITING','RECOVERING','BLOCKED') GROUP BY state"
+        )
+        activity_state_counts = {state: 0 for state in
+                                 ("QUEUED", "RUNNING", "WAITING", "RECOVERING", "BLOCKED")}
+        activity_state_counts.update({row["state"]: row["activity_count"] for row in activity_states})
         activities = [{key: row[key] for key in (
             "activity_id", "activity_type", "state", "attempt_count", "attempt_id",
             "available_at", "lease_owner", "lease_until", "updated_at", "exception", "input",
@@ -143,7 +154,9 @@ class DiagnosticProjection:
                 "source": "postgresql", "source_freshness": "fresh",
                 "configuration": snapshot["configuration"], "processes": processes,
                 "modules": module_health, "resources": resources,
-                "activities": activities, "event_summary": event_summary[0],
+                "activities": activities,
+                "activity_state_counts": activity_state_counts,
+                "event_summary": latest_event[0] if latest_event else None,
                 "state_machines": machines}
 
 

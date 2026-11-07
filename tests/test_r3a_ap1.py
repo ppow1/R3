@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.2.5
+File Revision: 1.2.6
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -25,10 +25,12 @@ Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Re
 Changed: 2026-11-07T02:41:51Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Assert actionable missing-edge feedback and verify the durable tool-result checkpoint.
 Changed: 2026-11-07T03:34:34Z | R3A-019-INBOX-LOOP | Codex GPT-6 | Verify response schemas expose only exact capability identifiers from the current tool manifest.
 Changed: 2026-11-07T03:59:26Z | R3A-019-SUSTAINED-OPERATION | Codex GPT-6 | Verify empty acceptance criteria reject intake and block legacy execution.
+Changed: 2026-11-07T04:41:59Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Assert status uses bounded latest-event evidence and skips event history payloads.
+Changed: 2026-11-07T04:44:58Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Assert indexed queue-state summary is included in status diagnostics.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
-History/Predecessor: Git blob 2b4bf3128a9c4ea916b21442b198c3a254ed9b70 at commit 7695e87bc1c1ae5e204c32ab43b7e4c8aac87afe.
+History/Predecessor: Git blob 10d0d5896ba9027203f652ed10109e1d45f73d59 at commit 8e89ada52fda4768782b712f23281150e71b11e3.
 """
 from __future__ import annotations
 
@@ -47,6 +49,7 @@ from r3a_runtime.cme import CME, _RESIDENT_TOOLS, _knowledge_answer_issues, _req
 from r3a_runtime.config import ConfigurationError, ModelRoute, resolve_model_route
 from r3a_runtime.grace_module import GraceResident, resident_action_schema
 from r3a_runtime.knowledge import retrieve
+from r3a_runtime.diagnostics import DiagnosticProjection
 
 
 class ModelRouteTests(unittest.TestCase):
@@ -157,6 +160,44 @@ class KnowledgeRetrievalTests(unittest.TestCase):
             source = Path(directory) / "machine.json"
             source.write_text('{"machine_id":"process.lifecycle","states":["RUNNING"]}', encoding="utf-8")
             self.assertEqual(retrieve(source, "knowledge.1", "Quest avatar rendering"), [])
+
+
+class DiagnosticSnapshotPerformanceTests(unittest.TestCase):
+    def test_status_skips_recent_event_history_query_but_event_view_keeps_it(self):
+        class StoreFake:
+            def __init__(self):
+                self.include_events = []
+                self.queries = []
+
+            async def snapshot(self, *, include_events=True):
+                self.include_events.append(include_events)
+                return {"configuration": {"revision_id": "config-1"}, "processes": [],
+                        "modules": [], "resources": [], "activities": [], "state_machines": [],
+                        "events": [{"event_id": "event-1"}] if include_events else []}
+
+            async def rows(self, sql):
+                self.queries.append(sql)
+                if "GROUP BY state" in sql:
+                    return [{"state": "QUEUED", "activity_count": 3}]
+                return [{"latest_event_id": "event-1", "latest_event_type": "test",
+                         "latest_event_at": "now"}]
+
+        async def exercise():
+            store = StoreFake()
+            settings = SimpleNamespace(instance_id="test", diagnostic_stale_after_seconds=10)
+            projection = DiagnosticProjection(settings, store)
+            status = await projection.handle("status", {}, "status-key")
+            events = await projection.handle("events", {}, "events-key")
+            return store, status, events
+
+        store, status, events = asyncio.run(exercise())
+        self.assertEqual(store.include_events, [False, True])
+        self.assertIn("ORDER BY persisted_at DESC LIMIT 1", store.queries[0])
+        self.assertNotIn("count(*)", store.queries[0].casefold())
+        self.assertEqual(status["event_summary"]["latest_event_id"], "event-1")
+        self.assertEqual(status["activity_state_counts"], {
+            "QUEUED": 3, "RUNNING": 0, "WAITING": 0, "RECOVERING": 0, "BLOCKED": 0})
+        self.assertEqual(events["events"], [{"event_id": "event-1"}])
 
 
 class ResidentCapabilityReasoningTests(unittest.TestCase):

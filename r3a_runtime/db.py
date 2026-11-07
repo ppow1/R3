@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.3.1
+File Revision: 1.3.2
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -22,16 +22,19 @@ Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Persist provider
 Changed: 2026-11-07T01:30:00Z | R3A-019 | Codex GPT-6 | Return the resolved configured route ID from durable objective intake.
 Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Persist validated objective acceptance criteria in the existing activity input.
 Changed: 2026-11-07T03:59:26Z | R3A-019-SUSTAINED-OPERATION | Codex GPT-6 | Reject Grace inbox submissions without nonempty validated acceptance criteria.
+Changed: 2026-11-07T04:36:29Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Add resumable concurrent-index migrations and skip unused event-history retrieval.
+Changed: 2026-11-07T04:41:59Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Generalize concurrent index validation for event and activity ordering indexes.
 Supersedes: None.
 Contracts: AP0-003–010; R3A-019; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py.
-History/Predecessor: Git blob 356ce73380d9bcd7d12af6ee5008844281796516 at commit 7695e87bc1c1ae5e204c32ab43b7e4c8aac87afe.
+History/Predecessor: Git blob 035452b509490e368e4fe831d9b07632bdb3655b at commit 8e89ada52fda4768782b712f23281150e71b11e3.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -56,6 +59,18 @@ class InvalidTransition(RuntimeError):
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _concurrent_index_spec(sql: str) -> tuple[str, str, str]:
+    match = re.search(
+        r"CREATE\s+INDEX\s+CONCURRENTLY\s+([a-z_][a-z0-9_]*)\s+ON\s+"
+        r"(r3a\.[a-z_][a-z0-9_]*)\s*\(([^;()]+)\)\s*;",
+        sql,
+        re.IGNORECASE,
+    )
+    if not match:
+        raise RuntimeError("Concurrent-index migrations must contain one simple CREATE INDEX CONCURRENTLY")
+    return match.group(1), match.group(2), " ".join(match.group(3).split())
 
 
 class Store:
@@ -83,6 +98,59 @@ class Store:
             for path in sorted(migration_dir.glob("*.sql")):
                 sql = path.read_text(encoding="utf-8")
                 checksum = hashlib.sha256(sql.encode("utf-8")).hexdigest()
+                if path.name.endswith(".concurrent.sql"):
+                    index_name, index_table, index_columns = _concurrent_index_spec(sql)
+                    await conn.execute(
+                        "SELECT pg_advisory_lock(hashtextextended('r3a-ap0-m1-migrations', 0))"
+                    )
+                    try:
+                        row = await (await conn.execute(
+                            "SELECT checksum FROM r3a.schema_migrations WHERE version=%s",
+                            (path.name,),
+                        )).fetchone()
+                        if row and row["checksum"].strip() != checksum:
+                            raise RuntimeError(f"Applied migration {path.name} checksum changed")
+
+                        index = await (await conn.execute(
+                            "SELECT i.indisvalid, pg_get_indexdef(c.oid) AS definition "
+                            "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                            "JOIN pg_index i ON i.indexrelid=c.oid "
+                            "WHERE n.nspname='r3a' AND c.relname=%s",
+                            (index_name,),
+                        )).fetchone()
+                        if index and not index["indisvalid"]:
+                            await conn.execute(f"DROP INDEX CONCURRENTLY r3a.{index_name}")
+                            index = None
+                        expected_definition = (
+                            f"ON {index_table} USING btree ({index_columns})"
+                        ).casefold()
+                        if index and expected_definition not in index["definition"].casefold():
+                            raise RuntimeError(f"Concurrent index {index_name} exists with an unexpected definition")
+                        if not index:
+                            await conn.execute(sql)
+                            index = await (await conn.execute(
+                                "SELECT i.indisvalid, pg_get_indexdef(c.oid) AS definition "
+                                "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                                "JOIN pg_index i ON i.indexrelid=c.oid "
+                                "WHERE n.nspname='r3a' AND c.relname=%s",
+                                (index_name,),
+                            )).fetchone()
+                            if (not index or not index["indisvalid"]
+                                    or expected_definition not in index["definition"].casefold()):
+                                raise RuntimeError(f"Concurrent index {index_name} was not valid after creation")
+                        if row:
+                            continue
+                        async with conn.transaction():
+                            await conn.execute(
+                                "INSERT INTO r3a.schema_migrations(version,checksum) VALUES (%s,%s)",
+                                (path.name, checksum),
+                            )
+                        applied.append(path.name)
+                    finally:
+                        await conn.execute(
+                            "SELECT pg_advisory_unlock(hashtextextended('r3a-ap0-m1-migrations', 0))"
+                        )
+                    continue
                 async with conn.transaction():
                     await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended('r3a-ap0-m1-migrations', 0))")
                     row = await (await conn.execute("SELECT checksum FROM r3a.schema_migrations WHERE version=%s", (path.name,))).fetchone()
@@ -1005,7 +1073,7 @@ class Store:
         async with self.pool.connection() as conn:
             return await (await conn.execute(sql, params)).fetchall()
 
-    async def snapshot(self) -> dict[str, Any]:
+    async def snapshot(self, *, include_events: bool = True) -> dict[str, Any]:
         async with self.pool.connection() as conn:
             current_config = await (await conn.execute(
                 "SELECT r.revision_id,r.schema_version,r.source_digest,r.activated_at,r.config "
@@ -1015,7 +1083,11 @@ class Store:
             modules = await (await conn.execute("SELECT * FROM r3a.module_registry ORDER BY module_id,module_version")).fetchall()
             resources = await (await conn.execute("SELECT * FROM r3a.resource_registry ORDER BY resource_id")).fetchall()
             activities = await (await conn.execute("SELECT * FROM r3a.activities ORDER BY created_at DESC LIMIT 30")).fetchall()
-            events = await (await conn.execute("SELECT * FROM r3a.institution_events ORDER BY persisted_at DESC LIMIT 100")).fetchall()
+            events = []
+            if include_events:
+                events = await (await conn.execute(
+                    "SELECT * FROM r3a.institution_events ORDER BY persisted_at DESC LIMIT 100"
+                )).fetchall()
             machines = await (await conn.execute("SELECT machine_id,machine_version,digest,definition FROM r3a.state_machine_definitions ORDER BY machine_id,machine_version")).fetchall()
             return {"configuration": current_config, "processes": processes, "modules": modules,
                     "resources": resources, "activities": activities, "events": events,
