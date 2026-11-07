@@ -1,3 +1,3 @@
 {
-  "workspace_root": "${R3A_ENGINEERING_WORKSPACE_ROOT}"
+  "workspace_root": "/absolute/path/to/approved/isolated/workspace"
 }

@@ -41,9 +41,9 @@ declares typed inputs/outputs, `isolated_write`, caller and target scope,
 required grant, evidence obligations, work-order idempotency, retry behavior,
 and lifecycle state. It registers through the existing
 `capability_operations` loader and `CapabilityRegistry`; it adds no
-operation-specific CME branch or parallel registry. The provider expands its
-workspace-root environment reference at provider construction, so deployment
-paths remain external configuration.
+operation-specific CME branch or parallel registry. The workspace root is an
+external provider-configuration value; the checked-in example uses only a
+generic placeholder path.
 
 The existing target contract discovers the workspace identity as a typed
 target. The existing generic read-only diagnostics status projection discovers

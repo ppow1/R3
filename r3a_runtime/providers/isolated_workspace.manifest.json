@@ -3,7 +3,7 @@
   "plugin_id": "r3a.isolated-workspace",
   "plugin_version": "1.0.0",
   "artifact_ref": "isolated_workspace.py",
-  "artifact_sha256": "c0eb0386127fb84e51df59d94034dba167e624d0f45704734470ff5d2afd8d24",
+  "artifact_sha256": "f7f095583882c89b9cbb39c3fe7f5408ce0b2a5b9f6a168464db4ba3b989ccaf",
   "configuration_schema": {
     "schema_id": "r3a.isolated-workspace.config.v1",
     "type": "object",
@@ -22,7 +22,7 @@
     "provider_id": "r3a.isolated-workspace",
     "provider_version": "1.0.0",
     "entrypoint": "r3a_runtime.providers.isolated_workspace:create_provider",
-    "artifact_sha256": "c0eb0386127fb84e51df59d94034dba167e624d0f45704734470ff5d2afd8d24"
+    "artifact_sha256": "f7f095583882c89b9cbb39c3fe7f5408ce0b2a5b9f6a168464db4ba3b989ccaf"
   },
   "operation": {
     "contract_id": "r3a.capability-operation.v1",
@@ -33,7 +33,7 @@
       "provider_id": "r3a.isolated-workspace",
       "provider_version": "1.0.0",
       "entrypoint": "r3a_runtime.providers.isolated_workspace:create_provider",
-      "artifact_sha256": "c0eb0386127fb84e51df59d94034dba167e624d0f45704734470ff5d2afd8d24"
+      "artifact_sha256": "f7f095583882c89b9cbb39c3fe7f5408ce0b2a5b9f6a168464db4ba3b989ccaf"
     },
     "input_schema": {
       "type": "object",

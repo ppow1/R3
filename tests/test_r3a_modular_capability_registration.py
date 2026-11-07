@@ -4,13 +4,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import os
 import shutil
 import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
 
 from r3a_runtime.config import load_settings
 from r3a_runtime.capability_contracts import CapabilityContractError
@@ -77,34 +75,32 @@ class ModularRegistrationConformanceTests(unittest.TestCase):
             workspace = root / "workspace"
             workspace.mkdir()
             config_path = root / "engineering-config.json"
-            config_path.write_text(json.dumps({"workspace_root": "${R3A_ENGINEERING_WORKSPACE_ROOT}"}))
+            config_path.write_text(json.dumps({"workspace_root": str(workspace)}))
             bootstrap = _write_bootstrap(root, MANIFEST, config_path)
-            env = patch.dict(os.environ, {"R3A_ENGINEERING_WORKSPACE_ROOT": str(workspace)})
-            with env:
-                settings = load_settings(bootstrap)
-                registry = settings.capability_registry
-                discovered = registry.discover()
-                self.assertEqual([OPERATION_ID], [item["descriptor"]["operation_id"] for item in discovered])
-                operation = registry.resolve(OPERATION_ID)
-                self.assertEqual("isolated_write", operation.descriptor["effect_class"])
-                self.assertEqual("work_order", operation.descriptor["recovery"]["idempotency_scope"])
-                self.assertEqual(["engineering.workspace.apply_patch"],
-                                 operation.descriptor["required_grants"])
-                self.assertEqual({"workspace_id": {"type": "string", "minLength": 1}},
-                                 operation.descriptor["target_scope_schema"]["properties"])
-                provider = operation.load_provider()
-                self.assertEqual(workspace.resolve(), provider.root)
-                self.assertTrue(callable(provider.invoke))
-                write_result = provider.invoke(
-                    {"path": "deliverables/registered.txt", "content": "manifest-backed provider"},
-                    context={"effect_class": "isolated_write",
-                             "target": {"workspace_id": "engineering-test"},
-                             "work_order": {"workspace_id": "engineering-test",
-                                            "allowed_paths": ["deliverables/**"]},
-                             "invocation_id": "manifest-registration-test"})
-                self.assertEqual(24, write_result["bytes_written"])
-                self.assertEqual("manifest-backed provider",
-                                 (workspace / "deliverables/registered.txt").read_text())
+            settings = load_settings(bootstrap)
+            registry = settings.capability_registry
+            discovered = registry.discover()
+            self.assertEqual([OPERATION_ID], [item["descriptor"]["operation_id"] for item in discovered])
+            operation = registry.resolve(OPERATION_ID)
+            self.assertEqual("isolated_write", operation.descriptor["effect_class"])
+            self.assertEqual("work_order", operation.descriptor["recovery"]["idempotency_scope"])
+            self.assertEqual(["engineering.workspace.apply_patch"],
+                             operation.descriptor["required_grants"])
+            self.assertEqual({"workspace_id": {"type": "string", "minLength": 1}},
+                             operation.descriptor["target_scope_schema"]["properties"])
+            provider = operation.load_provider()
+            self.assertEqual(workspace.resolve(), provider.root)
+            self.assertTrue(callable(provider.invoke))
+            write_result = provider.invoke(
+                {"path": "deliverables/registered.txt", "content": "manifest-backed provider"},
+                context={"effect_class": "isolated_write",
+                         "target": {"workspace_id": "engineering-test"},
+                         "work_order": {"workspace_id": "engineering-test",
+                                        "allowed_paths": ["deliverables/**"]},
+                         "invocation_id": "manifest-registration-test"})
+            self.assertEqual(24, write_result["bytes_written"])
+            self.assertEqual("manifest-backed provider",
+                             (workspace / "deliverables/registered.txt").read_text())
 
             resource = {"resource_id": "workspace:engineering-test", "contract_version": "1.0.0",
                         "owner": "R3A-test", "capacity": 1, "allocated": 0,
