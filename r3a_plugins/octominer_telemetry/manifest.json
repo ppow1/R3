@@ -1,18 +1,73 @@
 {
   "schema_version": 1,
   "plugin_id": "r3a.octominer-telemetry",
-  "plugin_version": "1.0.0",
+  "plugin_version": "1.1.0",
   "contract_id": "r3a.capability-plugin",
   "contract_version": "1.0.0",
   "capability_id": "infrastructure.octominer.telemetry.read",
   "tool": {
     "name": "octominer_telemetry_read",
-    "description": "Read freshness-aware GPU and fan/PSU telemetry from the configured Octo Control API. The source reports units in its own payload.",
-    "arguments_schema": {"type": "object", "properties": {}, "additionalProperties": false}
+    "description": "Read freshness-aware GPU and mounted filesystem telemetry directly from the configured host using R3A-owned read-only SSH.",
+    "arguments_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
   },
   "entrypoint": "r3a_plugins.octominer_telemetry.plugin:read_telemetry",
   "artifact_ref": "plugin.py",
-  "artifact_sha256": "cbd6bf84a98afd5af0dc1a7e9eb998d268f9ebe19b9af5479f10529856598a3b",
-  "configuration_schema": "r3a.octominer-telemetry.config.v1",
+  "artifact_sha256": "3d7b1242511c4c6238b73bd6cd06cd347a6073a297885481f077a0c2845f5628",
+  "configuration_schema": {
+    "schema_id": "r3a.octominer-nvidia-smi-ssh.config.v1",
+    "type": "object",
+    "required": [
+      "host_id",
+      "ssh_host",
+      "ssh_port",
+      "ssh_user",
+      "identity_file",
+      "known_hosts_file",
+      "timeout_seconds",
+      "max_age_seconds"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "host_id": {
+        "type": "string",
+        "minLength": 1
+      },
+      "ssh_host": {
+        "type": "string",
+        "pattern": "[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?"
+      },
+      "ssh_port": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 65535
+      },
+      "ssh_user": {
+        "type": "string",
+        "pattern": "[A-Za-z_][A-Za-z0-9_-]{0,31}"
+      },
+      "identity_file": {
+        "type": "string",
+        "pattern": "/.*"
+      },
+      "known_hosts_file": {
+        "type": "string",
+        "pattern": "/.*"
+      },
+      "timeout_seconds": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 30
+      },
+      "max_age_seconds": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 300
+      }
+    }
+  },
   "read_only": true
 }

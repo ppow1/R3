@@ -1,6 +1,10 @@
 {
-  "base_url": "http://127.0.0.1:8785",
-  "bearer_token_env": null,
+  "host_id": "octo1",
+  "ssh_host": "192.0.2.10",
+  "ssh_port": 22,
+  "ssh_user": "octo_readonly",
+  "identity_file": "/etc/r3a/credentials/octominer_ed25519",
+  "known_hosts_file": "/etc/r3a/ssh/known_hosts",
   "timeout_seconds": 5,
   "max_age_seconds": 30
 }

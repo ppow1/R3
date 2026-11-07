@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/config.py
 Component: R3A-BOOTSTRAP-CONFIG
-File Revision: 1.3.0
+File Revision: 1.4.0
 Created: 2026-11-06T15:04:00Z
 Created By: Codex GPT-6
 Purpose: Strictly validate external R3A AP0-M1 bootstrap and operating settings.
@@ -18,6 +18,7 @@ Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add validated co
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Preserve route-only configuration compatibility and finalize strict role/provider validation.
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Validate external provider endpoints, matching origins, private-network HTTP, freshness, timeouts and retries.
 Changed: 2026-11-07 | R3A-PLUG-001 | Codex GPT-6 | Load versioned capability plug-in manifests and external configuration with artifact digest validation.
+Changed: 2026-11-07 | R3A-PLUG-002 | Codex GPT-6 | Validate plug-in configuration against each manifest's portable schema, without capability-specific host validation.
 Supersedes: None.
 Contracts: AP0-001/008/009; R3A-019; Issue #46; AP0-M1 D7; r3a_runtime.contracts; hints/file-provenance.md.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py.
@@ -117,6 +118,53 @@ def _keys(value: dict[str, Any], expected: set[str], where: str) -> None:
         raise ConfigurationError(
             f"{where} keys invalid; missing={sorted(missing)}, unknown={sorted(extra)}"
         )
+
+
+def _validate_plugin_config(value: Any, schema: dict[str, Any], where: str) -> None:
+    """Validate the portable JSON Schema subset used by capability manifests."""
+    if schema.get("type") != "object" or not isinstance(schema.get("properties"), dict):
+        raise ConfigurationError(f"{where} schema must declare an object with properties")
+    required = schema.get("required", [])
+    if (not isinstance(required, list) or any(not isinstance(key, str) for key in required)
+            or not set(required).issubset(schema["properties"])):
+        raise ConfigurationError(f"{where} schema has invalid required fields")
+    supported_types = {"string", "integer", "number", "boolean", "object", "array"}
+    for key, field_schema in schema["properties"].items():
+        if (not isinstance(key, str) or not isinstance(field_schema, dict)
+                or field_schema.get("type") not in supported_types):
+            raise ConfigurationError(f"{where} schema property {key!r} has an unsupported declaration")
+    if not isinstance(value, dict):
+        raise ConfigurationError(f"{where} must be an object")
+    missing = set(required) - value.keys()
+    extra = value.keys() - schema["properties"].keys()
+    if missing or (extra and schema.get("additionalProperties", False) is False):
+        raise ConfigurationError(f"{where} fields invalid; missing={sorted(missing)}, unknown={sorted(extra)}")
+    for key, item in value.items():
+        field_schema = schema["properties"].get(key)
+        if not isinstance(field_schema, dict):
+            continue
+        field_type = field_schema.get("type")
+        type_ok = {
+            "string": lambda x: isinstance(x, str),
+            "integer": lambda x: isinstance(x, int) and not isinstance(x, bool),
+            "number": lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x),
+            "boolean": lambda x: isinstance(x, bool),
+            "object": lambda x: isinstance(x, dict),
+            "array": lambda x: isinstance(x, list),
+        }.get(field_type)
+        if type_ok is None or not type_ok(item):
+            raise ConfigurationError(f"{where}.{key} does not match its declared JSON type")
+        if field_type == "string":
+            if len(item) < field_schema.get("minLength", 0):
+                raise ConfigurationError(f"{where}.{key} is shorter than its declared minimum")
+            pattern = field_schema.get("pattern")
+            if pattern is not None and (not isinstance(pattern, str) or re.fullmatch(pattern, item) is None):
+                raise ConfigurationError(f"{where}.{key} does not match its declared pattern")
+        if field_type in {"integer", "number"}:
+            if "minimum" in field_schema and item < field_schema["minimum"]:
+                raise ConfigurationError(f"{where}.{key} is below its declared minimum")
+            if "maximum" in field_schema and item > field_schema["maximum"]:
+                raise ConfigurationError(f"{where}.{key} is above its declared maximum")
 
 
 def _text(value: Any, where: str) -> str:
@@ -558,16 +606,9 @@ def load_settings(path: str | Path) -> Settings:
                 or not isinstance(tool["arguments_schema"], dict)):
             raise ConfigurationError(f"{where}.tool is invalid")
         schema = manifest["configuration_schema"]
-        if schema != "r3a.octominer-telemetry.config.v1" or not isinstance(plugin_config, dict):
-            raise ConfigurationError(f"{where}.configuration schema is unsupported")
-        _keys(plugin_config, {"base_url", "bearer_token_env", "timeout_seconds", "max_age_seconds"},
-              f"{where}.configuration")
-        _service_endpoint(plugin_config["base_url"], f"{where}.configuration.base_url")
-        token_env = plugin_config["bearer_token_env"]
-        if token_env is not None and (not isinstance(token_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*", token_env)):
-            raise ConfigurationError(f"{where}.configuration.bearer_token_env must be an environment variable name or null")
-        _positive(plugin_config["timeout_seconds"], f"{where}.configuration.timeout_seconds")
-        _positive(plugin_config["max_age_seconds"], f"{where}.configuration.max_age_seconds")
+        if not isinstance(schema, dict):
+            raise ConfigurationError(f"{where}.manifest.configuration_schema must be a JSON Schema object")
+        _validate_plugin_config(plugin_config, schema, f"{where}.configuration")
         plugin_ids.add(capability_id)
         capability_plugins.append(CapabilityPlugin(manifest_path, configuration_path, manifest, plugin_config))
 
