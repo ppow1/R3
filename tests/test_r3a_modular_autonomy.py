@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_modular_autonomy.py
 Component: R3A-AP1-MODULAR-AUTONOMY-REGRESSION
-File Revision: 1.1.0
+File Revision: 1.1.2
 Created: 2026-11-06T23:19:46Z
 Created By: Codex GPT-6
 Purpose: Permanently verify versioned autonomy contracts, external model roles, readiness routing, deferral, and authorization-provider compatibility.
@@ -13,10 +13,12 @@ Authority: R3A AP0/AP1 Modular Autonomy Implementation Slices 1–2; isolated de
 Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add focused permanent regression coverage for the first modular autonomy slice.
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Cover legacy configuration, durable deferral semantics, and stale readiness diagnostics.
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Extend Slice 1 regressions for provider configuration, identity, stale state and recovery routing.
+Changed: 2026-11-07T05:45:10Z | AP2-IMPLEMENTATION | Codex GPT-6 | Give the model deferral compatibility fixture valid required acceptance criteria.
+Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Assert authorization decision identity remains distinct from its audit event.
 Supersedes: None.
-Contracts: AP0-003–010; R3A-019; MOD-006; r3a.contract-envelope.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
+Contracts: AP0-003–010; R3A-019; MOD-006; r3a.contract-envelope.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
 Tests: This test module.
-History/Predecessor: Git blob ce77c005bfa4cb480b56d03ff15c0cc6e49b50ea at commit ad16700f1e94dd36c81cac5383f9f2e2771a98a1.
+History/Predecessor: Prior revision at baseline commit 9925c7a408707162e6f070a4121dcc83f5fe0e0a, blob 979644d466f21ca2dbcd49014fad832552d9bd25; earlier history includes blob ce77c005bfa4cb480b56d03ff15c0cc6e49b50ea.
 """
 from __future__ import annotations
 
@@ -318,6 +320,8 @@ class GrantAuthorizationCompatibilityTests(unittest.TestCase):
             self.assertEqual(store.calls[1][4]["authorization_provider"], "capability_grants")
             self.assertEqual(decision.config_revision, "config-1")
             self.assertIsNone(decision.policy_revision)
+            self.assertEqual(decision.decision_id, "request-1")
+            self.assertNotEqual(decision.decision_id, decision.audit_event_id)
 
     def test_grant_provider_does_not_treat_scope_or_delegation_as_an_existing_grant(self):
         store = self.StoreFake(True)
@@ -436,11 +440,17 @@ class ExistingModuleRpcCompatibilityTests(unittest.IsolatedAsyncioTestCase):
             cme.module_process = type("Process", (), {"returncode": None})()
             activity = {"activity_type": "grace.objective", "activity_id": "activity-1",
                         "attempt_id": "attempt-1", "attempt_count": 0,
-                        "input": {"objective": "reason using the primary role",
+                        "input": {"objective": "Determine whether RUNNING can reach COMPLETED in process.lifecycle.",
                                   "event_kind": "objective", "route_id": None,
                                   "role_id": "resident.primary",
                                   "required_capabilities": ["plan"], "required_modalities": [],
-                                  "role_config_revision": settings.source_digest},
+                                  "role_config_revision": settings.source_digest,
+                                  "acceptance_contract": {"contract_id": "r3a.objective-acceptance",
+                                                          "contract_version": "1.0.0",
+                                                          "criteria": [{"criterion_id": "running_to_completed",
+                                                                        "type": "transition_path",
+                                                                        "from_state": "RUNNING",
+                                                                        "to_state": "COMPLETED"}]}},
                         "checkpoint": {}}
             await cme._run_activity(activity)
             self.assertEqual(len(store.deferred), 1)
