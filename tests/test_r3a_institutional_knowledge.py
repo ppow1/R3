@@ -34,7 +34,7 @@ class InstitutionalKnowledgeProviderTests(unittest.TestCase):
             registered = registry.register(operation_from_manifest(manifest), config,
                                            legacy_manifest=manifest)
             self.assertEqual("institution.knowledge.read", registered.descriptor["operation_id"])
-            self.assertEqual("1.0.0", registered.descriptor["operation_revision"])
+            self.assertEqual("1.0.1", registered.descriptor["operation_revision"])
             tool = registered.resident_tool_projection()
             cme = CME.__new__(CME)
             cme.settings = SimpleNamespace(module_capabilities=("institution.knowledge.read",),
@@ -58,6 +58,11 @@ class InstitutionalKnowledgeProviderTests(unittest.TestCase):
             self.assertEqual(fact["document_sha256"], result["evidence"][0]["document_sha256"])
             self.assertTrue(fact["retrieved_at"])
             self.assertTrue(fact["excerpt_sha256"])
+            invalid_request = dict(request)
+            invalid_request["arguments"] = {"query": "retention policy", "source_id": "invented.source"}
+            with self.assertRaisesRegex(ValueError, "unknown fields"):
+                asyncio.run(cme._invoke_resident_capability(
+                    {"activity_id": "activity-1", "attempt_id": "attempt-1"}, invalid_request))
 
     def test_real_source_id_and_digest_satisfy_existing_cited_transition_acceptance(self):
         source = ROOT / "r3a_runtime/state_machines/process.json"
@@ -113,9 +118,6 @@ class InstitutionalKnowledgeProviderTests(unittest.TestCase):
             missing = provider.invoke(args, context={})
             self.assertEqual("unavailable", missing.output["sources"][0]["availability"])
             self.assertEqual([], missing.output["results"])
-            unconfigured = provider.invoke({"query": "alpha retention", "source_id": "external.file"},
-                                          context={})
-            self.assertEqual("source_id_not_configured", unconfigured.output["sources"][0]["error"])
 
     def test_unmatched_query_produces_no_claim_or_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
