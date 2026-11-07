@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/steward_access.py
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.0.7
+File Revision: 1.0.9
 Created: 2026-11-07T21:37:42Z
 Created By: Codex GPT-6
 Purpose: Verify ingress-authenticated Steward identity, manage revocable durable sessions, and audit portal operations.
@@ -17,8 +17,10 @@ Changed: 2026-11-07T21:53:47Z | AP3-M1 | Codex GPT-6 | Consume the published Iss
 Changed: 2026-11-07T21:56:49Z | AP3-M1 | Codex GPT-6 | Tighten external config scalar validation and ensure boolean values cannot masquerade as thresholds.
 Changed: 2026-11-07T22:02:18Z | AP3-M1 | Codex GPT-6 | Audit invalid-origin and invalid-session attempts; make connection timeout configurable.
 Changed: 2026-11-07T22:03:19Z | AP3-M1 | Codex GPT-6 | Require Secure cookies when remote transport is configured.
+Changed: 2026-11-07T23:43:25Z | AP3-M1 | Codex GPT-6 | Bind replaceable versioned identity providers and publish authoritative session principal projections.
+Changed: 2026-11-07T23:43:25Z | AP3-M1 | Codex GPT-6 | Validate normalized identity-provider results before shared session issuance.
 Supersedes: None.
-Contracts: r3a.steward-identity.v1; r3a.steward-session.v1; r3a.capability-invocation.v1; r3a.secrets.provider.v1; r3a.machine-principal.v1.
+Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1; r3a.capability-invocation.v1; r3a.secrets.provider.v1; r3a.machine-principal.v1.
 Tests: tests/test_r3a_steward_access.py.
 History/Predecessor: New file; initial publication recorded in Git.
 """
@@ -43,6 +45,8 @@ from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger("r3a.steward_access")
 IDENTITY_CONTRACT = "r3a.steward-identity.v1"
+IDENTITY_PROVIDER_CONTRACT = "r3a.identity-provider.v1"
+PRINCIPAL_CONTRACT = "r3a.steward-principal.v1"
 SESSION_CONTRACT = "r3a.steward-session.v1"
 
 
@@ -64,6 +68,14 @@ class SecretProvider(Protocol):
     provider_id: str
     provider_version: str
     def resolve(self, reference: Any, *, correlation_id: str) -> Any: ...
+
+
+class IdentityProvider(Protocol):
+    """Replaceable trusted adapter; it returns normalized authority, never a session or grant."""
+    contract_id: str
+    contract_version: str
+
+    def authenticate(self, request: Request, *, correlation_id: str) -> "IdentityAssertion": ...
 
 
 class PostgresSessionStore:
@@ -167,17 +179,17 @@ class IdentityAssertion:
     secret_provenance: dict[str, Any]
 
 
-class StewardAccess:
-    def __init__(self, config: dict[str, Any], store: SessionStore,
-                 secret_provider: SecretProvider, secret_reference: Any):
-        self.config, self.store = config, store
-        self.secret_provider, self.secret_reference = secret_provider, secret_reference
+class HmacIngressIdentityProvider:
+    """Default adapter for an ingress-signed assertion; session handling stays in StewardAccess."""
+    contract_id = IDENTITY_PROVIDER_CONTRACT
+    contract_version = "1.0.0"
 
-    @staticmethod
-    async def _store_call(method, *args, **kwargs):
-        return await run_in_threadpool(method, *args, **kwargs)
+    def __init__(self, config: dict[str, Any], secret_provider: SecretProvider, secret_reference: Any):
+        self.config = config
+        self.secret_provider = secret_provider
+        self.secret_reference = secret_reference
 
-    def _verify_assertion(self, request: Request, correlation_id: str) -> IdentityAssertion:
+    def authenticate(self, request: Request, *, correlation_id: str) -> IdentityAssertion:
         issuer = request.headers.get("x-r3-identity-issuer", "")
         principal = request.headers.get("x-r3-identity-subject", "")
         assertion_id = request.headers.get("x-r3-identity-id", "")
@@ -187,22 +199,19 @@ class StewardAccess:
         signature = request.headers.get("x-r3-identity-signature", "")
         try:
             issued_at = int(timestamp_text)
-        except ValueError as exc:
-            raise PermissionError("invalid_identity_assertion") from exc
-        try:
             authenticated_at = datetime.fromisoformat(authenticated_at_text.replace("Z", "+00:00"))
         except ValueError as exc:
             raise PermissionError("invalid_identity_assertion") from exc
         factors = tuple(item for item in factor_text.split(",") if item)
-        expected_issuer = self.config["identity"]["issuer"]
-        expected_principal = self.config["identity"]["steward_principal_id"]
-        if not issuer or issuer != expected_issuer or principal != expected_principal:
+        identity = self.config["identity"]
+        if not issuer or issuer != identity["issuer"] or principal != identity["steward_principal_id"]:
             raise PermissionError("identity_not_authorized")
         if (not assertion_id or any(ord(char) < 33 or ord(char) == 127 for char in assertion_id)
-                or abs(time.time() - issued_at) > self.config["identity"]["assertion_max_age_seconds"]):
+                or abs(time.time() - issued_at) > identity["assertion_max_age_seconds"]):
             raise PermissionError("identity_assertion_expired_or_invalid")
         if authenticated_at.tzinfo is None or authenticated_at > datetime.now(timezone.utc):
             raise PermissionError("identity_authentication_time_invalid")
+        lease = None
         try:
             lease = self.secret_provider.resolve(self.secret_reference, correlation_id=correlation_id)
             key = lease.reveal()
@@ -219,15 +228,29 @@ class StewardAccess:
             outcome = getattr(exc, "outcome", "UNAVAILABLE")
             raise AccessUnavailable(f"identity_secret_{str(outcome).lower()}") from None
         finally:
-            if "lease" in locals():
+            if lease is not None:
                 lease.close()
         message = "\n".join((issuer, principal, assertion_id, timestamp_text,
-                              authenticated_at_text, factor_text)).encode()
+                               authenticated_at_text, factor_text)).encode()
         expected = hmac.new(key.encode(), message, hashlib.sha256).hexdigest()
         if not signature or not hmac.compare_digest(expected, signature):
             raise PermissionError("identity_assertion_invalid")
         return IdentityAssertion(issuer, principal, assertion_id, issued_at,
                                 authenticated_at.astimezone(timezone.utc), factors, secret_provenance)
+
+
+class StewardAccess:
+    def __init__(self, config: dict[str, Any], store: SessionStore,
+                 identity_provider: IdentityProvider):
+        self.config, self.store = config, store
+        if (identity_provider.contract_id != IDENTITY_PROVIDER_CONTRACT
+                or identity_provider.contract_version.split(".", 1)[0] != "1"):
+            raise AccessUnavailable("identity_provider_contract_unsupported")
+        self.identity_provider = identity_provider
+
+    @staticmethod
+    async def _store_call(method, *args, **kwargs):
+        return await run_in_threadpool(method, *args, **kwargs)
 
     @staticmethod
     def _digest(token: str) -> str:
@@ -247,6 +270,21 @@ class StewardAccess:
         if not record or record.get("revoked_at") or record["expires_at"] <= datetime.now(timezone.utc):
             raise PermissionError("session_invalid_or_expired")
         return record
+
+    @staticmethod
+    def _validate_provider_assertion(assertion: Any) -> IdentityAssertion:
+        if (not isinstance(assertion, IdentityAssertion)
+                or not isinstance(assertion.issuer, str) or not assertion.issuer
+                or not isinstance(assertion.principal_id, str) or not assertion.principal_id
+                or not isinstance(assertion.assertion_id, str) or not assertion.assertion_id
+                or not isinstance(assertion.authenticated_at, datetime)
+                or assertion.authenticated_at.tzinfo is None
+                or assertion.authenticated_at > datetime.now(timezone.utc)
+                or not isinstance(assertion.factor_refs, tuple)
+                or any(not isinstance(factor, str) or not factor for factor in assertion.factor_refs)
+                or not isinstance(assertion.secret_provenance, dict)):
+            raise AccessUnavailable("identity_provider_contract_result_invalid")
+        return assertion
 
     async def _require_origin(self, request: Request, origin: str | None, action: str) -> None:
         try:
@@ -271,7 +309,9 @@ class StewardAccess:
             correlation = self._correlation(request)
             try:
                 await self._require_origin(request, origin, "session.create")
-                assertion = await self._store_call(self._verify_assertion, request, correlation)
+                assertion = await self._store_call(self.identity_provider.authenticate,
+                                                   request, correlation_id=correlation)
+                assertion = self._validate_provider_assertion(assertion)
                 token = secrets.token_urlsafe(32)
                 expires = datetime.now(timezone.utc) + timedelta(seconds=self.config["session"]["lifetime_seconds"])
                 await self._store_call(self.store.create, token_digest=self._digest(token),
@@ -286,10 +326,17 @@ class StewardAccess:
                                     samesite="strict", path="/api/v1/steward")
                 logger.info("steward_session_created", extra={"correlation_id": correlation,
                             "principal_id": assertion.principal_id, "contract": SESSION_CONTRACT})
-                return {"contract": SESSION_CONTRACT, "principal_id": assertion.principal_id,
+                return {"contract": SESSION_CONTRACT, "state": "authenticated",
+                        "principal": {"contract": PRINCIPAL_CONTRACT,
+                                      "principal_id": assertion.principal_id,
+                                      "issuer": assertion.issuer,
+                                      "authenticated_at": assertion.authenticated_at.isoformat(),
+                                      "factor_refs": list(assertion.factor_refs)},
+                        "principal_id": assertion.principal_id,
                         "authenticated_at": assertion.authenticated_at.isoformat(),
                         "factor_refs": list(assertion.factor_refs),
-                        "expires_at": expires.isoformat(), "correlation_id": correlation}
+                        "expires_at": expires.isoformat(), "freshness": "current",
+                        "correlation_id": correlation}
             except PermissionError as exc:
                 await self._store_call(self.store.audit, event_type="steward.authentication.denied",
                                        principal_id=None, outcome="denied", correlation_id=correlation,
@@ -303,10 +350,17 @@ class StewardAccess:
             correlation = self._correlation(request)
             try:
                 record = await self._session(request.cookies.get(self.config["session"]["cookie_name"]))
-                return {"contract": SESSION_CONTRACT, "principal_id": record["principal_id"],
+                return {"contract": SESSION_CONTRACT, "state": "authenticated",
+                        "principal": {"contract": PRINCIPAL_CONTRACT,
+                                      "principal_id": record["principal_id"],
+                                      "issuer": record["issuer"],
+                                      "authenticated_at": record["authenticated_at"].isoformat(),
+                                      "factor_refs": record["factor_refs"]},
+                        "principal_id": record["principal_id"],
                         "authenticated_at": record["authenticated_at"].isoformat(),
                         "factor_refs": record["factor_refs"],
-                        "expires_at": record["expires_at"].isoformat(), "freshness": "current"}
+                        "expires_at": record["expires_at"].isoformat(), "freshness": "current",
+                        "correlation_id": correlation}
             except PermissionError as exc:
                 await self._store_call(self.store.audit, event_type="steward.session.access_denied",
                                        principal_id=None, outcome="denied", correlation_id=correlation,
@@ -327,7 +381,8 @@ class StewardAccess:
                 response.delete_cookie(self.config["session"]["cookie_name"], path="/api/v1/steward",
                                        secure=self.config["session"]["secure_cookie"], httponly=True,
                                        samesite="strict")
-                return {"revoked": revoked, "principal_id": record["principal_id"],
+                return {"contract": SESSION_CONTRACT, "state": "revoked", "revoked": revoked,
+                        "principal_id": record["principal_id"],
                         "correlation_id": correlation}
             except PermissionError as exc:
                 await self._store_call(self.store.audit, event_type="steward.session.revocation_denied",
@@ -534,6 +589,7 @@ def create_router_from_environment() -> APIRouter:
         secret_reference = SecretReference(**config["identity"]["assertion_secret_ref"])
     except Exception as exc:
         raise AccessUnavailable("steward_identity_provider_unavailable") from exc
+    identity_provider = HmacIngressIdentityProvider(config, provider, secret_reference)
     return StewardAccess(config,
                          PostgresSessionStore(dsn, config["session"]["connect_timeout_seconds"]),
-                         provider, secret_reference).router()
+                         identity_provider).router()

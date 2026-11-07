@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.0.9
+File Revision: 1.1.0
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -19,6 +19,7 @@ Changed: 2026-11-04 UTC | R3-GRANT-RUNBOOK-MIGRATION | ChatGPT GPT-6 | Direct al
 Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Index resident avatar implementation notes
 Changed: 2026-10-31 UTC | R3-COMMS-001 | ChatGPT GPT-6 | Index mandatory Comms incident capture
 Changed: 2026-11-07T21:44:36Z | AP3-M1 | Codex GPT-6 | Index the Steward authentication/session contract and portal prototype.
+Changed: 2026-11-07T23:43:25Z | AP3-M1 | Codex GPT-6 | Link website session/principal schema and integration instructions.
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Manual source/index review; no automated tests run.
@@ -58,5 +59,6 @@ Start with [the hints index](hints/README.md). Keep this root file short; put de
 - [Deployment and command execution](hints/deployment.md) — [manifest-driven runbook](docs/runbooks/R3_MANIFEST_DEPLOYMENT.md) and [deployment scripts](scripts/deployment/Deploy-R3.ps1) (currently plan-only; no live activation)
 - [Resident avatar system](hints/resident-avatar-system.md) — replaceable website avatar runtime, browser animation API, and pending authorized backend connection
 - [AP3 Steward access](docs/architecture/R3A_AP3_STEWARD_ACCESS.md) — authenticated ingress/session boundary, CME authorization delegation, and transport availability.
+- [Steward website session contract](docs/architecture/R3A_STEWARD_WEBSITE_SESSION_CONTRACT.md) — versioned principal/session schema, browser operation IDs, and integration guidance for #51.
 
 When asked to add material to AI_HINTS, update a focused `hints/` document and add or adjust a concise pointer here only if needed.
