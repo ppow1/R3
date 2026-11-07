@@ -540,6 +540,22 @@ class CME:
                     "authorized": allowed, "reason": None if allowed else reason,
                     "authorization": provider,
                     "effect": "none; discovery/check is read-only"}
+        if operation == "capability.discover":
+            registry = self.settings.capability_registry
+            operation_id = payload.get("operation_id")
+            if operation_id is not None:
+                if not isinstance(operation_id, str) or not operation_id:
+                    raise ValueError("capability.discover operation_id must be nonempty text")
+                contract_version = payload.get("contract_version", "1.0.0")
+                if not isinstance(contract_version, str):
+                    raise ValueError("capability.discover contract_version must be text")
+                registry.resolve(operation_id, contract_version)
+                operations = [entry for entry in registry.discover()
+                              if entry["descriptor"]["operation_id"] == operation_id]
+            else:
+                operations = list(registry.discover())
+            return {"operations": operations, "authorization_evaluated": False,
+                    "effect": "none; discovery does not authorize invocation"}
         if operation == "capability.invoke":
             request = payload.get("request")
             if not isinstance(request, dict):

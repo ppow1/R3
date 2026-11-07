@@ -48,6 +48,9 @@ class CapabilityContractTests(unittest.TestCase):
         self.assertEqual(1, len(discovered))
         self.assertEqual("registered", discovered[0]["registry_observation"]["state"])
         self.assertNotIn("authorized", discovered[0]["registry_observation"])
+        self.assertEqual("OctoMiner GPU Telemetry", discovered[0]["presentation"]["name"])
+        self.assertTrue(discovered[0]["presentation"]["description_registered"])
+        self.assertEqual("not_probed", discovered[0]["registry_observation"]["provider_availability"])
         discovered_descriptor = discovered[0]["descriptor"]
         self.assertEqual(self.descriptor["input_schema"], discovered_descriptor["input_schema"])
         self.assertEqual(self.descriptor["output_schema"], discovered_descriptor["output_schema"])

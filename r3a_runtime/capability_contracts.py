@@ -385,9 +385,17 @@ class CapabilityRegistry:
             descriptor = item.descriptor
             if descriptor["lifecycle"]["desired_state"] == "disabled" and not include_disabled:
                 continue
+            presentation = descriptor.get("resident_tool", {})
             records.append({"descriptor": copy.deepcopy(descriptor),
-                            "registry_observation": {"state": "registered", "health": "not_probed",
-                                                     "observed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}})
+                            "presentation": {
+                                "name": presentation.get("name") or descriptor["operation_id"].replace(".", "_"),
+                                "description": presentation.get("description", ""),
+                                "description_registered": bool(presentation.get("description")),
+                            },
+                            "registry_observation": {
+                                "state": "registered", "health": "not_probed",
+                                "provider_availability": "not_probed",
+                                "observed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}})
         return tuple(records)
 
     def resolve(self, operation_id: str, contract_version: str = CONTRACT_VERSION) -> RegisteredOperation:

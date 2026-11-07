@@ -138,6 +138,30 @@ class DurableFixtureStore:
 
 
 class IsolatedCapabilityIntegrationTests(unittest.TestCase):
+    def test_cme_discovery_exposes_registered_operations_without_authorizing(self):
+        async def scenario():
+            registered_descriptor = descriptor()
+            registry = CapabilityRegistry()
+            registry.register(registered_descriptor, {"workspace_root": "/tmp"})
+            instance = CME.__new__(CME)
+            instance.settings = SimpleNamespace(capability_registry=registry)
+            result = await instance._control_request("capability.discover", {}, "discover-all")
+            self.assertFalse(result["authorization_evaluated"])
+            self.assertEqual("none; discovery does not authorize invocation", result["effect"])
+            self.assertEqual(registered_descriptor["operation_id"],
+                             result["operations"][0]["descriptor"]["operation_id"])
+            selected = await instance._control_request(
+                "capability.discover",
+                {"operation_id": registered_descriptor["operation_id"],
+                 "contract_version": registered_descriptor["contract_version"]},
+                "discover-one")
+            self.assertEqual(registered_descriptor,
+                             selected["operations"][0]["descriptor"])
+            self.assertEqual("engineering_workspace_apply_patch",
+                             selected["operations"][0]["presentation"]["name"])
+
+        asyncio.run(scenario())
+
     def test_canonical_read_uses_cme_without_engineering_work_order(self):
         async def scenario(root: Path):
             order = work_order()
