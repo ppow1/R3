@@ -12,7 +12,7 @@
 # Authority: Issue #46; tests invoke no host or legacy service.
 # Changed: 2026-11-07 | R3A-PLUG-001 | Codex GPT-6 | Adapt tests to independent R3A SSH collector.
 # Supersedes: Revision 1.0.0 HTTP fixture tests; legacy API transport removed.
-# Contracts: r3a.capability-plugin 1.0.0; r3a.octominer-nvidia-smi-ssh.config.v1; Issue #46.
+# Contracts: r3a.capability-operation.v1; r3a.octominer-independent-telemetry.config.v2; Issue #46.
 # Tests: Self.
 # History/Predecessor: Git commit dee12de54618e36cce42b8002d7fb5cf1f436ec8.
 
@@ -54,14 +54,14 @@ class OctoMinerPluginTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_manifest_is_read_only_versioned_and_digest_pinned(self):
+    def test_manifest_uses_canonical_read_effect_and_digest_pins_artifacts(self):
         root = Path(__file__).resolve().parents[1]
         manifest = json.loads((root / "r3a_plugins/octominer_telemetry/manifest.json").read_text())
         package = root / "r3a_plugins/octominer_telemetry"
         artifact = package / manifest["artifact_ref"]
         self.assertEqual(1, manifest["schema_version"])
-        self.assertTrue(manifest["read_only"])
-        self.assertEqual("1.0.0", manifest["contract_version"])
+        self.assertEqual("r3a.capability-operation.v1", manifest["operation"]["contract_id"])
+        self.assertEqual("read", manifest["operation"]["effect_class"])
         self.assertEqual(manifest["artifact_sha256"], hashlib.sha256(artifact.read_bytes()).hexdigest())
         for support in manifest["supporting_artifacts"]:
             self.assertEqual(support["artifact_sha256"],

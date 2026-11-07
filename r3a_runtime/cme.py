@@ -37,7 +37,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
-import importlib
 import json
 import os
 import re
@@ -190,14 +189,22 @@ class CME:
                                              metadata={"description": "Read PostgreSQL version and readiness"})
         await self.store.register_capability("institution.knowledge.read", "R3A-CME", "read_only",
                                              metadata={"description": "Read explicitly allowlisted institutional knowledge sources"})
-        for plugin in getattr(self.settings, "capability_plugins", ()):
-            manifest = plugin.manifest
+        for discovery in self.settings.capability_registry.discover():
+            descriptor = discovery["descriptor"]
+            operation = self.settings.capability_registry.resolve(
+                descriptor["operation_id"], descriptor["contract_version"])
+            manifest = operation.legacy_manifest or {}
+            access_mode = "read_only" if descriptor["effect_class"] == "read" else "read_write"
             await self.store.register_capability(
-                manifest["capability_id"], manifest["plugin_id"], "read_only",
-                metadata={"plugin_version": manifest["plugin_version"],
-                          "contract_id": manifest["contract_id"],
-                          "contract_version": manifest["contract_version"],
-                          "description": manifest["tool"]["description"]})
+                descriptor["operation_id"], descriptor["provider"]["provider_id"], access_mode,
+                contract_version=descriptor["contract_version"],
+                metadata={"operation_contract_id": descriptor["contract_id"],
+                          "operation_revision": descriptor["operation_revision"],
+                          "provider_version": descriptor["provider"]["provider_version"],
+                          "effect_class": descriptor["effect_class"],
+                          "required_grants": descriptor["required_grants"],
+                          "compatibility_manifest_id": manifest.get("contract_id"),
+                          "description": descriptor.get("resident_tool", {}).get("description", "")})
         await self.store.register_capability("institution.diagnostics.read", "R3A-CME", "read_only",
                                              metadata={"description": "Read current durable process and database observations"})
         await self.store.register_resource("foundation.observer", self.settings.worker_concurrency,
@@ -844,28 +851,43 @@ class CME:
             query = arguments["query"]
             if not isinstance(query, str) or not query.strip():
                 raise ValueError("institution.knowledge.read query must be nonempty text")
-        elif arguments:
+        try:
+            registered_operation = self.settings.capability_registry.resolve(capability_id)
+        except KeyError:
+            registered_operation = None
+        if capability_id != "institution.knowledge.read" and registered_operation is None and arguments:
             raise ValueError(f"{capability_id} accepts no arguments")
-        plugins = getattr(self.settings, "capability_plugins", ())
-        if capability_id in {plugin.manifest["capability_id"] for plugin in plugins}:
-            if arguments:
-                raise ValueError(f"{capability_id} accepts no arguments")
+        if registered_operation is not None:
+            if registered_operation.descriptor["effect_class"] != "read":
+                raise PermissionError("effectful operation requires the canonical AP2 invocation dispatcher")
+            from .capability_contracts import validate_json
+            validate_json(arguments, registered_operation.descriptor["input_schema"], path="$.input")
         authorization = await self._authorize_capability(
             capability_id, activity_id=str(activity["activity_id"]),
             attempt_id=str(activity["attempt_id"]),
             context={"invocation_source": "resident_selected_action",
                      "tool_contract_id": tool["contract_id"],
+                     "operation_contract_id": registered_operation.descriptor["contract_id"]
+                     if registered_operation is not None else tool["contract_id"],
+                     "effect_class": registered_operation.descriptor["effect_class"]
+                     if registered_operation is not None else "read",
                      "query_sha256": hashlib.sha256(query.encode()).hexdigest()
                      if capability_id == "institution.knowledge.read" else None})
         evidence = []
         if capability_id == "institution.knowledge.read":
             for index, path in enumerate(self.settings.knowledge_sources):
                 evidence.extend(retrieve(path, f"knowledge.{index+1}", query))
-        elif capability_id in {plugin.manifest["capability_id"] for plugin in plugins}:
-            plugin = next(plugin for plugin in plugins if plugin.manifest["capability_id"] == capability_id)
-            module_name, function_name = plugin.manifest["entrypoint"].split(":", 1)
-            adapter = getattr(importlib.import_module(module_name), function_name)
-            evidence.extend(await asyncio.to_thread(adapter, plugin.configuration))
+        elif registered_operation is not None:
+            provider = registered_operation.load_provider()
+            provided = await asyncio.to_thread(provider.invoke, arguments,
+                                                context={"activity_id": str(activity["activity_id"]),
+                                                         "attempt_id": str(activity["attempt_id"]),
+                                                         "correlation_id": str(activity.get("correlation_id")
+                                                                               or activity["activity_id"]),
+                                                         "operation_id": capability_id})
+            from .capability_contracts import validate_json
+            validate_json(provided, registered_operation.descriptor["output_schema"], path="$.output")
+            evidence.extend(provided)
         else:
             evidence.extend(await self._read_runtime_capability(capability_id))
         return {"contract_id": tool["contract_id"],
@@ -876,12 +898,13 @@ class CME:
 
     def _resident_tools(self) -> tuple[dict[str, Any], ...]:
         tools = list(_RESIDENT_TOOLS)
-        for plugin in getattr(self.settings, "capability_plugins", ()):
-            manifest = plugin.manifest
-            tools.append({"contract_id": manifest["contract_id"],
-                          "contract_version": manifest["contract_version"],
-                          "capability_id": manifest["capability_id"],
-                          **manifest["tool"]})
+        # This is the temporary resident-capability-tool compatibility projection.
+        # AP2's canonical dispatcher consumes all registered effect classes.
+        for discovery in self.settings.capability_registry.discover():
+            operation = self.settings.capability_registry.resolve(
+                discovery["descriptor"]["operation_id"], discovery["descriptor"]["contract_version"])
+            if operation.descriptor["effect_class"] == "read":
+                tools.append(operation.resident_tool_projection())
         return tuple(tools)
 
     async def _read_runtime_capability(self, capability_id: str) -> list[dict[str, Any]]:

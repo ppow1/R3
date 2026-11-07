@@ -30,7 +30,7 @@ dependencies = ["psycopg[binary,pool]>=3.2,<4"]
 r3a = "r3a_runtime.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["r3a_runtime*"]
+include = ["r3a_runtime*", "r3a_plugins*"]
 
 [tool.setuptools.package-data]
-r3a_runtime = ["migrations/*.sql", "state_machines/*.json"]
+r3a_runtime = ["migrations/*.sql", "state_machines/*.json", "schemas/*.json"]

@@ -18,6 +18,7 @@ if importlib.util.find_spec("psycopg_pool") is None:
 from r3a_runtime import cme as cme_module
 from r3a_runtime.cme import CME
 from r3a_runtime.grace_module import GraceResident, resident_action_schema
+from r3a_runtime.capability_contracts import CapabilityRegistry
 
 
 class FakeStore:
@@ -40,20 +41,22 @@ class TelemetryInboxDemo(unittest.IsolatedAsyncioTestCase):
     async def test_grace_discovers_authorized_plugin_and_invokes_from_queued_objective(self):
         root = Path(__file__).resolve().parents[1]
         manifest = json.loads((root / "r3a_plugins/octominer_telemetry/manifest.json").read_text())
+        capability_id = manifest["operation"]["operation_id"]
         plugin_config = {"host_id": "fixture-host"}
-        configured_plugin = SimpleNamespace(manifest=manifest, configuration=plugin_config)
+        registry = CapabilityRegistry()
+        registry.register(manifest["operation"], plugin_config, legacy_manifest=manifest)
         cme = CME.__new__(CME)
         cme.settings = SimpleNamespace(
-            module_capabilities=(manifest["capability_id"],),
-            capability_plugins=(configured_plugin,), lease_seconds=30, source_digest="fixture-config",
+            module_capabilities=(capability_id,),
+            capability_registry=registry, lease_seconds=30, source_digest="fixture-config",
             restart_initial_seconds=1, restart_max_seconds=4)
         cme.store = FakeStore()
         cme.module_process = SimpleNamespace(returncode=None)
         cme.active_activities = {}
         tools = [tool for tool in cme._resident_tools()
-                 if tool["capability_id"] == manifest["capability_id"]]
+                 if tool["capability_id"] == capability_id]
         self.assertEqual(1, len(tools))
-        self.assertIn(manifest["capability_id"],
+        self.assertIn(capability_id,
                       resident_action_schema(tools)["properties"]["capability_id"]["enum"])
         tool = tools[0]
         capability_id = tool["capability_id"]

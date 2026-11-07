@@ -15,7 +15,7 @@
 # Changed: 2026-11-07 | R3A-PLUG-001 | Codex GPT-6 | Replace legacy API reader with independent R3A SSH collection.
 # Supersedes: Revision 2.0.0; add measured per-GPU fan and mounted-filesystem capacity.
 # Supersedes: Revision 1.0.0; remove Riverview Octo Control runtime dependency per steward correction.
-# Contracts: r3a.resident-capability-tool 1.0.0 adapter; r3a.octominer-independent-telemetry.config.v2; Issue #46.
+# Contracts: r3a.capability-operation.v1; temporary resident-tool projection; r3a.octominer-independent-telemetry.config.v2.
 # Tests: tests/test_r3a_octominer_plugin.py; tests/test_r3a_telemetry_providers.py.
 # History/Predecessor: Git commit dee12de54618e36cce42b8002d7fb5cf1f436ec8.
 
@@ -221,3 +221,22 @@ def read_telemetry(config: dict[str, Any]) -> list[dict[str, Any]]:
     normalized, history = apply_freshness_and_history(samples, config)
     normalized.append(history)
     return normalized
+
+
+class OctoMinerTelemetryProvider:
+    """Canonical capability provider binding for the existing read-only collectors."""
+
+    def __init__(self, configuration: dict[str, Any]):
+        self.configuration = configuration
+
+    def invoke(self, arguments: dict[str, Any], *, context: dict[str, Any]) -> list[dict[str, Any]]:
+        if arguments:
+            raise ValueError("octominer telemetry read accepts no input fields")
+        if not isinstance(context, dict):
+            raise ValueError("provider invocation context must be an object")
+        return read_telemetry(self.configuration)
+
+
+def create_provider(configuration: dict[str, Any]) -> OctoMinerTelemetryProvider:
+    """Construct a provider instance for the canonical operation registry."""
+    return OctoMinerTelemetryProvider(configuration)

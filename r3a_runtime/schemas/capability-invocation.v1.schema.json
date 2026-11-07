@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.capability-invocation.v1",
+  "title": "R3A Capability Invocation Request and Result v1",
+  "oneOf": [{"$ref": "#/$defs/request"}, {"$ref": "#/$defs/result"}],
+  "$defs": {
+    "caller": {
+      "type": "object", "required": ["principal_id", "resident_id", "service_id"], "additionalProperties": false,
+      "properties": {"principal_id": {"type": "string", "minLength": 1}, "resident_id": {"type": ["string", "null"]}, "service_id": {"type": ["string", "null"]}}
+    },
+    "request": {
+      "type": "object", "required": ["contract_id", "contract_version", "invocation_id", "operation_id", "operation_contract_version", "caller", "target", "input", "activity_id", "attempt_id", "correlation_id", "work_order", "evidence_purpose", "idempotency_key", "deadline", "config_revision"], "additionalProperties": false,
+      "properties": {
+        "contract_id": {"const": "r3a.capability-invocation.v1"}, "contract_version": {"const": "1.0.0"},
+        "invocation_id": {"type": "string", "minLength": 1}, "operation_id": {"type": "string", "minLength": 1}, "operation_contract_version": {"const": "1.0.0"},
+        "caller": {"$ref": "#/$defs/caller"}, "target": {"type": "object"}, "input": {"type": "object"},
+        "activity_id": {"type": "string", "minLength": 1}, "attempt_id": {"type": "string", "minLength": 1}, "correlation_id": {"type": "string", "minLength": 1},
+        "work_order": {"type": ["object", "null"], "required": ["work_order_id", "version"], "additionalProperties": false, "properties": {"work_order_id": {"type": "string", "minLength": 1}, "version": {"type": "integer", "minimum": 1}}},
+        "evidence_purpose": {"type": ["string", "null"]}, "idempotency_key": {"type": ["string", "null"]}, "deadline": {"type": ["string", "null"], "format": "date-time"}, "config_revision": {"type": "string", "minLength": 1}
+      }
+    },
+    "result": {
+      "type": "object", "required": ["contract_id", "contract_version", "invocation_id", "operation_id", "operation_contract_version", "activity_id", "attempt_id", "correlation_id", "provider", "outcome", "started_at", "finished_at", "authorization", "effect_disposition", "output", "error", "evidence", "retryable", "reconciliation_ref"], "additionalProperties": false,
+      "properties": {
+        "contract_id": {"const": "r3a.capability-invocation.v1"}, "contract_version": {"const": "1.0.0"}, "invocation_id": {"type": "string", "minLength": 1}, "operation_id": {"type": "string", "minLength": 1}, "operation_contract_version": {"const": "1.0.0"}, "activity_id": {"type": "string", "minLength": 1}, "attempt_id": {"type": "string", "minLength": 1}, "correlation_id": {"type": "string", "minLength": 1},
+        "provider": {"type": "object", "required": ["provider_id", "provider_version", "artifact_sha256"], "additionalProperties": false, "properties": {"provider_id": {"type": "string", "minLength": 1}, "provider_version": {"type": "string", "minLength": 1}, "artifact_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}},
+        "outcome": {"type": "string", "enum": ["SUCCEEDED", "FAILED", "DENIED", "DEFERRED", "UNKNOWN"]}, "started_at": {"type": "string", "format": "date-time"}, "finished_at": {"type": "string", "format": "date-time"},
+        "authorization": {"type": ["object", "null"], "required": ["provider_id", "allowed", "decision_id", "audit_event_id", "policy_revision", "config_revision"], "additionalProperties": false, "properties": {"provider_id": {"type": "string", "minLength": 1}, "allowed": {"type": "boolean"}, "decision_id": {"type": ["string", "null"]}, "audit_event_id": {"type": ["string", "null"]}, "policy_revision": {"type": ["string", "null"]}, "config_revision": {"type": "string", "minLength": 1}}},
+        "effect_disposition": {"type": "string", "enum": ["NOT_STARTED", "COMMITTED", "NOT_COMMITTED", "UNKNOWN"]}, "output": {}, "error": {"type": ["object", "null"]}, "evidence": {"type": "array", "items": {"type": "object"}}, "retryable": {"type": "boolean"}, "reconciliation_ref": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

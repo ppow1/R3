@@ -85,14 +85,6 @@ class AuthorizationProviderSettings:
     options: dict[str, Any]
 
 
-@dataclass(frozen=True)
-class CapabilityPlugin:
-    manifest_path: Path
-    configuration_path: Path
-    manifest: dict[str, Any]
-    configuration: dict[str, Any]
-
-
 def resolve_model_route(routes: tuple[ModelRoute, ...], default_route: str,
                         requested_route: str | None = None) -> ModelRoute:
     selected = requested_route or default_route
@@ -252,7 +244,7 @@ class Settings:
     default_model_role: str | None
     authorization_provider: AuthorizationProviderSettings
     knowledge_sources: tuple[Path, ...]
-    capability_plugins: tuple[CapabilityPlugin, ...]
+    capability_registry: Any
 
     def model_route(self, route_id: str | None = None) -> ModelRoute:
         return resolve_model_route(self.model_routes, self.default_model_route, route_id)
@@ -282,7 +274,7 @@ def load_settings(path: str | Path) -> Settings:
     if not isinstance(value, dict):
         raise ConfigurationError("bootstrap config must be a JSON object")
     expected_root = {"schema_version", "instance_id", "paths", "postgres", "module", "timing"}
-    extra = value.keys() - expected_root - {"grace", "authorization", "capability_plugins"}
+    extra = value.keys() - expected_root - {"grace", "authorization", "capability_plugins", "capability_operations"}
     missing = expected_root - value.keys()
     if missing or extra:
         raise ConfigurationError(f"root keys invalid; missing={sorted(missing)}, unknown={sorted(extra)}")
@@ -558,13 +550,17 @@ def load_settings(path: str | Path) -> Settings:
     if entrypoint == "r3a_runtime.grace_module" and not (model_endpoint and model_name and knowledge_sources):
         raise ConfigurationError("Grace requires explicit model and knowledge-source configuration")
 
-    capability_plugins: list[CapabilityPlugin] = []
+    from .capability_contracts import (CapabilityContractError, CapabilityRegistry,
+                                       operation_from_manifest)
+    capability_registry = CapabilityRegistry()
     plugin_ids: set[str] = set()
-    raw_plugins = value.get("capability_plugins", [])
+    if "capability_plugins" in value and "capability_operations" in value:
+        raise ConfigurationError("use one capability_operations registry input; capability_plugins is a compatibility alias")
+    raw_plugins = value.get("capability_operations", value.get("capability_plugins", []))
     if not isinstance(raw_plugins, list):
-        raise ConfigurationError("capability_plugins must be an array")
+        raise ConfigurationError("capability_operations must be an array")
     for index, item in enumerate(raw_plugins):
-        where = f"capability_plugins[{index}]"
+        where = f"capability_operations[{index}]"
         if not isinstance(item, dict):
             raise ConfigurationError(f"{where} must be an object")
         _keys(item, {"manifest", "configuration"}, where)
@@ -575,23 +571,30 @@ def load_settings(path: str | Path) -> Settings:
             plugin_config = json.loads(configuration_path.read_text(encoding="utf-8"), object_pairs_hook=_object_pairs)
         except (OSError, UnicodeError, json.JSONDecodeError, ConfigurationError) as exc:
             raise ConfigurationError(f"Cannot load {where}: {exc}") from exc
-        required_manifest = {"schema_version", "plugin_id", "plugin_version", "contract_id",
-                             "contract_version", "capability_id", "tool", "entrypoint",
-                             "configuration_schema", "read_only", "artifact_ref", "artifact_sha256"}
+        required_manifest = {"schema_version", "plugin_id", "plugin_version",
+                             "configuration_schema", "artifact_ref", "artifact_sha256"}
         if not isinstance(manifest, dict):
             raise ConfigurationError(f"{where}.manifest must contain an object")
-        _keys(manifest, required_manifest | ({"supporting_artifacts"} if "supporting_artifacts" in manifest else set()),
+        optional_manifest = {"supporting_artifacts", "operation", "provider", "contract_id",
+                             "contract_version", "capability_id", "tool", "entrypoint", "read_only"}
+        _keys(manifest, required_manifest | (optional_manifest & manifest.keys()),
               f"{where}.manifest")
-        if manifest["schema_version"] != 1 or manifest["read_only"] is not True:
-            raise ConfigurationError(f"{where} must declare schema_version 1 and read_only true")
-        capability_id = _text(manifest["capability_id"], f"{where}.capability_id")
-        if capability_id in plugin_ids or capability_id not in capabilities:
-            raise ConfigurationError(f"{where}.capability_id must be unique and explicitly declared in module.capabilities")
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", capability_id):
-            raise ConfigurationError(f"{where}.capability_id is invalid")
-        if (not isinstance(manifest["entrypoint"], str) or ":" not in manifest["entrypoint"]
+        if manifest["schema_version"] != 1:
+            raise ConfigurationError(f"{where} must declare schema_version 1")
+        if "operation" not in manifest and manifest.get("read_only") is not True:
+            raise ConfigurationError(f"{where} legacy manifest must declare read_only true")
+        schema = manifest["configuration_schema"]
+        if not isinstance(schema, dict):
+            raise ConfigurationError(f"{where}.manifest.configuration_schema must be a JSON Schema object")
+        _validate_plugin_config(plugin_config, schema, f"{where}.configuration")
+        if "entrypoint" in manifest and (not isinstance(manifest["entrypoint"], str) or ":" not in manifest["entrypoint"]
                 or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*", manifest["entrypoint"])):
             raise ConfigurationError(f"{where}.entrypoint must be a Python module:function reference")
+        if "tool" in manifest:
+            tool = manifest["tool"]
+            if (not isinstance(tool, dict) or set(tool) != {"name", "description", "arguments_schema"}
+                    or not isinstance(tool["arguments_schema"], dict)):
+                raise ConfigurationError(f"{where}.tool is invalid")
         artifact = Path(_text(manifest["artifact_ref"], f"{where}.artifact_ref"))
         if artifact.is_absolute():
             raise ConfigurationError(f"{where}.artifact_ref must be relative to its manifest")
@@ -606,6 +609,7 @@ def load_settings(path: str | Path) -> Settings:
         if not isinstance(support_files, list):
             raise ConfigurationError(f"{where}.supporting_artifacts must be an array")
         seen_support: set[str] = set()
+        pinned_digests = {artifact_digest}
         for support in support_files:
             if not isinstance(support, dict) or set(support) != {"artifact_ref", "artifact_sha256"}:
                 raise ConfigurationError(f"{where}.supporting_artifacts entry is invalid")
@@ -619,16 +623,21 @@ def load_settings(path: str | Path) -> Settings:
                     or not re.fullmatch(r"[0-9a-f]{64}", support_hash)
                     or hashlib.sha256(support_path.read_bytes()).hexdigest() != support_hash):
                 raise ConfigurationError(f"{where} supporting artifact digest does not match")
-        tool = manifest["tool"]
-        if (not isinstance(tool, dict) or set(tool) != {"name", "description", "arguments_schema"}
-                or not isinstance(tool["arguments_schema"], dict)):
-            raise ConfigurationError(f"{where}.tool is invalid")
-        schema = manifest["configuration_schema"]
-        if not isinstance(schema, dict):
-            raise ConfigurationError(f"{where}.manifest.configuration_schema must be a JSON Schema object")
-        _validate_plugin_config(plugin_config, schema, f"{where}.configuration")
+            pinned_digests.add(support_hash)
+        try:
+            operation = operation_from_manifest(manifest)
+            operation_id = operation["operation_id"]
+            capability_id = manifest.get("capability_id", operation_id)
+            if capability_id in plugin_ids or capability_id not in capabilities:
+                raise CapabilityContractError("operation_id must be unique and explicitly declared in module.capabilities")
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", capability_id):
+                raise CapabilityContractError("operation_id is invalid")
+            if operation["provider"]["artifact_sha256"] not in pinned_digests:
+                raise CapabilityContractError("operation provider digest must pin a declared artifact")
+            capability_registry.register(operation, plugin_config, legacy_manifest=manifest)
+        except (CapabilityContractError, KeyError, TypeError) as exc:
+            raise ConfigurationError(f"{where}.manifest operation contract is invalid: {exc}") from exc
         plugin_ids.add(capability_id)
-        capability_plugins.append(CapabilityPlugin(manifest_path, configuration_path, manifest, plugin_config))
 
     timing = value["timing"]
     if not isinstance(timing, dict):
@@ -689,7 +698,7 @@ def load_settings(path: str | Path) -> Settings:
         default_model_role=default_model_role,
         authorization_provider=authorization_provider,
         knowledge_sources=knowledge_sources,
-        capability_plugins=tuple(capability_plugins),
+        capability_registry=capability_registry,
     )
 
 

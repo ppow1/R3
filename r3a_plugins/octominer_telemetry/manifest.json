@@ -2,21 +2,8 @@
   "schema_version": 1,
   "plugin_id": "r3a.octominer-telemetry",
   "plugin_version": "2.0.0",
-  "contract_id": "r3a.resident-capability-tool",
-  "contract_version": "1.0.0",
-  "capability_id": "infrastructure.octominer.telemetry.read",
-  "tool": {
-    "name": "octominer_telemetry_read",
-    "description": "Read freshness-aware GPU, storage, model-server, ComfyUI, process, request and bounded-history telemetry from independently configured R3A sources.",
-    "arguments_schema": {
-      "type": "object",
-      "properties": {},
-      "additionalProperties": false
-    }
-  },
-  "entrypoint": "r3a_plugins.octominer_telemetry.plugin:read_telemetry",
   "artifact_ref": "plugin.py",
-  "artifact_sha256": "732b236df886cb2d020f054ff328f2b19ca8d0bc4b21f5c220d15dc71fe6c6cd",
+  "artifact_sha256": "3c36854d4127ce22b44234991709d880bee43509e981dbf00164717d159f6b0e",
   "supporting_artifacts": [
     {
       "artifact_ref": "http_providers.py",
@@ -125,5 +112,105 @@
       }
     }
   },
-  "read_only": true
+  "provider": {
+    "provider_id": "r3a.octominer-telemetry",
+    "provider_version": "2.0.0",
+    "entrypoint": "r3a_plugins.octominer_telemetry.plugin:create_provider",
+    "artifact_sha256": "3c36854d4127ce22b44234991709d880bee43509e981dbf00164717d159f6b0e"
+  },
+  "operation": {
+    "contract_id": "r3a.capability-operation.v1",
+    "contract_version": "1.0.0",
+    "operation_id": "infrastructure.octominer.telemetry.read",
+    "operation_revision": "2.0.0",
+    "provider": {
+      "provider_id": "r3a.octominer-telemetry",
+      "provider_version": "2.0.0",
+      "entrypoint": "r3a_plugins.octominer_telemetry.plugin:create_provider",
+      "artifact_sha256": "3c36854d4127ce22b44234991709d880bee43509e981dbf00164717d159f6b0e"
+    },
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "output_schema": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source_id",
+          "content"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "content": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "effect_class": "read",
+    "caller_constraints": {
+      "allowed_principals": [],
+      "allowed_residents": [
+        "resident.grace"
+      ],
+      "allowed_services": []
+    },
+    "target_scope_schema": {
+      "type": "object",
+      "properties": {
+        "source_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "host_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "required_grants": [
+      "infrastructure.octominer.telemetry.read"
+    ],
+    "evidence": {
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      },
+      "verification_obligations": [
+        "preserve_source_provenance_and_digest",
+        "state_source_freshness_and_timestamp_basis",
+        "do_not_infer_unavailable_measurements"
+      ]
+    },
+    "recovery": {
+      "idempotency_required": false,
+      "idempotency_scope": "invocation",
+      "replay_safe": true,
+      "reconciliation_operation_id": null
+    },
+    "execution": {
+      "timeout_seconds": 30,
+      "retry_disposition": "safe_retry"
+    },
+    "lifecycle": {
+      "desired_state": "enabled"
+    },
+    "resident_tool": {
+      "name": "octominer_telemetry_read",
+      "description": "Read freshness-aware GPU, storage, model-server, ComfyUI, process, request and bounded-history telemetry from independently configured R3A sources."
+    }
+  }
 }

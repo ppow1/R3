@@ -1,0 +1,45 @@
+{
+  "contract_id": "r3a.capability-invocation.v1",
+  "contract_version": "1.0.0",
+  "invocation_id": "fixture-invocation-01",
+  "operation_id": "infrastructure.octominer.telemetry.read",
+  "operation_contract_version": "1.0.0",
+  "activity_id": "fixture-activity-01",
+  "attempt_id": "fixture-attempt-01",
+  "correlation_id": "fixture-correlation-01",
+  "provider": {
+    "provider_id": "r3a.octominer-telemetry",
+    "provider_version": "2.0.0",
+    "artifact_sha256": "3c36854d4127ce22b44234991709d880bee43509e981dbf00164717d159f6b0e"
+  },
+  "outcome": "SUCCEEDED",
+  "started_at": "2026-11-07T11:59:59Z",
+  "finished_at": "2026-11-07T12:00:00Z",
+  "authorization": {
+    "provider_id": "capability_grants",
+    "allowed": true,
+    "decision_id": "fixture-decision-01",
+    "audit_event_id": "fixture-audit-01",
+    "policy_revision": "fixture-policy-01",
+    "config_revision": "fixture-config-sha256"
+  },
+  "effect_disposition": "NOT_STARTED",
+  "output": [
+    {
+      "source_id": "gpu.telemetry.octo-fixture",
+      "content": {
+        "available": true,
+        "gpus": []
+      }
+    }
+  ],
+  "error": null,
+  "evidence": [
+    {
+      "source_id": "gpu.telemetry.octo-fixture",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ],
+  "retryable": false,
+  "reconciliation_ref": null
+}
