@@ -540,6 +540,13 @@ class CME:
                     "authorized": allowed, "reason": None if allowed else reason,
                     "authorization": provider,
                     "effect": "none; discovery/check is read-only"}
+        if operation == "capability.invoke":
+            request = payload.get("request")
+            if not isinstance(request, dict):
+                raise ValueError("capability.invoke requires one canonical invocation request")
+            if request.get("work_order") is not None:
+                raise ValueError("work-order invocations must be submitted by the AP2 Engineering adapter")
+            return await self.invoke_capability(request)
         if operation == "model.readiness.refresh":
             role_id = str(payload["role_id"])
             role = next((entry for entry in self.settings.model_roles if entry.role_id == role_id), None)
@@ -905,49 +912,56 @@ class CME:
                 "authorization": authorization, "observed_at": utcnow().isoformat()}
 
     async def invoke_capability(self, request: dict[str, Any], *,
-                                work_order: EngineeringWorkOrder) -> dict[str, Any]:
-        """CME-only canonical dispatcher for AP2 operations, including isolated writes."""
-        if not isinstance(work_order, EngineeringWorkOrder):
-            raise TypeError("canonical Engineering invocation requires a validated work order")
+                                work_order: EngineeringWorkOrder | None = None) -> dict[str, Any]:
+        """Single canonical CME dispatcher; read operations may omit Engineering work orders."""
         if request.get("contract_id") != "r3a.capability-invocation.v1":
             raise CapabilityContractError("CME requires r3a.capability-invocation.v1")
         operation = self.settings.capability_registry.resolve(
             request.get("operation_id", ""), request.get("operation_contract_version", ""))
         descriptor = operation.descriptor
         checked = validate_invocation_request(request, descriptor)
-        order = work_order.to_dict()
-        if (checked["work_order"] != {"work_order_id": work_order.work_order_id,
-                                     "version": work_order.work_order_version}
-                or checked["activity_id"] != work_order.activity_id
-                or checked["attempt_id"] != work_order.attempt_id
-                or checked["correlation_id"] != work_order.correlation_id
-                or checked["caller"]["resident_id"] != work_order.resident_id
-                or checked["config_revision"] != work_order.config_revision):
-            raise PermissionError("invocation lineage does not match its immutable Engineering work order")
-        if not any(ref.to_dict()["operation_id"] == descriptor["operation_id"]
-                   and ref.contract_version == descriptor["contract_version"]
-                   and ref.effect_class == descriptor["effect_class"]
-                   and ref.target == checked["target"] and ref.inputs == checked["input"]
-                   for ref in work_order.operation_refs):
-            raise PermissionError("operation, inputs, target, or effect are outside the authorized work order")
-        stored = await self.store.get_engineering_work_order(work_order.work_order_id)
-        if (stored is None or stored.get("state") != "EXECUTING"
-                or stored.get("details", {}).get("work_order") != order):
-            raise PermissionError("invocation requires the matching durable EXECUTING work order")
+        order = None
+        if work_order is None:
+            if descriptor["effect_class"] != "read" or checked["work_order"] is not None:
+                raise PermissionError("effectful invocation requires its validated Engineering work order")
+        else:
+            if not isinstance(work_order, EngineeringWorkOrder):
+                raise TypeError("work_order must be a validated EngineeringWorkOrder")
+            order = work_order.to_dict()
+            if (checked["work_order"] != {"work_order_id": work_order.work_order_id,
+                                         "version": work_order.work_order_version}
+                    or checked["activity_id"] != work_order.activity_id
+                    or checked["attempt_id"] != work_order.attempt_id
+                    or checked["correlation_id"] != work_order.correlation_id
+                    or checked["caller"]["resident_id"] != work_order.resident_id
+                    or checked["config_revision"] != work_order.config_revision):
+                raise PermissionError("invocation lineage does not match its immutable Engineering work order")
+            if not any(ref.to_dict()["operation_id"] == descriptor["operation_id"]
+                       and ref.contract_version == descriptor["contract_version"]
+                       and ref.effect_class == descriptor["effect_class"]
+                       and ref.target == checked["target"] and ref.inputs == checked["input"]
+                       for ref in work_order.operation_refs):
+                raise PermissionError("operation, inputs, target, or effect are outside the authorized work order")
+            stored = await self.store.get_engineering_work_order(work_order.work_order_id)
+            if (stored is None or stored.get("state") != "EXECUTING"
+                    or stored.get("details", {}).get("work_order") != order):
+                raise PermissionError("invocation requires the matching durable EXECUTING work order")
         if descriptor["effect_class"] == "external_write":
             raise PermissionError("this isolated Engineering dispatcher does not execute external_write")
         started_at = utcnow().isoformat()
+        caller_resident = checked["caller"]["resident_id"] or checked["caller"]["principal_id"]
         authorization = await self._authorize_capability(
-            descriptor["operation_id"], activity_id=work_order.activity_id,
-            attempt_id=work_order.attempt_id, request_id=checked["invocation_id"],
-            resident_id=work_order.resident_id,
+            descriptor["operation_id"], activity_id=work_order.activity_id if work_order else checked["activity_id"],
+            attempt_id=work_order.attempt_id if work_order else checked["attempt_id"],
+            request_id=checked["invocation_id"], resident_id=caller_resident,
             context={"dispatcher": "CME", "invocation_id": checked["invocation_id"],
                      "idempotency_key": checked["idempotency_key"],
                      "effect_class": descriptor["effect_class"],
                      "required_grants": descriptor["required_grants"],
-                     "target": checked["target"], "work_order_id": work_order.work_order_id,
-                     "work_order_version": work_order.work_order_version,
-                     "config_revision": work_order.config_revision})
+                     "target": checked["target"],
+                     "work_order_id": work_order.work_order_id if work_order else None,
+                     "work_order_version": work_order.work_order_version if work_order else None,
+                     "config_revision": checked["config_revision"]})
         auth_ref = {"provider_id": authorization["provider_id"], "allowed": True,
                     "decision_id": authorization["decision_id"],
                     "audit_event_id": authorization["audit_event_id"],
@@ -955,7 +969,9 @@ class CME:
                     "config_revision": authorization["config_revision"]}
         canonical_digest = hashlib.sha256(json.dumps(checked, sort_keys=True,
                                                     separators=(",", ":")).encode()).hexdigest()
-        existing = await self.store.begin_capability_invocation(checked, canonical_digest, auth_ref)
+        persistence_key = checked["idempotency_key"] or f"invocation:{checked['invocation_id']}"
+        durable_request = {**checked, "idempotency_key": persistence_key}
+        existing = await self.store.begin_capability_invocation(durable_request, canonical_digest, auth_ref)
         if existing["state"] == "SUCCEEDED" and existing.get("result") is not None:
             return existing["result"]
         if existing["state"] != "STARTED":
@@ -965,7 +981,7 @@ class CME:
         provider = operation.load_provider()
         try:
             output = await asyncio.to_thread(provider.invoke, checked["input"], context={
-                "invocation_id": checked["invocation_id"], "idempotency_key": checked["idempotency_key"],
+                "invocation_id": checked["invocation_id"], "idempotency_key": persistence_key,
                 "activity_id": checked["activity_id"], "attempt_id": checked["attempt_id"],
                 "correlation_id": checked["correlation_id"], "target": checked["target"],
                 "work_order": order, "effect_class": descriptor["effect_class"]})
@@ -982,8 +998,8 @@ class CME:
                       "authorization": auth_ref, "effect_disposition": "UNKNOWN", "output": None,
                       "error": {"type": type(exc).__name__, "message": str(exc)}, "evidence": [],
                       "retryable": descriptor["recovery"]["replay_safe"],
-                      "reconciliation_ref": checked["idempotency_key"]}
-            await self.store.finish_capability_invocation(checked["idempotency_key"], canonical_digest, result)
+                      "reconciliation_ref": persistence_key}
+            await self.store.finish_capability_invocation(persistence_key, canonical_digest, result)
             raise
         output, provider_evidence = normalize_provider_result(output, descriptor)
         finished_at = utcnow().isoformat()
@@ -1001,7 +1017,7 @@ class CME:
                   "evidence": provider_evidence if isinstance(provider_evidence, list) else [provider_evidence],
                   "retryable": False, "reconciliation_ref": None}
         validate_invocation_result(result, descriptor)
-        await self.store.finish_capability_invocation(checked["idempotency_key"], canonical_digest, result)
+        await self.store.finish_capability_invocation(persistence_key, canonical_digest, result)
         return result
 
     async def complete_engineering_work_order(self, work_order: EngineeringWorkOrder,

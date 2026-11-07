@@ -209,8 +209,8 @@
       "desired_state": "enabled"
     },
     "resident_tool": {
-      "name": "octominer_telemetry_read",
-      "description": "Read freshness-aware GPU, storage, model-server, ComfyUI, process, request and bounded-history telemetry from independently configured R3A sources."
+      "name": "OctoMiner GPU Telemetry",
+      "description": "Read GPU, filesystem, compute-process, model-server, ComfyUI, request and bounded-history telemetry from independently configured R3A sources."
     }
   }
 }

@@ -56,7 +56,7 @@ class CapabilityContractTests(unittest.TestCase):
         self.assertEqual(self.descriptor["target_scope_schema"], discovered_descriptor["target_scope_schema"])
         provider = self.registered.load_provider()
         self.assertTrue(callable(provider.invoke))
-        self.assertEqual("octominer_telemetry_read",
+        self.assertEqual("OctoMiner GPU Telemetry",
                          self.registered.resident_tool_projection()["name"])
 
     def test_octominer_resolves_and_runs_through_common_provider_and_result_contract(self):

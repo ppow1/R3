@@ -13,7 +13,7 @@ import types
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 if importlib.util.find_spec("psycopg") is None:
     pg_module = types.ModuleType("psycopg")
@@ -138,6 +138,50 @@ class DurableFixtureStore:
 
 
 class IsolatedCapabilityIntegrationTests(unittest.TestCase):
+    def test_canonical_read_uses_cme_without_engineering_work_order(self):
+        async def scenario(root: Path):
+            order = work_order()
+            read_descriptor = descriptor()
+            read_descriptor["effect_class"] = "read"
+            read_descriptor["recovery"]["idempotency_required"] = False
+            registry = CapabilityRegistry()
+            registry.register(read_descriptor, {"workspace_root": str(root)})
+            instance = CME.__new__(CME)
+            instance.settings = SimpleNamespace(capability_registry=registry)
+            instance.store = DurableFixtureStore(order)
+            instance.store.fail_finish_once = False
+            instance._authorize_capability = AsyncMock(return_value={
+                "provider_id": "fixture-grants", "decision_id": "decision-read",
+                "audit_event_id": "audit-read", "policy_revision": "policy-demo",
+                "config_revision": "cfg-demo"})
+
+            class Reader:
+                def invoke(self, arguments, *, context):
+                    return {"path": arguments["path"], "sha256": "a" * 64,
+                            "bytes_written": 0, "replayed": False}
+
+            request = {
+                "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+                "invocation_id": ACTION, "operation_id": "engineering.workspace.apply_patch",
+                "operation_contract_version": "1.0.0",
+                "caller": {"principal_id": "resident.grace", "resident_id": "resident.grace", "service_id": None},
+                "target": {"workspace_id": "candidate-1"},
+                "input": {"path": "artifacts/result.txt", "content": "observed"},
+                "activity_id": ACTIVITY, "attempt_id": ATTEMPT, "correlation_id": CORRELATION,
+                "work_order": None, "evidence_purpose": "Read one registered capability fixture.",
+                "idempotency_key": None, "deadline": None, "config_revision": "cfg-demo"}
+            from r3a_runtime.providers import isolated_workspace
+            with patch.object(isolated_workspace, "create_provider", return_value=Reader()):
+                result = await instance._control_request(
+                    "capability.invoke", {"request": request}, "control-idempotency")
+            self.assertEqual("SUCCEEDED", result["outcome"])
+            self.assertEqual("NOT_STARTED", result["effect_disposition"])
+            self.assertIsNone(instance._authorize_capability.await_args.kwargs["context"]["work_order_id"])
+            self.assertEqual(f"invocation:{ACTION}", next(iter(instance.store.invocations)))
+
+        with tempfile.TemporaryDirectory(prefix="r3a-canonical-read-") as temporary:
+            asyncio.run(scenario(Path(temporary)))
+
     def test_cme_dispatch_recovery_artifact_verification_and_gated_completion(self):
         async def scenario(root: Path):
             order = work_order()
@@ -172,6 +216,8 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                         "audit_event_id": "audit-invocation", "policy_revision": "policy-demo",
                         "config_revision": "cfg-demo"}
             instance._authorize_capability = AsyncMock(side_effect=authorize)
+            with self.assertRaisesRegex(PermissionError, "requires its validated Engineering work order"):
+                await instance.invoke_capability(request, work_order=None)
             with self.assertRaisesRegex(RuntimeError, "simulated process interruption"):
                 await instance.invoke_capability(request, work_order=order)
             self.assertTrue(artifact.is_file())
