@@ -2,14 +2,14 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.5.0
+File Revision: 1.6.0
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
-Purpose: Execute read-only Grace objectives through configured inference and resident-selected authorized capabilities.
+Purpose: Execute Grace objectives through configured inference and resident-selected capabilities in the authorized canonical runtime.
 Execution Model: Versioned JSON-lines resident module process supervised by CME.
 Observability: Provider/model, request/result references and digests, citations, and failures are returned to durable activity state.
 Dependencies: Python standard library; explicitly configured OpenAI-compatible model endpoint.
-Authority: AP1 / R3A-019 and AP1 Slice 1 authorized by Steward; assigned authority and read-only configured capabilities are enforced.
+Authority: AP1 / R3A-019 and AP1 Slice 1 authorized by Steward; CME enforces configured grants and invocation authority.
 Changed: 2026-11-06 | AP1-M1 | Codex GPT-6 | Implement local inference and read-only objective execution.
 Changed: 2026-11-06 | AP1-M1 | Codex GPT-6 | Constrain JSON output and retain model response references on validation failure.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Execute selected configured model route and retain event/evidence lineage.
@@ -30,7 +30,8 @@ Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; automated infe
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Support model-selected registered Engineering operations, typed proposals and post-execution resident assessment.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Require evidence-bounded Engineering assessments and prohibit unsupported artifact claims.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Allow Grace to request a configured reasoning role with a rationale; CME remains the authorization and route gate.
-History/Predecessor: Prior revision at baseline 3355abe96524a5260e9ba8395a9dfef5bfdd9422, blob 79b5db5747b261cbb3d8807988e8c63043e1d9ae.
+Changed: 2026-11-07T23:41:45Z | R3A-AP2-DELEGATION | Codex GPT-6 | Guide resident-directed office discovery and generic registered handoff selection using authoritative evidence.
+History/Predecessor: Prior revision preserved at commit db46df7a04c694f0e7508d181a3a65b296cc6d16, blob 93c4e9ddee04a426fac866272be7bc49f93e30ff.
 """
 from __future__ import annotations
 
@@ -257,6 +258,7 @@ class GraceResident:
                         "For a continuation that lists dependency_context, treat those durable prerequisite outcomes as prior institutional evidence, "
                         "and continue the current objective without claiming the prerequisite's work as your own. "
                         "If a reasoning_escalation policy is supplied and your current reasoning route is insufficient, you may request one of its listed roles. This is your reasoning choice, not an automatic fallback; explain what uncertainty requires stronger reasoning. The runtime checks authorization, readiness, and the activity token budget, then returns its result or refusal in the same activity. Never claim an escalation succeeded unless the runtime reports its result. "
+                        "For institutional delegation, first use an available directory capability when office responsibility or resident binding is needed. Evaluate the returned authoritative office, resident, and capability records against the objective. A directory listing or office binding does not establish recipient readiness, execution registration, or authorization. If the current available_tools list contains a registered handoff operation whose advertised contract fits the work, you may select it and provide only target identifiers and evidence actually returned by the directory, plus arguments required by that operation's schema. The institutional runtime still enforces grants and records the result. Do not hardcode an office, resident, or operation identity; do not pretend to delegate if no suitable handoff operation is registered. Continue from returned capability results in this same activity, or return a justified blocked decision when the required handoff is unavailable. "
                         "When more information is needed, return {\"action\":\"invoke_capability\","
                         "\"contract_id\":\"r3a.resident-capability-tool\",\"contract_version\":\"1.0.0\","
                         "\"capability_id\":\"exact capability_id\",\"arguments\":{...},"
