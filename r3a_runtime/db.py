@@ -19,6 +19,7 @@ Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Persist model-ro
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Preserve role readiness in existing registries and atomically requeue or block deferred activities.
 Changed: 2026-11-06T23:46:49Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Consolidate model-role deferral operations into one durable state-transition method.
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Persist provider/model identity and evidence; invalidate incompatible prior readiness in the existing registry.
+Changed: 2026-11-07T01:30:00Z | R3A-019 | Codex GPT-6 | Return the resolved configured route ID from durable objective intake.
 Supersedes: None.
 Contracts: AP0-003–010; R3A-019; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py.
@@ -710,7 +711,7 @@ class Store:
                                (event_id, activity_id))
             return {"activity_id": activity_id, "state": "QUEUED", "activity_type": "grace.objective",
                     "idempotency_key": idempotency_key, "attempt_count": 0, "duplicate": False,
-                    "event_kind": event_kind, "route_id": selected_route.route_id,
+                    "event_kind": event_kind, "route_id": selected_route_id,
                     "received_event_id": event_id}
 
     async def requeue_blocked_activities(self) -> int:
