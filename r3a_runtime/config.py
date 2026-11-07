@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/config.py
 Component: R3A-BOOTSTRAP-CONFIG
-File Revision: 1.4.0
+File Revision: 1.5.0
 Created: 2026-11-06T15:04:00Z
 Created By: Codex GPT-6
 Purpose: Strictly validate external R3A AP0-M1 bootstrap and operating settings.
@@ -19,6 +19,7 @@ Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Preserve route-o
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Validate external provider endpoints, matching origins, private-network HTTP, freshness, timeouts and retries.
 Changed: 2026-11-07 | R3A-PLUG-001 | Codex GPT-6 | Load versioned capability plug-in manifests and external configuration with artifact digest validation.
 Changed: 2026-11-07 | R3A-PLUG-002 | Codex GPT-6 | Validate plug-in configuration against each manifest's portable schema, without capability-specific host validation.
+Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Add externally configured v1 escalation policy with per-activity request and completion-token budgets.
 Supersedes: None.
 Contracts: AP0-001/008/009; R3A-019; Issue #46; AP0-M1 D7; r3a_runtime.contracts; hints/file-provenance.md.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py.
@@ -83,6 +84,17 @@ class AuthorizationProviderSettings:
     provider_id: str
     contract_version: str
     options: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ReasoningEscalationPolicy:
+    contract_id: str
+    contract_version: str
+    enabled: bool
+    authorization_capability_id: str
+    allowed_role_ids: tuple[str, ...]
+    max_requests_per_activity: int
+    max_completion_tokens_per_activity: int
 
 
 def resolve_model_route(routes: tuple[ModelRoute, ...], default_route: str,
@@ -242,6 +254,7 @@ class Settings:
     default_model_route: str
     model_roles: tuple[ModelRole, ...]
     default_model_role: str | None
+    reasoning_escalation: ReasoningEscalationPolicy | None
     authorization_provider: AuthorizationProviderSettings
     knowledge_sources: tuple[Path, ...]
     capability_registry: Any
@@ -364,6 +377,7 @@ def load_settings(path: str | Path) -> Settings:
     default_model_route = "default"
     model_roles: tuple[ModelRole, ...] = ()
     default_model_role: str | None = None
+    reasoning_escalation: ReasoningEscalationPolicy | None = None
     knowledge_sources: tuple[Path, ...] = ()
     if entrypoint == "r3a_runtime.grace_module" or grace is not None:
         if not isinstance(grace, dict):
@@ -371,12 +385,14 @@ def load_settings(path: str | Path) -> Settings:
         legacy_keys = {"provider", "endpoint", "model", "timeout_seconds", "max_tokens", "knowledge_sources"}
         route_keys = {"routes", "default_route", "knowledge_sources"}
         role_route_keys = route_keys | {"role_registry"}
+        escalation_keys = {"reasoning_escalation"}
         if set(grace) == legacy_keys:
             route_data = [{"route_id": "default", "provider": grace["provider"],
                            "endpoint": grace["endpoint"], "model": grace["model"],
                            "timeout_seconds": grace["timeout_seconds"], "max_tokens": grace["max_tokens"]}]
             default_model_route = "default"
-        elif set(grace) in (route_keys, role_route_keys):
+        elif set(grace) in (route_keys, role_route_keys,
+                            route_keys | escalation_keys, role_route_keys | escalation_keys):
             route_data = grace["routes"]
             default_model_route = _text(grace["default_route"], "grace.default_route")
         else:
@@ -529,6 +545,48 @@ def load_settings(path: str | Path) -> Settings:
                 if set(role.fallback_roles) - role_ids:
                     raise ConfigurationError(f"role {role.role_id} references an unconfigured fallback role")
             model_roles = tuple(parsed_roles)
+
+        raw_escalation = grace.get("reasoning_escalation")
+        if raw_escalation is not None:
+            if not isinstance(raw_escalation, dict):
+                raise ConfigurationError("grace.reasoning_escalation must be an object")
+            required_escalation = {"contract_id", "contract_version", "enabled",
+                                   "authorization_capability_id", "allowed_role_ids",
+                                   "max_requests_per_activity", "max_completion_tokens_per_activity"}
+            _keys(raw_escalation, required_escalation, "grace.reasoning_escalation")
+            contract_id = _text(raw_escalation["contract_id"],
+                                "grace.reasoning_escalation.contract_id")
+            contract_version = _text(raw_escalation["contract_version"],
+                                     "grace.reasoning_escalation.contract_version")
+            if (contract_id != "r3a.reasoning-escalation-policy"
+                    or re.fullmatch(r"1\.[0-9]+\.[0-9]+", contract_version) is None):
+                raise ConfigurationError("grace.reasoning_escalation contract must be supported v1 semver")
+            enabled = raw_escalation["enabled"]
+            if not isinstance(enabled, bool):
+                raise ConfigurationError("grace.reasoning_escalation.enabled must be boolean")
+            grant = _text(raw_escalation["authorization_capability_id"],
+                          "grace.reasoning_escalation.authorization_capability_id")
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", grant):
+                raise ConfigurationError("reasoning escalation authorization capability ID is invalid")
+            if enabled and grant not in capabilities:
+                raise ConfigurationError("enabled reasoning escalation must be declared in module.capabilities")
+            allowed = raw_escalation["allowed_role_ids"]
+            if (not isinstance(allowed, list) or any(not isinstance(item, str) or not item.strip()
+                                                      for item in allowed)
+                    or len(set(allowed)) != len(allowed)):
+                raise ConfigurationError("reasoning escalation allowed_role_ids must be a unique text list")
+            if set(allowed) - {role.role_id for role in model_roles}:
+                raise ConfigurationError("reasoning escalation references an unconfigured role")
+            if enabled and not allowed:
+                raise ConfigurationError("enabled reasoning escalation requires at least one allowed role")
+            max_requests = raw_escalation["max_requests_per_activity"]
+            max_tokens = raw_escalation["max_completion_tokens_per_activity"]
+            if isinstance(max_requests, bool) or not isinstance(max_requests, int) or not 1 <= max_requests <= 5:
+                raise ConfigurationError("reasoning escalation max_requests_per_activity must be from 1 through 5")
+            if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or not 1 <= max_tokens <= 8192:
+                raise ConfigurationError("reasoning escalation token budget must be from 1 through 8192")
+            reasoning_escalation = ReasoningEscalationPolicy(
+                contract_id, contract_version, enabled, grant, tuple(allowed), max_requests, max_tokens)
 
     authorization = value.get("authorization", {"provider_id": "capability_grants",
                                                     "contract_version": "1.0.0", "options": {}})
@@ -696,6 +754,7 @@ def load_settings(path: str | Path) -> Settings:
         default_model_route=default_model_route,
         model_roles=model_roles,
         default_model_role=default_model_role,
+        reasoning_escalation=reasoning_escalation,
         authorization_provider=authorization_provider,
         knowledge_sources=knowledge_sources,
         capability_registry=capability_registry,
@@ -745,7 +804,15 @@ def sanitized_config(settings: Settings) -> dict[str, Any]:
                                                  "deferral_seconds": role.deferral_seconds,
                                                  "concurrency": role.concurrency}
                                                 for role in settings.model_roles]}
-                                     if settings.model_roles else None)}
+                                     if settings.model_roles else None),
+                   "reasoning_escalation": ({"contract_id": settings.reasoning_escalation.contract_id,
+                                              "contract_version": settings.reasoning_escalation.contract_version,
+                                              "enabled": settings.reasoning_escalation.enabled,
+                                              "authorization_capability_id": settings.reasoning_escalation.authorization_capability_id,
+                                              "allowed_role_ids": list(settings.reasoning_escalation.allowed_role_ids),
+                                              "max_requests_per_activity": settings.reasoning_escalation.max_requests_per_activity,
+                                              "max_completion_tokens_per_activity": settings.reasoning_escalation.max_completion_tokens_per_activity}
+                                             if settings.reasoning_escalation else None)}
                   if settings.model_endpoint else None),
         "timing": {"observer_interval_seconds": settings.observer_interval_seconds,
                    "scheduler_interval_seconds": settings.scheduler_interval_seconds,

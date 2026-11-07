@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_modular_autonomy.py
 Component: R3A-AP1-MODULAR-AUTONOMY-REGRESSION
-File Revision: 1.2.0
+File Revision: 1.3.0
 Created: 2026-11-06T23:19:46Z
 Created By: Codex GPT-6
 Purpose: Permanently verify versioned autonomy contracts, external model roles, readiness routing, deferral, and authorization-provider compatibility.
@@ -16,6 +16,7 @@ Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Extend Slice 1 r
 Changed: 2026-11-07T05:45:10Z | AP2-IMPLEMENTATION | Codex GPT-6 | Give the model deferral compatibility fixture valid required acceptance criteria.
 Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Assert authorization decision identity remains distinct from its audit event.
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Verify versioned activity dependency identity and validation.
+Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Verify external escalation policy version, registered routes, authorization identity and per-activity token limits.
 Supersedes: None.
 Contracts: AP0-003–010; R3A-019; MOD-006; r3a.contract-envelope.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
 Tests: This test module.
@@ -134,6 +135,43 @@ def make_config(directory: Path, *, primary_model: str = "reasoner-a",
     path = directory / "config.json"
     path.write_text(json.dumps(value), encoding="utf-8")
     return path
+
+
+class ReasoningEscalationConfigTests(unittest.TestCase):
+    def test_escalation_policy_is_versioned_configured_and_sanitized(self):
+        with TemporaryDirectory() as temporary:
+            path = make_config(Path(temporary))
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["module"]["capabilities"].append("reasoning.escalation.request")
+            value["grace"]["reasoning_escalation"] = {
+                "contract_id": "r3a.reasoning-escalation-policy", "contract_version": "1.0.0",
+                "enabled": True, "authorization_capability_id": "reasoning.escalation.request",
+                "allowed_role_ids": ["resident.primary"], "max_requests_per_activity": 2,
+                "max_completion_tokens_per_activity": 512}
+            path.write_text(json.dumps(value), encoding="utf-8")
+            settings = load_settings(path)
+            self.assertEqual(settings.reasoning_escalation.allowed_role_ids, ("resident.primary",))
+            self.assertEqual(settings.reasoning_escalation.max_completion_tokens_per_activity, 512)
+            self.assertEqual(sanitized_config(settings)["grace"]["reasoning_escalation"][
+                "authorization_capability_id"], "reasoning.escalation.request")
+
+    def test_escalation_policy_rejects_unregistered_roles_and_bad_budget(self):
+        for field, invalid, message in (
+                ("allowed_role_ids", ["resident.missing"], "unconfigured role"),
+                ("max_completion_tokens_per_activity", 0, "token budget")):
+            with self.subTest(field=field), TemporaryDirectory() as temporary:
+                path = make_config(Path(temporary))
+                value = json.loads(path.read_text(encoding="utf-8"))
+                value["module"]["capabilities"].append("reasoning.escalation.request")
+                value["grace"]["reasoning_escalation"] = {
+                    "contract_id": "r3a.reasoning-escalation-policy", "contract_version": "1.0.0",
+                    "enabled": True, "authorization_capability_id": "reasoning.escalation.request",
+                    "allowed_role_ids": ["resident.primary"], "max_requests_per_activity": 1,
+                    "max_completion_tokens_per_activity": 256}
+                value["grace"]["reasoning_escalation"][field] = invalid
+                path.write_text(json.dumps(value), encoding="utf-8")
+                with self.assertRaisesRegex(ConfigurationError, message):
+                    load_settings(path)
 
 
 class VersionedEnvelopeTests(unittest.TestCase):

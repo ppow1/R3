@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.2.6
+File Revision: 1.3.0
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -27,6 +27,7 @@ Changed: 2026-11-07T03:34:34Z | R3A-019-INBOX-LOOP | Codex GPT-6 | Verify respon
 Changed: 2026-11-07T03:59:26Z | R3A-019-SUSTAINED-OPERATION | Codex GPT-6 | Verify empty acceptance criteria reject intake and block legacy execution.
 Changed: 2026-11-07T04:41:59Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Assert status uses bounded latest-event evidence and skips event history payloads.
 Changed: 2026-11-07T04:44:58Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Assert indexed queue-state summary is included in status diagnostics.
+Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Verify resident-selected escalation is schema-bounded to offered roles and returned for CME enforcement.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
@@ -38,6 +39,7 @@ import tempfile
 import unittest
 import asyncio
 import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -46,7 +48,8 @@ import hashlib
 from r3a_runtime.acceptance import (AcceptanceCriteriaRequired, validate_acceptance,
                                     validate_criteria, validate_required_criteria)
 from r3a_runtime.cme import CME, _RESIDENT_TOOLS, _knowledge_answer_issues, _requires_runtime_evidence
-from r3a_runtime.config import ConfigurationError, ModelRoute, resolve_model_route
+from r3a_runtime.config import (ConfigurationError, ModelReadinessPolicy, ModelRole,
+                                ModelRoute, resolve_model_route)
 from r3a_runtime.grace_module import GraceResident, resident_action_schema
 from r3a_runtime.knowledge import retrieve
 from r3a_runtime.diagnostics import DiagnosticProjection
@@ -282,6 +285,31 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "not present in its tool manifest"):
             asyncio.run(resident.handle("execute", self._payload([])))
 
+    def test_grace_can_request_only_an_offered_escalation_role(self):
+        resident = self._resident(
+            '{"action":"escalate_reasoning","target_role_id":"resident.primary",'
+            '"rationale":"The 0.6B route cannot reliably compare the two evidence branches."}')
+        payload = self._payload([])
+        payload["reasoning_escalation"] = {"enabled": True, "available_roles": [
+            {"role_id": "resident.primary", "route_id": "primary", "readiness": "ready"}],
+            "max_completion_tokens_per_activity": 512, "charged_completion_tokens": 0}
+        result = asyncio.run(resident.handle("execute", payload))
+        self.assertEqual(result["action"], "escalate_reasoning")
+        self.assertEqual(result["reasoning_escalation_request"]["target_role_id"], "resident.primary")
+        schema = resident._model_request.await_args.args[2]["response_format"]["schema"]
+        self.assertIn("escalate_reasoning", schema["properties"]["action"]["enum"])
+        self.assertEqual(schema["properties"]["target_role_id"]["enum"], ["resident.primary"])
+
+    def test_grace_cannot_select_unoffered_escalation_role(self):
+        resident = self._resident(
+            '{"action":"escalate_reasoning","target_role_id":"resident.external",'
+            '"rationale":"Need a stronger route."}')
+        payload = self._payload([])
+        payload["reasoning_escalation"] = {"enabled": True, "available_roles": [
+            {"role_id": "resident.primary", "route_id": "primary", "readiness": "ready"}]}
+        with self.assertRaisesRegex(RuntimeError, "not offered by policy"):
+            asyncio.run(resident.handle("execute", payload))
+
     def test_cme_returns_source_digested_knowledge_only_after_authorization(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "process.json"
@@ -300,6 +328,120 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
             self.assertEqual(result["outcome"], "succeeded")
             self.assertEqual(result["evidence"][0]["content"], "Transitions from STOPPING: STOPPED, FAILED")
             self.assertEqual(result["authorization"]["audit_event_id"], "audit-1")
+
+    def test_cme_authorizes_and_routes_grace_requested_escalation_with_durable_budget_evidence(self):
+        class StoreFake:
+            def __init__(self):
+                self.progress = []
+                self.blocked = None
+
+            async def record_progress(self, _activity, progress, checkpoint):
+                self.progress.append((dict(progress), json.loads(json.dumps(checkpoint))))
+
+            async def block_activity(self, _activity, reason, details):
+                self.blocked = (reason, details)
+
+            async def renew_activity_lease(self, _activity):
+                return None
+
+        local = ModelRoute("autonomic", "openai-compatible", "http://127.0.0.1:18796/v1/chat/completions",
+                           "small", 20, 64)
+        primary = ModelRoute("primary", "openai-compatible", "http://127.0.0.1:8080/v1/chat/completions",
+                             "large", 30, 128)
+        readiness = ModelReadinessPolicy("models", "1.0.0", "http://127.0.0.1:8080/v1/models",
+                                         2, 1, 0.1, 5)
+        roles = (
+            ModelRole("resident.autonomic", "autonomic", ("reason.text",), ("text",), (),
+                      45, "block", 5, 1, readiness),
+            ModelRole("resident.primary", "primary", ("reason.text", "plan"), ("text",), (),
+                      45, "block", 5, 1, readiness),
+        )
+        settings = SimpleNamespace(model_roles=roles, model_route=lambda route_id: {
+            "autonomic": local, "primary": primary}[route_id], source_digest="config-1",
+            module_capabilities=(), lease_seconds=30, restart_initial_seconds=1,
+            restart_max_seconds=3)
+
+        async def exercise():
+            cme = CME.__new__(CME)
+            cme.module_process = SimpleNamespace(returncode=None)
+            cme.module_id = "resident.grace"
+            cme.module_version = "1.2.3"
+            cme.settings = settings
+            cme.store = StoreFake()
+            cme.active_activities = {}
+            cme._lease_heartbeat = AsyncMock()
+            cme._objective_context = AsyncMock(return_value={
+                "activity_type": "grace.objective", "activity_id": "activity-1", "attempt_id": "attempt-1",
+                "objective": "Use stronger reasoning to evaluate the evidence and report limitations.",
+                "acceptance_criteria": [{"criterion_id": "result", "type": "evidence_citation"}],
+                "event_kind": "objective", "route_id": "autonomic",
+                "model_route": {"route_id": "autonomic", "provider": "openai-compatible", "model": "small",
+                                "endpoint": local.endpoint, "timeout_seconds": 20, "max_tokens": 64},
+                "selected_role_id": "resident.autonomic", "route_decision": {},
+                "evidence_format": "r3a.knowledge-evidence.v1", "required_evidence_refs": [],
+                "evidence": [], "available_tools": [], "available_engineering_operations": [],
+                "reasoning_escalation": {"enabled": True,
+                    "available_roles": [{"role_id": "resident.primary", "route_id": "primary",
+                                         "readiness": "ready"}]},
+                "conversation": [], "reasoning_state": {}, "pending_final": None,
+                "config_revision": "config-1"})
+            cme._model_readiness_observations = AsyncMock(return_value={"resident.primary": {
+                "status": "ready", "observed_at": datetime.now(timezone.utc).isoformat(),
+                "provider_id": "models", "evidence_ref": "ready-1", "evidence": {"model_id": "large"},
+                "config_revision": "config-1"}})
+            cme._authorization_decision = AsyncMock(return_value=SimpleNamespace(
+                provider_id="capability_grants", allowed=True,
+                decision_id="decision-1", audit_event_id="audit-1", policy_revision=None,
+                config_revision="config-1", reason="active capability grant",
+                observed_at="2026-11-07T00:00:00Z"))
+            escalation = {"action": "escalate_reasoning", "target_role_id": "resident.primary",
+                          "rationale": "The current route cannot resolve the uncertainty from the evidence."}
+            final = {"action": "final", "decision": {"assessment": "Insufficient evidence remains.",
+                "status": "blocked", "evidence_refs": [], "recommended_action": "Obtain missing evidence."}}
+            calls = [
+                {"result": {"action": "escalate_reasoning", "reasoning_escalation_request": escalation,
+                            "model_content": json.dumps(escalation),
+                            "model": {"route_id": "autonomic", "request_ref": "small-req",
+                                      "result_ref": "small-result", "request_sha256": "1"*64,
+                                      "result_sha256": "2"*64, "usage": {"completion_tokens": 10}}}},
+                {"result": {"action": "final", "decision": final["decision"],
+                            "model_content": json.dumps(final),
+                            "model": {"route_id": "primary", "request_ref": "large-req",
+                                      "result_ref": "large-result", "request_sha256": "3"*64,
+                                      "result_sha256": "4"*64, "usage": {"completion_tokens": 26}}}},
+            ]
+            module_payloads = []
+
+            async def module_call(_operation, payload, **_kwargs):
+                module_payloads.append(json.loads(json.dumps(payload)))
+                return calls.pop(0)
+
+            cme._module_call = module_call
+            activity = {"activity_type": "grace.objective", "activity_id": "activity-1",
+                "attempt_id": "attempt-1", "attempt_count": 0,
+                "input": {"objective": "Use stronger reasoning to evaluate the evidence and report limitations.",
+                    "correlation_id": "correlation-1", "reasoning_escalation": {
+                        "contract_id": "r3a.reasoning-escalation-policy", "contract_version": "1.0.0",
+                        "enabled": True, "authorization_capability_id": "reasoning.escalation.request",
+                        "allowed_role_ids": ["resident.primary"], "max_requests_per_activity": 1,
+                        "max_completion_tokens_per_activity": 128, "config_revision": "config-1"}},
+                "checkpoint": {}}
+            await cme._run_activity(activity)
+            return cme, module_payloads
+
+        cme, payloads = asyncio.run(exercise())
+        cme._authorization_decision.assert_awaited_once()
+        self.assertEqual(cme._authorization_decision.await_args.args[0], "reasoning.escalation.request")
+        self.assertEqual(payloads[0]["route_id"], "autonomic")
+        self.assertEqual(payloads[1]["route_id"], "primary")
+        self.assertEqual(cme.store.blocked[1]["reasoning_trace"]["model_turns"][-1]["result_ref"],
+                         "large-result")
+        checkpoint = next(item[1] for item in cme.store.progress
+                          if item[0]["phase"] == "resident.decision.ready")
+        request = checkpoint["reasoning_state"]["escalation"]["requests"][0]
+        self.assertEqual(request["status"], "SUCCEEDED")
+        self.assertEqual(request["charged_completion_tokens"], 26)
+        self.assertEqual(request["authorization"]["audit_event_id"], "audit-1")
 
     def test_cme_rejects_false_completion_and_resumes_same_activity_for_missing_evidence(self):
         class StoreFake:

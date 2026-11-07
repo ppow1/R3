@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.6.0
+File Revision: 1.7.0
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -31,6 +31,7 @@ Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist autho
 Changed: 2026-11-07T13:20:00Z | R3A-AP2-CAPABILITY-INTEGRATION | Codex GPT-6 | Store canonical invocation authorization in a nonreserved evidence column and verify durable SQL recovery against isolated PostgreSQL.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Persist typed Engineering assignments in durable Grace inbox intake without relaxing AP1 acceptance criteria.
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Park objective dependencies durably, requeue after prerequisite completion, and expose bounded lineage evidence.
+Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Snapshot the configured escalation policy on each durable objective so continuation uses its original budget and allowed routes.
 Supersedes: None.
 Contracts: AP0-003–010; R3A-019; R3A-011/R3A-012; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1; r3a.engineering-work-order.v1; r3a.capability-invocation.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_engineering.py; tests/test_r3a_capability_integration_demo.py.
@@ -1103,6 +1104,18 @@ class Store:
                                                 "criteria": acceptance_criteria},
                        "engineering_assignment": engineering_assignment,
                        "role_config_revision": self.settings.source_digest if selected_role_id else None}
+        policy = self.settings.reasoning_escalation
+        if policy is not None:
+            event_input["reasoning_escalation"] = {
+                "contract_id": policy.contract_id,
+                "contract_version": policy.contract_version,
+                "enabled": policy.enabled,
+                "authorization_capability_id": policy.authorization_capability_id,
+                "allowed_role_ids": list(policy.allowed_role_ids),
+                "max_requests_per_activity": policy.max_requests_per_activity,
+                "max_completion_tokens_per_activity": policy.max_completion_tokens_per_activity,
+                "config_revision": self.settings.source_digest,
+            }
         if dependencies:
             event_input["dependencies"] = dependencies.to_dict()
         if requested_activity_id:
