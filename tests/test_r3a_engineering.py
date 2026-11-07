@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_engineering.py
 Component: R3A-AP2-ENGINEERING-CONTRACT-TESTS
-File Revision: 1.0.0
+File Revision: 1.0.2
 Created: 2026-11-07T05:28:24Z
 Created By: Codex GPT-6
 Purpose: Verify AP2 work-order lineage, effect references, criterion coverage, and fail-closed completion.
@@ -13,10 +13,12 @@ Authority: AP2 R3A-011/R3A-012, Issue #43; isolated R3A only.
 Changed: 2026-11-07T05:28:24Z | AP2-IMPLEMENTATION | Codex GPT-6 | Add focused AP2 contract and acceptance tests.
 Changed: 2026-11-07T05:45:10Z | AP2-IMPLEMENTATION | Codex GPT-6 | Cover verifier requests, durable issuance, recovery lineage, and gated completion.
 Changed: 2026-11-07T05:47:16Z | AP2-IMPLEMENTATION | Codex GPT-6 | Assert exact approved unified capability contract identities.
+Changed: 2026-11-07T05:52:05Z | AP2-IMPLEMENTATION | Codex GPT-6 | Verify durable proposal revision round-trip and idempotent checkpoint persistence.
+Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Cover canonical request mapping and distinct authorization decision/audit provenance.
 Supersedes: None.
 Contracts: r3a.engineering-proposal.v1; r3a.engineering-work-order.v1; r3a.engineering-action.v1; r3a.verification-result.v1.
 Tests: This test module.
-History/Predecessor: New file; no predecessor.
+History/Predecessor: Prior revision at AP2 commit 600020fd81b4b1e5ed4d938f95592560963a616d, blob 92607b908bdcc00e60ad796c2a62a1cb80f026ff.
 """
 from __future__ import annotations
 
@@ -39,6 +41,7 @@ from r3a_runtime.engineering import (
     EngineeringWorkOrder,
     VerificationRequest,
     VerificationResult,
+    proposal_digest,
     validate_completion,
 )
 from r3a_runtime.authorization import AuthorizationDecision, AUTHORIZATION_CONTRACT_ID
@@ -72,9 +75,22 @@ def work_order() -> EngineeringWorkOrder:
         baseline_ref="9925c7a408707162e6f070a4121dcc83f5fe0e0a", workspace_id="candidate-1",
         allowed_paths=("r3a_runtime/**", "tests/**"), command_profiles=("python-unittest-focused",),
         operation_refs=(operation(),), authorization_decision_id="decision-123",
+        authorization_audit_event_id="audit-456",
         authorization_provider_id="capability_grants", policy_revision=None,
         authorization_expires_at="2026-11-07T06:00:00Z",
         criteria=CRITERIA, issued_at="2026-11-07T05:30:00Z")
+
+
+def proposal() -> EngineeringProposal:
+    return EngineeringProposal(
+        proposal_id=PROPOSAL, proposal_revision=1, activity_id=ACTIVITY,
+        attempt_id=ATTEMPT, correlation_id=CORRELATION, resident_id="resident.grace",
+        config_revision="cfg-17", created_at="2026-11-07T05:30:00Z",
+        objective="Investigate the observed observer-activity rate.", criteria=CRITERIA,
+        repository="ppow1/R3", baseline_ref="9925c7a408707162e6f070a4121dcc83f5fe0e0a",
+        scope={"workspace": "isolated"}, proposed_operations=(operation("read"),),
+        verification_plan={"profiles": ["python-unittest-focused"]},
+        reasoning_provenance={"model_request_ref": "req-1", "model_result_ref": "res-1"})
 
 
 def verification(*, outcome: str = "PASS", activity_id: str = ACTIVITY,
@@ -98,7 +114,8 @@ def authorization(*, allowed: bool = True) -> AuthorizationDecision:
         provider_id="capability_grants", allowed=allowed, reason="recorded grant decision",
         retryable=False, policy_revision=None, config_revision="cfg-17",
         observed_at="2026-11-07T05:30:00Z", correlation_id=CORRELATION,
-        activity_id=ACTIVITY, attempt_id=ATTEMPT, audit_event_id="decision-123")
+        activity_id=ACTIVITY, attempt_id=ATTEMPT, audit_event_id="audit-456",
+        decision_id="decision-123")
 
 
 def store_for_order(state: str, details: dict) -> Store:
@@ -122,19 +139,33 @@ def store_for_order(state: str, details: dict) -> Store:
 
 class EngineeringContractTests(unittest.TestCase):
     def test_grace_proposal_retains_objective_criteria_plan_and_reasoning_provenance(self):
-        proposal = EngineeringProposal(
-            proposal_id=PROPOSAL, proposal_revision=1, activity_id=ACTIVITY,
-            attempt_id=ATTEMPT, correlation_id=CORRELATION, resident_id="resident.grace",
-            config_revision="cfg-17", created_at="2026-11-07T05:30:00Z",
-            objective="Investigate the observed observer-activity rate.", criteria=CRITERIA,
-            repository="ppow1/R3", baseline_ref="9925c7a408707162e6f070a4121dcc83f5fe0e0a",
-            scope={"workspace": "isolated"}, proposed_operations=(operation("read"),),
-            verification_plan={"profiles": ["python-unittest-focused"]},
-            reasoning_provenance={"model_request_ref": "req-1", "model_result_ref": "res-1"})
-        data = proposal.to_dict()
+        proposal_value = proposal()
+        data = proposal_value.to_dict()
         self.assertEqual(data["contract_id"], "r3a.engineering-proposal")
         self.assertEqual(data["reasoning_provenance"]["model_result_ref"], "res-1")
         self.assertEqual(data["criteria"], list(CRITERIA))
+        self.assertEqual(EngineeringProposal.from_dict(data), proposal_value)
+        self.assertEqual(len(proposal_digest(proposal_value)), len("sha256:") + 64)
+
+    def test_proposal_is_durably_checkpointed_on_activity_with_idempotent_revision(self):
+        store = Store.__new__(Store)
+        store.record_progress = AsyncMock()
+        activity = {"activity_id": ACTIVITY, "attempt_id": ATTEMPT, "checkpoint": {},
+                    "input": {"objective": proposal().objective, "correlation_id": CORRELATION}}
+        first = asyncio.run(store.record_engineering_proposal(activity, proposal()))
+        self.assertTrue(first["recorded"])
+        checkpoint = store.record_progress.await_args.args[2]
+        self.assertEqual(checkpoint["engineering_proposal"]["proposal_id"], PROPOSAL)
+        self.assertEqual(checkpoint["engineering_proposal_digest"], proposal_digest(proposal()))
+
+        activity["checkpoint"] = checkpoint
+        same = asyncio.run(store.record_engineering_proposal(activity, proposal()))
+        self.assertFalse(same["recorded"])
+        self.assertEqual(store.record_progress.await_count, 1)
+
+        changed = replace(proposal(), reasoning_provenance={"model_request_ref": "req-2"})
+        with self.assertRaisesRegex(ValueError, "immutable once durably recorded"):
+            asyncio.run(store.record_engineering_proposal(activity, changed))
 
     def test_work_order_binds_unified_operation_and_serializes_lineage(self):
         order = work_order()
@@ -171,10 +202,12 @@ class EngineeringContractTests(unittest.TestCase):
         self.assertEqual(str(args.kwargs["correlation_id"]), CORRELATION)
         self.assertEqual(str(args.kwargs["causation_id"]), ATTEMPT)
         self.assertEqual(args.args[6]["authorization"]["authorization_decision_id"], "decision-123")
+        self.assertEqual(args.args[6]["authorization"]["authorization_audit_event_id"], "audit-456")
 
     def test_durable_order_creation_is_idempotent_and_rejects_changed_content(self):
         order = work_order().to_dict()
-        auth_record = {"authorization_decision_id": "decision-123", "provider_id": "capability_grants",
+        auth_record = {"authorization_decision_id": "decision-123", "authorization_audit_event_id": "audit-456",
+                       "provider_id": "capability_grants",
                        "allowed": True, "reason": "recorded grant decision", "retryable": False,
                        "policy_revision": None, "config_revision": "cfg-17",
                        "observed_at": "2026-11-07T05:30:00Z", "correlation_id": CORRELATION,
@@ -276,11 +309,23 @@ class EngineeringContractTests(unittest.TestCase):
             action_id=ACTION, idempotency_key=f"{ORDER}:1:1", work_order_id=ORDER,
             work_order_version=1, activity_id=ACTIVITY, attempt_id=ATTEMPT,
             correlation_id=CORRELATION, operation=operation(), caller_id="resident.grace",
-            authorization_decision_id="decision-123", requested_at="2026-11-07T05:30:00Z")
+            requested_at="2026-11-07T05:30:00Z", config_revision="cfg-17",
+            evidence_purpose="Apply the authorized isolated patch.")
         data = action.to_dict()
-        self.assertEqual(data["invocation_contract_id"], "r3a.capability-invocation.v1")
-        self.assertEqual(data["invocation_contract_version"], "1.0.0")
-        self.assertEqual(data["idempotency_key"], f"{ORDER}:1:1")
+        request = data["invocation_request"]
+        self.assertEqual(request["contract_id"], "r3a.capability-invocation.v1")
+        self.assertEqual(request["contract_version"], "1.0.0")
+        self.assertEqual(request["operation_contract_version"], "1.0.0")
+        self.assertEqual(request["idempotency_key"], f"{ORDER}:1:1")
+        self.assertEqual(request["input"], operation().inputs)
+        self.assertEqual(request["target"], operation().target)
+        self.assertEqual(request["work_order"], {"work_order_id": ORDER, "version": 1})
+        self.assertNotIn("authorization", request)
+        self.assertNotIn("authorization_decision_id", request)
+        self.assertEqual(set(request), {"contract_id", "contract_version", "invocation_id", "operation_id",
+                                        "operation_contract_version", "caller", "target", "input", "activity_id",
+                                        "attempt_id", "correlation_id", "work_order", "evidence_purpose",
+                                        "idempotency_key", "deadline", "config_revision"})
 
     def test_verification_request_is_bound_to_candidate_and_criteria(self):
         request = VerificationRequest(

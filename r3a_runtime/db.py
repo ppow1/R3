@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.3.3
+File Revision: 1.3.5
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -26,10 +26,12 @@ Changed: 2026-11-07T04:36:29Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Add resum
 Changed: 2026-11-07T04:41:59Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Generalize concurrent index validation for event and activity ordering indexes.
 Changed: 2026-11-07T05:28:24Z | AP2-IMPLEMENTATION | Codex GPT-6 | Allow generic state-machine transition events to preserve caller-supplied correlation and causation lineage.
 Changed: 2026-11-07T05:45:10Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist authorized work orders and guard terminal order completion with independent verifier evidence.
+Changed: 2026-11-07T05:52:05Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist stable objective correlation and immutable Grace proposal revisions in existing activity checkpoints/events.
+Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist authorization decision and audit identities as separate provenance fields.
 Supersedes: None.
 Contracts: AP0-003–010; R3A-019; R3A-011/R3A-012; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1; r3a.engineering-work-order.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_engineering.py.
-History/Predecessor: Prior revision at baseline commit 9925c7a408707162e6f070a4121dcc83f5fe0e0a, blob f2cffbc6f44a47b10f6262ee469bd310ca652683; earlier history includes blob 035452b509490e368e4fe831d9b07632bdb3655b.
+History/Predecessor: Prior revision at AP2 commit 600020fd81b4b1e5ed4d938f95592560963a616d, blob a71a534e88a20df82ae2ea7989ca706dbb283c6e; earlier baseline blob f2cffbc6f44a47b10f6262ee469bd310ca652683.
 """
 from __future__ import annotations
 
@@ -51,7 +53,8 @@ from .acceptance import (OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
                          OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, validate_required_criteria)
 from .contracts import ReadinessObservation, parse_timestamp
 from .authorization import AuthorizationDecision
-from .engineering import EngineeringWorkOrder, VerificationResult, validate_completion
+from .engineering import (EngineeringProposal, EngineeringWorkOrder, VerificationResult,
+                          proposal_digest, validate_completion)
 
 
 IMPLEMENTATION_REVISION = os.environ.get("R3A_IMPLEMENTATION_REVISION", "working-tree")
@@ -280,7 +283,8 @@ class Store:
             raise ValueError("authorization decision is missing its durable audit reference")
         if not isinstance(authorization.provider_id, str) or not authorization.provider_id.strip():
             raise ValueError("authorization decision is missing its provider identity")
-        if (work_order.get("authorization_decision_id") != authorization.audit_event_id
+        if (work_order.get("authorization_decision_id") != authorization.decision_id
+                or work_order.get("authorization_audit_event_id") != authorization.audit_event_id
                 or work_order.get("authorization_provider_id") != authorization.provider_id
                 or work_order.get("policy_revision") != authorization.policy_revision
                 or work_order.get("config_revision") != authorization.config_revision):
@@ -295,7 +299,8 @@ class Store:
                 uuid.UUID(value)
             except (ValueError, TypeError, AttributeError) as exc:
                 raise ValueError(f"{key} must be a UUID") from exc
-        auth_evidence = {"authorization_decision_id": authorization.audit_event_id,
+        auth_evidence = {"authorization_decision_id": authorization.decision_id,
+                         "authorization_audit_event_id": authorization.audit_event_id,
                          "provider_id": authorization.provider_id,
                          "allowed": authorization.allowed, "reason": authorization.reason,
                          "retryable": authorization.retryable,
@@ -391,6 +396,49 @@ class Store:
         if not rows:
             return None
         return rows[0]
+
+    async def record_engineering_proposal(self, activity: dict[str, Any],
+                                          proposal: EngineeringProposal) -> dict[str, Any]:
+        """Checkpoint a Grace proposal on its existing activity and append its full revision evidence."""
+        if not isinstance(proposal, EngineeringProposal):
+            raise TypeError("proposal must be a validated EngineeringProposal")
+        activity_id = str(uuid.UUID(str(activity["activity_id"])))
+        attempt_id = str(uuid.UUID(str(activity["attempt_id"])))
+        objective_input = activity.get("input") or {}
+        correlation_id = objective_input.get("correlation_id")
+        if not isinstance(correlation_id, str) or str(uuid.UUID(correlation_id)) != proposal.correlation_id:
+            raise ValueError("proposal correlation does not match durable objective intake")
+        if proposal.activity_id != activity_id or proposal.attempt_id != attempt_id:
+            raise ValueError("proposal activity/attempt lineage does not match the current lease")
+        if proposal.objective != objective_input.get("objective"):
+            raise ValueError("proposal objective does not match the durable assignment")
+        digest = proposal_digest(proposal)
+        checkpoint = dict(activity.get("checkpoint") or {})
+        revisions = list(checkpoint.get("engineering_proposal_revisions") or [])
+        same = next((item for item in revisions
+                     if item.get("proposal_id") == proposal.proposal_id
+                     and item.get("proposal_revision") == proposal.proposal_revision), None)
+        if same:
+            if same.get("proposal_digest") != digest:
+                raise ValueError("proposal revision is immutable once durably recorded")
+            return {"recorded": False, "proposal_digest": digest,
+                    "proposal_revision": proposal.proposal_revision}
+        prior_for_id = [item for item in revisions if item.get("proposal_id") == proposal.proposal_id]
+        expected_revision = (max(item["proposal_revision"] for item in prior_for_id) + 1) if prior_for_id else 1
+        if proposal.proposal_revision != expected_revision:
+            raise ValueError("proposal revision must advance monotonically within its proposal identity")
+        revisions.append({"proposal_id": proposal.proposal_id,
+                          "proposal_revision": proposal.proposal_revision,
+                          "proposal_digest": digest, "created_at": proposal.created_at})
+        checkpoint.update({"engineering_proposal": proposal.to_dict(),
+                           "engineering_proposal_digest": digest,
+                           "engineering_proposal_revisions": revisions})
+        await self.record_progress(activity,
+            {"phase": "engineering.proposal.recorded", "proposal_id": proposal.proposal_id,
+             "proposal_revision": proposal.proposal_revision, "proposal_digest": digest,
+             "proposal": proposal.to_dict()}, checkpoint)
+        return {"recorded": True, "proposal_digest": digest,
+                "proposal_revision": proposal.proposal_revision}
 
     async def _transition_on_conn(self, conn, entity_type: str, entity_id: str,
                                   machine_id: str, machine_version: int,
@@ -895,11 +943,13 @@ class Store:
                     "criteria": []})
                 prior_input.setdefault("role_config_revision", None)
                 prior_input.pop("authorized_capability", None)
+                prior_input.pop("correlation_id", None)
                 if existing["activity_type"] != "grace.objective" or prior_input != event_input:
                     raise ValueError("idempotency key already belongs to a different request")
                 return {**existing, "duplicate": True}
             activity_id = uuid.uuid4()
             correlation_id = uuid.uuid4()
+            durable_input = {**event_input, "correlation_id": str(correlation_id)}
             config = await (await conn.execute(
                 "SELECT revision_id FROM r3a.config_current WHERE singleton=true"
             )).fetchone()
@@ -908,7 +958,7 @@ class Store:
                 "available_at,recovery_policy,config_revision,input) "
                 "VALUES (%s,'grace.objective',%s,'activity.generic',1,'QUEUED',clock_timestamp(),'idempotent',%s,%s)",
                 (activity_id, idempotency_key, config["revision_id"] if config else None,
-                 json.dumps(event_input)),
+                 json.dumps(durable_input)),
             )
             event_type = ("grace.notification.received" if event_kind == "notification"
                           else "grace.objective.received")
@@ -933,7 +983,7 @@ class Store:
             return {"activity_id": activity_id, "state": "QUEUED", "activity_type": "grace.objective",
                     "idempotency_key": idempotency_key, "attempt_count": 0, "duplicate": False,
                     "event_kind": event_kind, "route_id": selected_route_id,
-                    "received_event_id": event_id}
+                    "correlation_id": correlation_id, "received_event_id": event_id}
 
     async def requeue_blocked_activities(self) -> int:
         async with self.pool.connection() as conn, conn.transaction():
@@ -1089,7 +1139,10 @@ class Store:
             )
             await self._event(conn, "activity.progress", "activity", str(activity["activity_id"]),
                               "activity.generic", 1, "RUNNING", "RUNNING", "activity made progress",
-                              progress, causation_id=activity["attempt_id"])
+                              progress,
+                              correlation_id=(uuid.UUID(activity["input"]["correlation_id"])
+                                              if activity.get("input", {}).get("correlation_id") else None),
+                              causation_id=activity["attempt_id"])
 
     async def finish_activity(self, activity: dict[str, Any], result: dict[str, Any]) -> None:
         async with self.pool.connection() as conn, conn.transaction():

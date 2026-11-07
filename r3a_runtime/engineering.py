@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/engineering.py
 Component: R3A-AP2-ENGINEERING-CONTRACTS
-File Revision: 1.0.0
+File Revision: 1.2.0
 Created: 2026-11-07T05:28:24Z
 Created By: Codex GPT-6
 Purpose: Define AP2 proposal, work-order, operation-reference, action, and independent-verification contracts.
@@ -13,14 +13,18 @@ Authority: AP2 R3A-011/R3A-012, Issue #43; unified capability decision, Issue #4
 Changed: 2026-11-07T05:28:24Z | AP2-IMPLEMENTATION | Codex GPT-6 | Add versioned AP2 engineering and verification contracts.
 Changed: 2026-11-07T05:45:10Z | AP2-IMPLEMENTATION | Codex GPT-6 | Add verifier requests, digest checks, workspace path validation, and write-target binding.
 Changed: 2026-11-07T05:47:16Z | AP2-IMPLEMENTATION | Codex GPT-6 | Align operation and invocation contract identities with the approved v1 pin.
+Changed: 2026-11-07T05:52:05Z | AP2-IMPLEMENTATION | Codex GPT-6 | Add strict proposal deserialization and canonical revision digests for durable recovery.
+Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Project EngineeringAction as the pinned invocation request and separate decision/audit references.
 Supersedes: None.
-Contracts: r3a.engineering-proposal.v1; r3a.engineering-work-order.v1; r3a.engineering-action.v1; r3a.verification-request.v1; r3a.verification-result.v1; r3a.capability-operation.v1.
+Contracts: r3a.engineering-proposal.v1; r3a.engineering-work-order.v1; r3a.engineering-action.v1; r3a.verification-request.v1; r3a.verification-result.v1; r3a.capability-operation.v1; r3a.capability-invocation.v1.
 Tests: tests/test_r3a_engineering.py.
-History/Predecessor: New file; no predecessor.
+History/Predecessor: Prior revision at AP2 commit 600020fd81b4b1e5ed4d938f95592560963a616d, blob eeeb02ec2e03ad15a73ebf5f46a205e335394772.
 """
 from __future__ import annotations
 
 import re
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -150,6 +154,16 @@ class CapabilityOperationRef:
                 "contract_version": self.contract_version, "effect_class": self.effect_class,
                 "target": self.target, "inputs": self.inputs}
 
+    @classmethod
+    def from_dict(cls, value: Any) -> "CapabilityOperationRef":
+        if not isinstance(value, dict) or set(value) != {
+                "operation_id", "contract_id", "contract_version", "effect_class", "target", "inputs"}:
+            raise EngineeringContractError("capability operation reference fields are invalid")
+        if value["contract_id"] != CAPABILITY_OPERATION_CONTRACT_ID:
+            raise EngineeringContractError("capability operation contract identity mismatch")
+        return cls(value["operation_id"], value["contract_version"], value["effect_class"],
+                   value["target"], value["inputs"])
+
 
 @dataclass(frozen=True)
 class EngineeringProposal:
@@ -200,6 +214,27 @@ class EngineeringProposal:
                 "verification_plan": self.verification_plan,
                 "reasoning_provenance": self.reasoning_provenance}
 
+    @classmethod
+    def from_dict(cls, value: Any) -> "EngineeringProposal":
+        fields = {"contract_id", "contract_version", "proposal_id", "proposal_revision",
+                  "activity_id", "attempt_id", "correlation_id", "resident_id", "config_revision",
+                  "created_at", "objective", "criteria", "repository", "baseline_ref", "scope",
+                  "proposed_operations", "verification_plan", "reasoning_provenance"}
+        if not isinstance(value, dict) or set(value) != fields:
+            raise EngineeringContractError("engineering proposal fields are invalid")
+        if value["contract_id"] != PROPOSAL_CONTRACT_ID:
+            raise EngineeringContractError("engineering proposal contract identity mismatch")
+        operations = value["proposed_operations"]
+        if not isinstance(operations, list):
+            raise EngineeringContractError("proposed_operations must be an array")
+        return cls(value["proposal_id"], value["proposal_revision"], value["activity_id"],
+                   value["attempt_id"], value["correlation_id"], value["resident_id"],
+                   value["config_revision"], value["created_at"], value["objective"],
+                   tuple(value["criteria"]) if isinstance(value["criteria"], list) else value["criteria"],
+                   value["repository"], value["baseline_ref"], value["scope"],
+                   tuple(CapabilityOperationRef.from_dict(item) for item in operations),
+                   value["verification_plan"], value["reasoning_provenance"], value["contract_version"])
+
 
 @dataclass(frozen=True)
 class EngineeringWorkOrder:
@@ -220,6 +255,7 @@ class EngineeringWorkOrder:
     command_profiles: tuple[str, ...]
     operation_refs: tuple[CapabilityOperationRef, ...]
     authorization_decision_id: str
+    authorization_audit_event_id: str
     authorization_provider_id: str
     policy_revision: str | None
     authorization_expires_at: str | None
@@ -231,7 +267,8 @@ class EngineeringWorkOrder:
         for key in ("work_order_id", "activity_id", "attempt_id", "correlation_id", "proposal_id"):
             _uuid(getattr(self, key), key)
         for key in ("proposal_digest", "resident_id", "config_revision", "repository", "baseline_ref",
-                    "workspace_id", "authorization_decision_id", "authorization_provider_id"):
+                    "workspace_id", "authorization_decision_id", "authorization_audit_event_id",
+                    "authorization_provider_id"):
             _text(getattr(self, key), key)
         if not _DIGEST.fullmatch(self.proposal_digest):
             raise EngineeringContractError("proposal_digest must use sha256:<64 lowercase hex> form")
@@ -274,6 +311,7 @@ class EngineeringWorkOrder:
                 "command_profiles": list(self.command_profiles),
                 "operation_refs": [op.to_dict() for op in self.operation_refs],
                 "authorization_decision_id": self.authorization_decision_id,
+                "authorization_audit_event_id": self.authorization_audit_event_id,
                 "authorization_provider_id": self.authorization_provider_id,
                 "policy_revision": self.policy_revision,
                 "authorization_expires_at": self.authorization_expires_at,
@@ -291,14 +329,16 @@ class EngineeringAction:
     correlation_id: str
     operation: CapabilityOperationRef
     caller_id: str
-    authorization_decision_id: str
     requested_at: str
+    config_revision: str
+    evidence_purpose: str
+    deadline: str | None = None
     contract_version: str = CONTRACT_VERSION
 
     def __post_init__(self) -> None:
         for key in ("action_id", "work_order_id", "activity_id", "attempt_id", "correlation_id"):
             _uuid(getattr(self, key), key)
-        for key in ("idempotency_key", "caller_id", "authorization_decision_id"):
+        for key in ("idempotency_key", "caller_id", "config_revision", "evidence_purpose"):
             _text(getattr(self, key), key)
         _version(self.contract_version)
         if isinstance(self.work_order_version, bool) or not isinstance(self.work_order_version, int) or self.work_order_version < 1:
@@ -306,19 +346,38 @@ class EngineeringAction:
         if not isinstance(self.operation, CapabilityOperationRef):
             raise EngineeringContractError("operation must be a canonical capability reference")
         _timestamp(self.requested_at, "requested_at")
+        if self.deadline is not None:
+            _timestamp(self.deadline, "deadline")
+
+    def to_invocation_request(self) -> dict[str, Any]:
+        """Return the canonical request envelope; authorization is supplied by CME separately."""
+        return {
+            "contract_id": CAPABILITY_INVOCATION_CONTRACT_ID,
+            "contract_version": CONTRACT_VERSION,
+            "invocation_id": self.action_id,
+            "operation_id": self.operation.operation_id,
+            "operation_contract_version": self.operation.contract_version,
+            "caller": {"principal_id": self.caller_id, "resident_id": self.caller_id,
+                       "service_id": None},
+            "target": self.operation.target,
+            "input": self.operation.inputs,
+            "activity_id": self.activity_id,
+            "attempt_id": self.attempt_id,
+            "correlation_id": self.correlation_id,
+            "work_order": {"work_order_id": self.work_order_id, "version": self.work_order_version},
+            "evidence_purpose": self.evidence_purpose,
+            "idempotency_key": self.idempotency_key,
+            "deadline": self.deadline,
+            "config_revision": self.config_revision,
+        }
 
     def to_dict(self) -> dict[str, Any]:
         return {"contract_id": ACTION_CONTRACT_ID, "contract_version": self.contract_version,
                 "action_id": self.action_id, "idempotency_key": self.idempotency_key,
                 "work_order_id": self.work_order_id, "work_order_version": self.work_order_version,
                 "activity_id": self.activity_id, "attempt_id": self.attempt_id,
-                "correlation_id": self.correlation_id,
-                "invocation_contract_id": CAPABILITY_INVOCATION_CONTRACT_ID,
-                "invocation_contract_version": CONTRACT_VERSION,
-                "operation": self.operation.to_dict(),
-                "caller_id": self.caller_id,
-                "authorization_decision_id": self.authorization_decision_id,
-                "requested_at": self.requested_at}
+                "correlation_id": self.correlation_id, "requested_at": self.requested_at,
+                "invocation_request": self.to_invocation_request()}
 
 
 VerificationStatus = Literal["PASS", "FAIL", "INCONCLUSIVE"]
@@ -448,3 +507,10 @@ def validate_completion(work_order: EngineeringWorkOrder, result: VerificationRe
         raise EngineeringContractError("verification result must cover exactly the work-order criteria")
     if result.outcome != "PASS":
         raise EngineeringContractError("activity completion requires independent verification PASS")
+
+
+def proposal_digest(proposal: EngineeringProposal) -> str:
+    """Return a stable digest over the exact serialized proposal revision."""
+    payload = json.dumps(proposal.to_dict(), ensure_ascii=False, sort_keys=True,
+                         separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return "sha256:" + hashlib.sha256(payload).hexdigest()

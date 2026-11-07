@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/authorization.py
 Component: R3A-AUTHORIZATION-PROVIDER-PORT
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-06T23:19:46Z
 Created By: Codex GPT-6
 Purpose: Isolate institutional authorization decisions behind a replaceable versioned provider interface.
@@ -12,10 +12,11 @@ Dependencies: Python 3.12 standard library; r3a_runtime.contracts; Store-compati
 Authority: R3A AP0/AP1 Modular Autonomy Implementation Slice 1; existing capability grants remain authoritative.
 Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Introduce pluggable authorization provider protocol and grant-backed implementation.
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Validate authorization envelopes and preserve scope/policy/audit provenance across providers.
+Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Expose decision identity separately from its durable audit event reference.
 Supersedes: None.
-Contracts: AP0-008/010; MOD-006; R3A-019.
+Contracts: AP0-008/010; MOD-006; R3A-019; r3a.capability-invocation.v1 authorization result projection.
 Tests: tests/test_r3a_modular_autonomy.py.
-History/Predecessor: New file; initial publication recorded in Git.
+History/Predecessor: Prior revision at AP2 commit 600020fd81b4b1e5ed4d938f95592560963a616d, blob 4ea80ae837297aad477633de94bc8e843feb1377.
 """
 from __future__ import annotations
 
@@ -78,6 +79,7 @@ class AuthorizationDecision:
     activity_id: str | None = None
     attempt_id: str | None = None
     audit_event_id: str | None = None
+    decision_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.contract_id != AUTHORIZATION_CONTRACT_ID:
@@ -149,7 +151,7 @@ class CapabilityGrantAuthorizationProvider:
                                      None, request.config_revision,
                                      datetime.now(timezone.utc).isoformat(), request.correlation_id,
                                      request.activity_id, request.attempt_id,
-                                     str(audit_id) if audit_id else None)
+                                     str(audit_id) if audit_id else None, request.request_id)
 
 
 _PROVIDER_FACTORIES: dict[str, Callable[[Any, dict[str, Any], str], AuthorizationProvider]] = {}
