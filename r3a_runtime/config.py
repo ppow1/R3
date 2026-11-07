@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/config.py
 Component: R3A-BOOTSTRAP-CONFIG
-File Revision: 1.2.0
+File Revision: 1.3.0
 Created: 2026-11-06T15:04:00Z
 Created By: Codex GPT-6
 Purpose: Strictly validate external R3A AP0-M1 bootstrap and operating settings.
@@ -17,9 +17,10 @@ Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Add external model route
 Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add validated configurable model roles and authorization provider selection.
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Preserve route-only configuration compatibility and finalize strict role/provider validation.
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Validate external provider endpoints, matching origins, private-network HTTP, freshness, timeouts and retries.
+Changed: 2026-11-07 | R3A-PLUG-001 | Codex GPT-6 | Load versioned capability plug-in manifests and external configuration with artifact digest validation.
 Supersedes: None.
-Contracts: AP0-001/008/009; R3A-019; AP0-M1 D7; r3a_runtime.contracts; hints/file-provenance.md.
-Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py.
+Contracts: AP0-001/008/009; R3A-019; Issue #46; AP0-M1 D7; r3a_runtime.contracts; hints/file-provenance.md.
+Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py.
 History/Predecessor: Git blob 189c6ef7ef3821f9140bddbeac8d04c177ca32ac at commit ad16700f1e94dd36c81cac5383f9f2e2771a98a1.
 """
 from __future__ import annotations
@@ -81,6 +82,14 @@ class AuthorizationProviderSettings:
     provider_id: str
     contract_version: str
     options: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class CapabilityPlugin:
+    manifest_path: Path
+    configuration_path: Path
+    manifest: dict[str, Any]
+    configuration: dict[str, Any]
 
 
 def resolve_model_route(routes: tuple[ModelRoute, ...], default_route: str,
@@ -195,6 +204,7 @@ class Settings:
     default_model_role: str | None
     authorization_provider: AuthorizationProviderSettings
     knowledge_sources: tuple[Path, ...]
+    capability_plugins: tuple[CapabilityPlugin, ...]
 
     def model_route(self, route_id: str | None = None) -> ModelRoute:
         return resolve_model_route(self.model_routes, self.default_model_route, route_id)
@@ -224,7 +234,7 @@ def load_settings(path: str | Path) -> Settings:
     if not isinstance(value, dict):
         raise ConfigurationError("bootstrap config must be a JSON object")
     expected_root = {"schema_version", "instance_id", "paths", "postgres", "module", "timing"}
-    extra = value.keys() - expected_root - {"grace", "authorization"}
+    extra = value.keys() - expected_root - {"grace", "authorization", "capability_plugins"}
     missing = expected_root - value.keys()
     if missing or extra:
         raise ConfigurationError(f"root keys invalid; missing={sorted(missing)}, unknown={sorted(extra)}")
@@ -500,6 +510,67 @@ def load_settings(path: str | Path) -> Settings:
     if entrypoint == "r3a_runtime.grace_module" and not (model_endpoint and model_name and knowledge_sources):
         raise ConfigurationError("Grace requires explicit model and knowledge-source configuration")
 
+    capability_plugins: list[CapabilityPlugin] = []
+    plugin_ids: set[str] = set()
+    raw_plugins = value.get("capability_plugins", [])
+    if not isinstance(raw_plugins, list):
+        raise ConfigurationError("capability_plugins must be an array")
+    for index, item in enumerate(raw_plugins):
+        where = f"capability_plugins[{index}]"
+        if not isinstance(item, dict):
+            raise ConfigurationError(f"{where} must be an object")
+        _keys(item, {"manifest", "configuration"}, where)
+        manifest_path = _absolute_path(item["manifest"], f"{where}.manifest")
+        configuration_path = _absolute_path(item["configuration"], f"{where}.configuration")
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"), object_pairs_hook=_object_pairs)
+            plugin_config = json.loads(configuration_path.read_text(encoding="utf-8"), object_pairs_hook=_object_pairs)
+        except (OSError, UnicodeError, json.JSONDecodeError, ConfigurationError) as exc:
+            raise ConfigurationError(f"Cannot load {where}: {exc}") from exc
+        required_manifest = {"schema_version", "plugin_id", "plugin_version", "contract_id",
+                             "contract_version", "capability_id", "tool", "entrypoint",
+                             "configuration_schema", "read_only", "artifact_ref", "artifact_sha256"}
+        if not isinstance(manifest, dict):
+            raise ConfigurationError(f"{where}.manifest must contain an object")
+        _keys(manifest, required_manifest, f"{where}.manifest")
+        if manifest["schema_version"] != 1 or manifest["read_only"] is not True:
+            raise ConfigurationError(f"{where} must declare schema_version 1 and read_only true")
+        capability_id = _text(manifest["capability_id"], f"{where}.capability_id")
+        if capability_id in plugin_ids or capability_id not in capabilities:
+            raise ConfigurationError(f"{where}.capability_id must be unique and explicitly declared in module.capabilities")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", capability_id):
+            raise ConfigurationError(f"{where}.capability_id is invalid")
+        if (not isinstance(manifest["entrypoint"], str) or ":" not in manifest["entrypoint"]
+                or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*", manifest["entrypoint"])):
+            raise ConfigurationError(f"{where}.entrypoint must be a Python module:function reference")
+        artifact = Path(_text(manifest["artifact_ref"], f"{where}.artifact_ref"))
+        if artifact.is_absolute():
+            raise ConfigurationError(f"{where}.artifact_ref must be relative to its manifest")
+        artifact_path = (manifest_path.parent / artifact).resolve()
+        if not artifact_path.is_relative_to(manifest_path.parent) or not artifact_path.is_file():
+            raise ConfigurationError(f"{where}.artifact_ref must resolve to a file beside the manifest")
+        artifact_digest = _text(manifest["artifact_sha256"], f"{where}.artifact_sha256").lower()
+        if (not re.fullmatch(r"[0-9a-f]{64}", artifact_digest)
+                or hashlib.sha256(artifact_path.read_bytes()).hexdigest() != artifact_digest):
+            raise ConfigurationError(f"{where} artifact digest does not match")
+        tool = manifest["tool"]
+        if (not isinstance(tool, dict) or set(tool) != {"name", "description", "arguments_schema"}
+                or not isinstance(tool["arguments_schema"], dict)):
+            raise ConfigurationError(f"{where}.tool is invalid")
+        schema = manifest["configuration_schema"]
+        if schema != "r3a.octominer-telemetry.config.v1" or not isinstance(plugin_config, dict):
+            raise ConfigurationError(f"{where}.configuration schema is unsupported")
+        _keys(plugin_config, {"base_url", "bearer_token_env", "timeout_seconds", "max_age_seconds"},
+              f"{where}.configuration")
+        _service_endpoint(plugin_config["base_url"], f"{where}.configuration.base_url")
+        token_env = plugin_config["bearer_token_env"]
+        if token_env is not None and (not isinstance(token_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*", token_env)):
+            raise ConfigurationError(f"{where}.configuration.bearer_token_env must be an environment variable name or null")
+        _positive(plugin_config["timeout_seconds"], f"{where}.configuration.timeout_seconds")
+        _positive(plugin_config["max_age_seconds"], f"{where}.configuration.max_age_seconds")
+        plugin_ids.add(capability_id)
+        capability_plugins.append(CapabilityPlugin(manifest_path, configuration_path, manifest, plugin_config))
+
     timing = value["timing"]
     if not isinstance(timing, dict):
         raise ConfigurationError("timing must be an object")
@@ -559,6 +630,7 @@ def load_settings(path: str | Path) -> Settings:
         default_model_role=default_model_role,
         authorization_provider=authorization_provider,
         knowledge_sources=knowledge_sources,
+        capability_plugins=tuple(capability_plugins),
     )
 
 

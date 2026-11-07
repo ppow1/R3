@@ -1,0 +1,6 @@
+{
+  "base_url": "http://127.0.0.1:8785",
+  "bearer_token_env": null,
+  "timeout_seconds": 5,
+  "max_age_seconds": 30
+}

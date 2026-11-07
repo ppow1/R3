@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.4.2
+File Revision: 1.5.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -23,12 +23,13 @@ Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add versioned re
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Enforce role configuration pinning, freshness-aware deferral, and typed outcomes.
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Run configured readiness providers, validate identity, persist evidence, and recover deferred work.
 Changed: 2026-11-07 | R3A-019 | Codex GPT-6 | Dispatch resident-selected read capabilities and persist model/tool continuation evidence.
+Changed: 2026-11-07 | R3A-PLUG-001 | Codex GPT-6 | Discover configured capability plug-ins, register them read-only, and expose authorized tools to Grace.
 Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Enforce structured evidence criteria and resume reasoning after rejected completion.
 Changed: 2026-11-07T02:41:51Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Persist and validate a versioned acceptance envelope on objective intake.
 Changed: 2026-11-07T03:59:26Z | R3A-019-SUSTAINED-OPERATION | Codex GPT-6 | Block legacy or bypassed objectives that lack explicit acceptance criteria.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
-Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; automated inference responses are fixtures.
+Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py; automated inference responses are fixtures.
 History/Predecessor: Git blob e9729be19e0b5c6efd869c51023d0379e89294f3 at commit 7695e87bc1c1ae5e204c32ab43b7e4c8aac87afe.
 """
 from __future__ import annotations
@@ -36,6 +37,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -188,6 +190,14 @@ class CME:
                                              metadata={"description": "Read PostgreSQL version and readiness"})
         await self.store.register_capability("institution.knowledge.read", "R3A-CME", "read_only",
                                              metadata={"description": "Read explicitly allowlisted institutional knowledge sources"})
+        for plugin in getattr(self.settings, "capability_plugins", ()):
+            manifest = plugin.manifest
+            await self.store.register_capability(
+                manifest["capability_id"], manifest["plugin_id"], "read_only",
+                metadata={"plugin_version": manifest["plugin_version"],
+                          "contract_id": manifest["contract_id"],
+                          "contract_version": manifest["contract_version"],
+                          "description": manifest["tool"]["description"]})
         await self.store.register_capability("institution.diagnostics.read", "R3A-CME", "read_only",
                                              metadata={"description": "Read current durable process and database observations"})
         await self.store.register_resource("foundation.observer", self.settings.worker_concurrency,
@@ -788,7 +798,7 @@ class CME:
         reasoning_state = saved.get("reasoning_state") or {}
         if not isinstance(reasoning_state, dict):
             raise RuntimeError("Persisted Grace reasoning continuation is malformed")
-        available_tools = [tool for tool in _RESIDENT_TOOLS
+        available_tools = [tool for tool in self._resident_tools()
                            if tool["capability_id"] in self.settings.module_capabilities]
         evidence = saved.get("evidence", [])
         if not isinstance(evidence, list):
@@ -817,7 +827,7 @@ class CME:
                                           request: dict[str, Any]) -> dict[str, Any]:
         capability_id = request.get("capability_id")
         arguments = request.get("arguments")
-        tool = next((entry for entry in _RESIDENT_TOOLS
+        tool = next((entry for entry in self._resident_tools()
                      if entry["capability_id"] == capability_id), None)
         if tool is None:
             raise PermissionError("resident requested a capability without an execution adapter")
@@ -836,6 +846,10 @@ class CME:
                 raise ValueError("institution.knowledge.read query must be nonempty text")
         elif arguments:
             raise ValueError(f"{capability_id} accepts no arguments")
+        plugins = getattr(self.settings, "capability_plugins", ())
+        if capability_id in {plugin.manifest["capability_id"] for plugin in plugins}:
+            if arguments:
+                raise ValueError(f"{capability_id} accepts no arguments")
         authorization = await self._authorize_capability(
             capability_id, activity_id=str(activity["activity_id"]),
             attempt_id=str(activity["attempt_id"]),
@@ -847,6 +861,11 @@ class CME:
         if capability_id == "institution.knowledge.read":
             for index, path in enumerate(self.settings.knowledge_sources):
                 evidence.extend(retrieve(path, f"knowledge.{index+1}", query))
+        elif capability_id in {plugin.manifest["capability_id"] for plugin in plugins}:
+            plugin = next(plugin for plugin in plugins if plugin.manifest["capability_id"] == capability_id)
+            module_name, function_name = plugin.manifest["entrypoint"].split(":", 1)
+            adapter = getattr(importlib.import_module(module_name), function_name)
+            evidence.extend(await asyncio.to_thread(adapter, plugin.configuration))
         else:
             evidence.extend(await self._read_runtime_capability(capability_id))
         return {"contract_id": tool["contract_id"],
@@ -854,6 +873,16 @@ class CME:
                 "capability_id": capability_id, "outcome": "succeeded",
                 "arguments": arguments, "evidence": evidence,
                 "authorization": authorization, "observed_at": utcnow().isoformat()}
+
+    def _resident_tools(self) -> tuple[dict[str, Any], ...]:
+        tools = list(_RESIDENT_TOOLS)
+        for plugin in getattr(self.settings, "capability_plugins", ()):
+            manifest = plugin.manifest
+            tools.append({"contract_id": manifest["contract_id"],
+                          "contract_version": manifest["contract_version"],
+                          "capability_id": manifest["capability_id"],
+                          **manifest["tool"]})
+        return tuple(tools)
 
     async def _read_runtime_capability(self, capability_id: str) -> list[dict[str, Any]]:
         evidence: list[dict[str, Any]] = []
