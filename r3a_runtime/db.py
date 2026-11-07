@@ -32,7 +32,7 @@ Changed: 2026-11-07T13:20:00Z | R3A-AP2-CAPABILITY-INTEGRATION | Codex GPT-6 | S
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Persist typed Engineering assignments in durable Grace inbox intake without relaxing AP1 acceptance criteria.
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Park objective dependencies durably, requeue after prerequisite completion, and expose bounded lineage evidence.
 Supersedes: None.
-Contracts: AP0-003–010; R3A-019; R3A-011/R3A-012; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1; r3a.engineering-work-order.v1; r3a.capability-invocation.v1.
+Contracts: AP0-003–010; R3A-019; R3A-011/R3A-012; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; module.lifecycle v2; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1; r3a.engineering-work-order.v1; r3a.capability-invocation.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_engineering.py; tests/test_r3a_capability_integration_demo.py.
 History/Predecessor: Prior revision at AP2 commit 600020fd81b4b1e5ed4d938f95592560963a616d, blob a71a534e88a20df82ae2ea7989ca706dbb283c6e; earlier baseline blob f2cffbc6f44a47b10f6262ee469bd310ca652683.
 """
@@ -479,9 +479,9 @@ class Store:
         )).fetchone()
         if row:
             await conn.execute(
-                "UPDATE r3a.runtime_entities SET state=%s,details=%s,config_revision=%s,version=version+1,updated_at=clock_timestamp() "
+                "UPDATE r3a.runtime_entities SET machine_id=%s,machine_version=%s,state=%s,details=%s,config_revision=%s,version=version+1,updated_at=clock_timestamp() "
                 "WHERE entity_type=%s AND entity_id=%s",
-                (next_state, json.dumps(evidence or {}), current["revision_id"] if current else None,
+                (machine_id, machine_version, next_state, json.dumps(evidence or {}), current["revision_id"] if current else None,
                  entity_type, entity_id),
             )
         else:
@@ -963,7 +963,8 @@ class Store:
             )
 
     async def module_state(self, module_id: str, module_version: str, lifecycle: str,
-                           health: str, diagnostic: dict[str, Any] | None = None) -> None:
+                           health: str, diagnostic: dict[str, Any] | None = None,
+                           *, machine_version: int = 1) -> None:
         async with self.pool.connection() as conn, conn.transaction():
             entity_id = f"{module_id}@{module_version}"
             prior = await (await conn.execute(
@@ -978,10 +979,10 @@ class Store:
                 )
                 return
             if not prior and lifecycle != "INSTALLED":
-                await self._transition_on_conn(conn, "module", entity_id, "module.lifecycle", 1,
+                await self._transition_on_conn(conn, "module", entity_id, "module.lifecycle", machine_version,
                                                "INSTALLED", "module installation observed",
                                                {"version": module_version}, initial=True)
-            accepted = await self._transition_on_conn(conn, "module", entity_id, "module.lifecycle", 1,
+            accepted = await self._transition_on_conn(conn, "module", entity_id, "module.lifecycle", machine_version,
                                                       lifecycle, "module lifecycle observed",
                                                       {"version": module_version, "health": health,
                                                        **(diagnostic or {})},
@@ -1004,10 +1005,10 @@ class Store:
             )
 
     async def record_module_replacement(self, module_id: str, old_version: str,
-                                        new_version: str) -> None:
+                                        new_version: str, *, machine_version: int = 1) -> None:
         async with self.pool.connection() as conn, conn.transaction():
             await self._event(conn, "module.replaced", "module",
-                              f"{module_id}@{old_version}", "module.lifecycle", 1,
+                              f"{module_id}@{old_version}", "module.lifecycle", machine_version,
                               "STOPPED", "STOPPED", "module replacement completed",
                               {"module_id": module_id, "old_version": old_version,
                                "new_version": new_version})

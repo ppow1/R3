@@ -57,6 +57,15 @@ async def _run(args: argparse.Namespace, settings: Settings) -> Any:
     if args.command in {"module-install", "module-activate", "module-replace"}:
         if args.version is not None:
             payload["version"] = args.version
+    if args.command.startswith("capability-module-"):
+        payload = {"operation_id": args.operation_id,
+                   "contract_version": args.contract_version}
+        if args.provider_version:
+            payload["provider_version"] = args.provider_version
+        if args.command == "capability-module-replace":
+            payload.update({"old_module_id": args.old_module_id,
+                            "old_version": args.old_version,
+                            "new_provider_version": args.new_provider_version})
     if args.command == "module-activate":
         payload["module_id"] = args.module_id
     elif args.command == "capability-check":
@@ -110,6 +119,17 @@ def main() -> None:
         cmd.add_argument("--version", required=name != "module-install", default=None)
         if name == "module-activate":
             cmd.add_argument("--module-id", required=True)
+    for name in ("capability-module-install", "capability-module-activate",
+                 "capability-module-deactivate", "capability-module-status",
+                 "capability-module-replace"):
+        cmd = commands.add_parser(name)
+        cmd.add_argument("--operation-id", required=True)
+        cmd.add_argument("--contract-version", default="1.0.0")
+        cmd.add_argument("--provider-version")
+        if name == "capability-module-replace":
+            cmd.add_argument("--old-module-id", required=True)
+            cmd.add_argument("--old-version", required=True)
+            cmd.add_argument("--new-provider-version", required=True)
     for name in ("capability-check", "capability-grant"):
         cmd = commands.add_parser(name)
         cmd.add_argument("--module-id", required=True)
@@ -117,7 +137,9 @@ def main() -> None:
         if name == "capability-grant":
             cmd.add_argument("--reason", required=True)
     for name in ("module-install", "module-activate", "module-stop", "module-replace",
-                 "capability-check", "capability-grant", "config-reload"):
+                 "capability-check", "capability-grant", "capability-module-install",
+                 "capability-module-activate", "capability-module-deactivate",
+                 "capability-module-status", "capability-module-replace", "config-reload"):
         commands.choices[name].add_argument("--idempotency-key")
     backup = commands.add_parser("backup")
     backup.add_argument("--output")
