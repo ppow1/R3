@@ -10,8 +10,8 @@ import copy
 import hashlib
 import importlib
 import json
-import re
 import math
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,6 +35,12 @@ class CapabilityProviderResult:
 
     output: Any
     evidence: Any
+
+
+def _humanize_capability_name(value: str) -> str:
+    """Render a registered label/legacy ID as readable text without changing its identity."""
+    words = re.sub(r"[._:-]+", " ", str(value)).split()
+    return " ".join(word if word.isupper() else word[:1].upper() + word[1:] for word in words)
 
 
 @runtime_checkable
@@ -315,16 +321,28 @@ class RegisteredOperation:
     configuration: dict[str, Any]
     legacy_manifest: dict[str, Any] | None = None
 
-    def resident_tool_projection(self) -> dict[str, Any]:
-        """Compatibility projection for the pre-v1 resident tool schema only."""
+    def presentation_projection(self) -> dict[str, Any]:
+        """Separate stable operation identity from its human-facing registry label."""
         descriptor = self.descriptor
         tool = (self.legacy_manifest or {}).get("tool")
         display = descriptor.get("resident_tool", {})
+        raw_name = (tool or {}).get("name") or display.get("name")
+        name = _humanize_capability_name(raw_name or descriptor["operation_id"])
+        description = (tool or {}).get("description") or display.get("description")
+        return {"name": name,
+                "description": description or "No description is registered for this capability.",
+                "description_registered": bool(description)}
+
+    def resident_tool_projection(self) -> dict[str, Any]:
+        """Compatibility projection for the pre-v1 resident tool schema only."""
+        descriptor = self.descriptor
+        tool = (self.legacy_manifest or {}).get("tool") or {}
+        presentation = self.presentation_projection()
         return {"contract_id": (self.legacy_manifest or {}).get("contract_id", "r3a.resident-capability-tool"),
                 "contract_version": (self.legacy_manifest or {}).get("contract_version", CONTRACT_VERSION),
                 "capability_id": descriptor["operation_id"],
-                "name": (tool or {}).get("name", display.get("name", descriptor["operation_id"].replace(".", "_"))),
-                "description": (tool or {}).get("description", display.get("description", "")),
+                "name": presentation["name"],
+                "description": presentation["description"],
                 "arguments_schema": (tool or {}).get("arguments_schema", descriptor["input_schema"])}
 
     def load_provider(self) -> CapabilityProvider:
@@ -379,14 +397,16 @@ class CapabilityRegistry:
         return self._copy(registered)
 
     def discover(self, *, include_disabled: bool = False) -> tuple[dict[str, Any], ...]:
-        """Return operation descriptors and registry health, never grants/authorization."""
+        """Return stable operation identity plus a separate human presentation projection."""
         records = []
         for item in sorted(self._operations.values(), key=lambda x: x.descriptor["operation_id"]):
             descriptor = item.descriptor
             if descriptor["lifecycle"]["desired_state"] == "disabled" and not include_disabled:
                 continue
             records.append({"descriptor": copy.deepcopy(descriptor),
+                            "presentation": item.presentation_projection(),
                             "registry_observation": {"state": "registered", "health": "not_probed",
+                                                     "provider_availability": "not_probed",
                                                      "observed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}})
         return tuple(records)
 

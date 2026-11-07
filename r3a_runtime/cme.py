@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.6.6
+File Revision: 1.7.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -34,6 +34,7 @@ Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Return verifier identitie
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Resume typed proposals from checkpoints, provide inspected artifact evidence to Grace, and advance the live work-order projection before gated completion.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Use the validated operation reference's target after proposal normalization during work-order authorization.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Accept only invocation, workspace, or actual authorization-audit references in Grace's execution assessment.
+Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Expose separate capability presentation metadata and drive durable dependency resumption from the CME scheduler.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py; tests/test_r3a_telemetry_providers.py; tests/test_r3a_capability_contracts.py; tests/test_r3a_engineering.py.
@@ -217,7 +218,13 @@ class CME:
                           "effect_class": descriptor["effect_class"],
                           "required_grants": descriptor["required_grants"],
                           "compatibility_manifest_id": manifest.get("contract_id"),
-                          "description": descriptor.get("resident_tool", {}).get("description", "")})
+                          "operation_id": descriptor["operation_id"],
+                          "version": descriptor["contract_version"],
+                          "display_name": discovery["presentation"]["name"],
+                          "description": discovery["presentation"]["description"],
+                          "evidence_contract": descriptor["evidence"],
+                          "provider_availability": discovery["registry_observation"]["provider_availability"]},
+                health=discovery["registry_observation"]["provider_availability"])
         await self.store.register_capability("institution.diagnostics.read", "R3A-CME", "read_only",
                                              metadata={"description": "Read current durable process and database observations"})
         await self.store.register_resource("foundation.observer", self.settings.worker_concurrency,
@@ -587,7 +594,8 @@ class CME:
                 str(payload["role_id"]) if payload.get("role_id") is not None else None,
                 tuple(payload.get("required_capabilities", ())),
                 tuple(payload.get("required_modalities", ())),
-                payload.get("acceptance_criteria", []), payload.get("engineering_assignment"))
+                payload.get("acceptance_criteria", []), payload.get("engineering_assignment"),
+                payload.get("depends_on_activity_ids"), payload.get("activity_id"))
         if operation == "config.reload":
             if any(not task.done() for task in self.active_activities.values()):
                 raise RuntimeError("Config reload waits for in-flight activity to reach a safe boundary")
@@ -839,7 +847,9 @@ class CME:
         available_engineering_operations = []
         if engineering_assignment is not None and self.settings.capability_registry is not None:
             available_engineering_operations = [
-                discovery["descriptor"] for discovery in self.settings.capability_registry.discover()
+                {**discovery["descriptor"], "presentation": discovery["presentation"],
+                 "registry_observation": discovery["registry_observation"]}
+                for discovery in self.settings.capability_registry.discover()
                 if discovery["descriptor"].get("effect_class") == "isolated_write"]
         evidence = saved.get("evidence", [])
         if not isinstance(evidence, list):
@@ -858,6 +868,7 @@ class CME:
                 "selected_role_id": selected_role_id,
                 "route_decision": decision.__dict__ if selected_role_id else None,
                 "evidence": evidence,
+                "dependency_context": await self.store.activity_dependency_context(event_input.get("dependencies")),
                 "available_tools": available_tools,
                 "engineering_assignment": engineering_assignment,
                 "available_engineering_operations": available_engineering_operations,
@@ -1667,6 +1678,8 @@ class CME:
             await self.store.ensure_observer_activity()
             await self.store.recover_expired_activities()
             await self._requeue_ready_model_activities()
+            for waiting in await self.store.waiting_dependency_activities():
+                await self.store.requeue_dependency_activity(waiting["activity_id"])
             while len(self.active_activities) < self.settings.worker_concurrency:
                 activity = await self.store.claim_activity(f"cme:{os.getpid()}", self.settings.lease_seconds)
                 if activity is None:

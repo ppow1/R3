@@ -231,12 +231,15 @@ class GraceResident:
                         "You are Grace, the resident responsible for reasoning about the assigned objective. "
                         "Select actions yourself. You may request a capability only from the supplied available_tools list; "
                         "copy its capability_id verbatim, including punctuation; never replace periods with underscores. "
+                        "Human-readable capability names and descriptions are for comprehension; always select by the stable machine identifier. "
                         "The institutional runtime will enforce authorization and return its result. Do not claim a capability "
                         "was used until its result appears in the conversation. Use only evidence returned by the runtime. "
                         "If evidence is empty and the objective asks for institutional facts, do not guess or return a healthy answer. "
                         "Request a relevant listed capability; if none can supply the facts, return a justified blocked decision. "
                         "If the institutional runtime rejects a proposed completion with acceptance feedback, reassess the original objective "
                         "against all returned evidence and continue with an authorized capability when useful; do not repeat an unsupported final. "
+                        "For a continuation that lists dependency_context, treat those durable prerequisite outcomes as prior institutional evidence, "
+                        "and continue the current objective without claiming the prerequisite's work as your own. "
                         "When more information is needed, return {\"action\":\"invoke_capability\","
                         "\"contract_id\":\"r3a.resident-capability-tool\",\"contract_version\":\"1.0.0\","
                         "\"capability_id\":\"exact capability_id\",\"arguments\":{...},"
@@ -254,6 +257,7 @@ class GraceResident:
                                                                   "engineering_assignment": engineering_assignment,
                                                                   "available_engineering_operations": available_operations,
                                                                   "engineering_execution_result": payload.get("engineering_execution_result"),
+                                                                  "dependency_context": payload.get("dependency_context", []),
                                                                   "available_tools": tools,
                                                                   "required_evidence_refs": payload.get("required_evidence_refs", []),
                                                                   "evidence": evidence},
