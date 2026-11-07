@@ -390,7 +390,7 @@
       "additionalProperties": false
     },
     "required_grants": [
-      "institutional.directory.read"
+      "institutional.directory.discover"
     ],
     "evidence": {
       "schema": {

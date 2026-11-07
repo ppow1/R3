@@ -3,7 +3,7 @@
 The directory operation is registered in the existing capability registry as
 `institutional.directory.discover` (`r3a.capability-operation.v1`, revision
 1.0.0, effect `read`). CME validates every invocation, evaluates the
-`institutional.directory.read` grant, records the decision, and only then calls
+`institutional.directory.discover` grant, records the decision, and only then calls
 the R3A-owned provider. Discovery returns the descriptor and a separate human
 presentation projection; it does not authorize invocation.
 
