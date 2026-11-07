@@ -7,7 +7,9 @@ the common `r3a.capability-operation.v1` contract and a digest-pinned provider.
 This evolves the existing operation rather than adding a parallel search tool.
 
 The provider reuses `r3a_runtime.knowledge.retrieve_bytes` for deterministic
-fact extraction and matching. Its external configuration lists the source IDs,
+fact extraction and matching. Its typed input accepts a bounded query and
+result limit; it searches every configured source so Grace cannot guess a
+source selector. Its external configuration lists the source IDs,
 absolute document paths, freshness thresholds, and result/document limits.
 The included source example points at the versioned R3A process state machine;
 operators must configure real source paths for the runtime in use.
