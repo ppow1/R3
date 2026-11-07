@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.2.3
+File Revision: 1.2.4
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -23,10 +23,11 @@ Changed: 2026-11-06T19:16:11Z | R3A-019 | Codex GPT-6 | Cover explicit transitio
 Changed: 2026-11-07 | R3A-019 | Codex GPT-6 | Verify resident-selected capability actions and authorized knowledge dispatch.
 Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Reproduce false completion and prove same-activity evidence continuation.
 Changed: 2026-11-07T02:41:51Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Assert actionable missing-edge feedback and verify the durable tool-result checkpoint.
+Changed: 2026-11-07T03:34:34Z | R3A-019-INBOX-LOOP | Codex GPT-6 | Verify response schemas expose only exact capability identifiers from the current tool manifest.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
-History/Predecessor: Git blob c7b470dfc129378cc459d1339981afe253c8a5bb at commit 0d5f950efc2318774bb95a8dad3b5a498d3f8ce3.
+History/Predecessor: Git blob c9f4d2e4cca1ce9b20bd7853457084ce5cb39199 at commit 111c7661e9aad796a5f6752878c809d551f94884.
 """
 from __future__ import annotations
 
@@ -42,7 +43,7 @@ import hashlib
 from r3a_runtime.acceptance import validate_acceptance, validate_criteria
 from r3a_runtime.cme import CME, _RESIDENT_TOOLS, _knowledge_answer_issues, _requires_runtime_evidence
 from r3a_runtime.config import ConfigurationError, ModelRoute, resolve_model_route
-from r3a_runtime.grace_module import GraceResident
+from r3a_runtime.grace_module import GraceResident, resident_action_schema
 from r3a_runtime.knowledge import retrieve
 
 
@@ -151,6 +152,16 @@ class KnowledgeRetrievalTests(unittest.TestCase):
 
 
 class ResidentCapabilityReasoningTests(unittest.TestCase):
+    def test_capability_schema_uses_exact_manifest_identifiers(self):
+        schema = resident_action_schema([
+            {"capability_id": "institution.knowledge.read"},
+            {"capability_id": "institution.diagnostics.read"},
+        ])
+        self.assertEqual(schema["properties"]["capability_id"]["enum"], [
+            "institution.knowledge.read", "institution.diagnostics.read"])
+        self.assertNotIn("institution_knowledge_read",
+                         schema["properties"]["capability_id"]["enum"])
+
     def _resident(self, model_content):
         resident = GraceResident.__new__(GraceResident)
         resident.module_id = "resident.grace"

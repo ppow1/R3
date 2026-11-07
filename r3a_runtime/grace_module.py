@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.3.1
+File Revision: 1.3.2
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
 Purpose: Execute read-only Grace objectives through configured inference and resident-selected authorized capabilities.
@@ -23,10 +23,11 @@ Changed: 2026-11-07 | R3A-019 | Codex GPT-6 | Let Grace select authorized read c
 Changed: 2026-11-07 | R3A-019 | Codex GPT-6 | Normalize omitted arguments to an empty object only for no-argument capability manifests.
 Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Give Grace explicit objective criteria and continuation feedback.
 Changed: 2026-11-07T02:41:51Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Deliver the versioned acceptance envelope in the resident inference context.
+Changed: 2026-11-07T03:34:34Z | R3A-019-INBOX-LOOP | Codex GPT-6 | Constrain capability identifiers to the exact configured tool manifest values.
 Supersedes: None.
 Contracts: R3A-019; AP1-M1 Issue #43 acceptance; r3a.resident.execution.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; automated inference responses are fixtures.
-History/Predecessor: Git blob 267e9a55f5b8721e0e17c841e2e4b6dfca648fbd at commit 0d5f950efc2318774bb95a8dad3b5a498d3f8ce3.
+History/Predecessor: Git blob 79b5db5747b261cbb3d8807988e8c63043e1d9ae at commit 111c7661e9aad796a5f6752878c809d551f94884.
 """
 from __future__ import annotations
 
@@ -70,6 +71,16 @@ RESIDENT_ACTION_SCHEMA = {
     "required": ["action"],
     "additionalProperties": False,
 }
+
+
+def resident_action_schema(available_tools: list[dict[str, Any]]) -> dict[str, Any]:
+    """Constrain capability selection to exact identifiers in this execution's manifest."""
+    schema = json.loads(json.dumps(RESIDENT_ACTION_SCHEMA))
+    capability_ids = [tool.get("capability_id") for tool in available_tools
+                      if isinstance(tool, dict) and isinstance(tool.get("capability_id"), str)]
+    if capability_ids:
+        schema["properties"]["capability_id"]["enum"] = list(dict.fromkeys(capability_ids))
+    return schema
 
 
 class GraceResident:
@@ -161,13 +172,14 @@ class GraceResident:
                 "model": route.model,
                 "temperature": 0,
                 "max_tokens": route.max_tokens,
-                "response_format": {"type": "json_object", "schema": RESIDENT_ACTION_SCHEMA},
+                "response_format": {"type": "json_object", "schema": resident_action_schema(tools)},
                 "chat_template_kwargs": {"enable_thinking": False},
                 "messages": [
                     {"role": "system", "content": (
                         "You are Grace, the resident responsible for reasoning about the assigned objective. "
                         "Select actions yourself. You may request a capability only from the supplied available_tools list; "
-                        "the institutional runtime will enforce authorization and return its result. Do not claim a capability "
+                        "copy its capability_id verbatim, including punctuation; never replace periods with underscores. "
+                        "The institutional runtime will enforce authorization and return its result. Do not claim a capability "
                         "was used until its result appears in the conversation. Use only evidence returned by the runtime. "
                         "If evidence is empty and the objective asks for institutional facts, do not guess or return a healthy answer. "
                         "Request a relevant listed capability; if none can supply the facts, return a justified blocked decision. "
