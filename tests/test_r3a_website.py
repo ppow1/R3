@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_website.py
 Component: R3A-WEBSITE-API-TESTS
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-07T21:59:13Z
 Created By: Codex GPT-6
 Purpose: Verify Steward website auth gates and canonical runtime API forwarding.
@@ -11,6 +11,7 @@ Observability: HTTP status/body assertions and CME control request assertions.
 Dependencies: FastAPI, httpx, r3_app, unittest.mock.
 Authority: R3A Class I website development authorized by Issue #51.
 Changed: 2026-11-07T21:59:13Z | R3A-007/R3A-010/R3A-013/R3A-019 | Codex GPT-6 | Add API tests for effective config, authentication, diagnostics, and objective submission.
+Changed: 2026-11-07T22:04:07Z | R3A-007/R3A-010 | Codex GPT-6 | Verify request correlation header and preservation of CME correlation IDs.
 Supersedes: None.
 Contracts: R3A AP0 diagnostic socket; grace.objective.submit; R3A website Steward adapter.
 Tests: python -m unittest tests.test_r3a_website.
@@ -76,7 +77,7 @@ class StewardWebsiteApiTests(unittest.TestCase):
         self.assertFalse(body["write_available"])
 
     def test_objective_is_forwarded_to_cme_with_idempotency(self):
-        result = {"activity_id": "activity-1", "state": "QUEUED"}
+        result = {"activity_id": "activity-1", "state": "QUEUED", "correlation_id": "cme-correlation-1"}
         with patch.dict(os.environ, {"R3A_WEBSITE_STEWARD_TOKEN": "configured", "R3A_CONFIG": "/tmp/r3a.json"}), \
                 patch("r3a_runtime.config.load_settings", return_value=self.settings), \
                 patch("r3a_runtime.control.control_request", new_callable=AsyncMock,
@@ -88,7 +89,9 @@ class StewardWebsiteApiTests(unittest.TestCase):
                         "from_state": "RUNNING", "to_state": "STOPPING"}],
                     "idempotency_key": "website-request-1"})
         self.assertEqual(response.status_code, 202)
+        self.assertTrue(response.headers["X-Request-ID"])
         self.assertEqual(response.json()["activity_id"], "activity-1")
+        self.assertEqual(response.json()["correlation_id"], "cme-correlation-1")
         self.assertEqual(request.await_args.args[1], "grace.objective.submit")
         self.assertEqual(request.await_args.kwargs["idempotency_key"], "website-request-1")
 

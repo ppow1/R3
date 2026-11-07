@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.13
+# File Revision: 1.0.14
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Serve visual estate UI and authenticated, canonical R3A Steward API adapters
@@ -18,6 +18,7 @@
 # Changed: 2026-11-07T21:40:20Z | R3A-007/R3A-010/R3A-013/R3A-017/R3A-019 | Codex GPT-6 | Add configurable Steward-authenticated AP1 diagnostics and durable Grace objective gateway.
 # Changed: 2026-11-07T21:58:03Z | R3A-007/R3A-013 | Codex GPT-6 | Expose read-only effective sanitized configuration and bounded activation history from authoritative diagnostics.
 # Changed: 2026-11-07T22:02:09Z | R3A-007/R3A-013 | Codex GPT-6 | Record focused API test coverage and current verification limits in provenance.
+# Changed: 2026-11-07T22:04:07Z | R3A-007/R3A-010 | Codex GPT-6 | Add structured request correlation and preserve CME's actual objective correlation ID.
 
 """R3 first vertical slice: shared read-only capabilities, not UI-owned logic.
 
@@ -36,6 +37,8 @@ import math
 import asyncio
 import hmac
 import uuid
+import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Body, Header
@@ -46,6 +49,23 @@ ROOT = Path(os.environ.get("R3_REPO", Path(__file__).resolve().parent)).resolve(
 ART = (ROOT / "assets" / "artwork").resolve()
 EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 app = FastAPI(title="R3 Institutional Capabilities", version="0.1.0")
+website_logger = logging.getLogger("r3.website")
+
+
+@app.middleware("http")
+async def log_correlated_request(request, call_next):
+    request_id = str(uuid.uuid4())
+    response = await call_next(request)
+    route = request.scope.get("route")
+    website_logger.info(json.dumps({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "request_id": request_id,
+        "method": request.method,
+        "route": getattr(route, "path", request.url.path),
+        "status_code": response.status_code,
+    }, separators=(",", ":")))
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 class GraceObjectiveRequest(BaseModel):
@@ -133,7 +153,7 @@ async def submit_grace_objective(request: GraceObjectiveRequest,
             "acceptance_criteria": request.acceptance_criteria,
             "task_class": "objective_reasoning",
         }, idempotency_key=request.idempotency_key, timeout=6.0)
-        return {**result, "correlation_id": request.idempotency_key}
+        return result
     except Exception as exc:
         raise HTTPException(503, f"Grace objective was not accepted: {type(exc).__name__}") from exc
 
