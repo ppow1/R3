@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.4.0
+File Revision: 1.5.0
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -29,6 +29,7 @@ Changed: 2026-11-07T05:45:10Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist autho
 Changed: 2026-11-07T05:52:05Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist stable objective correlation and immutable Grace proposal revisions in existing activity checkpoints/events.
 Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist authorization decision and audit identities as separate provenance fields.
 Changed: 2026-11-07T13:20:00Z | R3A-AP2-CAPABILITY-INTEGRATION | Codex GPT-6 | Store canonical invocation authorization in a nonreserved evidence column and verify durable SQL recovery against isolated PostgreSQL.
+Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Persist typed Engineering assignments in durable Grace inbox intake without relaxing AP1 acceptance criteria.
 Supersedes: None.
 Contracts: AP0-003–010; R3A-019; R3A-011/R3A-012; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1; r3a.engineering-work-order.v1; r3a.capability-invocation.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_engineering.py; tests/test_r3a_capability_integration_demo.py.
@@ -55,7 +56,7 @@ from .acceptance import (OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
 from .contracts import ReadinessObservation, parse_timestamp
 from .authorization import AuthorizationDecision
 from .engineering import (EngineeringProposal, EngineeringWorkOrder, VerificationResult,
-                          proposal_digest, validate_completion)
+                          proposal_digest, validate_completion, validate_engineering_assignment)
 
 
 IMPLEMENTATION_REVISION = os.environ.get("R3A_IMPLEMENTATION_REVISION", "working-tree")
@@ -936,7 +937,8 @@ class Store:
                                      role_id: str | None = None,
                                      required_capabilities: tuple[str, ...] = (),
                                      required_modalities: tuple[str, ...] = (),
-                                     acceptance_criteria: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                                     acceptance_criteria: list[dict[str, Any]] | None = None,
+                                     engineering_assignment: dict[str, Any] | None = None) -> dict[str, Any]:
         """Durably enqueue one objective/notification; duplicate keys return the same activity."""
         if not objective.strip() or len(objective) > 4000:
             raise ValueError("event content must contain 1 to 4000 characters")
@@ -954,7 +956,13 @@ class Store:
             raise ValueError("required_modalities must be modality identifiers")
         if len(set(required_modalities)) != len(required_modalities):
             raise ValueError("required_modalities must be unique")
-        acceptance_criteria = validate_required_criteria(acceptance_criteria)
+        if engineering_assignment is not None:
+            engineering_assignment = validate_engineering_assignment(engineering_assignment)
+            if acceptance_criteria:
+                raise ValueError("Engineering assignments use their own typed acceptance criteria")
+            acceptance_criteria = []
+        else:
+            acceptance_criteria = validate_required_criteria(acceptance_criteria)
         if role_id is None and self.settings.model_roles:
             if route_id is None:
                 role_id = self.settings.default_model_role
@@ -982,6 +990,7 @@ class Store:
                        "acceptance_contract": {"contract_id": OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
                                                 "contract_version": OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION,
                                                 "criteria": acceptance_criteria},
+                       "engineering_assignment": engineering_assignment,
                        "role_config_revision": self.settings.source_digest if selected_role_id else None}
         async with self.pool.connection() as conn, conn.transaction():
             existing = await (await conn.execute(
@@ -1000,6 +1009,7 @@ class Store:
                     "contract_version": OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION,
                     "criteria": []})
                 prior_input.setdefault("role_config_revision", None)
+                prior_input.setdefault("engineering_assignment", None)
                 prior_input.pop("authorized_capability", None)
                 prior_input.pop("correlation_id", None)
                 if existing["activity_type"] != "grace.objective" or prior_input != event_input:

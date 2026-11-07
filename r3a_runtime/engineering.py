@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/engineering.py
 Component: R3A-AP2-ENGINEERING-CONTRACTS
-File Revision: 1.2.0
+File Revision: 1.3.0
 Created: 2026-11-07T05:28:24Z
 Created By: Codex GPT-6
 Purpose: Define AP2 proposal, work-order, operation-reference, action, and independent-verification contracts.
@@ -15,6 +15,7 @@ Changed: 2026-11-07T05:45:10Z | AP2-IMPLEMENTATION | Codex GPT-6 | Add verifier 
 Changed: 2026-11-07T05:47:16Z | AP2-IMPLEMENTATION | Codex GPT-6 | Align operation and invocation contract identities with the approved v1 pin.
 Changed: 2026-11-07T05:52:05Z | AP2-IMPLEMENTATION | Codex GPT-6 | Add strict proposal deserialization and canonical revision digests for durable recovery.
 Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Project EngineeringAction as the pinned invocation request and separate decision/audit references.
+Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Add validated Engineering assignment acceptance criteria and durable work-order deserialization for recovery.
 Supersedes: None.
 Contracts: r3a.engineering-proposal.v1; r3a.engineering-work-order.v1; r3a.engineering-action.v1; r3a.verification-request.v1; r3a.verification-result.v1; r3a.capability-operation.v1; r3a.capability-invocation.v1.
 Tests: tests/test_r3a_engineering.py.
@@ -47,6 +48,55 @@ _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 class EngineeringContractError(ValueError):
     """Raised when a durable AP2 engineering contract is malformed or incompatible."""
+
+
+def validate_engineering_assignment(value: Any) -> dict[str, Any]:
+    """Validate a durable, institution-scoped Engineering assignment and declarative checks."""
+    fields = {"contract_id", "contract_version", "repository", "baseline_ref", "workspace_id",
+              "allowed_paths", "command_profiles", "criteria", "verifier_id", "verifier_version",
+              "policy_revision"}
+    if not isinstance(value, dict) or set(value) != fields:
+        raise EngineeringContractError("engineering assignment fields are invalid")
+    if value["contract_id"] != "r3a.engineering-assignment":
+        raise EngineeringContractError("engineering assignment contract identity mismatch")
+    _version(value["contract_version"])
+    for key in ("repository", "baseline_ref", "workspace_id", "verifier_id", "policy_revision"):
+        _text(value[key], key)
+    _version(value["verifier_version"], "verifier_version")
+    _relative_paths(value["allowed_paths"], "allowed_paths")
+    _unique_texts(value["command_profiles"], "command_profiles")
+    criteria = value["criteria"]
+    if not isinstance(criteria, list) or not criteria:
+        raise EngineeringContractError("engineering assignment requires structured criteria")
+    seen: set[str] = set()
+    for criterion in criteria:
+        if not isinstance(criterion, dict) or set(criterion) != {
+                "criterion_id", "type", "artifact_path", "bindings"}:
+            raise EngineeringContractError("engineering criterion fields are invalid")
+        criterion_id = _text(criterion["criterion_id"], "criterion_id")
+        if criterion_id in seen:
+            raise EngineeringContractError("engineering criterion identifiers must be unique")
+        seen.add(criterion_id)
+        if criterion["type"] != "json_fields_equal":
+            raise EngineeringContractError("unsupported Engineering criterion type")
+        path = _relative_paths([criterion["artifact_path"]], "criterion.artifact_path")[0]
+        if not any(path == allowed or (allowed.endswith("**") and path.startswith(allowed[:-2]))
+                   for allowed in value["allowed_paths"]):
+            raise EngineeringContractError("criterion artifact path is outside allowed_paths")
+        bindings = criterion["bindings"]
+        if not isinstance(bindings, list) or not bindings:
+            raise EngineeringContractError("criterion bindings must be nonempty")
+        for binding in bindings:
+            if not isinstance(binding, dict) or set(binding) != {
+                    "artifact_pointer", "source", "source_pointer"}:
+                raise EngineeringContractError("criterion binding fields are invalid")
+            if binding["source"] not in {"operation", "work_order"}:
+                raise EngineeringContractError("criterion binding source is unsupported")
+            for key in ("artifact_pointer", "source_pointer"):
+                pointer = binding[key]
+                if not isinstance(pointer, str) or (pointer and not pointer.startswith("/")):
+                    raise EngineeringContractError(f"{key} must be a JSON pointer")
+    return json.loads(json.dumps(value))
 
 
 def _text(value: Any, name: str) -> str:
@@ -316,6 +366,30 @@ class EngineeringWorkOrder:
                 "policy_revision": self.policy_revision,
                 "authorization_expires_at": self.authorization_expires_at,
                 "criteria": list(self.criteria), "issued_at": self.issued_at}
+
+    @classmethod
+    def from_dict(cls, value: Any) -> "EngineeringWorkOrder":
+        if not isinstance(value, dict) or value.get("contract_id") != WORK_ORDER_CONTRACT_ID:
+            raise EngineeringContractError("engineering work-order contract identity mismatch")
+        fields = {"contract_id", "contract_version", "work_order_id", "work_order_version",
+                  "activity_id", "attempt_id", "correlation_id", "proposal_id", "proposal_revision",
+                  "proposal_digest", "resident_id", "config_revision", "repository", "baseline_ref",
+                  "workspace_id", "allowed_paths", "command_profiles", "operation_refs",
+                  "authorization_decision_id", "authorization_audit_event_id", "authorization_provider_id",
+                  "policy_revision", "authorization_expires_at", "criteria", "issued_at"}
+        if set(value) != fields or not isinstance(value["operation_refs"], list):
+            raise EngineeringContractError("engineering work-order fields are invalid")
+        return cls(value["work_order_id"], value["work_order_version"], value["activity_id"],
+                   value["attempt_id"], value["correlation_id"], value["proposal_id"],
+                   value["proposal_revision"], value["proposal_digest"], value["resident_id"],
+                   value["config_revision"], value["repository"], value["baseline_ref"],
+                   value["workspace_id"], tuple(value["allowed_paths"]),
+                   tuple(value["command_profiles"]),
+                   tuple(CapabilityOperationRef.from_dict(item) for item in value["operation_refs"]),
+                   value["authorization_decision_id"], value["authorization_audit_event_id"],
+                   value["authorization_provider_id"], value["policy_revision"],
+                   value["authorization_expires_at"], tuple(value["criteria"]), value["issued_at"],
+                   value["contract_version"])
 
 
 @dataclass(frozen=True)
