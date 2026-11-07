@@ -2,13 +2,13 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.3.2
+File Revision: 1.3.3
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
 Execution Model: Async Psycopg 3 connection pool.
 Observability: PostgreSQL current-state projections, append-only events, migrations, and activity lineage.
-Dependencies: psycopg 3; PostgreSQL; r3a_runtime.config.
+Dependencies: psycopg 3; PostgreSQL; r3a_runtime.config; AP1 authorization and AP2 engineering contracts.
 Authority: AP0-M1 Issue #42, AP1-M1 Issue #43, and AP1 Slices 1–2 Issue #45 authorized by Steward; R3A database only.
 Changed: 2026-11-06T15:06:00Z | R3A-AP0-M1 | Codex GPT-6 | Add durable PostgreSQL store.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Add validated machine definitions, idempotent grants/lifecycle, retry-safe leases and guarded state/event commits.
@@ -24,10 +24,12 @@ Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Pe
 Changed: 2026-11-07T03:59:26Z | R3A-019-SUSTAINED-OPERATION | Codex GPT-6 | Reject Grace inbox submissions without nonempty validated acceptance criteria.
 Changed: 2026-11-07T04:36:29Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Add resumable concurrent-index migrations and skip unused event-history retrieval.
 Changed: 2026-11-07T04:41:59Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Generalize concurrent index validation for event and activity ordering indexes.
+Changed: 2026-11-07T05:28:24Z | AP2-IMPLEMENTATION | Codex GPT-6 | Allow generic state-machine transition events to preserve caller-supplied correlation and causation lineage.
+Changed: 2026-11-07T05:45:10Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist authorized work orders and guard terminal order completion with independent verifier evidence.
 Supersedes: None.
-Contracts: AP0-003–010; R3A-019; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
-Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py.
-History/Predecessor: Git blob 035452b509490e368e4fe831d9b07632bdb3655b at commit 8e89ada52fda4768782b712f23281150e71b11e3.
+Contracts: AP0-003–010; R3A-019; R3A-011/R3A-012; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1; r3a.engineering-work-order.v1.
+Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_engineering.py.
+History/Predecessor: Prior revision at baseline commit 9925c7a408707162e6f070a4121dcc83f5fe0e0a, blob f2cffbc6f44a47b10f6262ee469bd310ca652683; earlier history includes blob 035452b509490e368e4fe831d9b07632bdb3655b.
 """
 from __future__ import annotations
 
@@ -48,6 +50,8 @@ from .config import Settings, sanitized_config
 from .acceptance import (OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
                          OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, validate_required_criteria)
 from .contracts import ReadinessObservation, parse_timestamp
+from .authorization import AuthorizationDecision
+from .engineering import EngineeringWorkOrder, VerificationResult, validate_completion
 
 
 IMPLEMENTATION_REVISION = os.environ.get("R3A_IMPLEMENTATION_REVISION", "working-tree")
@@ -249,20 +253,153 @@ class Store:
     async def transition(self, entity_type: str, entity_id: str, machine_id: str,
                          machine_version: int, next_state: str, reason: str,
                          evidence: dict[str, Any] | None = None,
-                         *, initial: bool = False, event_id: uuid.UUID | None = None) -> bool:
+                         *, initial: bool = False, event_id: uuid.UUID | None = None,
+                         correlation_id: uuid.UUID | None = None,
+                         causation_id: uuid.UUID | None = None) -> bool:
         """Validate and persist transition plus event atomically, including rejected attempts."""
+        if entity_type == "engineering_work_order" and next_state == "COMPLETED":
+            raise PermissionError("engineering work-order completion must use independent verification gate")
         event_id = event_id or uuid.uuid4()
         async with self.pool.connection() as conn, conn.transaction():
             return await self._transition_on_conn(conn, entity_type, entity_id, machine_id,
                                                   machine_version, next_state, reason, evidence,
-                                                  initial=initial, event_id=event_id)
+                                                  initial=initial, event_id=event_id,
+                                                  correlation_id=correlation_id,
+                                                  causation_id=causation_id)
+
+    async def create_engineering_work_order(self, work_order: dict[str, Any],
+                                            authorization: AuthorizationDecision) -> bool:
+        """Persist an authorized AP2 order in the existing state-machine/event store."""
+        if not isinstance(work_order, dict) or work_order.get("contract_id") != "r3a.engineering-work-order":
+            raise ValueError("work_order must use r3a.engineering-work-order")
+        if work_order.get("contract_version") != "1.0.0":
+            raise ValueError("unsupported engineering work-order contract version")
+        if not isinstance(authorization, AuthorizationDecision) or authorization.allowed is not True:
+            raise PermissionError("a successful institutional authorization decision is required")
+        if not isinstance(authorization.audit_event_id, str) or not authorization.audit_event_id.strip():
+            raise ValueError("authorization decision is missing its durable audit reference")
+        if not isinstance(authorization.provider_id, str) or not authorization.provider_id.strip():
+            raise ValueError("authorization decision is missing its provider identity")
+        if (work_order.get("authorization_decision_id") != authorization.audit_event_id
+                or work_order.get("authorization_provider_id") != authorization.provider_id
+                or work_order.get("policy_revision") != authorization.policy_revision
+                or work_order.get("config_revision") != authorization.config_revision):
+            raise ValueError("work-order authorization provenance does not match the provider decision")
+        order_id = str(work_order.get("work_order_id", ""))
+        activity_id = str(work_order.get("activity_id", ""))
+        attempt_id = str(work_order.get("attempt_id", ""))
+        correlation_id = str(work_order.get("correlation_id", ""))
+        for key, value in (("work_order_id", order_id), ("activity_id", activity_id),
+                           ("attempt_id", attempt_id), ("correlation_id", correlation_id)):
+            try:
+                uuid.UUID(value)
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ValueError(f"{key} must be a UUID") from exc
+        auth_evidence = {"authorization_decision_id": authorization.audit_event_id,
+                         "provider_id": authorization.provider_id,
+                         "allowed": authorization.allowed, "reason": authorization.reason,
+                         "retryable": authorization.retryable,
+                         "policy_revision": authorization.policy_revision,
+                         "config_revision": authorization.config_revision,
+                         "observed_at": authorization.observed_at,
+                         "correlation_id": authorization.correlation_id,
+                         "activity_id": authorization.activity_id,
+                         "attempt_id": authorization.attempt_id}
+        if authorization.correlation_id != correlation_id:
+            raise ValueError("authorization decision correlation does not match the work order")
+        if authorization.activity_id not in (None, activity_id):
+            raise ValueError("authorization decision activity does not match the work order")
+        if authorization.attempt_id not in (None, attempt_id):
+            raise ValueError("authorization decision attempt does not match the work order")
+        details = {"contract_id": work_order["contract_id"],
+                   "contract_version": work_order["contract_version"],
+                   "work_order": work_order, "authorization": auth_evidence,
+                   "activity_id": activity_id, "attempt_id": attempt_id,
+                   "correlation_id": correlation_id}
+        existing = await self.get_engineering_work_order(order_id)
+        if existing is not None:
+            stored = existing.get("details", {})
+            if (stored.get("work_order") == work_order
+                    and stored.get("authorization") == auth_evidence
+                    and stored.get("activity_id") == activity_id
+                    and stored.get("correlation_id") == correlation_id):
+                return True
+            raise ValueError("work_order_id already exists with different durable content")
+        return await self.transition(
+            "engineering_work_order", order_id, "engineering.work-order", 1,
+            "AUTHORIZED", "authorized work order issued", details, initial=True,
+            correlation_id=uuid.UUID(correlation_id), causation_id=uuid.UUID(attempt_id))
+
+    async def transition_engineering_work_order(self, work_order_id: str, next_state: str,
+                                                activity_id: str, attempt_id: str,
+                                                correlation_id: str, reason: str,
+                                                details: dict[str, Any], *,
+                                                work_order: EngineeringWorkOrder | None = None,
+                                                verification: VerificationResult | None = None) -> bool:
+        """Record one guarded work-order transition with activity/attempt event lineage."""
+        order_id = str(uuid.UUID(work_order_id))
+        activity = str(uuid.UUID(activity_id))
+        attempt = str(uuid.UUID(attempt_id))
+        correlation = str(uuid.UUID(correlation_id))
+        if not isinstance(details, dict):
+            raise ValueError("work-order transition details must be an object")
+        immutable = {"contract_id", "contract_version", "work_order", "authorization",
+                     "activity_id", "attempt_id", "correlation_id", "transition_attempt_id"}
+        if immutable & details.keys():
+            raise ValueError("transition details cannot replace immutable work-order provenance")
+        if next_state == "COMPLETED":
+            if not isinstance(work_order, EngineeringWorkOrder) or not isinstance(verification, VerificationResult):
+                raise PermissionError("COMPLETED requires typed work-order and independent verification contracts")
+            if work_order.to_dict().get("work_order_id") != order_id:
+                raise ValueError("completion work order identity does not match transition")
+            validate_completion(work_order, verification)
+            details = {**details, "verification_result": verification.to_dict()}
+        elif work_order is not None or verification is not None:
+            raise ValueError("verification contracts are accepted only for a COMPLETED transition")
+        async with self.pool.connection() as conn, conn.transaction():
+            existing = await (await conn.execute(
+                "SELECT state,details FROM r3a.runtime_entities "
+                "WHERE entity_type='engineering_work_order' AND entity_id=%s FOR UPDATE",
+                (order_id,))).fetchone()
+            if existing is None:
+                raise KeyError(f"unknown engineering work order: {order_id}")
+            stored_details = existing.get("details") or {}
+            stored_order = stored_details.get("work_order")
+            if (stored_details.get("activity_id") != activity
+                    or stored_details.get("correlation_id") != correlation):
+                raise ValueError("transition lineage does not match the durable work order")
+            if next_state == "COMPLETED":
+                if work_order.to_dict() != stored_order:
+                    raise ValueError("completion work order does not match the immutable durable order")
+                if existing.get("state") != "VERIFYING":
+                    raise ValueError("work order must be VERIFYING before completion")
+            evidence = {**stored_details, **details, "work_order_id": order_id,
+                        "activity_id": activity, "attempt_id": stored_details.get("attempt_id"),
+                        "transition_attempt_id": attempt, "correlation_id": correlation}
+            return await self._transition_on_conn(
+                conn, "engineering_work_order", order_id, "engineering.work-order", 1,
+                next_state, reason, evidence, correlation_id=uuid.UUID(correlation),
+                causation_id=uuid.UUID(attempt))
+
+    async def get_engineering_work_order(self, work_order_id: str) -> dict[str, Any] | None:
+        """Read the latest durable order projection without scanning historical events."""
+        order_id = str(uuid.UUID(work_order_id))
+        rows = await self.rows(
+            "SELECT entity_id,state,details,version,updated_at FROM r3a.runtime_entities "
+            "WHERE entity_type='engineering_work_order' AND entity_id=%s",
+            (order_id,))
+        if not rows:
+            return None
+        return rows[0]
 
     async def _transition_on_conn(self, conn, entity_type: str, entity_id: str,
                                   machine_id: str, machine_version: int,
                                   next_state: str, reason: str,
                                   evidence: dict[str, Any] | None = None,
                                   *, initial: bool = False,
-                                  event_id: uuid.UUID | None = None) -> bool:
+                                  event_id: uuid.UUID | None = None,
+                                  correlation_id: uuid.UUID | None = None,
+                                  causation_id: uuid.UUID | None = None) -> bool:
         event_id = event_id or uuid.uuid4()
         definition_row = await (await conn.execute(
             "SELECT definition FROM r3a.state_machine_definitions WHERE machine_id=%s AND machine_version=%s",
@@ -283,7 +420,8 @@ class Store:
                               machine_id, machine_version, prior, next_state,
                               "transition is not allowed by the active versioned definition",
                               {"requested_reason": reason, "requested_evidence": evidence or {}},
-                              outcome="rejected", event_id=event_id)
+                              outcome="rejected", event_id=event_id,
+                              correlation_id=correlation_id, causation_id=causation_id)
             return False
         current = await (await conn.execute(
             "SELECT revision_id FROM r3a.config_current WHERE singleton=true"
@@ -304,7 +442,8 @@ class Store:
             )
         await self._event(conn, f"{entity_type}.state_transition", entity_type, entity_id,
                           machine_id, machine_version, prior, next_state, reason, evidence,
-                          event_id=event_id)
+                          event_id=event_id, correlation_id=correlation_id,
+                          causation_id=causation_id)
         return True
 
     async def process_heartbeat(self, component_id: str, pid: int, state: str,
