@@ -75,6 +75,7 @@ from .engineering import (CapabilityOperationRef, CriterionResult, EngineeringPr
 from .engineering_verifier import verify_workspace_artifact
 from .diagnostics import make_server
 from .knowledge import retrieve
+from .notifications import INSTITUTION_EVENT_SOURCE, validate_notification_envelope
 from .acceptance import (AcceptanceCriteriaRequired, OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
                          OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, evidence_fingerprint,
                          validate_acceptance, validate_required_criteria)
@@ -206,6 +207,11 @@ class CME:
                                              metadata={"description": "Read PostgreSQL version and readiness"})
         await self.store.register_capability("institution.knowledge.read", "R3A-CME", "read_only",
                                              metadata={"description": "Read explicitly allowlisted institutional knowledge sources"})
+        if any(source.enabled for source in getattr(self.settings, "notification_sources", ())):
+            await self.store.register_capability(
+                "notification.source.read", "R3A-CME", "read_only",
+                metadata={"description": "Read one identified event from the configured durable institution-event source",
+                          "source_id": INSTITUTION_EVENT_SOURCE})
         for discovery in self.settings.capability_registry.discover():
             descriptor = discovery["descriptor"]
             operation = self.settings.capability_registry.resolve(
@@ -600,6 +606,34 @@ class CME:
             if request.get("work_order") is not None:
                 raise ValueError("work-order invocations must be submitted by the AP2 Engineering adapter")
             return await self.invoke_capability(request)
+        if operation == "notification.ingest":
+            source_id = str(payload.get("source_id", ""))
+            source_event_id = str(payload.get("source_event_id", ""))
+            source = next((item for item in getattr(self.settings, "notification_sources", ())
+                           if item.source_id == source_id and item.enabled
+                           and item.adapter == "institution_events.v1"), None)
+            if source is None:
+                raise PermissionError("notification source is not enabled by bootstrap configuration")
+            stable_key = f"notification:{source_id}:{source_event_id}"
+            if idempotency_key != stable_key:
+                raise ValueError("notification intake requires a source-bound idempotency key")
+            authorization = await self._authorize_capability(
+                "notification.source.read", request_id=idempotency_key,
+                context={"source_id": source_id, "source_event_id": source_event_id},
+                resident_id=self.settings.module_id)
+            try:
+                result = await self.store.ingest_institution_event_notification(
+                    source_id, source_event_id, idempotency_key)
+            except Exception as exc:
+                try:
+                    await self.store.record_notification_intake_failure(
+                        source_id, source_event_id, idempotency_key, exc)
+                except Exception:
+                    # If the database is unavailable, the control response remains the truthful failure.
+                    pass
+                raise
+            result["source_authorization"] = authorization
+            return result
         if operation == "model.readiness.refresh":
             role_id = str(payload["role_id"])
             role = next((entry for entry in self.settings.model_roles if entry.role_id == role_id), None)
@@ -673,6 +707,11 @@ class CME:
             self.store.settings = new_settings
             self.authorization_provider = new_provider
             revision = await self.store.activate_config()
+            if any(source.enabled for source in new_settings.notification_sources):
+                await self.store.register_capability(
+                    "notification.source.read", "R3A-CME", "read_only",
+                    metadata={"description": "Read one identified event from the configured durable institution-event source",
+                              "source_id": INSTITUTION_EVENT_SOURCE})
             await self.store.register_resource("foundation.observer", new_settings.worker_concurrency,
                                                owner="R3A-CME")
             for role in new_settings.model_roles:
@@ -836,8 +875,11 @@ class CME:
         if (acceptance_contract.get("contract_id") != OBJECTIVE_ACCEPTANCE_CONTRACT_ID
                 or acceptance_contract.get("contract_version") != OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION):
             raise ValueError("objective acceptance contract identity or version is unsupported")
+        notification = event_input.get("notification")
+        if notification is not None:
+            notification = validate_notification_envelope(notification)
         acceptance_criteria = (validate_required_criteria(acceptance_contract.get("criteria"))
-                               if engineering_assignment is None else [])
+                               if engineering_assignment is None and notification is None else [])
         if engineering_assignment is not None:
             engineering_assignment = validate_engineering_assignment(engineering_assignment)
         saved = activity.get("checkpoint") or {}
@@ -922,6 +964,18 @@ class CME:
         evidence = saved.get("evidence", [])
         if not isinstance(evidence, list):
             raise RuntimeError("Persisted resident evidence is malformed")
+        required_evidence_refs = list(saved.get("required_evidence_refs", []))
+        if notification is not None:
+            notification_source = f"notification:{notification['source_id']}:{notification['source_event_id']}"
+            source_content = json.dumps(notification, sort_keys=True, separators=(",", ":"),
+                                        ensure_ascii=False)
+            if not any(item.get("source_id") == notification_source for item in evidence):
+                evidence.append({"source_id": notification_source,
+                                 "source_path": notification["payload_ref"],
+                                 "content": source_content,
+                                 "sha256": hashlib.sha256(source_content.encode("utf-8")).hexdigest(),
+                                 "source": notification["provenance"]["store"]})
+            required_evidence_refs = sorted(set(required_evidence_refs + [notification_source]))
         escalation_offer = {"enabled": False}
         policy = event_input.get("reasoning_escalation")
         if policy and policy.get("enabled") is True:
@@ -961,6 +1015,7 @@ class CME:
                 "attempt_id": str(activity["attempt_id"]),
                 "objective": event_input["objective"], "event_kind": event_input.get("event_kind", "objective"),
                 "task_class": task_class,
+                "notification": notification,
                 "acceptance_contract": {"contract_id": OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
                                         "contract_version": OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION,
                                         "criteria": acceptance_criteria},
@@ -968,7 +1023,7 @@ class CME:
                 "route_id": route.route_id,
                 "model_route": effective_route,
                 "evidence_format": "r3a.knowledge-evidence.v1",
-                "required_evidence_refs": saved.get("required_evidence_refs", []),
+                "required_evidence_refs": required_evidence_refs,
                 "selected_role_id": selected_role_id,
                 "route_decision": decision.__dict__ if selected_role_id else None,
                 "evidence": evidence,
@@ -1645,6 +1700,8 @@ class CME:
                     try:
                         result = await self._module_call("execute", context,
                             timeout=context["model_route"]["timeout_seconds"] + 15)
+                        if context.get("notification") is not None:
+                            await self.store.acknowledge_notification(activity)
                     except Exception as exc:
                         pending = next((item for item in reversed(escalation_requests)
                                         if item.get("status") == "REQUESTED"
@@ -2111,6 +2168,11 @@ class CME:
                      "known_source_ids": sorted(str(item) for item in known_sources if item),
                      "required_source_ids": context.get("required_evidence_refs", []),
                      "message": "Citations do not cover the required returned evidence sources."}]
+        if context.get("notification") is not None:
+            if not isinstance(decision.get("assessment"), str) or not decision["assessment"].strip():
+                return [{"code": "notification_disposition_missing",
+                         "message": "Provide an evidence-grounded notification disposition."}]
+            return []
         answer_issues = _knowledge_answer_issues(context["objective"], evidence, decision)
         if answer_issues:
             return [{"code": "knowledge_answer_incomplete", "missing_facts": answer_issues,

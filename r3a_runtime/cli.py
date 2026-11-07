@@ -19,6 +19,7 @@ Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Replace caller-a
 Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Accept structured objective criteria through normal durable intake.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Support explicit activity-scoped grants and caller-assigned activity IDs for bounded authorization setup.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Permit configured objective-reasoning or vision task class on durable objective intake.
+Changed: 2026-11-07 | R3A-AP1-N1 | Codex GPT-6 | Add idempotent, source-bound institution-event notification intake.
 Supersedes: None.
 Contracts: AP0-007/008/010/013; R3A-019; AP0-M1 D8/D9; r3a.model-route-decision.v1; r3a.model-readiness.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; no model inference in this slice.
@@ -67,7 +68,7 @@ async def _run(args: argparse.Namespace) -> Any:
         payload = {"module_id": args.module_id, "capability_id": args.capability_id,
                    "reason": args.reason, "activity_id": args.activity_id}
     elif args.command == "grace-objective-submit":
-        payload = {"objective": args.objective, "event_kind": args.event_kind,
+        payload = {"objective": args.objective, "event_kind": "objective",
                    "required_capabilities": args.required_capability,
                    "required_modalities": args.required_modality,
                    "acceptance_criteria": json.loads(args.acceptance_criteria_json),
@@ -77,6 +78,10 @@ async def _run(args: argparse.Namespace) -> Any:
             payload["route_id"] = args.route_id
         if args.role_id:
             payload["role_id"] = args.role_id
+    elif args.command == "notification-ingest":
+        payload = {"source_id": args.source_id, "source_event_id": args.source_event_id}
+        operation = "notification.ingest"
+        args.idempotency_key = f"notification:{args.source_id}:{args.source_event_id}"
     elif args.command == "model-readiness-refresh":
         payload = {"role_id": args.role_id}
     elif args.command == "config-reload":
@@ -94,8 +99,6 @@ def main() -> None:
     objective = commands.add_parser("grace-objective-submit",
                                     help="Durably submit a read-only objective to the configured Grace resident")
     objective.add_argument("--objective", required=True)
-    objective.add_argument("--event-kind", choices=("objective", "notification"), default="objective",
-                           help="Durably classify this incoming event for Grace")
     objective.add_argument("--route-id", help="Configured Grace model route; defaults to bootstrap policy")
     objective.add_argument("--role-id", help="Configured Grace model role; readiness is checked before dispatch")
     objective.add_argument("--task-class", choices=("objective_reasoning", "vision"),
@@ -109,6 +112,10 @@ def main() -> None:
                            help="Versioned, machine-checkable completion criteria as a JSON array")
     objective.add_argument("--requested-activity-id", help="Optional caller-generated UUID for pre-scoping an institutional grant")
     objective.add_argument("--idempotency-key", required=True)
+    notification = commands.add_parser("notification-ingest",
+                                       help="Import one configured durable institution event for Grace")
+    notification.add_argument("--source-id", default="r3a.institution-events")
+    notification.add_argument("--source-event-id", required=True)
     readiness = commands.add_parser("model-readiness-refresh",
                                     help="Ask CME to perform a configured model-provider readiness check")
     readiness.add_argument("--role-id", required=True)

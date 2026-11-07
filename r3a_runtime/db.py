@@ -33,6 +33,7 @@ Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Persist typed Engineering
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Park objective dependencies durably, requeue after prerequisite completion, and expose bounded lineage evidence.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Snapshot the configured escalation policy on each durable objective so continuation uses its original budget and allowed routes.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Persist activity-scoped capability grants and atomically reserve per-activity external invocation budgets.
+Changed: 2026-11-07 | R3A-AP1-N1 | Codex GPT-6 | Import identified institution events as correlated Grace notifications with durable lifecycle events.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Persist objective task class and selected role with durable intake for route-safe recovery.
 Supersedes: None.
 Contracts: AP0-003–010; R3A-019; R3A-011/R3A-012; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1; r3a.engineering-work-order.v1; r3a.capability-invocation.v1.
@@ -57,6 +58,8 @@ from psycopg_pool import AsyncConnectionPool
 from .config import Settings, sanitized_config
 from .acceptance import (OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
                          OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, validate_required_criteria)
+from .notifications import (INSTITUTION_EVENT_SOURCE, institution_event_envelope,
+                            same_notification_input, validate_notification_envelope)
 from .contracts import ActivityDependencySet, ReadinessObservation, parse_timestamp
 from .authorization import AuthorizationDecision
 from .engineering import (EngineeringProposal, EngineeringWorkOrder, VerificationResult,
@@ -1080,7 +1083,8 @@ class Store:
                                      engineering_assignment: dict[str, Any] | None = None,
                                      depends_on_activity_ids: Any = None,
                                      requested_activity_id: str | None = None,
-                                     task_class: str = "objective_reasoning") -> dict[str, Any]:
+                                     task_class: str = "objective_reasoning",
+                                     notification_envelope: dict[str, Any] | None = None) -> dict[str, Any]:
         """Durably enqueue one objective/notification; duplicate keys return the same activity."""
         if not objective.strip() or len(objective) > 4000:
             raise ValueError("event content must contain 1 to 4000 characters")
@@ -1088,6 +1092,10 @@ class Store:
             raise ValueError("idempotency_key must contain 1 to 200 characters")
         if event_kind not in {"objective", "notification"}:
             raise ValueError("event_kind must be objective or notification")
+        if (event_kind == "notification") != (notification_envelope is not None):
+            raise ValueError("notification event kind requires exactly one versioned notification envelope")
+        if notification_envelope is not None:
+            notification_envelope = validate_notification_envelope(notification_envelope)
         if event_kind != "objective" and depends_on_activity_ids:
             raise ValueError("only objectives may depend on other activities")
         if task_class not in {"objective_reasoning", "vision"}:
@@ -1111,8 +1119,10 @@ class Store:
             if acceptance_criteria:
                 raise ValueError("Engineering assignments use their own typed acceptance criteria")
             acceptance_criteria = []
-        else:
+        elif notification_envelope is None:
             acceptance_criteria = validate_required_criteria(acceptance_criteria)
+        else:
+            acceptance_criteria = []
         if role_id is None and self.settings.model_roles:
             if route_id is None:
                 role_id = self.settings.model_role_for_task(task_class).role_id
@@ -1145,6 +1155,8 @@ class Store:
                                                 "criteria": acceptance_criteria},
                        "engineering_assignment": engineering_assignment,
                        "role_config_revision": self.settings.source_digest if selected_role_id else None}
+        if notification_envelope is not None:
+            event_input["notification"] = notification_envelope
         policy = self.settings.reasoning_escalation
         if policy is not None:
             event_input["reasoning_escalation"] = {
@@ -1188,7 +1200,8 @@ class Store:
                     prior_input.pop("requested_activity_id", None)
                 prior_input.pop("authorized_capability", None)
                 prior_input.pop("correlation_id", None)
-                if (existing["activity_type"] != "grace.objective" or prior_input != event_input
+                if (existing["activity_type"] != "grace.objective"
+                        or not same_notification_input(prior_input, event_input)
                         or (requested_activity_id and str(existing["activity_id"]) != str(selected_activity_id))):
                     raise ValueError("idempotency key already belongs to a different request")
                 return {**existing, "duplicate": True}
@@ -1206,7 +1219,8 @@ class Store:
                 elif any(dependency_states.get(value) != "COMPLETED"
                          for value in dependencies.activity_ids):
                     state = "WAITING"
-            correlation_id = uuid.uuid4()
+            correlation_id = (uuid.UUID(notification_envelope["correlation_id"])
+                              if notification_envelope else uuid.uuid4())
             durable_input = {**event_input, "correlation_id": str(correlation_id)}
             config = await (await conn.execute(
                 "SELECT revision_id FROM r3a.config_current WHERE singleton=true"
@@ -1232,8 +1246,11 @@ class Store:
                                           "required_capabilities": list(required_capabilities),
                                          "required_modalities": list(required_modalities),
                                           "dependencies": dependencies.to_dict() if dependencies else None,
-                                          "acceptance_contract": event_input["acceptance_contract"]},
-                                         correlation_id=correlation_id)
+                                          "acceptance_contract": event_input["acceptance_contract"],
+                                          "notification": notification_envelope},
+                                         correlation_id=correlation_id,
+                                         causation_id=(uuid.UUID(notification_envelope["event_id"])
+                                                       if notification_envelope else None))
             accepted = await self._transition_on_conn(conn, "activity", str(activity_id),
                                                        "activity.generic", 1, state,
                                                        initial_reason,
@@ -1248,6 +1265,92 @@ class Store:
                     "idempotency_key": idempotency_key, "attempt_count": 0, "duplicate": False,
                     "event_kind": event_kind, "route_id": selected_route_id,
                     "correlation_id": correlation_id, "received_event_id": event_id}
+
+    async def ingest_institution_event_notification(self, source_id: str, source_event_id: str,
+                                                    idempotency_key: str) -> dict[str, Any]:
+        """Import one existing event into Grace's durable activity path; never mutates the source."""
+        source = next((item for item in self.settings.notification_sources
+                       if item.source_id == source_id and item.enabled
+                       and item.adapter == "institution_events.v1"), None)
+        if source is None or source_id != INSTITUTION_EVENT_SOURCE:
+            raise PermissionError("notification source is not enabled by bootstrap configuration")
+        try:
+            source_uuid = uuid.UUID(source_event_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("source_event_id must be a UUID") from exc
+        events = await self.rows(
+            "SELECT event_id,event_type,schema_version,subject_type,subject_id,prior_state,next_state,"
+            "occurred_at,persisted_at,actor,correlation_id,reason,outcome,config_revision,implementation_revision,evidence "
+            "FROM r3a.institution_events WHERE event_id=%s", (source_uuid,))
+        if not events:
+            raise KeyError(f"institution event not found: {source_event_id}")
+        event = events[0]
+        if source.event_types and event["event_type"] not in source.event_types:
+            raise PermissionError("source event type is not enabled for notification intake")
+        received_at = datetime.now(timezone.utc).isoformat()
+        envelope = institution_event_envelope(event, received_at=received_at)
+        prior, next_state = event.get("prior_state"), event.get("next_state")
+        transition = (f"{prior} to {next_state}" if prior and next_state else
+                      f"new state {next_state}" if next_state else "no state transition")
+        objective = (f"Review this {envelope['severity']} service notification from {source_id}. "
+                     f"Source event {source_event_id} reports {event['event_type']} for "
+                     f"{event['subject_type']} {event['subject_id']} ({transition}): {event['reason']}. "
+                     "Decide whether follow-up is warranted. Return a concise evidence-grounded disposition "
+                     "and cite the notification evidence. Do not claim to perform external side effects.")
+        stable_key = idempotency_key or f"notification:{source_id}:{source_event_id}"
+        if stable_key != f"notification:{source_id}:{source_event_id}":
+            raise ValueError("notification idempotency key must bind the source identity and event ID")
+        return await self.submit_grace_objective(
+            objective, stable_key, event_kind="notification", notification_envelope=envelope,
+            acceptance_criteria=[])
+
+    async def acknowledge_notification(self, activity: dict[str, Any]) -> None:
+        """Record acknowledgment only after Grace returned an actual reasoning response."""
+        envelope = (activity.get("input") or {}).get("notification")
+        if not isinstance(envelope, dict):
+            return
+        async with self.pool.connection() as conn, conn.transaction():
+            exists = await (await conn.execute(
+                "SELECT 1 FROM r3a.institution_events WHERE event_type='grace.notification.acknowledged' "
+                "AND subject_type='activity' AND subject_id=%s LIMIT 1", (str(activity["activity_id"]),)
+            )).fetchone()
+            if exists:
+                return
+            await self._event(conn, "grace.notification.acknowledged", "activity",
+                              str(activity["activity_id"]), "activity.generic", 1, "RUNNING", "RUNNING",
+                              "Grace returned a reasoning response to the notification",
+                              {"source_id": envelope["source_id"],
+                               "source_event_id": envelope["source_event_id"],
+                               "payload_ref": envelope["payload_ref"]},
+                              correlation_id=uuid.UUID(envelope["correlation_id"]),
+                              causation_id=uuid.UUID(envelope["event_id"]))
+
+    async def _notification_actionable(self, conn, activity: dict[str, Any], attempt_id: uuid.UUID) -> None:
+        envelope = (activity.get("input") or {}).get("notification")
+        if not isinstance(envelope, dict):
+            return
+        await self._event(
+            conn, "grace.notification.actionable", "activity", str(activity["activity_id"]),
+            "activity.generic", 1, activity["state"], "RUNNING",
+            "CME made the notification available to Grace",
+            {"source_id": envelope["source_id"], "source_event_id": envelope["source_event_id"],
+             "attempt_id": str(attempt_id), "payload_ref": envelope["payload_ref"]},
+            correlation_id=uuid.UUID(envelope["correlation_id"]),
+            causation_id=uuid.UUID(envelope["event_id"]))
+
+    async def _notification_outcome(self, conn, activity: dict[str, Any], outcome: str,
+                                    details: dict[str, Any]) -> None:
+        envelope = (activity.get("input") or {}).get("notification")
+        if not isinstance(envelope, dict):
+            return
+        await self._event(
+            conn, f"grace.notification.{outcome}", "activity", str(activity["activity_id"]),
+            "activity.generic", 1, "RUNNING", "COMPLETED" if outcome == "resolved" else "BLOCKED",
+            f"Grace notification {outcome}",
+            {"source_id": envelope["source_id"], "source_event_id": envelope["source_event_id"],
+             "payload_ref": envelope["payload_ref"], "details": details},
+            correlation_id=uuid.UUID(envelope["correlation_id"]),
+            causation_id=uuid.UUID(envelope["event_id"]))
 
     async def requeue_blocked_activities(self) -> int:
         async with self.pool.connection() as conn, conn.transaction():
@@ -1288,6 +1391,8 @@ class Store:
                                                       "activity.generic", 1, "BLOCKED", reason, details)
             if not accepted:
                 raise InvalidTransition(f"Cannot block activity {activity['activity_id']}")
+            await self._notification_outcome(conn, activity, "blocked",
+                                              {"reason": reason, **(details or {})})
 
     async def defer_activity(self, activity: dict[str, Any], reason: str,
                              retry_after_seconds: float, details: dict[str, Any] | None = None) -> None:
@@ -1363,6 +1468,7 @@ class Store:
                                                        {"attempt_id": str(attempt_id), "lease_owner": owner})
             if not accepted:
                 raise InvalidTransition(f"Cannot claim activity {row['activity_id']}")
+            await self._notification_actionable(conn, row, attempt_id)
             await conn.execute("UPDATE r3a.activities SET latest_event_id=%s WHERE activity_id=%s",
                                (event_id, row["activity_id"]))
             row.update({"attempt_id": attempt_id, "attempt_count": row["attempt_count"] + 1,
@@ -1437,6 +1543,7 @@ class Store:
                                                       "activity completed with evidence", result)
             if not accepted:
                 raise InvalidTransition(f"Cannot complete activity {activity['activity_id']}")
+            await self._notification_outcome(conn, activity, "resolved", result)
             activity_id = uuid.uuid4()
             key = f"foundation.observe:{activity_id}"
             config = await (await conn.execute("SELECT revision_id FROM r3a.config_current WHERE singleton=true")).fetchone()
