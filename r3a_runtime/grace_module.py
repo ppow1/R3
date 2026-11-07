@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.2.0
+File Revision: 1.2.1
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
 Purpose: Execute read-only Grace objectives through configured inference and resident-selected authorized capabilities.
@@ -20,6 +20,7 @@ Changed: 2026-11-06T18:38:00Z | R3A-019 | Codex GPT-6 | Request schema-constrain
 Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Validate optional versioned execution envelopes and retain selected role provenance.
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Complete execution envelope identity checks and role provenance propagation.
 Changed: 2026-11-07 | R3A-019 | Codex GPT-6 | Let Grace select authorized read capabilities and reason over returned evidence through durable continuation turns.
+Changed: 2026-11-07 | R3A-019 | Codex GPT-6 | Normalize omitted arguments to an empty object only for no-argument capability manifests.
 Supersedes: None.
 Contracts: R3A-019; AP1-M1 Issue #43 acceptance; r3a.resident.execution.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; automated inference responses are fixtures.
@@ -206,8 +207,19 @@ class GraceResident:
                 if not isinstance(decision, dict):
                     raise ValueError("model result must be a JSON object")
                 if decision.get("action") == "invoke_capability":
-                    if set(decision) != {"action", "contract_id", "contract_version",
-                                         "capability_id", "arguments", "rationale"}:
+                    required_fields = {"action", "contract_id", "contract_version",
+                                       "capability_id", "rationale"}
+                    allowed_fields = required_fields | {"arguments"}
+                    selected_tool = next((tool for tool in tools
+                                          if isinstance(tool, dict)
+                                          and tool.get("capability_id") == decision.get("capability_id")), None)
+                    argument_schema = selected_tool.get("arguments_schema", {}) if selected_tool else {}
+                    no_arguments = (isinstance(argument_schema, dict)
+                                    and argument_schema.get("properties", {}) == {}
+                                    and not argument_schema.get("required", []))
+                    if set(decision) == required_fields and no_arguments:
+                        decision["arguments"] = {}
+                    elif set(decision) != allowed_fields:
                         raise ValueError("capability request fields are invalid")
                     version_parts = str(decision["contract_version"]).split(".")
                     if (decision["contract_id"] != "r3a.resident-capability-tool"
