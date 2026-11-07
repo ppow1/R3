@@ -15,7 +15,7 @@ from r3a_plugins.notification_source import plugin
 from r3a_runtime.capability_contracts import (CapabilityRegistry, normalize_provider_result,
                                               validate_operation)
 from r3a_runtime.config import _validate_plugin_config, load_settings
-from r3a_runtime.notifications import same_notification_input
+from r3a_runtime.notifications import same_notification_input, validate_notification_envelope
 from tests.test_r3a_modular_autonomy import make_config
 
 
@@ -142,6 +142,37 @@ class NotificationSourceAdapterTests(unittest.TestCase):
             one = self.provider.invoke({"source_event_id": str(EVENT_ID)}, context={}).output
             two = self.provider.invoke({"source_event_id": str(EVENT_ID)}, context={}).output
         self.assertTrue(same_notification_input({"notification": one}, {"notification": two}))
+
+    def test_source_output_supplies_proposed_generic_intake_fields_without_repacking_n1(self):
+        with patch.dict(os.environ, {"R3A_NOTIFICATION_SOURCE_DSN": "fixture-secret"}):
+            provider_result = self.provider.invoke({"source_event_id": str(EVENT_ID)}, context={})
+        envelope = validate_notification_envelope(provider_result.output)
+
+        # Compatibility projection from the audit proposal; it is test-local,
+        # not a new r3a.activity-intake contract or a production wrapper.
+        adapter_fields = {
+            "source_id": envelope["source_id"],
+            "source_event_id": envelope["source_event_id"],
+            "idempotency_key": f"notification:{envelope['source_id']}:{envelope['source_event_id']}",
+            "correlation_id": envelope["correlation_id"],
+            "payload_ref": envelope["payload_ref"],
+            "provenance": envelope["provenance"],
+            "evidence": envelope["evidence"],
+        }
+        self.assertEqual(str(EVENT_ID), adapter_fields["source_event_id"])
+        self.assertEqual(str(CORRELATION_ID), adapter_fields["correlation_id"])
+        self.assertEqual("notification:r3a.institution-events:" + str(EVENT_ID),
+                         adapter_fields["idempotency_key"])
+        self.assertTrue(adapter_fields["payload_ref"].endswith(str(EVENT_ID)))
+        self.assertEqual("r3a.institution_events", adapter_fields["provenance"]["store"])
+        self.assertIn("source_evidence", adapter_fields["evidence"])
+
+        # Parent activity linkage and the reasoning task class belong to CME's
+        # generic intake context; neither is guessed or added to N1's envelope.
+        self.assertNotIn("parent_activity_id", envelope)
+        self.assertNotIn("task_class", envelope)
+        self.assertEqual("r3a.notification-intake", envelope["contract_id"])
+        self.assertEqual("1.0.0", envelope["contract_version"])
 
     def test_rejects_invalid_id_unconfigured_source_missing_event_and_unallowlisted_type(self):
         with self.assertRaisesRegex(ValueError, "UUID"):

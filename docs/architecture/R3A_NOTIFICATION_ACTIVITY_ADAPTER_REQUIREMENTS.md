@@ -61,7 +61,11 @@ The source event's `subject_id` must not be used as a generic parent activity ID
 
 ## Test separation
 
-`tests/test_r3a_notification_source_plugin.py` verifies source-domain behavior without invoking CME scheduling: manifest/operation registration, exact output envelope, source allowlisting, read-only SQL, digest/provenance, source outage, malformed/unknown input, and stable replay identity. `tests/test_r3a_notifications.py` and `tests/test_r3a_notification_delivery.py` continue to verify N1 and N2 lifecycle behavior. Generic intake integration tests belong beside the agreed shared boundary and should exercise deduplication, parent/correlation lineage, restart, grant denial, and durable lifecycle using a real CME event when that boundary is available.
+`tests/test_r3a_notification_source_plugin.py` verifies source-domain behavior without invoking CME scheduling: manifest/operation registration, exact output envelope, source allowlisting, read-only SQL, digest/provenance, source outage, malformed/unknown input, and stable replay identity. A compatibility test projects the audit-proposed generic source/idempotency/correlation/payload/evidence/provenance requirements from the unchanged N1 envelope and verifies it leaves parent activity and task-class ownership to CME. That projection exists in test assertions only; this branch defines no generic intake type, schema, dispatcher, or persistence call. `tests/test_r3a_notifications.py` and `tests/test_r3a_notification_delivery.py` continue to verify N1 and N2 lifecycle behavior. Generic intake integration tests belong beside the agreed shared boundary and should exercise deduplication, parent/correlation lineage, restart, grant denial, and durable lifecycle using a real CME event when that boundary is available.
+
+## Generic boundary status
+
+The latest #43 modularity audit and the coordinator's current modular-foundation work still label generic activity intake as a future slice. No authoritative `r3a.activity-intake.v1` schema, invocation type, or callable boundary is published in the coordinator worktree. The source provider is compatible at the established capability-operation/N1-envelope seam; end-to-end generic intake compatibility cannot yet be executed. This workstream continues independently and waits only for the shared contract before adding the boundary binding.
 
 ## Activation limit
 
