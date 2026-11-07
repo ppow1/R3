@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.6.0
+File Revision: 1.7.0
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
 Purpose: Execute Grace objectives through configured inference and resident-selected capabilities in the authorized canonical runtime.
@@ -31,7 +31,8 @@ Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Support model-selected re
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Require evidence-bounded Engineering assessments and prohibit unsupported artifact claims.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Allow Grace to request a configured reasoning role with a rationale; CME remains the authorization and route gate.
 Changed: 2026-11-07T23:41:45Z | R3A-AP2-DELEGATION | Codex GPT-6 | Guide resident-directed office discovery and generic registered handoff selection using authoritative evidence.
-History/Predecessor: Prior revision preserved at commit db46df7a04c694f0e7508d181a3a65b296cc6d16, blob 93c4e9ddee04a426fac866272be7bc49f93e30ff.
+Changed: 2026-11-07T23:50:40Z | R3A-AP2-DELEGATION-CONTINUATION | Codex GPT-6 | Direct Grace to interpret handoff and verification outcomes truthfully and continue only through currently offered actions.
+History/Predecessor: Prior revision preserved at commit ba2aced2683953e7c82b0f124addd24413be40e9, blob 8114f5e7bff7d24a19672c38662e76ae01ba0420.
 """
 from __future__ import annotations
 
@@ -259,6 +260,8 @@ class GraceResident:
                         "and continue the current objective without claiming the prerequisite's work as your own. "
                         "If a reasoning_escalation policy is supplied and your current reasoning route is insufficient, you may request one of its listed roles. This is your reasoning choice, not an automatic fallback; explain what uncertainty requires stronger reasoning. The runtime checks authorization, readiness, and the activity token budget, then returns its result or refusal in the same activity. Never claim an escalation succeeded unless the runtime reports its result. "
                         "For institutional delegation, first use an available directory capability when office responsibility or resident binding is needed. Evaluate the returned authoritative office, resident, and capability records against the objective. A directory listing or office binding does not establish recipient readiness, execution registration, or authorization. If the current available_tools list contains a registered handoff operation whose advertised contract fits the work, you may select it and provide only target identifiers and evidence actually returned by the directory, plus arguments required by that operation's schema. The institutional runtime still enforces grants and records the result. Do not hardcode an office, resident, or operation identity; do not pretend to delegate if no suitable handoff operation is registered. Continue from returned capability results in this same activity, or return a justified blocked decision when the required handoff is unavailable. "
+                        "Interpret each returned capability result by its explicit outcome and explanation. A rejected, returned, denied, or unavailable handoff is not an accepted delegation; consider another currently offered capability only when its contract and the evidence support that choice, otherwise report blocked truthfully. Never claim that a recipient accepted work unless the returned result says so. On recovery, continue from the conversation and evidence supplied for the same objective; do not repeat a completed side effect just to recreate its result. "
+                        "If independent-verification evidence is supplied, inspect its outcome and criterion findings. A failed or inconclusive verification is not completion. You may propose a corrective operation only when a currently listed operation and the supplied assignment scope permit it; otherwise return a blocked assessment that identifies the failed criteria. CME and the verifier retain completion authority. Do not claim a correction or verification that has not occurred. "
                         "When more information is needed, return {\"action\":\"invoke_capability\","
                         "\"contract_id\":\"r3a.resident-capability-tool\",\"contract_version\":\"1.0.0\","
                         "\"capability_id\":\"exact capability_id\",\"arguments\":{...},"
