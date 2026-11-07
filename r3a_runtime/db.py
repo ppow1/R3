@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.3.0
+File Revision: 1.3.1
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -21,10 +21,11 @@ Changed: 2026-11-06T23:46:49Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Consolidate mode
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Persist provider/model identity and evidence; invalidate incompatible prior readiness in the existing registry.
 Changed: 2026-11-07T01:30:00Z | R3A-019 | Codex GPT-6 | Return the resolved configured route ID from durable objective intake.
 Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Persist validated objective acceptance criteria in the existing activity input.
+Changed: 2026-11-07T03:59:26Z | R3A-019-SUSTAINED-OPERATION | Codex GPT-6 | Reject Grace inbox submissions without nonempty validated acceptance criteria.
 Supersedes: None.
 Contracts: AP0-003–010; R3A-019; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py.
-History/Predecessor: Git blob 6acab79fceaf1e2d3e4c81ad01537e7e628d631d at commit 0d5f950efc2318774bb95a8dad3b5a498d3f8ce3.
+History/Predecessor: Git blob 356ce73380d9bcd7d12af6ee5008844281796516 at commit 7695e87bc1c1ae5e204c32ab43b7e4c8aac87afe.
 """
 from __future__ import annotations
 
@@ -42,7 +43,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from .config import Settings, sanitized_config
 from .acceptance import (OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
-                         OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, validate_criteria)
+                         OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, validate_required_criteria)
 from .contracts import ReadinessObservation, parse_timestamp
 
 
@@ -640,7 +641,7 @@ class Store:
             raise ValueError("required_modalities must be modality identifiers")
         if len(set(required_modalities)) != len(required_modalities):
             raise ValueError("required_modalities must be unique")
-        acceptance_criteria = validate_criteria(acceptance_criteria)
+        acceptance_criteria = validate_required_criteria(acceptance_criteria)
         if role_id is None and self.settings.model_roles:
             if route_id is None:
                 role_id = self.settings.default_model_role

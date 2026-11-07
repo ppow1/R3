@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.4.1
+File Revision: 1.4.2
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -25,10 +25,11 @@ Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Run configured r
 Changed: 2026-11-07 | R3A-019 | Codex GPT-6 | Dispatch resident-selected read capabilities and persist model/tool continuation evidence.
 Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Enforce structured evidence criteria and resume reasoning after rejected completion.
 Changed: 2026-11-07T02:41:51Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Persist and validate a versioned acceptance envelope on objective intake.
+Changed: 2026-11-07T03:59:26Z | R3A-019-SUSTAINED-OPERATION | Codex GPT-6 | Block legacy or bypassed objectives that lack explicit acceptance criteria.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; automated inference responses are fixtures.
-History/Predecessor: Git blob b89e6cbe7e3f05d7edf9c73f1bf2549f97830d75 at commit 0d5f950efc2318774bb95a8dad3b5a498d3f8ce3.
+History/Predecessor: Git blob e9729be19e0b5c6efd869c51023d0379e89294f3 at commit 7695e87bc1c1ae5e204c32ab43b7e4c8aac87afe.
 """
 from __future__ import annotations
 
@@ -56,9 +57,9 @@ from .readiness import (READINESS_PROVIDER_CONTRACT_ID, ReadinessCheckRequest,
 from .db import InvalidTransition, Store, utcnow
 from .diagnostics import make_server
 from .knowledge import retrieve
-from .acceptance import (OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
+from .acceptance import (AcceptanceCriteriaRequired, OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
                          OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, evidence_fingerprint,
-                         validate_acceptance, validate_criteria)
+                         validate_acceptance, validate_required_criteria)
 from .protocol import PROTOCOL_MAJOR, PROTOCOL_MINOR, request as module_request
 
 
@@ -724,9 +725,6 @@ class CME:
                 "config_revision": self.settings.source_digest}
 
     async def _objective_context(self, activity: dict[str, Any]) -> dict[str, Any]:
-        for capability_id in self.settings.module_capabilities:
-            await self._authorize_capability(capability_id, activity_id=str(activity["activity_id"]),
-                                              attempt_id=str(activity["attempt_id"]))
         event_input = activity["input"]
         acceptance_contract = event_input.get("acceptance_contract") or {
             "contract_id": OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
@@ -734,7 +732,10 @@ class CME:
         if (acceptance_contract.get("contract_id") != OBJECTIVE_ACCEPTANCE_CONTRACT_ID
                 or acceptance_contract.get("contract_version") != OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION):
             raise ValueError("objective acceptance contract identity or version is unsupported")
-        acceptance_criteria = validate_criteria(acceptance_contract.get("criteria"))
+        acceptance_criteria = validate_required_criteria(acceptance_contract.get("criteria"))
+        for capability_id in self.settings.module_capabilities:
+            await self._authorize_capability(capability_id, activity_id=str(activity["activity_id"]),
+                                              attempt_id=str(activity["attempt_id"]))
         saved = activity.get("checkpoint") or {}
         route_id = event_input.get("route_id")
         selected_role_id = event_input.get("role_id")
@@ -1102,6 +1103,12 @@ class CME:
                                                                   "source_sha256": item.get("source_sha256")}
                                                                  for item in evidence]}
                 await self.store.finish_activity(activity, observations)
+        except AcceptanceCriteriaRequired as exc:
+            await self.store.block_activity(
+                activity, "objective acceptance criteria are required",
+                {"validation": "r3a.objective-acceptance.v1",
+                 "criteria_gaps": [{"criterion_id": "acceptance_criteria",
+                                    "code": "acceptance_criteria_missing", "message": str(exc)}]})
         except PermissionError as exc:
             await self.store.block_activity(activity, "capability grant required", {"error": str(exc)})
         except ModelRoleUnavailable as exc:
@@ -1170,8 +1177,12 @@ class CME:
                     hashlib.sha256(source_path.read_bytes()).hexdigest())
             except OSError:
                 continue
-        return validate_acceptance(validate_criteria(context.get("acceptance_criteria", [])),
-                                   evidence, decision, trusted_digests)
+        try:
+            criteria = validate_required_criteria(context.get("acceptance_criteria", []))
+        except AcceptanceCriteriaRequired as exc:
+            return [{"criterion_id": "acceptance_criteria", "code": "acceptance_criteria_missing",
+                     "message": str(exc)}]
+        return validate_acceptance(criteria, evidence, decision, trusted_digests)
 
     async def _scheduler_loop(self) -> None:
         while not self.shutdown.is_set():

@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/acceptance.py
 Component: R3A-OBJECTIVE-ACCEPTANCE
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-07T02:35:35Z
 Created By: Codex GPT-6
 Purpose: Validate structured objective acceptance criteria against cited, digested evidence.
@@ -13,10 +13,11 @@ Authority: AP1 / R3A-019 false-completion correction, Steward Issue #43 comment 
 Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Add generic evidence-backed directed path acceptance.
 Changed: 2026-11-07T02:41:51Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Require current configured source digests and report unresolved reachable evidence states.
 Changed: 2026-11-07T02:43:15Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Accept any answer route whose individual edges are independently evidenced.
+Changed: 2026-11-07T03:59:26Z | R3A-019-SUSTAINED-OPERATION | Codex GPT-6 | Require nonempty machine-checkable criteria and fail closed during validation.
 Supersedes: None.
 Contracts: r3a.objective-acceptance.v1.
 Tests: tests/test_r3a_ap1.py.
-History/Predecessor: New file; no predecessor.
+History/Predecessor: Git blob 97f4a2dad9afd09d32a38e5aeae61c0d03888874 at commit 7695e87bc1c1ae5e204c32ab43b7e4c8aac87afe.
 """
 from __future__ import annotations
 
@@ -31,6 +32,10 @@ OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION = "1.0.0"
 _IDENTIFIER = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _TRANSITION = re.compile(r"^Transitions from ([A-Z][A-Z0-9_]*):\s*(.*)$")
 _PATH_IN_ANSWER = re.compile(r"\b[A-Z][A-Z0-9_]*(?:\s*(?:->|→)\s*[A-Z][A-Z0-9_]*)+\b")
+
+
+class AcceptanceCriteriaRequired(ValueError):
+    """Raised when an objective cannot be accepted without explicit criteria."""
 
 
 def validate_criteria(value: Any) -> list[dict[str, str]]:
@@ -65,6 +70,15 @@ def validate_criteria(value: Any) -> list[dict[str, str]]:
         normalized.append({"criterion_id": criterion_id, "type": kind,
                            "from_state": source, "to_state": target})
     return normalized
+
+
+def validate_required_criteria(value: Any) -> list[dict[str, str]]:
+    """Validate the supported criteria contract and reject an empty acceptance boundary."""
+    criteria = validate_criteria(value)
+    if not criteria:
+        raise AcceptanceCriteriaRequired(
+            "at least one machine-checkable acceptance criterion is required")
+    return criteria
 
 
 def evidence_fingerprint(evidence: list[dict[str, Any]]) -> str:
@@ -126,6 +140,9 @@ def validate_acceptance(criteria: list[dict[str, str]], evidence: list[dict[str,
                         decision: dict[str, Any],
                         trusted_source_digests: dict[str, set[str]]) -> list[dict[str, Any]]:
     """Return criteria unsupported by cited source facts or absent from the deliverable."""
+    if not criteria:
+        return [{"criterion_id": "acceptance_criteria", "code": "acceptance_criteria_missing",
+                 "message": "A completed objective requires at least one machine-checkable acceptance criterion."}]
     gaps: list[dict[str, Any]] = []
     citations = decision.get("evidence_refs", [])
     cited_sources = set(citations) if isinstance(citations, list) else set()

@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.2.4
+File Revision: 1.2.5
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -24,10 +24,11 @@ Changed: 2026-11-07 | R3A-019 | Codex GPT-6 | Verify resident-selected capabilit
 Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Reproduce false completion and prove same-activity evidence continuation.
 Changed: 2026-11-07T02:41:51Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Assert actionable missing-edge feedback and verify the durable tool-result checkpoint.
 Changed: 2026-11-07T03:34:34Z | R3A-019-INBOX-LOOP | Codex GPT-6 | Verify response schemas expose only exact capability identifiers from the current tool manifest.
+Changed: 2026-11-07T03:59:26Z | R3A-019-SUSTAINED-OPERATION | Codex GPT-6 | Verify empty acceptance criteria reject intake and block legacy execution.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
-History/Predecessor: Git blob c9f4d2e4cca1ce9b20bd7853457084ce5cb39199 at commit 111c7661e9aad796a5f6752878c809d551f94884.
+History/Predecessor: Git blob 2b4bf3128a9c4ea916b21442b198c3a254ed9b70 at commit 7695e87bc1c1ae5e204c32ab43b7e4c8aac87afe.
 """
 from __future__ import annotations
 
@@ -40,7 +41,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 import hashlib
 
-from r3a_runtime.acceptance import validate_acceptance, validate_criteria
+from r3a_runtime.acceptance import (AcceptanceCriteriaRequired, validate_acceptance,
+                                    validate_criteria, validate_required_criteria)
 from r3a_runtime.cme import CME, _RESIDENT_TOOLS, _knowledge_answer_issues, _requires_runtime_evidence
 from r3a_runtime.config import ConfigurationError, ModelRoute, resolve_model_route
 from r3a_runtime.grace_module import GraceResident, resident_action_schema
@@ -137,6 +139,12 @@ class KnowledgeRetrievalTests(unittest.TestCase):
         self.assertEqual(uncited[0]["code"], "evidence_path_incomplete")
 
     def test_acceptance_criteria_reject_unsupported_or_ambiguous_contracts(self):
+        with self.assertRaisesRegex(AcceptanceCriteriaRequired, "at least one"):
+            validate_required_criteria([])
+        with self.assertRaisesRegex(AcceptanceCriteriaRequired, "at least one"):
+            validate_required_criteria(None)
+        missing = validate_acceptance([], [], {"status": "healthy", "assessment": "done"}, {})
+        self.assertEqual(missing[0]["code"], "acceptance_criteria_missing")
         with self.assertRaisesRegex(ValueError, "unsupported acceptance criterion"):
             validate_criteria([{"criterion_id": "one", "type": "model_says_ok",
                                 "from_state": "RUNNING", "to_state": "STOPPED"}])
@@ -161,6 +169,36 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
             "institution.knowledge.read", "institution.diagnostics.read"])
         self.assertNotIn("institution_knowledge_read",
                          schema["properties"]["capability_id"]["enum"])
+
+    def test_legacy_activity_without_acceptance_criteria_is_blocked_before_resident_execution(self):
+        class StoreFake:
+            def __init__(self):
+                self.blocked = None
+                self.finished = None
+
+            async def block_activity(self, _activity, reason, details):
+                self.blocked = (reason, details)
+
+            async def finish_activity(self, _activity, result):
+                self.finished = result
+
+        async def exercise():
+            cme = CME.__new__(CME)
+            cme.module_process = SimpleNamespace(returncode=None)
+            cme.module_id = "resident.grace"
+            cme.store = StoreFake()
+            cme.settings = SimpleNamespace(module_capabilities=())
+            cme.active_activities = {}
+            activity = {"activity_id": "legacy-empty-criteria", "activity_type": "grace.objective",
+                        "attempt_id": "attempt-1", "input": {"objective": "unverified legacy task"}}
+            await cme._run_activity(activity)
+            return cme.store
+
+        store = asyncio.run(exercise())
+        self.assertIsNone(store.finished)
+        self.assertEqual(store.blocked[0], "objective acceptance criteria are required")
+        self.assertEqual(store.blocked[1]["criteria_gaps"][0]["code"],
+                         "acceptance_criteria_missing")
 
     def _resident(self, model_content):
         resident = GraceResident.__new__(GraceResident)
