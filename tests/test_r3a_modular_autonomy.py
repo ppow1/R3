@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_modular_autonomy.py
 Component: R3A-AP1-MODULAR-AUTONOMY-REGRESSION
-File Revision: 1.3.0
+File Revision: 1.4.0
 Created: 2026-11-06T23:19:46Z
 Created By: Codex GPT-6
 Purpose: Permanently verify versioned autonomy contracts, external model roles, readiness routing, deferral, and authorization-provider compatibility.
@@ -18,6 +18,7 @@ Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Assert author
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Verify versioned activity dependency identity and validation.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Verify external escalation policy version, registered routes, authorization identity and per-activity token limits.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Verify grant provider receives activity scope for external invocation authorization.
+Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Verify task-class role defaults, reject autonomic reasoning, preserve vision routing, and forbid cross-class fallback.
 Supersedes: None.
 Contracts: AP0-003–010; R3A-019; MOD-006; r3a.contract-envelope.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
 Tests: This test module.
@@ -32,7 +33,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from r3a_runtime.authorization import (AuthorizationDecision, AuthorizationRequest,
                                        CapabilityGrantAuthorizationProvider,
@@ -40,7 +41,7 @@ from r3a_runtime.authorization import (AuthorizationDecision, AuthorizationReque
 from r3a_runtime.config import ConfigurationError, load_settings, sanitized_config
 from r3a_runtime.contracts import (ActivityDependencySet, ContractEnvelope, ContractOutcome, ContractValidationError,
                                    ReadinessObservation, resolve_role)
-from r3a_runtime.cme import CME
+from r3a_runtime.cme import CME, ModelRoleUnavailable
 from r3a_runtime.diagnostics import project_resource_readiness
 from r3a_runtime.protocol import ModuleProtocolServer, request as module_request
 
@@ -82,7 +83,8 @@ def make_config(directory: Path, *, primary_model: str = "reasoner-a",
     ]
     roles = [
         {"role_id": "resident.autonomic", "route_id": "autonomic-route",
-         "capabilities": ["monitor.health"], "modalities": ["text"], "fallback_roles": [],
+         "capabilities": ["monitor.health"], "modalities": ["text"],
+         "task_classes": ["autonomic"], "fallback_roles": [],
          "readiness_max_age_seconds": 30, "unavailable_action": "defer",
          "deferral_seconds": 10, "concurrency": 1,
          "readiness": {"provider_id": "openai-compatible.models", "contract_version": "1.0.0",
@@ -91,7 +93,7 @@ def make_config(directory: Path, *, primary_model: str = "reasoner-a",
                        "poll_interval_seconds": 15}},
         {"role_id": "resident.primary", "route_id": "primary-route",
          "capabilities": ["reason.text", "plan"], "modalities": ["text"],
-         "fallback_roles": ["resident.vision"], "readiness_max_age_seconds": 45,
+         "task_classes": ["objective_reasoning"], "fallback_roles": [], "readiness_max_age_seconds": 45,
          "unavailable_action": "defer", "deferral_seconds": 12, "concurrency": 2,
          "readiness": {"provider_id": "openai-compatible.models", "contract_version": "1.0.0",
                        "endpoint": "https://models.example.invalid/v1/models", "timeout_seconds": 3,
@@ -99,6 +101,7 @@ def make_config(directory: Path, *, primary_model: str = "reasoner-a",
                        "poll_interval_seconds": 20}},
         {"role_id": "resident.vision", "route_id": "vision-route",
          "capabilities": ["reason.text", "vision.interpret"], "modalities": ["text", "image"],
+         "task_classes": ["vision"],
          "fallback_roles": [], "readiness_max_age_seconds": 45,
          "unavailable_action": "block", "deferral_seconds": 12, "concurrency": 1,
          "readiness": {"provider_id": "openai-compatible.models", "contract_version": "1.0.0",
@@ -129,6 +132,9 @@ def make_config(directory: Path, *, primary_model: str = "reasoner-a",
         "grace": {"routes": routes, "default_route": "primary-route",
                   "knowledge_sources": [str(ROOT / "r3a_runtime" / "state_machines" / "process.json")],
                   "role_registry": {"schema_version": 1, "default_role": "resident.primary",
+                                    "task_defaults": {"autonomic": "resident.autonomic",
+                                                      "objective_reasoning": "resident.primary",
+                                                      "vision": "resident.vision"},
                                     "roles": roles}},
         "authorization": {"provider_id": "capability_grants", "contract_version": "1.0.0",
                           "options": {}},
@@ -204,11 +210,16 @@ class ModelRoleConfigAndRoutingTests(unittest.TestCase):
             second = load_settings(make_config(Path(second_dir), primary_model="reasoner-b"))
             self.assertEqual(first.default_model_role, "resident.primary")
             self.assertEqual(len(first.model_roles), 3)
+            self.assertEqual(first.model_role_for_task("objective_reasoning").route_id, "primary-route")
+            self.assertEqual(first.model_role_for_task("autonomic").route_id, "autonomic-route")
+            self.assertEqual(first.model_role_for_task("vision").route_id, "vision-route")
             self.assertEqual(first.model_route("primary-route").model, "reasoner-a")
             self.assertEqual(second.model_route("primary-route").model, "reasoner-b")
             self.assertNotEqual(first.source_digest, second.source_digest)
             durable = sanitized_config(first)
             self.assertEqual(durable["grace"]["role_registry"]["schema_version"], 1)
+            self.assertEqual(durable["grace"]["role_registry"]["task_defaults"]["objective_reasoning"],
+                             "resident.primary")
             self.assertEqual(durable["authorization"]["provider_id"], "capability_grants")
 
     def test_legacy_route_configuration_remains_supported(self):
@@ -222,6 +233,104 @@ class ModelRoleConfigAndRoutingTests(unittest.TestCase):
             self.assertEqual(settings.model_roles, ())
             self.assertIsNone(settings.default_model_role)
             self.assertEqual(settings.authorization_provider.provider_id, "capability_grants")
+
+    def test_objective_intake_defaults_to_primary_and_rejects_autonomic_role(self):
+        async def scenario():
+            with TemporaryDirectory() as directory:
+                settings = load_settings(make_config(Path(directory)))
+                cme = CME.__new__(CME)
+                cme.settings = settings
+                cme.store = type("Store", (), {"submit_grace_objective": AsyncMock(
+                    return_value={"activity_id": "activity-primary", "state": "QUEUED"})})()
+                result = await cme._control_request("grace.objective.submit", {
+                    "objective": "Inspect the configured process definition.",
+                    "acceptance_criteria": []}, "objective-primary")
+                self.assertEqual(result["activity_id"], "activity-primary")
+                args = cme.store.submit_grace_objective.await_args.args
+                self.assertEqual(args[3], "primary-route")
+                self.assertEqual(args[4], "resident.primary")
+                self.assertEqual(args[-1], "objective_reasoning")
+                with self.assertRaisesRegex(ValueError, "not authorized for objective_reasoning"):
+                    await cme._control_request("grace.objective.submit", {
+                        "objective": "Use the autonomic route for reasoning.",
+                        "acceptance_criteria": [], "role_id": "resident.autonomic"},
+                        "objective-autonomic")
+                self.assertEqual(cme.store.submit_grace_objective.await_count, 1)
+                await cme._control_request("grace.objective.submit", {
+                    "objective": "Interpret this submitted visual evidence.",
+                    "acceptance_criteria": [], "required_modalities": ["image"]},
+                    "objective-vision")
+                vision_args = cme.store.submit_grace_objective.await_args.args
+                self.assertEqual(vision_args[3], "vision-route")
+                self.assertEqual(vision_args[4], "resident.vision")
+                self.assertEqual(vision_args[-1], "vision")
+        asyncio.run(scenario())
+
+    def test_cme_rejects_autonomic_role_before_objective_inference(self):
+        async def scenario():
+            with TemporaryDirectory() as directory:
+                settings = load_settings(make_config(Path(directory)))
+                cme = CME.__new__(CME)
+                cme.settings = settings
+                cme.module_id = "resident.grace"
+                activity = {"activity_id": "activity-autonomic", "attempt_id": "attempt-1",
+                            "input": {"objective": "Reason about an institutional assignment.",
+                                      "task_class": "autonomic", "role_id": "resident.autonomic",
+                                      "role_config_revision": settings.source_digest,
+                                      "acceptance_contract": {"contract_id": "r3a.objective-acceptance",
+                                                              "contract_version": "1.0.0",
+                                                              "criteria": [{"criterion_id": "state-route",
+                                                                            "type": "transition_path",
+                                                                            "from_state": "RUNNING",
+                                                                            "to_state": "STOPPED"}]}},
+                            "checkpoint": {}}
+                with self.assertRaises(ModelRoleUnavailable) as raised:
+                    await cme._objective_context(activity)
+                self.assertEqual(raised.exception.decision.action, "block")
+                self.assertEqual(raised.exception.decision.reason,
+                                 "objective_activity_cannot_use_autonomic_role")
+        asyncio.run(scenario())
+
+    def test_durable_continuation_keeps_pinned_primary_role(self):
+        async def scenario():
+            with TemporaryDirectory() as directory:
+                settings = load_settings(make_config(Path(directory)))
+                role = next(entry for entry in settings.model_roles
+                            if entry.role_id == "resident.primary")
+                route = settings.model_route(role.route_id)
+
+                class StoreFake:
+                    async def activity_dependency_context(self, _dependencies):
+                        return None
+
+                    async def model_role_observations(self, _role_ids):
+                        return {role.role_id: {"status": "ready", "observed_at": datetime.now(timezone.utc).isoformat(),
+                            "config_revision": settings.source_digest, "model_id": route.model,
+                            "provider_id": role.readiness.provider_id, "source": "provider_model",
+                            "evidence_ref": "sha256:provider-evidence", "evidence": {"model_match": True}}}
+
+                cme = CME.__new__(CME)
+                cme.settings = settings
+                cme.store = StoreFake()
+                cme.module_id = "resident.grace"
+                cme._resident_tools = lambda: []
+                expected_route = {"route_id": route.route_id, "provider": route.provider,
+                                  "model": route.model, "endpoint": route.endpoint,
+                                  "timeout_seconds": route.timeout_seconds, "max_tokens": route.max_tokens}
+                activity = {"activity_id": "activity-resume", "attempt_id": "attempt-2",
+                    "input": {"objective": "Continue the durable reasoning assignment.",
+                        "role_id": role.role_id, "route_id": role.route_id,
+                        "task_class": "objective_reasoning", "role_config_revision": settings.source_digest,
+                        "required_capabilities": ["plan"], "required_modalities": [],
+                        "acceptance_contract": {"contract_id": "r3a.objective-acceptance",
+                            "contract_version": "1.0.0", "criteria": [{"criterion_id": "state-route",
+                                "type": "transition_path", "from_state": "RUNNING", "to_state": "STOPPED"}]}},
+                    "checkpoint": {"selected_role_id": role.role_id, "model_route": expected_route,
+                                   "evidence": [], "reasoning_state": {}}}
+                context = await cme._objective_context(activity)
+                self.assertEqual(context["selected_role_id"], "resident.primary")
+                self.assertEqual(context["route_id"], "primary-route")
+        asyncio.run(scenario())
 
     def test_private_network_http_model_endpoint_is_externally_configurable(self):
         with TemporaryDirectory() as directory:
@@ -275,6 +384,14 @@ class ModelRoleConfigAndRoutingTests(unittest.TestCase):
             with self.assertRaises(ConfigurationError):
                 load_settings(path)
 
+        with TemporaryDirectory() as directory:
+            path = make_config(Path(directory))
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["grace"]["role_registry"]["roles"][1]["fallback_roles"] = ["resident.autonomic"]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigurationError, "preserve task-class authorization"):
+                load_settings(path)
+
     def test_capability_selection_fallback_deferral_staleness_and_unsupported(self):
         with TemporaryDirectory() as directory:
             settings = load_settings(make_config(Path(directory)))
@@ -290,14 +407,21 @@ class ModelRoleConfigAndRoutingTests(unittest.TestCase):
                 "resident.primary": observation("resident.primary", "unavailable", now.isoformat()),
                 "resident.vision": observation("resident.vision", "ready", now.isoformat()),
             }
-            fallback = resolve_role(settings.model_roles, "resident.primary", {"vision.interpret"},
-                                    observations, config_revision=settings.source_digest, now=now)
-            self.assertEqual((fallback.action, fallback.selected_role_id, fallback.route_id),
+            primary_cannot_be_replaced_by_vision = resolve_role(
+                settings.model_roles, "resident.primary", {"vision.interpret"},
+                observations, config_revision=settings.source_digest, now=now)
+            self.assertEqual((primary_cannot_be_replaced_by_vision.action,
+                              primary_cannot_be_replaced_by_vision.reason),
+                             ("block", "unsupported_capability"))
+            vision = resolve_role(settings.model_roles, "resident.vision", {"vision.interpret"},
+                                  observations, config_revision=settings.source_digest, now=now)
+            self.assertEqual((vision.action, vision.selected_role_id, vision.route_id),
                              ("route", "resident.vision", "vision-route"))
             unavailable = resolve_role(settings.model_roles, "resident.primary", {"plan"},
                                        observations, config_revision=settings.source_digest, now=now)
             self.assertEqual(unavailable.action, "defer")
             self.assertIsNone(unavailable.selected_role_id)
+            self.assertNotEqual(unavailable.route_id, "autonomic-route")
             stale = {"resident.primary": observation(
                 "resident.primary", "ready", (now - timedelta(minutes=2)).isoformat())}
             self.assertEqual(resolve_role(settings.model_roles, "resident.primary", {"plan"}, stale,

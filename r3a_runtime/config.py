@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/config.py
 Component: R3A-BOOTSTRAP-CONFIG
-File Revision: 1.5.0
+File Revision: 1.6.0
 Created: 2026-11-06T15:04:00Z
 Created By: Codex GPT-6
 Purpose: Strictly validate external R3A AP0-M1 bootstrap and operating settings.
@@ -20,6 +20,7 @@ Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Validate externa
 Changed: 2026-11-07 | R3A-PLUG-001 | Codex GPT-6 | Load versioned capability plug-in manifests and external configuration with artifact digest validation.
 Changed: 2026-11-07 | R3A-PLUG-002 | Codex GPT-6 | Validate plug-in configuration against each manifest's portable schema, without capability-specific host validation.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Add externally configured v1 escalation policy with per-activity request and completion-token budgets.
+Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Bind configured model roles to task classes and reject cross-class fallback.
 Supersedes: None.
 Contracts: AP0-001/008/009; R3A-019; Issue #46; AP0-M1 D7; r3a_runtime.contracts; hints/file-provenance.md.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py.
@@ -59,6 +60,7 @@ class ModelRole:
     route_id: str
     capabilities: tuple[str, ...]
     modalities: tuple[str, ...]
+    task_classes: tuple[str, ...]
     fallback_roles: tuple[str, ...]
     readiness_max_age_seconds: float
     unavailable_action: str
@@ -254,6 +256,7 @@ class Settings:
     default_model_route: str
     model_roles: tuple[ModelRole, ...]
     default_model_role: str | None
+    model_task_defaults: dict[str, str]
     reasoning_escalation: ReasoningEscalationPolicy | None
     authorization_provider: AuthorizationProviderSettings
     knowledge_sources: tuple[Path, ...]
@@ -261,6 +264,15 @@ class Settings:
 
     def model_route(self, route_id: str | None = None) -> ModelRoute:
         return resolve_model_route(self.model_routes, self.default_model_route, route_id)
+
+    def model_role_for_task(self, task_class: str) -> ModelRole:
+        role_id = self.model_task_defaults.get(task_class)
+        if role_id is None:
+            raise ConfigurationError(f"No configured model role for task class: {task_class}")
+        role = next((item for item in self.model_roles if item.role_id == role_id), None)
+        if role is None or task_class not in role.task_classes:
+            raise ConfigurationError(f"Configured model role does not serve task class: {task_class}")
+        return role
 
     @property
     def connection_info(self) -> dict[str, Any]:
@@ -377,6 +389,7 @@ def load_settings(path: str | Path) -> Settings:
     default_model_route = "default"
     model_roles: tuple[ModelRole, ...] = ()
     default_model_role: str | None = None
+    model_task_defaults: dict[str, str] = {}
     reasoning_escalation: ReasoningEscalationPolicy | None = None
     knowledge_sources: tuple[Path, ...] = ()
     if entrypoint == "r3a_runtime.grace_module" or grace is not None:
@@ -438,7 +451,7 @@ def load_settings(path: str | Path) -> Settings:
             registry = grace["role_registry"]
             if not isinstance(registry, dict):
                 raise ConfigurationError("grace.role_registry must be an object")
-            _keys(registry, {"schema_version", "default_role", "roles"}, "grace.role_registry")
+            _keys(registry, {"schema_version", "default_role", "roles", "task_defaults"}, "grace.role_registry")
             if registry["schema_version"] != 1:
                 raise ConfigurationError("grace.role_registry.schema_version must equal 1")
             default_model_role = _text(registry["default_role"], "grace.role_registry.default_role")
@@ -451,7 +464,7 @@ def load_settings(path: str | Path) -> Settings:
                 where = f"grace.role_registry.roles[{index}]"
                 if not isinstance(item, dict):
                     raise ConfigurationError(f"{where} must be an object")
-                role_keys = {"role_id", "route_id", "capabilities", "modalities", "fallback_roles",
+                role_keys = {"role_id", "route_id", "capabilities", "modalities", "task_classes", "fallback_roles",
                              "readiness_max_age_seconds", "unavailable_action", "deferral_seconds",
                              "concurrency"}
                 if "readiness" not in item:
@@ -520,6 +533,9 @@ def load_settings(path: str | Path) -> Settings:
                     return tuple(values)
                 capabilities_for_role = string_list("capabilities")
                 modalities = string_list("modalities")
+                task_classes = string_list("task_classes")
+                if set(task_classes) - {"autonomic", "objective_reasoning", "vision"}:
+                    raise ConfigurationError(f"{where}.task_classes contains an unsupported class")
                 fallbacks = item["fallback_roles"]
                 if (not isinstance(fallbacks, list) or any(not isinstance(entry, str) or not entry.strip()
                                                            for entry in fallbacks)
@@ -533,7 +549,7 @@ def load_settings(path: str | Path) -> Settings:
                     raise ConfigurationError(f"{where}.concurrency must be a positive integer")
                 parsed_roles.append(ModelRole(
                     role_id=role_id, route_id=route_id, capabilities=capabilities_for_role,
-                    modalities=modalities, fallback_roles=tuple(fallbacks),
+                    modalities=modalities, task_classes=task_classes, fallback_roles=tuple(fallbacks),
                     readiness_max_age_seconds=_positive(item["readiness_max_age_seconds"],
                                                          f"{where}.readiness_max_age_seconds"),
                     unavailable_action=action,
@@ -541,10 +557,27 @@ def load_settings(path: str | Path) -> Settings:
                     concurrency=concurrency, readiness=readiness))
             if default_model_role not in role_ids:
                 raise ConfigurationError("grace.role_registry.default_role must identify a configured role")
+            task_defaults = registry["task_defaults"]
+            expected_task_classes = {"autonomic", "objective_reasoning", "vision"}
+            if (not isinstance(task_defaults, dict) or set(task_defaults) != expected_task_classes
+                    or any(not isinstance(value, str) or not value.strip()
+                           for value in task_defaults.values())):
+                raise ConfigurationError("grace.role_registry.task_defaults must map all task classes to roles")
+            role_map = {role.role_id: role for role in parsed_roles}
+            for task_class, role_id in task_defaults.items():
+                if role_id not in role_map or task_class not in role_map[role_id].task_classes:
+                    raise ConfigurationError(f"task default for {task_class} must reference a role that serves it")
+            if default_model_role != task_defaults["objective_reasoning"]:
+                raise ConfigurationError("role_registry.default_role must equal the objective_reasoning task default")
             for role in parsed_roles:
                 if set(role.fallback_roles) - role_ids:
                     raise ConfigurationError(f"role {role.role_id} references an unconfigured fallback role")
+                for fallback_id in role.fallback_roles:
+                    fallback = next(entry for entry in parsed_roles if entry.role_id == fallback_id)
+                    if not set(role.task_classes).issubset(fallback.task_classes):
+                        raise ConfigurationError("model role fallbacks must preserve task-class authorization")
             model_roles = tuple(parsed_roles)
+            model_task_defaults = dict(task_defaults)
 
         raw_escalation = grace.get("reasoning_escalation")
         if raw_escalation is not None:
@@ -754,6 +787,7 @@ def load_settings(path: str | Path) -> Settings:
         default_model_route=default_model_route,
         model_roles=model_roles,
         default_model_role=default_model_role,
+        model_task_defaults=model_task_defaults,
         reasoning_escalation=reasoning_escalation,
         authorization_provider=authorization_provider,
         knowledge_sources=knowledge_sources,
@@ -795,9 +829,11 @@ def sanitized_config(settings: Settings) -> dict[str, Any]:
                               for route in settings.model_routes],
                    "knowledge_sources": [str(path) for path in settings.knowledge_sources],
                    "role_registry": ({"schema_version": 1, "default_role": settings.default_model_role,
+                                      "task_defaults": dict(settings.model_task_defaults),
                                       "roles": [{"role_id": role.role_id, "route_id": role.route_id,
                                                  "capabilities": list(role.capabilities),
                                                  "modalities": list(role.modalities),
+                                                 "task_classes": list(role.task_classes),
                                                  "fallback_roles": list(role.fallback_roles),
                                                  "readiness_max_age_seconds": role.readiness_max_age_seconds,
                                                  "unavailable_action": role.unavailable_action,

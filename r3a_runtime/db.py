@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.7.0
+File Revision: 1.8.0
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -33,6 +33,7 @@ Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Persist typed Engineering
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Park objective dependencies durably, requeue after prerequisite completion, and expose bounded lineage evidence.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Snapshot the configured escalation policy on each durable objective so continuation uses its original budget and allowed routes.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Persist activity-scoped capability grants and atomically reserve per-activity external invocation budgets.
+Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Persist objective task class and selected role with durable intake for route-safe recovery.
 Supersedes: None.
 Contracts: AP0-003–010; R3A-019; R3A-011/R3A-012; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1; r3a.engineering-work-order.v1; r3a.capability-invocation.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_engineering.py; tests/test_r3a_capability_integration_demo.py.
@@ -634,6 +635,7 @@ class Store:
         metadata = {"registry_contract": "r3a.model-role.v1", "resident_id": resident_id,
                     "role_id": role.role_id,
                     "route_id": role.route_id, "capabilities": list(role.capabilities),
+                    "task_classes": list(role.task_classes),
                     "configured_model_id": model_id,
                     "readiness_provider_id": role.readiness.provider_id if role.readiness else None,
                     "modalities": list(role.modalities), "fallback_roles": list(role.fallback_roles),
@@ -1077,7 +1079,8 @@ class Store:
                                      acceptance_criteria: list[dict[str, Any]] | None = None,
                                      engineering_assignment: dict[str, Any] | None = None,
                                      depends_on_activity_ids: Any = None,
-                                     requested_activity_id: str | None = None) -> dict[str, Any]:
+                                     requested_activity_id: str | None = None,
+                                     task_class: str = "objective_reasoning") -> dict[str, Any]:
         """Durably enqueue one objective/notification; duplicate keys return the same activity."""
         if not objective.strip() or len(objective) > 4000:
             raise ValueError("event content must contain 1 to 4000 characters")
@@ -1087,6 +1090,8 @@ class Store:
             raise ValueError("event_kind must be objective or notification")
         if event_kind != "objective" and depends_on_activity_ids:
             raise ValueError("only objectives may depend on other activities")
+        if task_class not in {"objective_reasoning", "vision"}:
+            raise ValueError("Grace objective intake cannot use autonomic-only task classes")
         dependencies = ActivityDependencySet.from_value(depends_on_activity_ids)
         selected_activity_id = uuid.UUID(requested_activity_id) if requested_activity_id else uuid.uuid4()
         if dependencies and str(selected_activity_id) in dependencies.activity_ids:
@@ -1110,7 +1115,7 @@ class Store:
             acceptance_criteria = validate_required_criteria(acceptance_criteria)
         if role_id is None and self.settings.model_roles:
             if route_id is None:
-                role_id = self.settings.default_model_role
+                role_id = self.settings.model_role_for_task(task_class).role_id
             else:
                 matching_roles = [entry for entry in self.settings.model_roles if entry.route_id == route_id]
                 if len(matching_roles) != 1:
@@ -1120,6 +1125,8 @@ class Store:
             role = next((entry for entry in self.settings.model_roles if entry.role_id == role_id), None)
             if role is None:
                 raise ValueError("requested model role is not configured")
+            if task_class not in role.task_classes:
+                raise ValueError(f"model role {role.role_id} is not authorized for {task_class}")
             if route_id is not None and route_id != role.route_id:
                 raise ValueError("route_id must match the configured route for the requested role")
             selected_route_id = role.route_id
@@ -1128,6 +1135,7 @@ class Store:
             selected_route_id = self.settings.model_route(route_id).route_id
             selected_role_id = None
         event_input = {"objective": objective, "event_kind": event_kind,
+                       "task_class": task_class,
                        "route_id": selected_route_id if selected_role_id is None else None,
                        "role_id": selected_role_id,
                        "required_capabilities": list(required_capabilities),

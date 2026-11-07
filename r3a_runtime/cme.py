@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.8.0
+File Revision: 1.9.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -37,6 +37,7 @@ Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Accept only invocation, w
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Expose separate capability presentation metadata and drive durable dependency resumption from the CME scheduler.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Enforce Grace-requested reasoning escalation through existing authorization, readiness, durable checkpoint and per-activity token-budget paths.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Dispatch escalation inference through the unified capability invocation and durable budget-reservation path.
+Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Resolve routes by configured task class and reject autonomic objective inference before model execution.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py; tests/test_r3a_telemetry_providers.py; tests/test_r3a_capability_contracts.py; tests/test_r3a_engineering.py.
@@ -620,16 +621,37 @@ class CME:
         if operation == "grace.objective.submit":
             if self.settings.module_id != "resident.grace":
                 raise RuntimeError("The configured module is not the AP1 Grace resident")
+            modalities = tuple(payload.get("required_modalities", ()))
+            task_class = payload.get("task_class")
+            if task_class is None:
+                task_class = "vision" if "image" in modalities else "objective_reasoning"
+            if task_class not in {"objective_reasoning", "vision"}:
+                raise ValueError("Grace objective intake cannot use autonomic-only model roles")
+            requested_role_id = payload.get("role_id")
+            requested_route = payload.get("route_id")
+            roles = self.settings.model_roles
+            if requested_role_id is not None:
+                selected_role = next((role for role in roles if role.role_id == requested_role_id), None)
+                if selected_role is None:
+                    raise ValueError("requested model role is not configured")
+            elif requested_route is not None:
+                matching = [role for role in roles if role.route_id == requested_route]
+                if len(matching) != 1:
+                    raise ValueError("requested route must resolve to exactly one configured model role")
+                selected_role = matching[0]
+            else:
+                selected_role = self.settings.model_role_for_task(task_class)
+            if task_class not in selected_role.task_classes:
+                raise ValueError(f"model role {selected_role.role_id} is not authorized for {task_class}")
             return await self.store.submit_grace_objective(
                 str(payload.get("objective", "")), idempotency_key,
                 str(payload.get("event_kind", "objective")),
-                str(payload["route_id"]) if payload.get("route_id") is not None else None,
-                str(payload["role_id"]) if payload.get("role_id") is not None else None,
+                str(selected_role.route_id), str(selected_role.role_id),
                 tuple(payload.get("required_capabilities", ())),
-                tuple(payload.get("required_modalities", ())),
+                modalities,
                 payload.get("acceptance_criteria", []), payload.get("engineering_assignment"),
                 payload.get("depends_on_activity_ids"),
-                payload.get("requested_activity_id", payload.get("activity_id")))
+                payload.get("requested_activity_id", payload.get("activity_id")), task_class)
         if operation == "config.reload":
             if any(not task.done() for task in self.active_activities.values()):
                 raise RuntimeError("Config reload waits for in-flight activity to reach a safe boundary")
@@ -821,6 +843,15 @@ class CME:
         saved = activity.get("checkpoint") or {}
         route_id = event_input.get("route_id")
         selected_role_id = event_input.get("role_id")
+        task_class = event_input.get("task_class", "objective_reasoning")
+        if task_class not in {"objective_reasoning", "vision"}:
+            raise ModelRoleUnavailable(
+                RouteDecision("block", selected_role_id or "", None, None,
+                              "objective_activity_cannot_use_autonomic_role", False,
+                              self.settings.source_digest,
+                              request_id=str(uuid.uuid4()), activity_id=str(activity["activity_id"]),
+                              attempt_id=str(activity["attempt_id"]), correlation_id=str(activity["activity_id"]),
+                              resident_id=self.module_id, evaluated_at=utcnow().isoformat()), 0)
         if selected_role_id:
             roles = self.settings.model_roles
             if event_input.get("role_config_revision") != self.settings.source_digest:
@@ -836,6 +867,15 @@ class CME:
                                   evaluated_at=utcnow().isoformat()), 0)
             observations = await self._model_readiness_observations()
             decision_role_id = saved.get("selected_role_id") or event_input["role_id"]
+            role_contract = next((role for role in roles if role.role_id == decision_role_id), None)
+            if role_contract is None or task_class not in role_contract.task_classes:
+                raise ModelRoleUnavailable(
+                    RouteDecision("block", decision_role_id, None, None,
+                                  "role_not_authorized_for_task_class", False,
+                                  self.settings.source_digest,
+                                  request_id=str(uuid.uuid4()), activity_id=str(activity["activity_id"]),
+                                  attempt_id=str(activity["attempt_id"]), correlation_id=str(activity["activity_id"]),
+                                  resident_id=self.module_id, evaluated_at=utcnow().isoformat()), 0)
             decision = resolve_role(
                 roles, decision_role_id, set(event_input.get("required_capabilities", [])),
                 observations, config_revision=self.settings.source_digest,
@@ -896,7 +936,8 @@ class CME:
             allowed_ids = set(policy.get("allowed_role_ids", []))
             role_offers = []
             for role in self.settings.model_roles:
-                if role.role_id not in allowed_ids or role.role_id == selected_role_id:
+                if (role.role_id not in allowed_ids or role.role_id == selected_role_id
+                        or "objective_reasoning" not in role.task_classes):
                     continue
                 readiness = resolve_role(
                     self.settings.model_roles, role.role_id, set(), observations,
@@ -919,6 +960,7 @@ class CME:
         return {"activity_type": "grace.objective", "activity_id": str(activity["activity_id"]),
                 "attempt_id": str(activity["attempt_id"]),
                 "objective": event_input["objective"], "event_kind": event_input.get("event_kind", "objective"),
+                "task_class": task_class,
                 "acceptance_contract": {"contract_id": OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
                                         "contract_version": OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION,
                                         "criteria": acceptance_criteria},
@@ -1721,7 +1763,8 @@ class CME:
                             failure = "target_role_not_allowed_by_activity_policy"
                         elif not isinstance(reason, str) or not reason.strip():
                             failure = "reasoning_escalation_rationale_missing"
-                        elif target_role is None or target_role.role_id == context.get("selected_role_id"):
+                        elif (target_role is None or target_role.role_id == context.get("selected_role_id")
+                              or "objective_reasoning" not in target_role.task_classes):
                             failure = "target_role_unavailable_or_not_stronger"
                         elif target_role.route_id == model_route["route_id"]:
                             failure = "target_role_does_not_change_configured_route"

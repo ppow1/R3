@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.3.0
+File Revision: 1.4.0
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -31,6 +31,7 @@ Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Verify residen
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Verify Grace escalation dispatches through canonical CME invocation with durable budget context.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Verify diagnostics context does not pre-authorize unused capabilities.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Cover observer activity context while preserving capability authorization at actual invocation.
+Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Keep escalation regression on the configured primary reasoning route.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
@@ -380,16 +381,19 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         readiness = ModelReadinessPolicy("models", "1.0.0", "http://127.0.0.1:8080/v1/models",
                                          2, 1, 0.1, 5)
         roles = (
-            ModelRole("resident.autonomic", "autonomic", ("reason.text",), ("text",), (),
+            ModelRole("resident.autonomic", "autonomic", ("monitor.health",), ("text",), ("autonomic",), (),
                       45, "block", 5, 1, readiness),
-            ModelRole("resident.primary", "primary", ("reason.text", "plan"), ("text",), (),
+            ModelRole("resident.primary", "primary", ("reason.text", "plan"), ("text",),
+                      ("objective_reasoning",), (),
                       45, "block", 5, 1, readiness),
+            ModelRole("resident.external", "external", ("reason.text", "plan"), ("text",),
+                      ("objective_reasoning",), (), 45, "block", 5, 1, readiness),
         )
         operation = SimpleNamespace(descriptor={"operation_id": "reasoning.model.invoke",
                                                  "contract_version": "1.0.0",
                                                  "effect_class": "external_write"})
         settings = SimpleNamespace(model_roles=roles, model_route=lambda route_id: {
-            "autonomic": local, "primary": primary}[route_id], source_digest="config-1",
+            "autonomic": local, "primary": primary, "external": primary}[route_id], source_digest="config-1",
             capability_registry=SimpleNamespace(resolve=Mock(return_value=operation)),
             module_capabilities=(), lease_seconds=30, restart_initial_seconds=1,
             restart_max_seconds=3)
@@ -407,18 +411,18 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
                 "activity_type": "grace.objective", "activity_id": "activity-1", "attempt_id": "attempt-1",
                 "objective": "Use stronger reasoning to evaluate the evidence and report limitations.",
                 "acceptance_criteria": [{"criterion_id": "result", "type": "evidence_citation"}],
-                "event_kind": "objective", "route_id": "autonomic",
-                "model_route": {"route_id": "autonomic", "provider": "openai-compatible", "model": "small",
-                                "endpoint": local.endpoint, "timeout_seconds": 20, "max_tokens": 64},
-                "selected_role_id": "resident.autonomic", "route_decision": {},
+                "event_kind": "objective", "task_class": "objective_reasoning", "route_id": "primary",
+                "model_route": {"route_id": "primary", "provider": "openai-compatible", "model": "large",
+                                "endpoint": primary.endpoint, "timeout_seconds": 20, "max_tokens": 64},
+                "selected_role_id": "resident.primary", "route_decision": {},
                 "evidence_format": "r3a.knowledge-evidence.v1", "required_evidence_refs": [],
                 "evidence": [], "available_tools": [], "available_engineering_operations": [],
                 "reasoning_escalation": {"enabled": True,
-                    "available_roles": [{"role_id": "resident.primary", "route_id": "primary",
+                    "available_roles": [{"role_id": "resident.external", "route_id": "external",
                                          "readiness": "ready"}]},
                 "conversation": [], "reasoning_state": {}, "pending_final": None,
                 "config_revision": "config-1"})
-            cme._model_readiness_observations = AsyncMock(return_value={"resident.primary": {
+            cme._model_readiness_observations = AsyncMock(return_value={"resident.external": {
                 "status": "ready", "observed_at": datetime.now(timezone.utc).isoformat(),
                 "provider_id": "models", "evidence_ref": "ready-1", "evidence": {"model_id": "large"},
                 "config_revision": "config-1"}})
@@ -431,7 +435,7 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
                 "output": {"content": "The evidence is incomplete; inspect the activity contract.",
                            "usage": {"completion_tokens": 26}},
                 "evidence": [{"evidence_id": "model-inference:invocation-1"}]})
-            escalation = {"action": "escalate_reasoning", "target_role_id": "resident.primary",
+            escalation = {"action": "escalate_reasoning", "target_role_id": "resident.external",
                           "rationale": "The current route cannot resolve the uncertainty from the evidence."}
             final = {"action": "final", "decision": {"assessment": "Insufficient evidence remains.",
                 "status": "blocked", "evidence_refs": [], "recommended_action": "Obtain missing evidence."}}
@@ -460,7 +464,7 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
                     "correlation_id": "correlation-1", "reasoning_escalation": {
                         "contract_id": "r3a.reasoning-escalation-policy", "contract_version": "1.0.0",
                         "enabled": True, "authorization_capability_id": "reasoning.model.invoke",
-                        "allowed_role_ids": ["resident.primary"], "max_requests_per_activity": 1,
+                    "allowed_role_ids": ["resident.external"], "max_requests_per_activity": 1,
                         "max_completion_tokens_per_activity": 128, "config_revision": "config-1"}},
                 "checkpoint": {}}
             await cme._run_activity(activity)
@@ -474,8 +478,8 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         self.assertEqual(invocation["budget_reservation"]["resource"], "completion_tokens")
         self.assertEqual(cme.invoke_capability.await_args.kwargs["_approved_budget_reservation"],
                          invocation["budget_reservation"])
-        self.assertEqual(payloads[0]["route_id"], "autonomic")
-        self.assertEqual(payloads[1]["route_id"], "autonomic")
+        self.assertEqual(payloads[0]["route_id"], "primary")
+        self.assertEqual(payloads[1]["route_id"], "primary")
         self.assertIn("The evidence is incomplete", payloads[1]["conversation"][-1]["content"])
         self.assertEqual(cme.store.blocked[1]["reasoning_trace"]["model_turns"][-1]["result_ref"],
                          "large-result")

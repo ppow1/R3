@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cli.py
 Component: R3A-OPERATOR-CLI
-File Revision: 1.3.0
+File Revision: 1.4.0
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Expose operator-invoked AP0 diagnostics, CME controls and isolated backup actions.
@@ -18,6 +18,7 @@ Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add provider-rea
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Replace caller-authored readiness reports with provider-triggered checks.
 Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Accept structured objective criteria through normal durable intake.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Support explicit activity-scoped grants and caller-assigned activity IDs for bounded authorization setup.
+Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Permit configured objective-reasoning or vision task class on durable objective intake.
 Supersedes: None.
 Contracts: AP0-007/008/010/013; R3A-019; AP0-M1 D8/D9; r3a.model-route-decision.v1; r3a.model-readiness.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; no model inference in this slice.
@@ -70,7 +71,8 @@ async def _run(args: argparse.Namespace) -> Any:
                    "required_capabilities": args.required_capability,
                    "required_modalities": args.required_modality,
                    "acceptance_criteria": json.loads(args.acceptance_criteria_json),
-                   "requested_activity_id": args.requested_activity_id}
+                   "requested_activity_id": args.requested_activity_id,
+                   "task_class": args.task_class}
         if args.route_id:
             payload["route_id"] = args.route_id
         if args.role_id:
@@ -96,6 +98,9 @@ def main() -> None:
                            help="Durably classify this incoming event for Grace")
     objective.add_argument("--route-id", help="Configured Grace model route; defaults to bootstrap policy")
     objective.add_argument("--role-id", help="Configured Grace model role; readiness is checked before dispatch")
+    objective.add_argument("--task-class", choices=("objective_reasoning", "vision"),
+                           default="objective_reasoning",
+                           help="Objective execution class; autonomic-only roles cannot run objective work")
     objective.add_argument("--required-capability", action="append", default=[],
                            help="Required model capability for role selection; may be repeated")
     objective.add_argument("--required-modality", action="append", default=[],
