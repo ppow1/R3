@@ -1,87 +1,81 @@
 {
   "schema_version": 1,
   "plugin_id": "r3a.institutional-directory",
-  "plugin_version": "1.0.0",
+  "plugin_version": "1.1.0",
   "artifact_ref": "plugin.py",
-  "artifact_sha256": "bcf48b29d672715b0c532adc0bbdf6e00098e3e70a441e97ae4be1ff2cef5fca",
-  "supporting_artifacts": [
-    {
-      "artifact_ref": "responsibility_catalog.schema.json",
-      "artifact_sha256": "6c6afa14fe6d8546d95531836112d19f611c35e36c84a85ea1c4384c14354ef9"
-    }
-  ],
+  "artifact_sha256": "0756de2608cd846779f511fd8a6bda91b6563c8f4b4ea65410c2038e563a679a",
   "configuration_schema": {
     "schema_id": "r3a.institutional-directory.config.v1",
     "type": "object",
     "required": [
-      "database_path_env",
-      "max_age_seconds",
-      "responsibility_catalog_path_env"
+      "dsn_env",
+      "schema",
+      "connect_timeout_seconds"
     ],
     "additionalProperties": false,
     "properties": {
-      "database_path_env": {
+      "dsn_env": {
         "type": "string",
         "pattern": "[A-Z][A-Z0-9_]*"
       },
-      "max_age_seconds": {
+      "schema": {
+        "type": "string",
+        "pattern": "[A-Za-z_][A-Za-z0-9_]{0,62}"
+      },
+      "connect_timeout_seconds": {
         "type": "integer",
-        "minimum": 60,
-        "maximum": 604800
-      },
-      "responsibility_catalog_path_env": {
-        "type": "string",
-        "pattern": "[A-Z][A-Z0-9_]*"
+        "minimum": 1,
+        "maximum": 10
       }
     }
   },
   "provider": {
     "provider_id": "r3a.institutional-directory",
-    "provider_version": "1.0.0",
+    "provider_version": "1.1.0",
     "entrypoint": "r3a_plugins.institutional_directory.plugin:create_provider",
-    "artifact_sha256": "bcf48b29d672715b0c532adc0bbdf6e00098e3e70a441e97ae4be1ff2cef5fca"
+    "artifact_sha256": "0756de2608cd846779f511fd8a6bda91b6563c8f4b4ea65410c2038e563a679a"
   },
   "operation": {
     "contract_id": "r3a.capability-operation.v1",
     "contract_version": "1.0.0",
     "operation_id": "institutional.directory.discover",
-    "operation_revision": "1.0.0",
+    "operation_revision": "1.1.0",
     "provider": {
       "provider_id": "r3a.institutional-directory",
-      "provider_version": "1.0.0",
+      "provider_version": "1.1.0",
       "entrypoint": "r3a_plugins.institutional_directory.plugin:create_provider",
-      "artifact_sha256": "bcf48b29d672715b0c532adc0bbdf6e00098e3e70a441e97ae4be1ff2cef5fca"
+      "artifact_sha256": "0756de2608cd846779f511fd8a6bda91b6563c8f4b4ea65410c2038e563a679a"
     },
     "input_schema": {
       "type": "object",
       "properties": {
-        "resident_id": {
+        "office_id": {
           "type": "string",
           "minLength": 1
         },
-        "office": {
+        "resident_id": {
           "type": "string",
           "minLength": 1
         },
         "limit": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 50
+          "maximum": 250
         }
       },
       "additionalProperties": false
     },
     "output_schema": {
       "type": "object",
+      "additionalProperties": false,
       "required": [
         "schema_id",
         "schema_version",
         "observed_at",
         "source",
-        "residents",
         "offices",
-        "capabilities",
-        "responsibility_catalog"
+        "residents",
+        "capabilities"
       ],
       "properties": {
         "schema_id": {
@@ -89,8 +83,8 @@
           "type": "string"
         },
         "schema_version": {
-          "type": "integer",
-          "const": 1
+          "const": 1,
+          "type": "integer"
         },
         "observed_at": {
           "type": "string",
@@ -98,72 +92,53 @@
         },
         "source": {
           "type": "object",
+          "additionalProperties": false,
           "required": [
             "source_id",
             "source_contract",
-            "source_sha256",
-            "source_modified_at",
+            "snapshot_sha256",
             "observed_at",
-            "age_seconds",
-            "max_age_seconds",
             "freshness",
             "availability",
             "error",
-            "record_count",
-            "complete_inventory",
-            "total_matching_records",
-            "source_timestamp_basis"
+            "row_counts",
+            "potentially_truncated",
+            "transaction_isolation",
+            "timestamp_basis"
           ],
           "properties": {
             "source_id": {
+              "const": "riverview_authority.directory",
               "type": "string"
             },
             "source_contract": {
+              "const": "riverview-authority.directory.v1",
               "type": "string"
             },
-            "source_sha256": {
+            "snapshot_sha256": {
               "type": [
                 "string",
                 "null"
               ],
               "pattern": "^[a-f0-9]{64}$"
             },
-            "source_modified_at": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "format": "date-time"
-            },
             "observed_at": {
               "type": "string",
               "format": "date-time"
             },
-            "age_seconds": {
-              "type": [
-                "number",
-                "null"
-              ],
-              "minimum": 0
-            },
-            "max_age_seconds": {
-              "type": "number",
-              "minimum": 1
-            },
             "freshness": {
-              "type": "string",
               "enum": [
                 "fresh",
-                "stale",
                 "unavailable"
-              ]
+              ],
+              "type": "string"
             },
             "availability": {
-              "type": "string",
               "enum": [
                 "measured",
                 "unavailable"
-              ]
+              ],
+              "type": "string"
             },
             "error": {
               "type": [
@@ -171,65 +146,195 @@
                 "null"
               ]
             },
-            "record_count": {
-              "type": "integer",
-              "minimum": 0
+            "row_counts": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
             },
-            "complete_inventory": {
+            "potentially_truncated": {
               "type": "boolean"
             },
-            "total_matching_records": {
-              "type": "integer",
-              "minimum": 0
+            "transaction_isolation": {
+              "type": "string"
             },
-            "source_timestamp_basis": {
+            "timestamp_basis": {
               "type": "string"
             }
-          },
-          "additionalProperties": false
+          }
+        },
+        "offices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "office_id",
+              "office_role",
+              "status",
+              "residents",
+              "capabilities"
+            ],
+            "properties": {
+              "office_id": {
+                "type": "string"
+              },
+              "office_role": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "residents": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "capabilities": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "capability_id",
+                    "owner_office",
+                    "authority_action",
+                    "enabled",
+                    "availability_policy",
+                    "registration_blocker",
+                    "input_schema",
+                    "authorization_contract",
+                    "resources",
+                    "availability_state",
+                    "availability_basis"
+                  ],
+                  "properties": {
+                    "capability_id": {
+                      "type": "string"
+                    },
+                    "owner_office": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "authority_action": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "enabled": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "availability_policy": {
+                      "type": [
+                        "string",
+                        "object",
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "registration_blocker": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "input_schema": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
+                    "authorization_contract": {
+                      "type": [
+                        "string",
+                        "object",
+                        "null"
+                      ]
+                    },
+                    "resources": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "resource_id",
+                          "implementation_ref"
+                        ],
+                        "properties": {
+                          "resource_id": {
+                            "type": "string"
+                          },
+                          "implementation_ref": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "availability_state": {
+                      "const": "unavailable",
+                      "type": "string"
+                    },
+                    "availability_basis": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
         },
         "residents": {
           "type": "array",
           "items": {
             "type": "object",
+            "additionalProperties": false,
             "required": [
               "resident_id",
               "display_name",
-              "office",
-              "status",
-              "schema_version",
-              "record_revision",
-              "role_description",
+              "office_id",
+              "office_role",
+              "office_status",
+              "binding_revision",
               "availability",
-              "availability_state",
-              "responsibilities",
-              "responsibility_state"
+              "availability_state"
             ],
             "properties": {
               "resident_id": {
                 "type": "string"
               },
               "display_name": {
-                "type": "string"
-              },
-              "office": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string"
-              },
-              "schema_version": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "record_revision": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "role_description": {
                 "type": [
                   "string",
                   "null"
+                ]
+              },
+              "office_id": {
+                "type": "string"
+              },
+              "office_role": {
+                "type": "string"
+              },
+              "office_status": {
+                "type": "string"
+              },
+              "binding_revision": {
+                "type": [
+                  "integer",
+                  "string"
                 ]
               },
               "availability": {
@@ -239,144 +344,118 @@
                 ]
               },
               "availability_state": {
-                "type": "string",
                 "enum": [
                   "measured",
                   "unavailable"
-                ]
-              },
-              "responsibilities": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              },
-              "responsibility_state": {
-                "type": "string",
-                "enum": [
-                  "measured",
-                  "unavailable"
-                ]
-              }
-            },
-            "additionalProperties": false
-          }
-        },
-        "offices": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": [
-              "office",
-              "resident_ids",
-              "responsibilities",
-              "responsibility_state"
-            ],
-            "properties": {
-              "office": {
+                ],
                 "type": "string"
-              },
-              "resident_ids": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "responsibilities": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              },
-              "responsibility_state": {
-                "type": "string",
-                "enum": [
-                  "measured",
-                  "unavailable"
-                ]
               }
-            },
-            "additionalProperties": false
+            }
           }
         },
         "capabilities": {
           "type": "array",
           "items": {
             "type": "object",
+            "additionalProperties": false,
             "required": [
-              "descriptor",
-              "presentation",
-              "registry_observation",
-              "authorization_evaluated"
+              "capability_id",
+              "owner_office",
+              "authority_action",
+              "enabled",
+              "availability_policy",
+              "registration_blocker",
+              "input_schema",
+              "authorization_contract",
+              "resources",
+              "availability_state",
+              "availability_basis"
             ],
             "properties": {
-              "descriptor": {
-                "type": "object",
-                "additionalProperties": true
+              "capability_id": {
+                "type": "string"
               },
-              "presentation": {
-                "type": "object",
-                "additionalProperties": true
+              "owner_office": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
-              "registry_observation": {
-                "type": "object",
-                "additionalProperties": true
+              "authority_action": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
-              "authorization_evaluated": {
-                "const": false,
-                "type": "boolean"
+              "enabled": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "availability_policy": {
+                "type": [
+                  "string",
+                  "object",
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "registration_blocker": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "input_schema": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "authorization_contract": {
+                "type": [
+                  "string",
+                  "object",
+                  "null"
+                ]
+              },
+              "resources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "resource_id",
+                    "implementation_ref"
+                  ],
+                  "properties": {
+                    "resource_id": {
+                      "type": "string"
+                    },
+                    "implementation_ref": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              },
+              "availability_state": {
+                "const": "unavailable",
+                "type": "string"
+              },
+              "availability_basis": {
+                "type": "string"
               }
-            },
-            "additionalProperties": false
-          }
-        },
-        "responsibility_catalog": {
-          "type": "object",
-          "required": [
-            "schema_id",
-            "state",
-            "source_sha256",
-            "source_revision",
-            "error"
-          ],
-          "properties": {
-            "schema_id": {
-              "const": "r3a.institutional-responsibility-catalog.v1",
-              "type": "string"
-            },
-            "state": {
-              "type": "string",
-              "enum": [
-                "measured",
-                "unavailable"
-              ]
-            },
-            "source_sha256": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "pattern": "^[a-f0-9]{64}$"
-            },
-            "source_revision": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "error": {
-              "type": [
-                "string",
-                "null"
-              ]
             }
-          },
-          "additionalProperties": false
+          }
         }
-      },
-      "additionalProperties": false
+      }
     },
     "effect_class": "read",
     "caller_constraints": {
@@ -401,10 +480,10 @@
         }
       },
       "verification_obligations": [
-        "preserve_hr_source_digest_and_record_revisions",
-        "report_source_freshness_and_timestamp_basis",
-        "do_not_infer_responsibilities_availability_or_authorization",
-        "preserve_dynamic_capability_descriptors"
+        "read_only_authoritative_snapshot",
+        "preserve_snapshot_digest_and_source_contract",
+        "report_unavailable_directory_configuration_without_fabricating_records",
+        "do_not_treat_capability_catalog_or_directory_binding_as_execution_authorization"
       ]
     },
     "recovery": {
@@ -421,8 +500,8 @@
       "desired_state": "enabled"
     },
     "resident_tool": {
-      "name": "Institutional Directory Discovery",
-      "description": "Read authoritative HR resident/office records, configured responsibility bindings, and dynamically registered R3A capability descriptors; this operation does not authorize their invocation."
+      "name": "institutional_directory_discover",
+      "description": "Read Riverview authoritative institutional offices, current resident bindings, and office-owned capability catalog metadata with snapshot provenance. Directory discovery does not authorize invocation."
     }
   }
 }

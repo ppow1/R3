@@ -1,5 +1,5 @@
 {
-  "database_path_env": "R3A_HR_DIRECTORY_DATABASE",
-  "max_age_seconds": 86400,
-  "responsibility_catalog_path_env": "R3A_DIRECTORY_RESPONSIBILITY_CATALOG"
+  "dsn_env": "R3A_DIRECTORY_POSTGRES_DSN",
+  "schema": "riverview_authority",
+  "connect_timeout_seconds": 3
 }

@@ -1,28 +1,107 @@
-"""Read-only R3A adapter for the authoritative HR resident record store.
+"""Read-only R3A adapter for Riverview's authoritative institutional directory.
 
-This module owns the R3A provider boundary. It reads the configured SQLite
-source directly in query-only mode and does not import or call an R/3 service.
-Only HR record identity, office, status, schema/revision, and explicitly public
-role text are projected. Responsibility bindings remain HR-owned configuration.
+The provider connects directly to the configured, least-privilege PostgreSQL
+reader for ``riverview_authority``. It never reads or calls the legacy R/3 HR
+SQLite store or website service. The DSN is supplied out of band through an
+environment variable named by plugin configuration and is never returned in
+results or diagnostics.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import os
-import sqlite3
+import re
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from r3a_runtime.capability_contracts import CapabilityProviderResult, validate_json
 
 
 DIRECTORY_SCHEMA_ID = "r3a.institutional-directory.v1"
-RESPONSIBILITY_CATALOG_SCHEMA_ID = "r3a.institutional-responsibility-catalog.v1"
-MAX_SOURCE_BYTES = 16 * 1024 * 1024
-RESPONSIBILITY_CATALOG_SCHEMA = json.loads(
-    Path(__file__).with_name("responsibility_catalog.schema.json").read_text(encoding="utf-8"))
+SCHEMA_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+MAX_ROWS = 250
+
+CAPABILITY_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["capability_id", "owner_office", "authority_action", "enabled",
+                 "availability_policy", "registration_blocker", "input_schema",
+                 "authorization_contract", "resources", "availability_state",
+                 "availability_basis"],
+    "properties": {
+        "capability_id": {"type": "string"},
+        "owner_office": {"type": ["string", "null"]},
+        "authority_action": {"type": ["string", "null"]},
+        "enabled": {"type": ["boolean", "null"]},
+        "availability_policy": {"type": ["string", "object", "array", "null"],
+                                "items": {"type": "string"}},
+        "registration_blocker": {"type": ["string", "null"]},
+        "input_schema": {"type": ["object", "null"]},
+        "authorization_contract": {"type": ["string", "object", "null"]},
+        "resources": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False,
+            "required": ["resource_id", "implementation_ref"],
+            "properties": {"resource_id": {"type": "string"},
+                           "implementation_ref": {"type": ["string", "null"]}},
+        }},
+        "availability_state": {"const": "unavailable", "type": "string"},
+        "availability_basis": {"type": "string"},
+    },
+}
+
+OUTPUT_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["schema_id", "schema_version", "observed_at", "source",
+                  "offices", "residents", "capabilities"],
+    "properties": {
+        "schema_id": {"const": DIRECTORY_SCHEMA_ID, "type": "string"},
+        "schema_version": {"const": 1, "type": "integer"},
+        "observed_at": {"type": "string", "format": "date-time"},
+        "source": {
+            "type": "object", "additionalProperties": False,
+            "required": ["source_id", "source_contract", "snapshot_sha256", "observed_at",
+                         "freshness", "availability", "error", "row_counts",
+                         "potentially_truncated", "transaction_isolation", "timestamp_basis"],
+            "properties": {
+                "source_id": {"const": "riverview_authority.directory", "type": "string"},
+                "source_contract": {"const": "riverview-authority.directory.v1", "type": "string"},
+                "snapshot_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+                "observed_at": {"type": "string", "format": "date-time"},
+                "freshness": {"enum": ["fresh", "unavailable"], "type": "string"},
+                "availability": {"enum": ["measured", "unavailable"], "type": "string"},
+                "error": {"type": ["string", "null"]},
+                "row_counts": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+                "potentially_truncated": {"type": "boolean"},
+                "transaction_isolation": {"type": "string"},
+                "timestamp_basis": {"type": "string"},
+            },
+        },
+        "offices": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False,
+            "required": ["office_id", "office_role", "status", "residents", "capabilities"],
+            "properties": {
+                "office_id": {"type": "string"}, "office_role": {"type": "string"},
+                "status": {"type": "string"},
+                "residents": {"type": "array", "items": {"type": "string"}},
+                "capabilities": {"type": "array", "items": CAPABILITY_SCHEMA},
+            },
+        }},
+        "residents": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False,
+            "required": ["resident_id", "display_name", "office_id", "office_role",
+                         "office_status", "binding_revision", "availability",
+                         "availability_state"],
+            "properties": {
+                "resident_id": {"type": "string"}, "display_name": {"type": ["string", "null"]},
+                "office_id": {"type": "string"}, "office_role": {"type": "string"},
+                "office_status": {"type": "string"}, "binding_revision": {"type": ["integer", "string"]},
+                "availability": {"type": ["string", "null"]},
+                "availability_state": {"enum": ["measured", "unavailable"], "type": "string"},
+            },
+        }},
+        "capabilities": {"type": "array", "items": CAPABILITY_SCHEMA},
+    },
+}
 
 
 def _now() -> datetime:
@@ -33,289 +112,214 @@ def _iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        while chunk := source.read(1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _unavailable_source(*, observed_at: str, max_age: int, reason: str) -> dict[str, Any]:
+def _unavailable(observed_at: str, reason: str) -> dict[str, Any]:
     return {
-        "source_id": "hr.resident-records",
-        "source_contract": "r3.hr-resident-record.v1",
-        "source_sha256": None,
-        "source_modified_at": None,
-        "observed_at": observed_at,
-        "age_seconds": None,
-        "max_age_seconds": max_age,
-        "freshness": "unavailable",
-        "availability": "unavailable",
-        "error": reason,
-        "record_count": 0,
-        "complete_inventory": False,
-        "total_matching_records": 0,
-        "source_timestamp_basis": "SQLite source file last modification time; rows expose HR record revisions",
+        "source_id": "riverview_authority.directory",
+        "source_contract": "riverview-authority.directory.v1",
+        "snapshot_sha256": None, "observed_at": observed_at,
+        "freshness": "unavailable", "availability": "unavailable",
+        "error": reason, "row_counts": {"offices": 0, "bindings": 0,
+                                           "residents": 0, "capabilities": 0,
+                                           "resources": 0},
+        "potentially_truncated": False,
+        "transaction_isolation": "read_only_repeatable_read",
+        "timestamp_basis": "PostgreSQL transaction snapshot observation time; binding_revision is source revision",
     }
 
 
-def _read_public_role(payload: dict[str, Any]) -> str | None:
-    fields = payload.get("fields", {})
-    if not isinstance(fields, dict):
-        raise ValueError("invalid_hr_fields")
-    role = fields.get("role")
-    if not isinstance(role, dict):
-        return None
-    value = role.get("value")
-    if role.get("classification") == "public" and isinstance(value, str):
-        return value
-    return None
+def _normalize_rows(rows: dict[str, list[dict[str, Any]]], observed_at: str,
+                    limit: int) -> dict[str, Any]:
+    offices_by_id: dict[str, dict[str, Any]] = {}
+    for row in rows["offices"]:
+        office_id, office_role, status = row.get("office_id"), row.get("office_role"), row.get("status")
+        if not all(isinstance(value, str) and value for value in (office_id, office_role, status)):
+            raise ValueError("invalid_office_record")
+        if office_id in offices_by_id:
+            raise ValueError("duplicate_office_record")
+        offices_by_id[office_id] = {"office_id": office_id, "office_role": office_role,
+                                    "status": status, "residents": [], "capabilities": []}
 
+    residents: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows["bindings"]:
+        office_id, principal_id = row.get("office_id"), row.get("principal_id")
+        if office_id not in offices_by_id or not isinstance(principal_id, str) or not principal_id:
+            raise ValueError("invalid_resident_binding")
+        key = (office_id, principal_id)
+        resident = {"resident_id": principal_id, "display_name": None,
+                    "office_id": office_id,
+                    "office_role": offices_by_id[office_id]["office_role"],
+                    "office_status": offices_by_id[office_id]["status"],
+                    "binding_revision": row.get("binding_revision"),
+                    "availability": None, "availability_state": "unavailable"}
+        if key in residents and residents[key] != resident:
+            raise ValueError("conflicting_resident_binding")
+        residents[key] = resident
+        offices_by_id[office_id]["residents"].append(principal_id)
 
-def _read_residents(path: Path, *, filters: dict[str, Any], limit: int) -> tuple[list[dict[str, Any]], int]:
-    uri = path.as_uri() + "?mode=ro"
-    connection = sqlite3.connect(uri, uri=True, timeout=2.0)
-    connection.row_factory = sqlite3.Row
-    try:
-        connection.execute("PRAGMA query_only=ON")
-        connection.execute("BEGIN")
-        clauses: list[str] = []
-        parameters: list[Any] = []
-        if filters.get("resident_id"):
-            clauses.append("resident_id = ?")
-            parameters.append(filters["resident_id"])
-        if filters.get("office"):
-            clauses.append("json_extract(payload, '$.office') = ?")
-            parameters.append(filters["office"])
-        where = " WHERE " + " AND ".join(clauses) if clauses else ""
-        total = int(connection.execute(
-            "SELECT COUNT(*) FROM hr_records" + where, parameters).fetchone()[0])
-        rows = connection.execute(
-            "SELECT resident_id, revision, payload FROM hr_records" + where +
-            " ORDER BY resident_id LIMIT ?", (*parameters, limit),
-        ).fetchall()
-        residents = []
-        for row in rows:
-            payload = json.loads(row["payload"])
-            if not isinstance(payload, dict):
-                raise ValueError("invalid_hr_record")
-            resident_id = row["resident_id"]
-            display_name = payload.get("display_name")
-            office = payload.get("office")
-            schema_version = payload.get("schema_version")
-            status = payload.get("status")
-            revision = row["revision"]
-            if (not all(isinstance(item, str) and item for item in
-                        (resident_id, display_name, office, status))
-                    or type(schema_version) is not int or type(revision) is not int):
-                raise ValueError("invalid_hr_record")
-            residents.append({
-                "resident_id": resident_id,
-                "display_name": display_name,
-                "office": office,
-                "status": status,
-                "schema_version": schema_version,
-                "record_revision": revision,
-                "role_description": _read_public_role(payload),
-                "availability": None,
-                "availability_state": "unavailable",
-                "responsibilities": [],
-                "responsibility_state": "unavailable",
-            })
-        connection.commit()
-        return residents, total
-    finally:
-        connection.close()
-
-
-def _catalog_from_context(context: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    catalog = context.get("capability_catalog", [])
-    if not isinstance(catalog, list):
-        raise ValueError("invalid_capability_catalog")
-    by_id: dict[str, dict[str, Any]] = {}
-    for entry in catalog:
-        if not isinstance(entry, dict) or not isinstance(entry.get("descriptor"), dict):
-            raise ValueError("invalid_capability_catalog")
-        descriptor = entry["descriptor"]
-        operation_id = descriptor.get("operation_id")
-        if not isinstance(operation_id, str) or operation_id in by_id:
-            raise ValueError("invalid_capability_catalog")
-        by_id[operation_id] = {
-            "descriptor": descriptor,
-            "presentation": entry.get("presentation", {}),
-            "registry_observation": entry.get("registry_observation", {}),
+    capability_ids: set[str] = set()
+    capabilities: list[dict[str, Any]] = []
+    for row in rows["capabilities"]:
+        capability_id, owner_office = row.get("capability_id"), row.get("owner_office")
+        if not isinstance(capability_id, str) or not capability_id or capability_id in capability_ids:
+            raise ValueError("invalid_capability_record")
+        capability_ids.add(capability_id)
+        item = {
+            "capability_id": capability_id, "owner_office": owner_office,
+            "authority_action": row.get("authority_action"),
+            "enabled": row.get("enabled"),
+            "availability_policy": row.get("availability_policy"),
+            "registration_blocker": row.get("registration_blocker"),
+            "input_schema": row.get("input_schema"),
+            "authorization_contract": row.get("authorization_contract"),
+            "resources": sorted(row.get("resources", []), key=lambda value: value["resource_id"]),
+            "availability_state": "unavailable",
+            "availability_basis": "directory metadata is authoritative; provider health was not probed",
         }
-    return by_id
+        capabilities.append(item)
+        if owner_office in offices_by_id:
+            offices_by_id[owner_office]["capabilities"].append(item)
 
+    for office in offices_by_id.values():
+        office["residents"] = sorted(set(office["residents"]))
+        office["capabilities"].sort(key=lambda item: item["capability_id"])
 
-def _load_responsibility_catalog(config: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None, str | None]:
-    env_name = config["responsibility_catalog_path_env"]
-    configured = os.environ.get(env_name)
-    if not configured:
-        return None, None, "responsibility_source_not_configured"
-    path = Path(configured).expanduser().resolve()
-    if not path.is_file() or path.stat().st_size > MAX_SOURCE_BYTES:
-        return None, None, "responsibility_source_unavailable"
-    try:
-        catalog = json.loads(path.read_text(encoding="utf-8"))
-        validate_json(catalog, RESPONSIBILITY_CATALOG_SCHEMA, path="$.responsibility_catalog")
-        if catalog.get("schema_id") != RESPONSIBILITY_CATALOG_SCHEMA_ID:
-            raise ValueError("responsibility_schema_id_mismatch")
-        return catalog, _sha256(path), None
-    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, TypeError):
-        return None, None, "responsibility_source_invalid"
-
-
-def _apply_responsibilities(residents: list[dict[str, Any]], catalog: dict[str, Any] | None,
-                            capabilities: dict[str, dict[str, Any]]) -> tuple[list[dict[str, Any]], str]:
-    if catalog is None:
-        return residents, "unavailable"
-    office_rules = {entry["office"]: entry["responsibilities"] for entry in catalog["offices"]}
-    for resident in residents:
-        rules = office_rules.get(resident["office"])
-        if rules is None:
-            continue
-        responsibilities = []
-        for rule in rules:
-            associated = []
-            for capability_id in rule["capability_ids"]:
-                registered = capabilities.get(capability_id)
-                if registered is None:
-                    associated.append({"operation_id": capability_id,
-                                       "registry_state": "not_registered",
-                                       "authorization_evaluated": False})
-                else:
-                    associated.append({"operation_id": capability_id,
-                                       "descriptor": registered["descriptor"],
-                                       "presentation": registered["presentation"],
-                                       "registry_observation": registered["registry_observation"],
-                                       "authorization_evaluated": False})
-            responsibilities.append({"responsibility_id": rule["responsibility_id"],
-                                     "description": rule["description"],
-                                     "capabilities": associated})
-        resident["responsibilities"] = responsibilities
-        resident["responsibility_state"] = "measured"
-    return residents, "measured"
+    canonical_rows = {key: rows[key] for key in sorted(rows)}
+    snapshot_digest = hashlib.sha256(json.dumps(
+        canonical_rows, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+    counts = {key: len(value) for key, value in rows.items()}
+    return {
+        "schema_id": DIRECTORY_SCHEMA_ID, "schema_version": 1, "observed_at": observed_at,
+        "source": {
+            "source_id": "riverview_authority.directory",
+            "source_contract": "riverview-authority.directory.v1",
+            "snapshot_sha256": snapshot_digest, "observed_at": observed_at,
+            "freshness": "fresh", "availability": "measured", "error": None,
+            "row_counts": counts,
+            "potentially_truncated": any(len(items) >= limit for items in rows.values()),
+            "transaction_isolation": "read_only_repeatable_read",
+            "timestamp_basis": "PostgreSQL transaction snapshot observation time; binding_revision is source revision",
+        },
+        "offices": sorted(offices_by_id.values(), key=lambda item: item["office_id"]),
+        "residents": sorted(residents.values(), key=lambda item: (item["office_id"], item["resident_id"])),
+        "capabilities": sorted(capabilities, key=lambda item: item["capability_id"]),
+    }
 
 
 class InstitutionalDirectoryProvider:
-    """Bounded, read-only projection of HR facts and dynamically registered capabilities."""
+    """Bounded read-only snapshot adapter for the authoritative Riverview directory."""
 
-    def __init__(self, configuration: dict[str, Any]):
+    def __init__(self, configuration: dict[str, Any], *,
+                 connect: Callable[..., Any] | None = None):
         self.configuration = configuration
+        self._connect = connect
+
+    def _connection(self, dsn: str):
+        if self._connect is not None:
+            return self._connect(dsn)
+        import psycopg
+        from psycopg.rows import dict_row
+        return psycopg.connect(dsn, connect_timeout=int(self.configuration["connect_timeout_seconds"]),
+                               autocommit=True, row_factory=dict_row,
+                               options="-c default_transaction_read_only=on -c statement_timeout=3000")
 
     def invoke(self, arguments: dict[str, Any], *, context: dict[str, Any]) -> CapabilityProviderResult:
-        now = _now()
-        observed_at = _iso(now)
-        config = self.configuration
-        max_age = int(config["max_age_seconds"])
-        capabilities = _catalog_from_context(context)
-        limit = min(max(1, int(arguments.get("limit", 50))), 50)
-        path_value = os.environ.get(config["database_path_env"])
-        if not path_value:
-            source = _unavailable_source(observed_at=observed_at, max_age=max_age,
-                                         reason="directory_source_not_configured")
-            residents: list[dict[str, Any]] = []
-            total = 0
-            read_error = source["error"]
-        else:
-            path = Path(path_value).expanduser().resolve()
+        del context  # Directory authority is separate from the dynamic R3A execution registry.
+        observed_at = _iso(_now())
+        env_name = self.configuration["dsn_env"]
+        dsn = os.environ.get(env_name, "")
+        schema = self.configuration["schema"]
+        limit = min(max(1, int(arguments.get("limit", MAX_ROWS))), MAX_ROWS)
+        if not dsn:
+            result = _unavailable(observed_at, "directory_source_not_configured")
+            output = {"schema_id": DIRECTORY_SCHEMA_ID, "schema_version": 1,
+                      "observed_at": observed_at, "source": result,
+                      "offices": [], "residents": [], "capabilities": []}
+            evidence = [{"source_id": result["source_id"], "source_contract": result["source_contract"],
+                         "snapshot_sha256": None, "observed_at": observed_at,
+                         "freshness": "unavailable", "error": result["error"]}]
+            validate_json(output, OUTPUT_SCHEMA, path="$.output")
+            return CapabilityProviderResult(output, evidence)
+        if not SCHEMA_NAME.fullmatch(schema):
+            raise ValueError("invalid_directory_schema_configuration")
+        try:
+            connection = self._connection(dsn)
             try:
-                if not path.is_file() or path.stat().st_size > MAX_SOURCE_BYTES:
-                    raise ValueError("directory_source_unavailable")
-                before = path.stat()
-                source_digest = _sha256(path)
-                modified = datetime.fromtimestamp(before.st_mtime, timezone.utc)
-                age = max(0.0, (now - modified).total_seconds())
-                freshness = "fresh" if age <= max_age else "stale"
-                residents, total = _read_residents(path, filters=arguments, limit=limit)
-                after = path.stat()
-                if (before.st_mtime_ns, before.st_size) != (after.st_mtime_ns, after.st_size):
-                    raise ValueError("directory_source_changed_during_read")
-                source = {
-                    "source_id": "hr.resident-records",
-                    "source_contract": "r3.hr-resident-record.v1",
-                    "source_sha256": source_digest,
-                    "source_modified_at": _iso(modified),
-                    "observed_at": observed_at,
-                    "age_seconds": age,
-                    "max_age_seconds": max_age,
-                    "freshness": freshness,
-                    "availability": "measured",
-                    "error": None,
-                    "record_count": len(residents),
-                    "complete_inventory": (not arguments.get("resident_id")
-                                            and not arguments.get("office") and total <= limit),
-                    "total_matching_records": total,
-                    "source_timestamp_basis": "SQLite source file last modification time; rows expose HR record revisions",
-                }
-                read_error = None
-            except (OSError, sqlite3.Error, json.JSONDecodeError, ValueError, TypeError):
-                source = _unavailable_source(observed_at=observed_at, max_age=max_age,
-                                             reason="directory_source_unavailable")
-                residents = []
-                total = 0
-                read_error = source["error"]
+                connection.execute("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                where_office = " AND o.office_id = %(office_id)s" if arguments.get("office_id") else ""
+                parameters: dict[str, Any] = {"limit": limit}
+                if arguments.get("office_id"):
+                    parameters["office_id"] = arguments["office_id"]
+                office_rows = connection.execute(
+                    f'SELECT o.office_id,o.office_role,o.status FROM "{schema}".institutional_offices o '
+                    f'WHERE TRUE{where_office} ORDER BY o.office_id LIMIT %(limit)s', parameters).fetchall()
+                offices = [dict(row) for row in office_rows]
+                office_ids = [row["office_id"] for row in offices]
+                bindings: list[dict[str, Any]] = []
+                capabilities: list[dict[str, Any]] = []
+                if office_ids:
+                    bindings = [dict(row) for row in connection.execute(
+                        f'SELECT b.office_id,r.principal_id,b.binding_revision FROM "{schema}".office_bindings b '
+                        f'JOIN "{schema}".resident_occupants r ON r.occupant_id=b.occupant_id '
+                        'WHERE r.retired_at IS NULL AND b.office_id = ANY(%(office_ids)s) '
+                        'AND (%(resident_id)s IS NULL OR r.principal_id = %(resident_id)s) '
+                        'ORDER BY b.office_id,r.principal_id LIMIT %(limit)s',
+                        {"office_ids": office_ids, "resident_id": arguments.get("resident_id"),
+                         "limit": limit}).fetchall()]
+                    catalog_rows = connection.execute(
+                        f'SELECT c.capability_id,c.owner_office,c.authority_action,c.enabled,'
+                        f'c.availability_policy,c.registration_blocker,c.input_schema,c.authorization_contract '
+                        f'FROM "{schema}".capability_catalog c WHERE c.owner_office = ANY(%(office_ids)s) '
+                        'ORDER BY c.capability_id LIMIT %(limit)s',
+                        {"office_ids": office_ids, "limit": limit}).fetchall()
+                    capabilities = [dict(row) for row in catalog_rows]
+                    capability_ids = [row["capability_id"] for row in capabilities]
+                    if capability_ids:
+                        resources = [dict(row) for row in connection.execute(
+                            f'SELECT capability_id,resource_id,implementation_ref FROM "{schema}".capability_resources '
+                            'WHERE capability_id = ANY(%(capability_ids)s) ORDER BY capability_id,resource_id '
+                            'LIMIT %(limit)s', {"capability_ids": capability_ids, "limit": limit}).fetchall()]
+                        by_capability: dict[str, list[dict[str, Any]]] = {}
+                        for row in resources:
+                            by_capability.setdefault(row["capability_id"], []).append({
+                                "resource_id": row["resource_id"],
+                                "implementation_ref": row["implementation_ref"]})
+                        for row in capabilities:
+                            row["resources"] = by_capability.get(row["capability_id"], [])
+                    else:
+                        resources = []
+                        for row in capabilities:
+                            row["resources"] = []
+                else:
+                    resources = []
+                result = _normalize_rows({"offices": offices, "bindings": bindings,
+                                          "capabilities": capabilities, "resources": resources},
+                                         observed_at, limit)
+                connection.execute("COMMIT")
+            finally:
+                connection.close()
+        except Exception as exc:
+            # Keep credentials, SQL and server diagnostics out of returned evidence.
+            error_type = type(exc).__name__
+            result = {"schema_id": DIRECTORY_SCHEMA_ID, "schema_version": 1,
+                      "observed_at": observed_at,
+                      "source": _unavailable(observed_at, f"directory_source_unavailable:{error_type}"),
+                      "offices": [], "residents": [], "capabilities": []}
+            evidence = [{"source_id": result["source"]["source_id"],
+                         "source_contract": result["source"]["source_contract"],
+                         "snapshot_sha256": None, "observed_at": observed_at,
+                         "freshness": "unavailable", "error": result["source"]["error"]}]
+            validate_json(result, OUTPUT_SCHEMA, path="$.output")
+            return CapabilityProviderResult(result, evidence)
 
-        responsibility_catalog, responsibility_digest, responsibility_error = _load_responsibility_catalog(config)
-        residents, responsibility_state = _apply_responsibilities(residents, responsibility_catalog, capabilities)
-        offices_by_name: dict[str, dict[str, Any]] = {}
-        for resident in residents:
-            entry = offices_by_name.setdefault(resident["office"], {
-                "office": resident["office"], "resident_ids": [],
-                "responsibilities": resident["responsibilities"],
-                "responsibility_state": resident["responsibility_state"],
-            })
-            entry["resident_ids"].append(resident["resident_id"])
-
-        capability_records = [{
-            "descriptor": entry["descriptor"],
-            "presentation": entry["presentation"],
-            "registry_observation": entry["registry_observation"],
-            "authorization_evaluated": False,
-        } for entry in sorted(capabilities.values(),
-                              key=lambda item: item["descriptor"]["operation_id"])]
-        output = {
-            "schema_id": DIRECTORY_SCHEMA_ID,
-            "schema_version": 1,
-            "observed_at": observed_at,
-            "source": source,
-            "residents": residents,
-            "offices": sorted(offices_by_name.values(), key=lambda item: item["office"]),
-            "capabilities": capability_records,
-            "responsibility_catalog": {
-                "schema_id": RESPONSIBILITY_CATALOG_SCHEMA_ID,
-                "state": responsibility_state,
-                "source_sha256": responsibility_digest,
-                "source_revision": responsibility_catalog.get("source_revision") if responsibility_catalog else None,
-                "error": responsibility_error,
-            },
-        }
-        evidence = [{
-            "source_id": source["source_id"],
-            "source_contract": source["source_contract"],
-            "source_sha256": source["source_sha256"],
-            "source_modified_at": source["source_modified_at"],
-            "observed_at": source["observed_at"],
-            "freshness": source["freshness"],
-            "record_revisions": [{"resident_id": item["resident_id"],
-                                  "record_revision": item["record_revision"]}
-                                 for item in residents],
-            "error": read_error,
-        }, {
-            "source_id": "r3a.capability-registry",
-            "config_revision": context.get("config_revision"),
-            "operation_ids": [item["descriptor"]["operation_id"] for item in capability_records],
-            "availability_basis": "registered descriptors only; provider health and authorization not evaluated",
-        }, {
-            "source_id": "institutional.responsibility-catalog",
-            "schema_id": RESPONSIBILITY_CATALOG_SCHEMA_ID,
-            "state": responsibility_state,
-            "source_sha256": responsibility_digest,
-            "error": responsibility_error,
-        }]
-        return CapabilityProviderResult(output, evidence)
+        validate_json(result, OUTPUT_SCHEMA, path="$.output")
+        evidence = [{"source_id": result["source"]["source_id"],
+                     "source_contract": result["source"]["source_contract"],
+                     "snapshot_sha256": result["source"]["snapshot_sha256"],
+                     "observed_at": observed_at, "freshness": result["source"]["freshness"],
+                     "row_counts": result["source"]["row_counts"],
+                     "transaction_isolation": result["source"]["transaction_isolation"],
+                     "error": None}]
+        return CapabilityProviderResult(result, evidence)
 
 
 def create_provider(configuration: dict[str, Any]) -> InstitutionalDirectoryProvider:

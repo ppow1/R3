@@ -1,56 +1,65 @@
 # R3A Institutional Directory Capability
 
-The directory operation is registered in the existing capability registry as
+The operation is registered in the common capability registry as
 `institutional.directory.discover` (`r3a.capability-operation.v1`, revision
-1.0.0, effect `read`). CME validates every invocation, evaluates the
-`institutional.directory.discover` grant, records the decision, and only then calls
-the R3A-owned provider. Discovery returns the descriptor and a separate human
-presentation projection; it does not authorize invocation.
+1.0.0, effect `read`). CME validates each invocation and enforces the matching
+operation grant before calling the provider. Discovery returns a stable
+technical identity and a separate human-facing presentation; discovery itself
+does not authorize execution.
 
-## Source and ownership
+## Authoritative source
 
-The provider reads the externally configured HR SQLite source using SQLite
-`mode=ro` and `PRAGMA query_only=ON`. It does not import or call the older R/3
-website, HR service, or their capability dispatcher. The source remains owned by
-HR; R3A owns the adapter, output contract, provenance, freshness evaluation,
-and capability-registry projection. The environment variable
-`R3A_HR_DIRECTORY_DATABASE` names the configured source path. No database path
-or resident roster is embedded in Python or the manifest.
+The provider reads Riverview's authoritative PostgreSQL schema
+`riverview_authority` directly. Its projection uses `institutional_offices`,
+`office_bindings`, `resident_occupants`, `capability_catalog`, and
+`capability_resources`. It does not import or call the legacy R/3 website or
+HR service and does not copy their SQLite records. Resident identity, office
+role/status, active occupant bindings, capability ownership/action, and
+registration metadata remain owned by Riverview.
 
-The adapter projects HR resident ID, display name, office, status, record
-schema/revision, and the `role` field only when HR classifies it as `public`.
-It does not return other fields or authority-principal extensions. Every
-record's `availability` and `responsibilities` fields carry explicit states;
-absence in HR data is never translated into an inferred assignment or a
-positive availability claim. Source freshness uses the SQLite file modification
-timestamp, carries the collection timestamp and maximum age, and can return
-stale data with an explicit stale state.
+R3A receives the database connection string only through the external
+environment variable named by `dsn_env` (the example names
+`R3A_DIRECTORY_POSTGRES_DSN`). The value is never returned in results or error
+evidence. Deployment must provide a least-privilege read-only database role;
+the provider additionally opens a bounded `REPEATABLE READ READ ONLY`
+transaction, uses parameterized values and fixed table names, applies a
+statement/connect timeout, and caps result sizes. If the DSN is missing or the
+source cannot be read, it returns empty arrays with `availability` and
+`freshness` set to `unavailable`; it does not fall back to another roster.
 
-## Responsibilities and capability association
+The current source fields do not include resident display names or authoritative
+availability observations. The provider returns `display_name: null` and
+availability `unavailable`. Capability catalog values such as `enabled`,
+`availability_policy`, and `registration_blocker` are reported as source
+metadata; they are not treated as provider health or execution authorization.
+The source snapshot digest hashes the bounded rows observed in the single
+transaction. Freshness is based on the live transaction timestamp; source row
+revision evidence is retained from `binding_revision`.
 
-The current HR resident-record schema has no structured office responsibility
-or responsibility-to-capability relationship. The versioned
-`r3a.institutional-responsibility-catalog.v1` schema is therefore an optional
-HR-owned external data extension, selected through the environment variable
-named by `responsibility_catalog_path_env`. A configured catalog binds an exact
-HR office label to sourced responsibility IDs/descriptions and canonical
-operation IDs. The provider resolves those operation IDs against the live R3A
-registry and includes their unchanged descriptors and separate presentation.
-Unknown IDs remain marked `not_registered`; authorization is never inferred.
+## Capability and delegation semantics
 
-Until HR supplies this catalog, office responsibility and capability binding
-states remain `unavailable`. The provider still returns source-backed resident
-and office facts plus the current dynamic R3A capability descriptors so Grace
-can consume them through the existing read-capability tool and evidence path.
-Grace/AP2 owns any delegate selection; execution still requires the normal CME
-invocation grant and effect controls.
+Office-owned capability catalog records are returned with their authority
+action, owner office, enablement/policy/blocker fields, schemas, authorization
+contract, and associated resource IDs. Provider availability remains
+`unavailable`/not probed unless a separate authoritative health source exists.
+The R3A dynamic capability descriptors are separately returned by CME
+discovery. Neither an office binding nor a directory capability record grants
+permission to invoke an R3A operation. CME remains the only authorization and
+invocation path.
 
-## Output provenance
+Grace's resident capability adapter passes the provider's typed `output`
+separately from source `evidence` into the next reasoning turn. This lets Grace
+consume directory facts while keeping provenance and authorization distinct.
+The integration test covers that adapter path with synthetic PostgreSQL
+fixtures. Selecting or executing a delegate still requires AP2 policy and a
+separate authorized invocation.
 
-The invocation output is `r3a.institutional-directory.v1`. CME separately
-persists the canonical invocation result, authorization evidence, and provider
-evidence. The provider evidence includes the HR source contract and digest, file
-timestamp/freshness, returned HR record revisions, R3A registry configuration
-revision, and responsibility-catalog source digest/state. Source facts,
-registered capability descriptors, and execution authorization remain
-distinguishable in the output.
+## Live integration limit
+
+Comms5 does not currently expose a directory read operation, and the R3A
+prototype has no Riverview read-only database credential configured. The
+prototype configuration references `R3A_DIRECTORY_POSTGRES_DSN` but leaves its
+value unset. Therefore the operation is discoverable and contract-valid, but
+its live provider response is explicitly unavailable until Riverview provisions
+an approved least-privilege credential/API for R3A. Do not substitute the
+legacy R/3 HR SQLite file or invent resident/capability facts.
