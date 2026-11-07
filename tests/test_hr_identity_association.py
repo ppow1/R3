@@ -1,4 +1,19 @@
-"""Exact-scope, revisioned, idempotent HR identity association tests."""
+# R3 CONTROLLED SOURCE
+# File: tests/test_hr_identity_association.py
+# Component: R3-HR-IDENTITY-CROSSWALK-REGRESSION
+# File Revision: 1.1.0
+# Created: 2026-11-06 UTC (exact time not independently established)
+# Created By: Grace Autonomy engineering
+# Purpose: Verify exact read-only identity resolution from HR without a local HR writer.
+# Execution Model: unittest with an isolated fake HRStore.
+# Observability: Resolution outcome and fail-closed ambiguity checks.
+# Dependencies: runtime.hr_identity_association.
+# Authority: HR owns associations; R3 only reads and consumes them.
+# Changed: 2026-11-06T23:58:00Z | GRACE-AUTHORITY-ARCH-002 | Remove tests for resident-facing association operation and assert resolver-only boundary.
+# Supersedes: Previous tests for the R3-local HR association writer.
+# Contracts: docs/architecture/RESIDENT_AUTHORITY_AND_CAPABILITIES.md.
+# Tests: This module.
+# History/Predecessor: Current branch predecessor `cb162499a5ae94b801cbdbf9e5aa2dcd4c75ebaf`.
 from __future__ import annotations
 
 import importlib
@@ -6,9 +21,8 @@ import sys
 import tempfile
 import types
 import unittest
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from runtime.capabilities import CapabilityDenied
@@ -23,7 +37,7 @@ class FakeField:
 @dataclass
 class FakeRecord:
     resident_id: str
-    extensions: dict = field(default_factory=dict)
+    extensions: dict
 
 
 class FakeHRStore:
@@ -41,105 +55,52 @@ class FakeHRStore:
     def get(self, resident_id):
         return self.rows.get(resident_id)
 
-    def put(self, record, *, expected_revision=None):
-        current = self.rows[record.resident_id]
-        if current[1] != expected_revision:
-            raise ValueError("revision conflict")
-        revision = current[1] + 1
-        self.rows[record.resident_id] = (record, revision)
-        return revision
-
-
-class FakeGateway:
-    def __init__(self):
-        self.capabilities = {}
-
-    def register(self, capability):
-        self.capabilities[capability.name] = capability
-
 
 class HRIdentityAssociationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        records = types.ModuleType("runtime.hr_records")
-        records.HRField = FakeField
         store = types.ModuleType("runtime.hr_store")
         store.HRStore = FakeHRStore
-        governed = types.ModuleType("runtime.governed_tools")
-
-        @dataclass
-        class GovernedCapability:
-            name: str
-            resource_id: str
-            action: str
-            operation: str
-            description: str
-            parameters: dict
-            executor: object
-
-        governed.GovernedCapability = GovernedCapability
-        with patch.dict(sys.modules, {
-                "runtime.hr_records": records,
-                "runtime.hr_store": store,
-                "runtime.governed_tools": governed}):
+        with patch.dict(sys.modules, {"runtime.hr_store": store}):
             cls.module = importlib.import_module("runtime.hr_identity_association")
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        database = Path(self.temp.name) / "hr.sqlite"
-        database.touch()
-        FakeHRStore.rows = {"r3:grace": (FakeRecord("r3:grace"), 1)}
-        self.gateway = FakeGateway()
-        self.database = database
-        self.module.register_hr_identity_association(self.gateway, str(database))
-        self.capability = self.gateway.capabilities["hr.associate_principal"]
-        self.r3 = "resident:Grace"
-        self.authority = "resident:grace"
-        self.scope = self.module.association_scope("r3:grace", self.r3, self.authority)
-        self.context = SimpleNamespace(principal=self.r3, resource_id="r3:hr",
-            action="hr.associate_principal", operation="write", scope_ref=self.scope)
-        self.params = {"scope_ref": self.scope, "resident_id": "r3:grace",
-            "r3_principal": self.r3, "authority_principal": self.authority,
-            "expected_revision": 1}
+        self.database = Path(self.temp.name) / "hr.sqlite"
+        self.database.touch()
+        self.r3_principal = "resident:Grace"
+        self.authority_principal = "resident:grace"
+        FakeHRStore.rows = {"r3:grace": (FakeRecord("r3:grace", {
+            "r3_principal": FakeField(self.r3_principal),
+            "authority_principal": FakeField(self.authority_principal)}), 1)}
 
-    def test_associates_both_identities_once_and_preserves_revisioned_hr_record(self):
-        result = self.capability.executor(self.params, self.context)
-        self.assertEqual(result["revision"], 2)
-        self.assertTrue(result["persisted"])
-        record, revision = FakeHRStore.rows["r3:grace"]
-        self.assertEqual(revision, 2)
-        self.assertEqual(record.extensions["r3_principal"].value, self.r3)
-        self.assertEqual(record.extensions["authority_principal"].value, self.authority)
-        self.assertEqual(self.module.resolve_authority_principal(self.database, self.r3),
-                         self.authority)
-
-    def test_same_association_is_idempotent_and_does_not_increment_revision(self):
-        first = self.capability.executor(self.params, self.context)
-        replay = self.capability.executor(self.params, self.context)
-        self.assertFalse(first["idempotent_replay"])
-        self.assertTrue(replay["idempotent_replay"])
-        self.assertEqual(replay["revision"], 2)
-        self.assertEqual(FakeHRStore.rows["r3:grace"][1], 2)
-
-    def test_wrong_scope_or_principal_is_rejected(self):
-        wrong_scope = dict(self.params, scope_ref="r3:hr:identity-association/r3:grace")
+    def test_resolves_only_exact_explicit_hr_association(self):
+        self.assertEqual(self.module.resolve_authority_principal(
+            self.database, self.r3_principal), self.authority_principal)
         with self.assertRaises(CapabilityDenied):
-            self.capability.executor(wrong_scope, self.context)
-        wrong_context = SimpleNamespace(**{**vars(self.context), "principal": "resident:other"})
-        with self.assertRaises(CapabilityDenied):
-            self.capability.executor(self.params, wrong_context)
-        self.assertEqual(FakeHRStore.rows["r3:grace"][1], 1)
+            self.module.resolve_authority_principal(self.database, "resident:grace")
 
-    def test_identity_resolution_requires_one_explicit_mapping(self):
+    def test_missing_mapping_fails_closed(self):
+        FakeHRStore.rows = {"r3:grace": (FakeRecord("r3:grace", {}), 1)}
         with self.assertRaises(CapabilityDenied):
-            self.module.resolve_authority_principal(self.database, self.r3)
-        self.capability.executor(self.params, self.context)
-        FakeHRStore.rows["r3:other"] = (FakeRecord("r3:other", extensions={
-            "r3_principal": FakeField(self.r3),
+            self.module.resolve_authority_principal(self.database, self.r3_principal)
+
+    def test_duplicate_or_malformed_mapping_fails_closed(self):
+        FakeHRStore.rows["r3:other"] = (FakeRecord("r3:other", {
+            "r3_principal": FakeField(self.r3_principal),
             "authority_principal": FakeField("resident:other")}), 1)
         with self.assertRaises(CapabilityDenied):
-            self.module.resolve_authority_principal(self.database, self.r3)
+            self.module.resolve_authority_principal(self.database, self.r3_principal)
+
+        FakeHRStore.rows = {"r3:grace": (FakeRecord("r3:grace", {
+            "r3_principal": FakeField(self.r3_principal),
+            "authority_principal": FakeField("not-a-resident")}), 1)}
+        with self.assertRaises(CapabilityDenied):
+            self.module.resolve_authority_principal(self.database, self.r3_principal)
+
+    def test_r3_crosswalk_module_has_no_hr_mutation_operation(self):
+        self.assertFalse(hasattr(self.module, "register_hr_identity_association"))
 
 
 if __name__ == "__main__":

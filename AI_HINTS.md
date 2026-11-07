@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.0.8
+File Revision: 1.0.9
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -12,6 +12,7 @@ Dependencies: hints/README.md
 Authority: R3 engineering navigation, subordinate to approved charter
 Changed: 2026-11-04 UTC | R3-GRANT-RUNBOOK-MIGRATION | ChatGPT GPT-6 | Direct all new grant/delegation runbooks to R3
 Changed: 2026-11-06T23:06:45Z | GRACE-AUTHORITY-ARCH-001 | Codex GPT-6 | Index the resident authority invariant and current R3 architecture contract.
+Changed: 2026-11-06T23:58:00Z | GRACE-AUTHORITY-ARCH-002 | Codex GPT-6 | State that R3 consumes the HR identity mapping read-only and does not create a second HR writer.
 Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Index resident avatar implementation notes
 Changed: 2026-10-31 UTC | R3-COMMS-001 | ChatGPT GPT-6 | Index mandatory Comms incident capture
 Supersedes: None
@@ -55,7 +56,7 @@ When asked to add material to AI_HINTS, update a focused `hints/` document and a
 
 ## Current resident-authority correction
 
-New software must consume the existing institutional authority decision. The R3 proposal adapter uses HR's exact principal crosswalk and the existing Riverview proposal registry's authorization decision; it does not require a duplicate proposal-specific R3 grant. R3-owned capabilities continue using R3 authority. HR capability assignments and Ingrid security classifications are not currently present in the R3 HR identity contract; do not invent a local substitute. See [the resident authority and capabilities contract](docs/architecture/RESIDENT_AUTHORITY_AND_CAPABILITIES.md).
+New software must consume the existing institutional authority decision. The R3 proposal adapter uses HR's exact principal crosswalk and the existing Riverview proposal registry's authorization decision; it does not require a duplicate proposal-specific R3 grant. R3 reads HR identity associations but does not expose a parallel resident-facing HR identity writer. R3-owned capabilities continue using R3 authority. HR capability assignments and Ingrid security classifications are not currently present in the R3 HR identity contract; do not invent a local substitute. See [the resident authority and capabilities contract](docs/architecture/RESIDENT_AUTHORITY_AND_CAPABILITIES.md).
 
 ---
 

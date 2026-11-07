@@ -142,7 +142,7 @@ class GovernedToolGateway:
             server = (target / "runtime" / "tool_server.py").read_text()
             self.assertIn("register_grace_operational_tools(gateway, evidence_journal=evidence)", server)
             self.assertIn("register_hr_governed_tools(", server)
-            self.assertIn("register_hr_identity_association(gateway, args.hr_database)", server)
+            self.assertNotIn("register_hr_identity_association", server)
             self.assertIn(REGISTER_OVERLAY_EXPECTATION, server)
             self.assertIn("register_internal_proposal_tools(", server)
             self.assertIn("hr_database=args.hr_database", server)
@@ -152,6 +152,7 @@ class GovernedToolGateway:
             self.assertIn("--institutional-proposal-credential-file", server)
             self.assertEqual(manifest["added_capabilities"],
                              ["r3.proposal.submit", "r3.proposal.status"])
+            self.assertNotIn("added_hr_operation", manifest)
             self.assertFalse(manifest["credential_values_included"])
             compile(server, str(target / "runtime" / "tool_server.py"), "exec")
             compiled = (target / "runtime" / "governed_tools.py").read_text()

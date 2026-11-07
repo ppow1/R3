@@ -11,6 +11,7 @@ Observability: Source revisions, authority status, tests, and live outcomes.
 Dependencies: R3 broker and institutional proposal registry.
 Authority: Steward-directed operational record; no grants or approvals created here.
 Changed: 2026-11-06T23:06:45Z | GRACE-AUTHORITY-ARCH-001 | Codex GPT-6 | Supersede the duplicate R3 proposal grant assumption.
+Changed: 2026-11-06T23:58:00Z | GRACE-AUTHORITY-ARCH-002 | Codex GPT-6 | Correct the identity association writer boundary and record current read-only denial evidence.
 Supersedes: None; adds a correction to the preceding operational entry.
 Contracts: docs/architecture/RESIDENT_AUTHORITY_AND_CAPABILITIES.md.
 Tests: Documentation review.
@@ -27,3 +28,5 @@ History/Predecessor: Git blob c985198f34d8dd3be942befb9cce369409d66a97 at cb1624
 **Current activation state:** Riverview proposal endpoint active; native broker with expiry safeguards staged but not activated; identity association and production grants not verified active; live model-driven Grace assignment not run.
 
 The additive staged broker exposes `hr.associate_principal` with a scope bound to one HR record and both exact identities. Proposal submission and readback resolve the institutional principal from the confidential HR crosswalk; there is no alias or case-folding fallback. Prior isolated composed-broker evidence used temporary databases and test-only grants; it is not a live model run and did not change production identity, grants, or resident credentials. The current production identity association and institutional policy decision remain unverified.
+
+**Superseding correction (2026-11-06):** R/3 no longer stages a resident-facing `hr.associate_principal` writer that would require a separate R/3 grant. HR owns identity writes; R/3 consumes only the exact confidential crosswalk. A live HR read found `r3:grace` at revision 1 with no association. Read-only calls to Riverview's proposal status route using both available resident-token sources returned HTTP 403 `resident_proposal_not_authorized`. No identity, credential, grant, proposal, or website record was changed.

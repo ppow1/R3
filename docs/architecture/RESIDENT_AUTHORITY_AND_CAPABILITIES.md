@@ -41,7 +41,7 @@ The accessible Riverview legacy implementation (`Riverview-Comms5-Operations`, s
 ## Grace internal proposal path
 
 1. R3 authenticates the caller's existing resident credential.
-2. The broker resolves the caller's institutional principal through the exact confidential HR crosswalk.
+2. The broker reads the caller's institutional principal through the exact confidential HR crosswalk. HR owns association writes; R3 does not expose a parallel resident-facing identity-mutation operation or require a new R3 grant for HR-owned maintenance.
 3. `r3.proposal.submit` or `r3.proposal.status` invokes the existing `/api/v1/internal/resident-proposals` service with the mapped institutional identity and correlation.
 4. The institutional registry makes the action/scope authorization decision and owns proposal persistence/readback. R3 records the named authority source and operation outcome; it does not require a duplicate R3 proposal grant.
 5. A registry 401/403 remains an authorization denial. Registry outage, conflict, or uncertain write remains a backend failure requiring reconciliation; it is never reported as success.

@@ -10,6 +10,7 @@
 # Dependencies: Immutable HR broker release; R3 proposal adapter and HR identity contract.
 # Authority: Institutional registry owns proposal authorization; deployment requires existing release policy.
 # Changed: 2026-11-06T23:06:45Z | GRACE-AUTHORITY-ARCH-001 | Codex GPT-6 | Patch staged broker to consume the named institutional authority decision without a duplicate local grant.
+# Changed: 2026-11-06T23:58:00Z | GRACE-AUTHORITY-ARCH-002 | Codex GPT-6 | Keep HR identity writes on the HR-owned path; compose a read-only HR crosswalk resolver only.
 # Supersedes: Prior overlay that required exact R3 grants for institutional proposal calls.
 # Contracts: docs/architecture/RESIDENT_AUTHORITY_AND_CAPABILITIES.md; docs/r3-native-tool-contract.md.
 # Tests: tests/test_native_broker_composer.py; actual-base isolated composition and module compilation.
@@ -49,8 +50,6 @@ _ARGS_OVERLAY = '''    parser.add_argument("--institutional-proposal-url")
     parser.add_argument("--institutional-proposal-credential-file", type=Path)
 '''
 _REGISTER_OVERLAY = '''
-        from runtime.hr_identity_association import register_hr_identity_association
-        register_hr_identity_association(gateway, args.hr_database)
         if (args.institutional_proposal_url is None) != (args.institutional_proposal_credential_file is None):
             parser.error("internal proposal integration requires both endpoint and credential file")
         if args.institutional_proposal_url is not None:
@@ -315,7 +314,6 @@ def compose(base_release: Path, destination: Path, *, expected_sha256: str = BAS
         "base_governed_tools_sha256": expected_governed_sha256,
         "staged_tool_server_sha256": _sha256(staged_server),
         "added_capabilities": ["r3.proposal.submit", "r3.proposal.status"],
-        "added_hr_operation": "hr.associate_principal",
         "proposal_authority_source": "riverview.institutional-proposal-registry",
         "proposal_specific_r3_grants_required": False,
         "preserved_registrations": ["register_grace_operational_tools", "register_hr_governed_tools"],
