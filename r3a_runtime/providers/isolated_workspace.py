@@ -9,7 +9,10 @@ from typing import Any
 
 class IsolatedWorkspaceProvider:
     def __init__(self, configuration: dict[str, Any]):
-        self.root = Path(configuration["workspace_root"]).resolve(strict=True)
+        configured_root = os.path.expandvars(os.path.expanduser(configuration["workspace_root"]))
+        if configured_root == configuration["workspace_root"] and "${" in configured_root:
+            raise ValueError("workspace_root environment reference is not configured")
+        self.root = Path(configured_root).resolve(strict=True)
 
     def invoke(self, arguments: dict[str, Any], *, context: dict[str, Any]) -> dict[str, Any]:
         relative = arguments["path"]
