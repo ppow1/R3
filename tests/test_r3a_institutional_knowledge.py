@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_institutional_knowledge.py
 Component: R3A-KNOWLEDGE-RETRIEVAL-TESTS
-File Revision: 1.1.0
+File Revision: 1.2.0
 Created: Unknown (legacy)
 Created By: Unknown (legacy)
 Purpose: Verify registered institutional knowledge retrieval, authorization, freshness, and provenance.
@@ -10,11 +10,11 @@ Execution Model: unittest; local deterministic provider and CME test doubles.
 Observability: Test names and assertion failures.
 Dependencies: R3A capability contracts, CME, knowledge provider, configured source files.
 Authority: AP1 / R3A-019; read-only capability regression tests.
-Changed: 2026-11-07T22:00:34Z | AP1-K2 | Codex GPT-6 | Cover Markdown source citations and multi-source institutional retrieval.
+Changed: 2026-11-07T22:08:20Z | AP1-K2 | Codex GPT-6 | Verify cross-document charter/roadmap retrieval and engineering guidance sources.
 Supersedes: None.
 Contracts: institution.knowledge.read@1.1.0; R3A capability-operation v1.
 Tests: This module; tests.test_r3a_capability_contracts; tests.test_r3a_ap1.
-History/Predecessor: Git blob cac6af338b7aff900bf47a64cadd685ea762eb60 at commit 4fe86ba4158e0f1f4b134114af276c942456c77c.
+History/Predecessor: Git blob 6f8f735e7983db7a0959f4cad08b9970730e0de0 at commit 0be4c92986bb2db54b07840d80742a63e84a207a.
 """
 from __future__ import annotations
 
@@ -218,6 +218,9 @@ class InstitutionalKnowledgeProviderTests(unittest.TestCase):
         provider = create_provider(config)
         charter_result = provider.invoke({"query": "Grace Director of Operations"}, context={})
         roadmap_result = provider.invoke({"query": "AP1 knowledge grounding retrieval"}, context={})
+        combined_result = provider.invoke(
+            {"query": "Who owns personnel records, and what does AP1 require for knowledge grounding?"},
+            context={})
         self.assertIn("knowledge.r3.charter.revision-2",
                       {item["source_id"] for item in charter_result.output["results"]})
         self.assertIn("knowledge.r3a.master-roadmap.baseline-1",
@@ -227,12 +230,35 @@ class InstitutionalKnowledgeProviderTests(unittest.TestCase):
         self.assertIn("AP1 — Grace autonomy and institutional continuity", roadmap_fact["content"])
         self.assertIn("table-row", roadmap_fact["source_path"])
         self.assertNotIn("AP0 — Institutional foundation", roadmap_fact["content"])
+        self.assertTrue({"knowledge.r3.charter.revision-2",
+                         "knowledge.r3a.master-roadmap.baseline-1"}.issubset(
+                             {item["source_id"] for item in combined_result.output["results"]}))
         for result in (charter_result, roadmap_result):
             fact = result.output["results"][0]
             self.assertRegex(fact["source_path"], r"markdown\..+@L\d+-L\d+$")
             self.assertEqual(fact["document_sha256"], fact["document_revision"])
             self.assertEqual(fact["excerpt_sha256"], fact["sha256"])
             self.assertTrue(result.evidence)
+
+    def test_real_engineering_workflow_and_verification_sources_are_retrievable(self):
+        execution = ROOT / "hints/development-execution.md"
+        acceptance = ROOT / "docs/architecture/R3A_BOUNDED_TESTING_AND_ACCEPTANCE_POLICY.md"
+        config = {"sources": [
+            {"source_id": "knowledge.r3.development-execution", "path": str(execution),
+             "freshness_max_age_seconds": 86400},
+            {"source_id": "knowledge.r3a.testing-acceptance-policy", "path": str(acceptance),
+             "freshness_max_age_seconds": 86400},
+        ], "max_results": 10, "max_document_bytes": 1024 * 1024}
+        provider = create_provider(config)
+        workflow = provider.invoke(
+            {"query": "inspect local and already-retrieved evidence before executing commands"},
+            context={})
+        verification = provider.invoke(
+            {"query": "risk-based bounded validation proportional to changed behavior"}, context={})
+        self.assertTrue(any(item["source_id"] == "knowledge.r3.development-execution"
+                            for item in workflow.output["results"]))
+        self.assertTrue(any(item["source_id"] == "knowledge.r3a.testing-acceptance-policy"
+                            for item in verification.output["results"]))
 
 
 if __name__ == "__main__":

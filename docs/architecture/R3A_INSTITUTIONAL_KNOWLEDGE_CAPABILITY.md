@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_INSTITUTIONAL_KNOWLEDGE_CAPABILITY.md
 Component: R3A-INSTITUTIONAL-KNOWLEDGE
-File Revision: 1.1.0
+File Revision: 1.2.0
 Created: Unknown (legacy)
 Created By: Unknown (legacy)
 Purpose: Describe the authorized institutional knowledge provider, sources, evidence, and operating boundaries.
@@ -11,10 +11,11 @@ Observability: Registry operation/provider revision, per-source availability/fre
 Dependencies: R3A capability-operation v1; CME activity-scoped grants; externally configured local source files.
 Authority: AP1 / R3A-019; Grace owns reasoning and decisions, CME owns authorization and dispatch.
 Changed: 2026-11-07T22:00:34Z | AP1-K2 | Codex GPT-6 | Document source inventory, Markdown citations, freshness, and current managed-config boundary.
+Changed: 2026-11-07T22:08:20Z | AP1-K2 | Codex GPT-6 | Classify engineering guidance and existing directory/runbook authorities.
 Supersedes: None.
 Contracts: institution.knowledge.read@1.1.0; r3a.capability-operation.v1.
 Tests: tests/test_r3a_institutional_knowledge.py; tests.test_r3a_capability_contracts; tests.test_r3a_ap1.
-History/Predecessor: Git blob 0e26c2e996f70860804ae1e36fabd31ed0983bfb at commit 4fe86ba4158e0f1f4b134114af276c942456c77c.
+History/Predecessor: Git blob fd57ca51b98f1ef8135bcc70a431ca5fb4d49772 at commit 0be4c92986bb2db54b07840d80742a63e84a207a.
 -->
 # R3A institutional knowledge retrieval capability
 
@@ -55,10 +56,20 @@ The inspected repository contains the Steward-approved R3 Charter Revision 2
 at `docs/PROJECT_CHARTER_REVISION_2_REVIEW.md`, the Steward-approved R3A
 Master Roadmap Baseline 1.0 at
 `docs/architecture/R3A_MASTER_ROADMAP_AP0_AP6.md`, and controlled R3A
-architecture, capability, lifecycle, and verification documents. The R3A
+architecture, capability, lifecycle, state-machine, and verification
+documents. Steward-directed R3 engineering guidance is available in
+`hints/development-governance.md`, `hints/development-execution.md`,
+`hints/development-bootstrap.md`, `hints/engineering.md`, and
+`hints/file-provenance.md`. The R3A
 architecture charter supplements rather than supersedes the institutional
 charter. Historical project notes, punch lists, generic deployment runbooks,
 and unverified personnel or resident records are not presumed authoritative.
+The AP0-M1 plan is planning-only, and no dedicated R3A operational runbook was
+found. The Steward-authorized command-grant runbook contains an imported
+historical commissioning appendix, so it is classified as a separate security
+authority source and is not in the proposed general Grace corpus. Current
+office/occupant data has an existing `institutional.directory.discover`
+adapter and is not copied into a static document index.
 The charter explicitly keeps Evelyn's private continuity/communications out
 of general operational search and requires separate protected boundaries for
 Gray Man; neither is part of the proposed general Grace corpus.
@@ -67,8 +78,9 @@ The managed AP1-K1 external configuration inspected for this work still
 contains the process lifecycle JSON source only and remains on operation
 revision `1.0.1`. The K2 multi-document
 configuration was exercised against the actual checked-in charter, roadmap,
-capability contract, lifecycle specification, verification policy, and process
-state machine, but has not been installed into the shared runtime. Runtime
+capability contract, lifecycle specification, verification policy, engineering
+guidance, and process state machine, but has not been installed into the shared
+runtime. Runtime
 configuration/restart and a Grace 80B objective using multiple institutional
 sources are pending a coordinator-scheduled shared-runtime window.
 
