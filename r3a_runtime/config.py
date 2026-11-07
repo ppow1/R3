@@ -21,6 +21,7 @@ Changed: 2026-11-07 | R3A-PLUG-001 | Codex GPT-6 | Load versioned capability plu
 Changed: 2026-11-07 | R3A-PLUG-002 | Codex GPT-6 | Validate plug-in configuration against each manifest's portable schema, without capability-specific host validation.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Add externally configured v1 escalation policy with per-activity request and completion-token budgets.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Bind configured model roles to task classes and reject cross-class fallback.
+Changed: 2026-11-07 | R3A-AP1-N1 | Codex GPT-6 | Add externally configured versioned service-event notification sources.
 Supersedes: None.
 Contracts: AP0-001/008/009; R3A-019; Issue #46; AP0-M1 D7; r3a_runtime.contracts; hints/file-provenance.md.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py.
@@ -97,6 +98,14 @@ class ReasoningEscalationPolicy:
     allowed_role_ids: tuple[str, ...]
     max_requests_per_activity: int
     max_completion_tokens_per_activity: int
+
+
+@dataclass(frozen=True)
+class NotificationSourceSettings:
+    source_id: str
+    adapter: str
+    enabled: bool
+    event_types: tuple[str, ...]
 
 
 def resolve_model_route(routes: tuple[ModelRoute, ...], default_route: str,
@@ -261,6 +270,7 @@ class Settings:
     authorization_provider: AuthorizationProviderSettings
     knowledge_sources: tuple[Path, ...]
     capability_registry: Any
+    notification_sources: tuple[NotificationSourceSettings, ...]
 
     def model_route(self, route_id: str | None = None) -> ModelRoute:
         return resolve_model_route(self.model_routes, self.default_model_route, route_id)
@@ -299,10 +309,46 @@ def load_settings(path: str | Path) -> Settings:
     if not isinstance(value, dict):
         raise ConfigurationError("bootstrap config must be a JSON object")
     expected_root = {"schema_version", "instance_id", "paths", "postgres", "module", "timing"}
-    extra = value.keys() - expected_root - {"grace", "authorization", "capability_plugins", "capability_operations"}
+    extra = value.keys() - expected_root - {
+        "grace", "authorization", "capability_plugins", "capability_operations", "notification_intake"}
     missing = expected_root - value.keys()
     if missing or extra:
         raise ConfigurationError(f"root keys invalid; missing={sorted(missing)}, unknown={sorted(extra)}")
+    notification_sources = ()
+    if "notification_intake" in value:
+        intake = value["notification_intake"]
+        if not isinstance(intake, dict):
+            raise ConfigurationError("notification_intake must be an object")
+        _keys(intake, {"contract_id", "contract_version", "sources"}, "notification_intake")
+        if (intake["contract_id"] != "r3a.notification-intake"
+                or intake["contract_version"] != "1.0.0"):
+            raise ConfigurationError("unsupported notification intake configuration contract")
+        if not isinstance(intake["sources"], list):
+            raise ConfigurationError("notification_intake.sources must be an array")
+        sources = []
+        source_ids = set()
+        for index, item in enumerate(intake["sources"]):
+            where = f"notification_intake.sources[{index}]"
+            if not isinstance(item, dict):
+                raise ConfigurationError(f"{where} must be an object")
+            _keys(item, {"source_id", "adapter", "enabled", "event_types"}, where)
+            source_id = _text(item["source_id"], f"{where}.source_id")
+            if (len(source_id) > 150 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", source_id)
+                    or source_id in source_ids):
+                raise ConfigurationError(f"{where}.source_id must be unique and contract-safe")
+            source_ids.add(source_id)
+            adapter = _text(item["adapter"], f"{where}.adapter")
+            if adapter != "institution_events.v1":
+                raise ConfigurationError(f"{where}.adapter is unsupported")
+            if not isinstance(item["enabled"], bool):
+                raise ConfigurationError(f"{where}.enabled must be boolean")
+            event_types = item["event_types"]
+            if (not isinstance(event_types, list) or
+                    any(not isinstance(event_type, str) or not event_type.strip() for event_type in event_types)
+                    or len(set(event_types)) != len(event_types)):
+                raise ConfigurationError(f"{where}.event_types must be a unique text array")
+            sources.append(NotificationSourceSettings(source_id, adapter, item["enabled"], tuple(event_types)))
+        notification_sources = tuple(sources)
     if value["schema_version"] != 1:
         raise ConfigurationError("schema_version must equal 1")
     instance_id = _text(value["instance_id"], "instance_id")
@@ -792,6 +838,7 @@ def load_settings(path: str | Path) -> Settings:
         authorization_provider=authorization_provider,
         knowledge_sources=knowledge_sources,
         capability_registry=capability_registry,
+        notification_sources=notification_sources,
     )
 
 
@@ -822,6 +869,11 @@ def sanitized_config(settings: Settings) -> dict[str, Any]:
         "authorization": {"provider_id": settings.authorization_provider.provider_id,
                           "contract_version": settings.authorization_provider.contract_version,
                           "options": _redact_provider_options(settings.authorization_provider.options)},
+        "notification_intake": {"contract_id": "r3a.notification-intake", "contract_version": "1.0.0",
+                                "sources": [{"source_id": source.source_id, "adapter": source.adapter,
+                                             "enabled": source.enabled,
+                                             "event_types": list(source.event_types)}
+                                            for source in settings.notification_sources]},
         "grace": ({"default_route": settings.default_model_route,
                    "routes": [{"route_id": route.route_id, "provider": route.provider,
                                "endpoint": route.endpoint, "model": route.model,
