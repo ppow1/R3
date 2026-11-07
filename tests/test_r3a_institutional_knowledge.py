@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_institutional_knowledge.py
 Component: R3A-KNOWLEDGE-RETRIEVAL-TESTS
-File Revision: 1.2.0
+File Revision: 1.3.0
 Created: Unknown (legacy)
 Created By: Unknown (legacy)
 Purpose: Verify registered institutional knowledge retrieval, authorization, freshness, and provenance.
@@ -10,15 +10,16 @@ Execution Model: unittest; local deterministic provider and CME test doubles.
 Observability: Test names and assertion failures.
 Dependencies: R3A capability contracts, CME, knowledge provider, configured source files.
 Authority: AP1 / R3A-019; read-only capability regression tests.
-Changed: 2026-11-07T22:08:20Z | AP1-K2 | Codex GPT-6 | Verify cross-document charter/roadmap retrieval and engineering guidance sources.
+Changed: 2026-11-07T23:45:06Z | AP1-K2 | Codex GPT-6 | Verify 1.1.0 compatibility, citation and digest integrity, and external configuration reload behavior.
 Supersedes: None.
 Contracts: institution.knowledge.read@1.1.0; R3A capability-operation v1.
 Tests: This module; tests.test_r3a_capability_contracts; tests.test_r3a_ap1.
-History/Predecessor: Git blob 6f8f735e7983db7a0959f4cad08b9970730e0de0 at commit 0be4c92986bb2db54b07840d80742a63e84a207a.
+History/Predecessor: Git blob 91fc5f0f6fd3e14dc802b9be754ca5f903492e68 at commit d0404a5.
 """
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import tempfile
 import unittest
@@ -26,7 +27,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from r3a_runtime.capability_contracts import CapabilityRegistry, operation_from_manifest
+from r3a_runtime.capability_contracts import (CapabilityRegistry, normalize_provider_result,
+                                              operation_from_manifest)
 from r3a_runtime.cme import CME
 from r3a_runtime.acceptance import validate_acceptance
 from r3a_plugins.institutional_knowledge.plugin import create_provider
@@ -41,6 +43,85 @@ class InstitutionalKnowledgeProviderTests(unittest.TestCase):
         return {"sources": [{"source_id": "knowledge.test.policy", "path": str(path),
                              "freshness_max_age_seconds": freshness}],
                 "max_results": 5, "max_document_bytes": 1024 * 1024}
+
+    def test_provider_revision_1_1_remains_compatible_with_operation_contract_v1(self):
+        charter = ROOT / "docs/PROJECT_CHARTER_REVISION_2_REVIEW.md"
+        roadmap = ROOT / "docs/architecture/R3A_MASTER_ROADMAP_AP0_AP6.md"
+        config = {"sources": [
+            {"source_id": "knowledge.r3.charter.revision-2", "path": str(charter),
+             "freshness_max_age_seconds": 86400},
+            {"source_id": "knowledge.r3a.master-roadmap.baseline-1", "path": str(roadmap),
+             "freshness_max_age_seconds": 86400},
+        ], "max_results": 10, "max_document_bytes": 1024 * 1024}
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        registry = CapabilityRegistry()
+        registry.register(operation_from_manifest(manifest), config, legacy_manifest=manifest)
+        registered = registry.resolve("institution.knowledge.read", "1.0.0")
+        descriptor = registered.descriptor
+        self.assertEqual("1.1.0", descriptor["operation_revision"])
+        self.assertEqual("1.1.0", descriptor["provider"]["provider_version"])
+        self.assertEqual("1.0.0", descriptor["contract_version"])
+        self.assertEqual("read", descriptor["effect_class"])
+        provider = registered.load_provider()
+        raw = provider.invoke({"query": "Who owns personnel records, and what does AP1 require for knowledge grounding?"},
+                              context={})
+        output, evidence = normalize_provider_result(raw, descriptor)
+        facts = output["results"]
+        citations = {item["source_id"]: item for item in facts}
+        self.assertTrue({"knowledge.r3.charter.revision-2",
+                         "knowledge.r3a.master-roadmap.baseline-1"}.issubset(citations))
+        self.assertEqual({item["source_id"] for item in facts},
+                         {item["evidence_id"] for item in evidence})
+        for source_id, item in citations.items():
+            source_path = Path(item["uri"].removeprefix("file://"))
+            raw_source = source_path.read_bytes()
+            self.assertEqual(hashlib.sha256(raw_source).hexdigest(), item["document_sha256"])
+            self.assertEqual(item["document_sha256"], item["document_revision"])
+            self.assertEqual(item["document_sha256"], item["source_sha256"])
+            self.assertEqual(item["excerpt_sha256"], item["sha256"])
+            self.assertRegex(item["source_path"], r"markdown\..+@L\d+-L\d+$")
+            self.assertTrue(item["retrieved_at"])
+            self.assertEqual(item["document_sha256"],
+                             next(ev["document_sha256"] for ev in evidence
+                                  if ev["evidence_id"] == source_id))
+            excerpt = item["content"].encode("utf-8")
+            self.assertEqual(hashlib.sha256(excerpt).hexdigest(), item["excerpt_sha256"])
+
+    def test_external_configuration_change_replaces_sources_after_registry_reload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            alpha = root / "alpha.md"
+            beta = root / "beta.md"
+            alpha.write_text("# Alpha policy\n\nAlpha retention is thirty days.\n", encoding="utf-8")
+            beta.write_text("# Beta policy\n\nBeta retention is ninety days.\n", encoding="utf-8")
+            config_path = root / "institutional-knowledge.json"
+
+            def write_configuration(source_id: str, path: Path) -> None:
+                config_path.write_text(json.dumps({"sources": [
+                    {"source_id": source_id, "path": str(path), "freshness_max_age_seconds": 86400}],
+                    "max_results": 10, "max_document_bytes": 1024 * 1024}), encoding="utf-8")
+
+            def reload_registry():
+                manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+                configuration = json.loads(config_path.read_text(encoding="utf-8"))
+                registry = CapabilityRegistry()
+                registry.register(operation_from_manifest(manifest), configuration,
+                                  legacy_manifest=manifest)
+                return registry.resolve("institution.knowledge.read", "1.0.0").load_provider()
+
+            write_configuration("knowledge.test.alpha", alpha)
+            first = reload_registry().invoke({"query": "retention"}, context={})
+            self.assertEqual({"knowledge.test.alpha"},
+                             {source["source_id"] for source in first.output["sources"]})
+            first_revision = first.output["results"][0]["document_revision"]
+            write_configuration("knowledge.test.beta", beta)
+            reloaded = reload_registry().invoke({"query": "retention"}, context={})
+            self.assertEqual({"knowledge.test.beta"},
+                             {source["source_id"] for source in reloaded.output["sources"]})
+            self.assertEqual({"knowledge.test.beta"},
+                             {item["source_id"] for item in reloaded.output["results"]})
+            self.assertNotEqual(first_revision, reloaded.output["results"][0]["document_revision"])
+            self.assertIn("ninety", reloaded.output["results"][0]["content"])
 
     def test_registered_operation_is_the_existing_grace_capability_and_carries_provenance(self):
         with tempfile.TemporaryDirectory() as directory:
