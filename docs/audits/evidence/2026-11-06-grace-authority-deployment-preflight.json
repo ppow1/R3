@@ -1,0 +1,113 @@
+{
+  "audit": "Grace autonomy authority and deployment preflight",
+  "observed_at_utc": "2026-11-07T00:14:00Z",
+  "repository": "ppow1/R3",
+  "branch": "engineering/grace-autonomy-recovery-20261106",
+  "source_baseline": "421f088901083b2facddd71e28461aae5b73c380",
+  "scope": "R/3 Grace proposal capability, HR identity resolution, native broker",
+  "read_only_live_observations": {
+    "native_broker": {
+      "unit": "r3-native-tools.service",
+      "release": "/home/admin1/.local/share/r3/releases/hr-native-010c2d971828",
+      "listener": "127.0.0.1:8765",
+      "http_tools_endpoint": 200,
+      "registered_tool_count": 8,
+      "proposal_tools_registered": false,
+      "existing_hr_directory_invocation": {
+        "credential_source": "existing R/3 Grace resident credential",
+        "tool": "hr.directory",
+        "http": 200,
+        "operation": "read-only"
+      },
+      "registered_tool_names": [
+        "hr.directory",
+        "hr.read",
+        "hr.save",
+        "r3.evidence.record",
+        "r3.host.uptime",
+        "r3.resources.assess_gpu_capacity",
+        "r3.resources.local_snapshot",
+        "r3.status"
+      ],
+      "active_systemd_working_directory": "/home/admin1/.local/share/r3/releases/hr-native-010c2d971828",
+      "active_service_state": "active/running; read-only status check"
+    },
+    "hr_identity": {
+      "resident_record": "r3:grace",
+      "revision": 1,
+      "r3_principal_association_present": false,
+      "institutional_principal_association_present": false
+    },
+    "proposal_authorization": {
+      "endpoint": "http://127.0.0.1:8767/api/v1/internal/resident-proposals",
+      "read_only_route": "GET /proposal:{uuid}",
+      "r3_resident_credential_result": {
+        "http": 403,
+        "error": "resident_proposal_not_authorized",
+        "request_id": "a63d9338f8eb085428aac7dc"
+      },
+      "existing_owner_session_resident_token_result": {
+        "http": 403,
+        "error": "resident_proposal_not_authorized",
+        "request_id": "e017452d160adb98ee64aa32"
+      },
+      "policy_behavior": "The deployed ResidentProposalDraftService delegates to the existing Riverview ExactGrantAuthorizer for proposal.draft.submit and proposal.status.read; the adapter must preserve this denial."
+    },
+    "r3_authority": {
+      "grace_principal": "resident:Grace",
+      "active_relevant_actions_observed": [
+        "hr.directory",
+        "hr.read"
+      ],
+      "proposal_grant_rows_observed": 0
+    },
+    "command_grants": {
+      "handling": "No authority or grant records modified; active command grants were preserved; superseded November 3 requests were not acted on."
+    }
+  },
+  "implementation_correction": {
+    "removed": "R/3-local resident-facing hr.associate_principal writer and its additional exact R/3 grant requirement",
+    "retained": "Read-only exact HR crosswalk resolution; no case folding or inferred alias",
+    "proposal_authority": "Existing Riverview institutional proposal registry; no duplicate R/3 proposal grant",
+    "proposal_approval": "Unchanged; remains Steward-controlled",
+    "hr_authority_boundary": "R3 consumes the exact HR crosswalk read-only; existing HR authenticated write path owns association maintenance."
+  },
+  "staged_candidate": {
+    "path": "/home/admin1/.local/share/r3/releases/grace-proposal-native-authority-b411a2b-r1-20261107",
+    "base_release": "/home/admin1/.local/share/r3/releases/hr-native-010c2d971828",
+    "preserved_registrations": [
+      "register_grace_operational_tools",
+      "register_hr_governed_tools"
+    ],
+    "added_capabilities": [
+      "r3.proposal.submit",
+      "r3.proposal.status"
+    ],
+    "hr_write_capability_added": false,
+    "staged_tool_server_sha256": "a30ced81c4d6f3951d9e6fb5105bc8b3275c90bb1069506696c5713d294d3bc8",
+    "runtime_python_modules_parsed": 30,
+    "credential_values_included": false,
+    "activated": false,
+    "source_commit": "b411a2b"
+  },
+  "tests": {
+    "focused_resolver_composer_proposal_tests": 11,
+    "focused_result": "PASS",
+    "full_repository_suite": 257,
+    "full_suite_result": "PASS; 257 tests in 68.730 seconds",
+    "dependency_target": "/tmp/r3-grace-autonomy-test-deps-20261106",
+    "full_suite_rerun": "PASS"
+  },
+  "not_performed": [
+    "No production HR association was written.",
+    "No credentials or grants were created, extended, or revoked.",
+    "No production broker drop-in or service was changed.",
+    "No model-driven Grace assignment was issued.",
+    "No proposal, work order, or website change was created."
+  ],
+  "acceptance_status": "BLOCKED_ON_HR_CROSSWALK_AND_EXISTING_REGISTRY_AUTHORIZATION",
+  "remaining_authoritative_dependencies": [
+    "The HR-owned authenticated write path must establish the exact resident:Grace to resident:grace association on r3:grace without an R/3-local identity writer.",
+    "The existing Riverview proposal authority must authorize an available canonical resident credential for proposal.draft.submit and proposal.status.read, or provide the existing approved credential/identity binding. Current read-only probes with the available resident tokens returned 403."
+  ]
+}
