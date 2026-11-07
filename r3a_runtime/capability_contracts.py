@@ -233,6 +233,16 @@ def validate_invocation_request(request: Any, descriptor: dict[str, Any]) -> dic
             raise CapabilityContractError(f"caller is outside {field}")
     validate_json(request["input"], descriptor["input_schema"], path="$.input")
     validate_json(request["target"], descriptor["target_scope_schema"], path="$.target")
+    reservation = request.get("budget_reservation")
+    if reservation is not None:
+        validate_json(reservation, schema["$defs"]["request"]["properties"]["budget_reservation"],
+                      path="$.budget_reservation")
+        if reservation["activity_id"] != request["activity_id"]:
+            raise CapabilityContractError("budget reservation activity does not match invocation lineage")
+        if descriptor["effect_class"] != "external_write" or request["work_order"] is not None:
+            raise CapabilityContractError("activity budget reservations apply only to external calls without work orders")
+    elif descriptor["effect_class"] == "external_write" and request["work_order"] is None:
+        raise CapabilityContractError("external invocation without a work order requires a durable budget reservation")
     if descriptor["recovery"]["idempotency_required"] and not request["idempotency_key"]:
         raise CapabilityContractError("operation requires an idempotency key")
     deadline = request["deadline"]

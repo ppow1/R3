@@ -36,6 +36,7 @@ Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Use the validated operati
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Accept only invocation, workspace, or actual authorization-audit references in Grace's execution assessment.
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Expose separate capability presentation metadata and drive durable dependency resumption from the CME scheduler.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Enforce Grace-requested reasoning escalation through existing authorization, readiness, durable checkpoint and per-activity token-budget paths.
+Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Dispatch escalation inference through the unified capability invocation and durable budget-reservation path.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py; tests/test_r3a_telemetry_providers.py; tests/test_r3a_capability_contracts.py; tests/test_r3a_engineering.py.
@@ -52,7 +53,7 @@ import re
 import signal
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -226,6 +227,12 @@ class CME:
                           "evidence_contract": descriptor["evidence"],
                           "provider_availability": discovery["registry_observation"]["provider_availability"]},
                 health=discovery["registry_observation"]["provider_availability"])
+        escalation_policy = self.settings.reasoning_escalation
+        if escalation_policy and escalation_policy.enabled:
+            escalation_operation = self.settings.capability_registry.resolve(
+                escalation_policy.authorization_capability_id)
+            if escalation_operation.descriptor["effect_class"] != "external_write":
+                raise RuntimeError("reasoning escalation must resolve to a registered external_write operation")
         await self.store.register_capability("institution.diagnostics.read", "R3A-CME", "read_only",
                                              metadata={"description": "Read current durable process and database observations"})
         await self.store.register_resource("foundation.observer", self.settings.worker_concurrency,
@@ -547,10 +554,12 @@ class CME:
             module_id = str(payload["module_id"])
             capability_id = str(payload["capability_id"])
             reason = str(payload["reason"])
-            grant_id = await self.store.grant_capability(module_id, capability_id, reason)
+            grant_id = await self.store.grant_capability(
+                module_id, capability_id, reason, payload.get("activity_id"))
             await self.store.requeue_blocked_activities()
             return {"grant_id": str(grant_id), "module_id": module_id,
-                    "capability_id": capability_id, "granted_by": f"uid:{os.getuid()}"}
+                    "capability_id": capability_id, "activity_id": payload.get("activity_id"),
+                    "granted_by": f"uid:{os.getuid()}"}
         if operation == "capability.check":
             module_id, capability_id = str(payload["module_id"]), str(payload["capability_id"])
             try:
@@ -619,7 +628,8 @@ class CME:
                 tuple(payload.get("required_capabilities", ())),
                 tuple(payload.get("required_modalities", ())),
                 payload.get("acceptance_criteria", []), payload.get("engineering_assignment"),
-                payload.get("depends_on_activity_ids"), payload.get("activity_id"))
+                payload.get("depends_on_activity_ids"),
+                payload.get("requested_activity_id", payload.get("activity_id")))
         if operation == "config.reload":
             if any(not task.done() for task in self.active_activities.values()):
                 raise RuntimeError("Config reload waits for in-flight activity to reach a safe boundary")
@@ -770,9 +780,6 @@ class CME:
                 await asyncio.sleep(max(0.05, delay))
 
     async def _observer_context(self, activity: dict[str, Any]) -> dict[str, Any]:
-        for capability_id in self.settings.module_capabilities:
-            await self._authorize_capability(capability_id, activity_id=str(activity["activity_id"]),
-                                              attempt_id=str(activity["attempt_id"]))
         processes = await self.store.rows(
             "SELECT component_id,pid,state,health,heartbeat_at FROM r3a.process_observations "
             "WHERE component_id IN ('ring0','cme') ORDER BY component_id"
@@ -811,9 +818,6 @@ class CME:
                                if engineering_assignment is None else [])
         if engineering_assignment is not None:
             engineering_assignment = validate_engineering_assignment(engineering_assignment)
-        for capability_id in self.settings.module_capabilities:
-            await self._authorize_capability(capability_id, activity_id=str(activity["activity_id"]),
-                                              attempt_id=str(activity["attempt_id"]))
         saved = activity.get("checkpoint") or {}
         route_id = event_input.get("route_id")
         selected_role_id = event_input.get("role_id")
@@ -1010,7 +1014,9 @@ class CME:
                 "authorization": authorization, "observed_at": utcnow().isoformat()}
 
     async def invoke_capability(self, request: dict[str, Any], *,
-                                work_order: EngineeringWorkOrder | None = None) -> dict[str, Any]:
+                                work_order: EngineeringWorkOrder | None = None,
+                                _approved_budget_reservation: dict[str, Any] | None = None,
+                                _provider_context: dict[str, Any] | None = None) -> dict[str, Any]:
         """Single canonical CME dispatcher; read operations may omit Engineering work orders."""
         if request.get("contract_id") != "r3a.capability-invocation.v1":
             raise CapabilityContractError("CME requires r3a.capability-invocation.v1")
@@ -1020,8 +1026,19 @@ class CME:
         checked = validate_invocation_request(request, descriptor)
         order = None
         if work_order is None:
-            if descriptor["effect_class"] != "read" or checked["work_order"] is not None:
+            if checked["work_order"] is not None:
                 raise PermissionError("effectful invocation requires its validated Engineering work order")
+            if descriptor["effect_class"] == "read":
+                if checked.get("budget_reservation") is not None:
+                    raise PermissionError("read invocation cannot reserve an external effect budget")
+            elif descriptor["effect_class"] == "external_write":
+                reservation = checked.get("budget_reservation")
+                if (reservation is None or _approved_budget_reservation != reservation
+                        or reservation["activity_id"] != checked["activity_id"]):
+                    raise PermissionError(
+                        "external invocation without a work order requires CME-approved activity budget reservation")
+            else:
+                raise PermissionError("isolated writes require their validated Engineering work order")
         else:
             if not isinstance(work_order, EngineeringWorkOrder):
                 raise TypeError("work_order must be a validated EngineeringWorkOrder")
@@ -1044,8 +1061,11 @@ class CME:
             if (stored is None or stored.get("state") != "EXECUTING"
                     or stored.get("details", {}).get("work_order") != order):
                 raise PermissionError("invocation requires the matching durable EXECUTING work order")
-        if descriptor["effect_class"] == "external_write":
-            raise PermissionError("this isolated Engineering dispatcher does not execute external_write")
+        if descriptor["effect_class"] == "external_write" and (
+                work_order is not None or checked.get("budget_reservation") is None
+                or _provider_context is None):
+            raise PermissionError(
+                "external_write requires a CME-approved activity budget and internal configured provider context")
         started_at = utcnow().isoformat()
         caller_resident = checked["caller"]["resident_id"] or checked["caller"]["principal_id"]
         authorization = await self._authorize_capability(
@@ -1074,7 +1094,7 @@ class CME:
             return existing["result"]
         if existing["state"] != "STARTED":
             raise RuntimeError(f"invocation requires reconciliation from durable state {existing['state']}")
-        if not descriptor["recovery"]["replay_safe"]:
+        if not existing.get("created", False) and not descriptor["recovery"]["replay_safe"]:
             raise RuntimeError("interrupted invocation is not replay safe; reconciliation is required")
         provider = operation.load_provider()
         try:
@@ -1084,6 +1104,7 @@ class CME:
                 "correlation_id": checked["correlation_id"], "target": checked["target"],
                 "work_order": order, "effect_class": descriptor["effect_class"],
                 "config_revision": self.settings.source_digest,
+                **(_provider_context or {}),
                 "capability_catalog": list(self.settings.capability_registry.discover())})
         except Exception as exc:
             finished = utcnow().isoformat()
@@ -1710,6 +1731,17 @@ class CME:
                               + self.settings.model_route(target_role.route_id).max_tokens
                               > int(policy.get("max_completion_tokens_per_activity", 0))):
                             failure = "activity_escalation_token_budget_exhausted"
+                        operation = None
+                        if failure is None:
+                            try:
+                                operation = self.settings.capability_registry.resolve(
+                                    policy["authorization_capability_id"])
+                            except (KeyError, AttributeError):
+                                failure = "reasoning_escalation_operation_unregistered"
+                            if (operation is not None
+                                    and (operation.descriptor["operation_id"] != policy["authorization_capability_id"]
+                                         or operation.descriptor["effect_class"] != "external_write")):
+                                failure = "reasoning_escalation_operation_contract_mismatch"
                         readiness = await self._model_readiness_observations() if target_role else {}
                         if failure is None:
                             decision = resolve_role(
@@ -1721,43 +1753,93 @@ class CME:
                                                    or activity["activity_id"]), resident_id=self.module_id)
                             if decision.action != "route":
                                 failure = "target_model_role_not_ready"
-                        request_id = str(uuid.uuid4())
+                        ordinal = len(escalation_requests) + 1
+                        request_id = str(uuid.uuid5(uuid.NAMESPACE_URL,
+                                                    f"r3a.reasoning-escalation:{activity['activity_id']}:{ordinal}"))
                         auth_record = None
+                        invocation_result = None
+                        reservation = None
+                        target_route = self.settings.model_route(target_role.route_id) if target_role else None
                         if failure is None:
+                            reservation = {
+                                "contract_id": "r3a.activity-budget-reservation.v1",
+                                "contract_version": "1.0.0", "reservation_id": request_id,
+                                "activity_id": str(activity["activity_id"]),
+                                "resource": "completion_tokens", "units": target_route.max_tokens,
+                                "limit": int(policy["max_completion_tokens_per_activity"]),
+                                "policy_revision": str(policy["config_revision"]),
+                            }
+                            escalation_messages = [{"role": "system", "content":
+                                "You provide bounded advisory reasoning to Grace, Director of Operations. "
+                                "Analyze the stated uncertainty and supplied evidence. Do not claim to execute "
+                                "capabilities or make institutional state changes. Identify remaining uncertainty."}]
+                            escalation_messages.extend(context.get("conversation", []))
+                            escalation_messages.append({"role": "user", "content": json.dumps({
+                                "objective": activity["input"].get("objective"),
+                                "grace_rationale": reason,
+                                "evidence": evidence,
+                                "instruction": "Return analysis for Grace to evaluate in the same activity."},
+                                separators=(",", ":"), ensure_ascii=False)})
+                            invocation = {
+                                "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+                                "invocation_id": request_id,
+                                "operation_id": operation.descriptor["operation_id"],
+                                "operation_contract_version": operation.descriptor["contract_version"],
+                                "caller": {"principal_id": self.module_id, "resident_id": self.module_id,
+                                           "service_id": None},
+                                "target": {"role_id": target_role.role_id},
+                                "input": {"messages": escalation_messages},
+                                "activity_id": str(activity["activity_id"]),
+                                "attempt_id": str(activity["attempt_id"]),
+                                "correlation_id": str(activity["input"].get("correlation_id")
+                                                       or activity["activity_id"]),
+                                "work_order": None, "budget_reservation": reservation,
+                                "evidence_purpose": "Grace-requested reasoning escalation",
+                                "idempotency_key": f"reasoning-escalation:{activity['activity_id']}:{ordinal}",
+                                "deadline": (datetime.now(timezone.utc)
+                                             + timedelta(seconds=target_route.timeout_seconds)).isoformat(),
+                                "config_revision": self.settings.source_digest,
+                            }
                             try:
-                                auth = await self._authorization_decision(
-                                    policy["authorization_capability_id"],
-                                    activity_id=str(activity["activity_id"]),
-                                    attempt_id=str(activity["attempt_id"]), request_id=request_id,
-                                    context={"action": "resident_reasoning_escalation",
-                                             "target_role_id": target_role.role_id,
-                                             "route_id": target_role.route_id,
-                                             "rationale_sha256": hashlib.sha256(str(reason).encode()).hexdigest(),
-                                             "reserved_completion_tokens": self.settings.model_route(
-                                                 target_role.route_id).max_tokens,
-                                             "activity_token_budget": policy[
-                                                 "max_completion_tokens_per_activity"],
-                                             "config_revision": self.settings.source_digest})
-                                auth_record = {"provider_id": auth.provider_id,
-                                               "allowed": auth.allowed,
-                                               "decision_id": auth.decision_id,
-                                               "audit_event_id": auth.audit_event_id,
-                                               "policy_revision": auth.policy_revision,
-                                               "config_revision": auth.config_revision,
-                                               "reason": auth.reason,
-                                               "observed_at": auth.observed_at}
-                                if not auth.allowed:
-                                    failure = "reasoning_escalation_authorization_denied"
-                                elif not auth.audit_event_id or not auth.decision_id:
-                                    failure = "reasoning_escalation_authorization_audit_missing"
+                                invocation_result = await self.invoke_capability(
+                                    invocation, _approved_budget_reservation=reservation,
+                                    _provider_context={"model_role_id": target_role.role_id,
+                                                       "model_route": {"route_id": target_route.route_id,
+                                                                       "provider": target_route.provider,
+                                                                       "endpoint": target_route.endpoint,
+                                                                       "model": target_route.model,
+                                                                       "timeout_seconds": target_route.timeout_seconds,
+                                                                       "max_tokens": target_route.max_tokens}})
+                                auth_record = invocation_result["authorization"]
+                                if invocation_result["outcome"] != "SUCCEEDED":
+                                    failure = f"reasoning_escalation_provider_{invocation_result['outcome'].lower()}"
                             except PermissionError:
                                 failure = "reasoning_escalation_authorization_denied"
+                            except Exception as exc:
+                                failure = f"reasoning_escalation_invocation_failed:{type(exc).__name__}"
+                                existing = None
+                                if hasattr(self.store, "get_capability_invocation"):
+                                    existing = await self.store.get_capability_invocation(
+                                        invocation["idempotency_key"])
+                                if existing is not None:
+                                    invocation_result = existing.get("result") or {
+                                        "invocation_id": request_id, "outcome": "UNKNOWN",
+                                        "durable_state": existing.get("state")}
+                                    if existing.get("state") == "STARTED":
+                                        failure = "reasoning_escalation_outcome_unknown_no_replay"
+                                    elif existing.get("state") == "SUCCEEDED":
+                                        invocation_result = existing["result"]
+                                        failure = None
                         if failure is not None:
+                            charged = reservation["units"] if reservation and invocation_result is not None else 0
                             escalation_requests.append({"request_id": request_id,
                                                         "target_role_id": request.get("target_role_id"),
                                                         "rationale": reason, "authorization": auth_record,
-                                                        "status": "REFUSED",
-                                                        "reason": failure, "charged_completion_tokens": 0,
+                                                        "status": "REFUSED", "reason": failure,
+                                                        "budget_reservation": reservation,
+                                                        "charged_completion_tokens": charged,
+                                                        "invocation_id": invocation_result.get("invocation_id")
+                                                        if invocation_result else None,
                                                         "observed_at": utcnow().isoformat()})
                             conversation.append({"role": "user", "content": json.dumps(
                                 {"reasoning_escalation": "refused", "reason": failure,
@@ -1766,10 +1848,13 @@ class CME:
                             await self.store.record_progress(
                                 activity, {"phase": "resident.reasoning_escalation.refused",
                                            "at": utcnow().isoformat(), "request_id": request_id,
+                                           "invocation_id": invocation_result.get("invocation_id")
+                                           if invocation_result else None,
                                            "reason": failure}, durable_checkpoint())
                             observations = None
                             continue
-                        target_route = self.settings.model_route(target_role.route_id)
+                        auth_record = invocation_result["authorization"]
+                        provider_output = invocation_result["output"]
                         escalation_requests.append({"request_id": request_id,
                                                     "target_role_id": target_role.role_id,
                                                     "previous_role_id": context.get("selected_role_id"),
@@ -1779,32 +1864,32 @@ class CME:
                                                     "model": target_route.model,
                                                     "rationale": reason,
                                                     "authorization": auth_record,
-                                                    "status": "REQUESTED",
+                                                    "status": "COMPLETED",
+                                                    "invocation_id": invocation_result["invocation_id"],
+                                                    "budget_reservation": reservation,
                                                     "reserved_completion_tokens": target_route.max_tokens,
                                                     "charged_completion_tokens": target_route.max_tokens,
+                                                    "actual_usage": provider_output.get("usage", {}),
+                                                    "provider_evidence": invocation_result["evidence"],
                                                     "request_attempt_id": str(activity["attempt_id"]),
                                                     "requested_at": utcnow().isoformat()})
-                        model_route = {"route_id": target_route.route_id, "provider": target_route.provider,
-                                       "model": target_route.model, "endpoint": target_route.endpoint,
-                                       "timeout_seconds": target_route.timeout_seconds,
-                                       "max_tokens": target_route.max_tokens}
-                        context["model_route"] = model_route
-                        context["route_id"] = target_route.route_id
-                        context["selected_role_id"] = target_role.role_id
-                        context["route_decision"] = decision.__dict__
                         conversation.append({"role": "user", "content": json.dumps(
-                            {"reasoning_escalation": "authorized", "request_id": request_id,
+                            {"reasoning_escalation": "completed", "request_id": request_id,
+                             "invocation_id": invocation_result["invocation_id"],
                              "role_id": target_role.role_id, "route_id": target_route.route_id,
-                             "rationale": reason,
-                             "instruction": "Continue the original objective with this authorized stronger reasoning route."},
-                            separators=(",", ":"))})
+                             "rationale": reason, "analysis": provider_output["content"],
+                             "evidence": invocation_result["evidence"],
+                             "instruction": "Evaluate this additional analysis against the supplied evidence and continue the original objective."},
+                            separators=(",", ":"), ensure_ascii=False)})
                         await self.store.record_progress(
-                            activity, {"phase": "resident.reasoning_escalation.authorized",
+                            activity, {"phase": "resident.reasoning_escalation.completed",
                                        "at": utcnow().isoformat(), "request_id": request_id,
+                                       "invocation_id": invocation_result["invocation_id"],
                                        "target_role_id": target_role.role_id,
                                        "route_id": target_route.route_id,
-                                       "authorization_audit_event_id": auth_record["audit_event_id"],
-                                       "reserved_completion_tokens": target_route.max_tokens},
+                                       "authorization_audit_event_id": auth_record.get("audit_event_id"),
+                                       "reserved_completion_tokens": target_route.max_tokens,
+                                       "usage": provider_output.get("usage", {})},
                             durable_checkpoint())
                         observations = None
                         continue

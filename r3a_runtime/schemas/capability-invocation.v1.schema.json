@@ -16,6 +16,7 @@
         "caller": {"$ref": "#/$defs/caller"}, "target": {"type": "object"}, "input": {"type": "object"},
         "activity_id": {"type": "string", "minLength": 1}, "attempt_id": {"type": "string", "minLength": 1}, "correlation_id": {"type": "string", "minLength": 1},
         "work_order": {"type": ["object", "null"], "required": ["work_order_id", "version"], "additionalProperties": false, "properties": {"work_order_id": {"type": "string", "minLength": 1}, "version": {"type": "integer", "minimum": 1}}},
+        "budget_reservation": {"type": ["object", "null"], "required": ["contract_id", "contract_version", "reservation_id", "activity_id", "resource", "units", "limit", "policy_revision"], "additionalProperties": false, "properties": {"contract_id": {"const": "r3a.activity-budget-reservation.v1"}, "contract_version": {"const": "1.0.0"}, "reservation_id": {"type": "string", "minLength": 1}, "activity_id": {"type": "string", "minLength": 1}, "resource": {"type": "string", "minLength": 1}, "units": {"type": "integer", "minimum": 1}, "limit": {"type": "integer", "minimum": 1}, "policy_revision": {"type": "string", "minLength": 1}}},
         "evidence_purpose": {"type": ["string", "null"]}, "idempotency_key": {"type": ["string", "null"]}, "deadline": {"type": ["string", "null"], "format": "date-time"}, "config_revision": {"type": "string", "minLength": 1}
       }
     },

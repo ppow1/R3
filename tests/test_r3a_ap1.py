@@ -28,6 +28,9 @@ Changed: 2026-11-07T03:59:26Z | R3A-019-SUSTAINED-OPERATION | Codex GPT-6 | Veri
 Changed: 2026-11-07T04:41:59Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Assert status uses bounded latest-event evidence and skips event history payloads.
 Changed: 2026-11-07T04:44:58Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Assert indexed queue-state summary is included in status diagnostics.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Verify resident-selected escalation is schema-bounded to offered roles and returned for CME enforcement.
+Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Verify Grace escalation dispatches through canonical CME invocation with durable budget context.
+Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Verify diagnostics context does not pre-authorize unused capabilities.
+Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Cover observer activity context while preserving capability authorization at actual invocation.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
@@ -42,7 +45,7 @@ import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 import hashlib
 
 from r3a_runtime.acceptance import (AcceptanceCriteriaRequired, validate_acceptance,
@@ -204,6 +207,32 @@ class DiagnosticSnapshotPerformanceTests(unittest.TestCase):
 
 
 class ResidentCapabilityReasoningTests(unittest.TestCase):
+    def test_observer_context_does_not_pre_authorize_uninvoked_module_capabilities(self):
+        class ObserverStore:
+            async def rows(self, query, _params=()):
+                if "process_observations" in query:
+                    return []
+                return [{"server_version": "16", "observed_at": datetime.now(timezone.utc),
+                         "in_recovery": False, "database": "isolated-test"}]
+
+        async def exercise():
+            cme = CME.__new__(CME)
+            cme.module_id = "resident.grace"
+            cme.store = ObserverStore()
+            cme.settings = SimpleNamespace(module_capabilities=("reasoning.model.invoke",),
+                                           heartbeat_stale_after_seconds=10,
+                                           source_digest="test-config")
+            cme._authorize_capability = AsyncMock(side_effect=AssertionError(
+                "diagnostics context must not authorize a capability it did not invoke"))
+            context = await cme._observer_context({"activity_type": "grace.objective",
+                                                   "activity_id": "activity-1",
+                                                   "attempt_id": "attempt-1"})
+            return cme, context
+
+        cme, context = asyncio.run(exercise())
+        self.assertEqual(context["postgres"]["database"], "isolated-test")
+        cme._authorize_capability.assert_not_awaited()
+
     def test_capability_schema_uses_exact_manifest_identifiers(self):
         schema = resident_action_schema([
             {"capability_id": "institution.knowledge.read"},
@@ -356,8 +385,12 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
             ModelRole("resident.primary", "primary", ("reason.text", "plan"), ("text",), (),
                       45, "block", 5, 1, readiness),
         )
+        operation = SimpleNamespace(descriptor={"operation_id": "reasoning.model.invoke",
+                                                 "contract_version": "1.0.0",
+                                                 "effect_class": "external_write"})
         settings = SimpleNamespace(model_roles=roles, model_route=lambda route_id: {
             "autonomic": local, "primary": primary}[route_id], source_digest="config-1",
+            capability_registry=SimpleNamespace(resolve=Mock(return_value=operation)),
             module_capabilities=(), lease_seconds=30, restart_initial_seconds=1,
             restart_max_seconds=3)
 
@@ -389,11 +422,15 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
                 "status": "ready", "observed_at": datetime.now(timezone.utc).isoformat(),
                 "provider_id": "models", "evidence_ref": "ready-1", "evidence": {"model_id": "large"},
                 "config_revision": "config-1"}})
-            cme._authorization_decision = AsyncMock(return_value=SimpleNamespace(
-                provider_id="capability_grants", allowed=True,
-                decision_id="decision-1", audit_event_id="audit-1", policy_revision=None,
-                config_revision="config-1", reason="active capability grant",
-                observed_at="2026-11-07T00:00:00Z"))
+            cme.invoke_capability = AsyncMock(return_value={
+                "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+                "invocation_id": "invocation-1", "outcome": "SUCCEEDED",
+                "authorization": {"provider_id": "capability_grants", "allowed": True,
+                                   "decision_id": "decision-1", "audit_event_id": "audit-1",
+                                   "policy_revision": "policy-1", "config_revision": "config-1"},
+                "output": {"content": "The evidence is incomplete; inspect the activity contract.",
+                           "usage": {"completion_tokens": 26}},
+                "evidence": [{"evidence_id": "model-inference:invocation-1"}]})
             escalation = {"action": "escalate_reasoning", "target_role_id": "resident.primary",
                           "rationale": "The current route cannot resolve the uncertainty from the evidence."}
             final = {"action": "final", "decision": {"assessment": "Insufficient evidence remains.",
@@ -422,7 +459,7 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
                 "input": {"objective": "Use stronger reasoning to evaluate the evidence and report limitations.",
                     "correlation_id": "correlation-1", "reasoning_escalation": {
                         "contract_id": "r3a.reasoning-escalation-policy", "contract_version": "1.0.0",
-                        "enabled": True, "authorization_capability_id": "reasoning.escalation.request",
+                        "enabled": True, "authorization_capability_id": "reasoning.model.invoke",
                         "allowed_role_ids": ["resident.primary"], "max_requests_per_activity": 1,
                         "max_completion_tokens_per_activity": 128, "config_revision": "config-1"}},
                 "checkpoint": {}}
@@ -430,17 +467,23 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
             return cme, module_payloads
 
         cme, payloads = asyncio.run(exercise())
-        cme._authorization_decision.assert_awaited_once()
-        self.assertEqual(cme._authorization_decision.await_args.args[0], "reasoning.escalation.request")
+        cme.invoke_capability.assert_awaited_once()
+        invocation = cme.invoke_capability.await_args.args[0]
+        self.assertEqual(invocation["operation_id"], "reasoning.model.invoke")
+        self.assertIsNone(invocation["work_order"])
+        self.assertEqual(invocation["budget_reservation"]["resource"], "completion_tokens")
+        self.assertEqual(cme.invoke_capability.await_args.kwargs["_approved_budget_reservation"],
+                         invocation["budget_reservation"])
         self.assertEqual(payloads[0]["route_id"], "autonomic")
-        self.assertEqual(payloads[1]["route_id"], "primary")
+        self.assertEqual(payloads[1]["route_id"], "autonomic")
+        self.assertIn("The evidence is incomplete", payloads[1]["conversation"][-1]["content"])
         self.assertEqual(cme.store.blocked[1]["reasoning_trace"]["model_turns"][-1]["result_ref"],
                          "large-result")
         checkpoint = next(item[1] for item in cme.store.progress
                           if item[0]["phase"] == "resident.decision.ready")
         request = checkpoint["reasoning_state"]["escalation"]["requests"][0]
-        self.assertEqual(request["status"], "SUCCEEDED")
-        self.assertEqual(request["charged_completion_tokens"], 26)
+        self.assertEqual(request["status"], "COMPLETED")
+        self.assertEqual(request["charged_completion_tokens"], 128)
         self.assertEqual(request["authorization"]["audit_event_id"], "audit-1")
 
     def test_cme_rejects_false_completion_and_resumes_same_activity_for_missing_evidence(self):

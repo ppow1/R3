@@ -32,6 +32,7 @@ Changed: 2026-11-07T13:20:00Z | R3A-AP2-CAPABILITY-INTEGRATION | Codex GPT-6 | S
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Persist typed Engineering assignments in durable Grace inbox intake without relaxing AP1 acceptance criteria.
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Park objective dependencies durably, requeue after prerequisite completion, and expose bounded lineage evidence.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Snapshot the configured escalation policy on each durable objective so continuation uses its original budget and allowed routes.
+Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Persist activity-scoped capability grants and atomically reserve per-activity external invocation budgets.
 Supersedes: None.
 Contracts: AP0-003–010; R3A-019; R3A-011/R3A-012; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1; r3a.engineering-work-order.v1; r3a.capability-invocation.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_engineering.py; tests/test_r3a_capability_integration_demo.py.
@@ -576,36 +577,43 @@ class Store:
                 (capability_id, contract_version, owner, access_mode, health, json.dumps(metadata or {})),
             )
 
-    async def grant_capability(self, module_id: str, capability_id: str, reason: str) -> uuid.UUID:
+    async def grant_capability(self, module_id: str, capability_id: str, reason: str,
+                               activity_id: str | None = None) -> uuid.UUID:
         async with self.pool.connection() as conn, conn.transaction():
             found = await (await conn.execute(
                 "SELECT access_mode FROM r3a.capability_registry WHERE capability_id=%s", (capability_id,)
             )).fetchone()
             if found is None:
                 raise KeyError(f"Capability is not registered: {capability_id}")
-            if found["access_mode"] != "read_only":
-                raise PermissionError("AP0-M1 operator grants are restricted to read-only capabilities")
+            if found["access_mode"] != "read_only" and activity_id is None:
+                raise PermissionError("effectful capability grants must be scoped to one durable activity")
+            scope = {"activity_id": str(uuid.UUID(activity_id))} if activity_id is not None else {}
             active = await (await conn.execute(
                 "SELECT grant_id FROM r3a.capability_grants WHERE module_id=%s AND capability_id=%s "
-                "AND revoked_at IS NULL FOR UPDATE", (module_id, capability_id)
+                "AND scope=%s::jsonb AND revoked_at IS NULL FOR UPDATE",
+                (module_id, capability_id, json.dumps(scope))
             )).fetchone()
             if active:
                 return active["grant_id"]
             grant_id = uuid.uuid4()
             await conn.execute(
-                "INSERT INTO r3a.capability_grants(grant_id,module_id,capability_id,granted_by,reason) VALUES (%s,%s,%s,%s,%s)",
-                (grant_id, module_id, capability_id, f"uid:{os.getuid()}", reason),
+                "INSERT INTO r3a.capability_grants(grant_id,module_id,capability_id,granted_by,reason,scope) "
+                "VALUES (%s,%s,%s,%s,%s,%s)",
+                (grant_id, module_id, capability_id, f"uid:{os.getuid()}", reason, json.dumps(scope)),
             )
             await self._event(conn, "capability.granted", "capability", capability_id,
                               None, None, None, "ACTIVE", reason,
-                              {"module_id": module_id, "grant_id": str(grant_id)})
+                              {"module_id": module_id, "grant_id": str(grant_id), "scope": scope})
             return grant_id
 
-    async def require_capability(self, module_id: str, capability_id: str) -> None:
+    async def require_capability(self, module_id: str, capability_id: str,
+                                 activity_id: str | None = None) -> None:
         async with self.pool.connection() as conn:
             row = await (await conn.execute(
-                "SELECT 1 FROM r3a.capability_grants WHERE module_id=%s AND capability_id=%s AND revoked_at IS NULL LIMIT 1",
-                (module_id, capability_id),
+                "SELECT 1 FROM r3a.capability_grants WHERE module_id=%s AND capability_id=%s "
+                "AND revoked_at IS NULL AND (scope='{}'::jsonb OR "
+                "(scope ? 'activity_id' AND scope->>'activity_id'=%s)) LIMIT 1",
+                (module_id, capability_id, str(activity_id) if activity_id else None),
             )).fetchone()
         if row is None:
             raise PermissionError(f"No active grant for {module_id} to invoke {capability_id}")
@@ -895,7 +903,7 @@ class Store:
 
     async def begin_capability_invocation(self, request: dict[str, Any], request_digest: str,
                                           authorization: dict[str, Any]) -> dict[str, Any]:
-        """Persist authorization and STARTED before effects; conflicting key reuse fails closed."""
+        """Persist authorization and STARTED before effects; reserve bounded activity usage atomically."""
         key = request.get("idempotency_key")
         if not isinstance(key, str) or not key:
             raise ValueError("canonical invocation requires an idempotency key")
@@ -906,7 +914,31 @@ class Store:
             if existing:
                 if existing["request_digest"] != request_digest:
                     raise ValueError("idempotency key already belongs to a different canonical request")
-                return existing
+                return {**existing, "created": False}
+            reservation = request.get("budget_reservation")
+            if reservation is not None:
+                activity_id = uuid.UUID(reservation["activity_id"])
+                activity = await (await conn.execute(
+                    "SELECT state,attempt_id,config_revision FROM r3a.activities "
+                    "WHERE activity_id=%s FOR UPDATE", (activity_id,))).fetchone()
+                if (activity is None or activity["state"] != "RUNNING"
+                        or str(activity["attempt_id"]) != request["attempt_id"]
+                        or str(activity["config_revision"]) != request["config_revision"]
+                        or reservation["activity_id"] != request["activity_id"]):
+                    raise PermissionError("budget reservation is outside the live activity attempt/configuration")
+                prior = await (await conn.execute(
+                    "SELECT COALESCE(sum((request->'budget_reservation'->>'units')::bigint),0) AS units, "
+                    "COALESCE(bool_and(request->'budget_reservation'->>'policy_revision'=%s "
+                    "AND (request->'budget_reservation'->>'limit')::bigint=%s),true) AS compatible "
+                    "FROM r3a.capability_invocations "
+                    "WHERE request->'budget_reservation'->>'activity_id'=%s "
+                    "AND request->'budget_reservation'->>'resource'=%s",
+                    (reservation["policy_revision"], reservation["limit"],
+                     reservation["activity_id"], reservation["resource"]))).fetchone()
+                if not prior["compatible"]:
+                    raise ValueError("activity budget policy revision or limit conflicts with prior reservations")
+                if int(prior["units"]) + reservation["units"] > reservation["limit"]:
+                    raise ValueError("activity budget reservation exceeds its configured limit")
             await conn.execute(
                 "INSERT INTO r3a.capability_invocations(idempotency_key,invocation_id,operation_id,"
                 "request_digest,state,request,authorization_evidence,evidence) VALUES (%s,%s,%s,%s,'STARTED',%s,%s,%s)",
@@ -918,7 +950,8 @@ class Store:
                               {"idempotency_key": key, "operation_id": request["operation_id"],
                                "authorization": authorization}, correlation_id=uuid.UUID(request["correlation_id"]))
             return {"idempotency_key": key, "request_digest": request_digest,
-                    "state": "STARTED", "result": None, "evidence": {"phase": "authorized"}}
+                    "state": "STARTED", "result": None, "evidence": {"phase": "authorized"},
+                    "created": True}
 
     async def finish_capability_invocation(self, idempotency_key: str, request_digest: str,
                                            result: dict[str, Any]) -> None:

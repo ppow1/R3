@@ -1,4 +1,21 @@
-"""End-to-end isolated demonstration of CME dispatch and independent verification."""
+"""
+R3 CONTROLLED SOURCE
+File: tests/test_r3a_capability_integration_demo.py
+Component: R3A-CAPABILITY-INTEGRATION-REGRESSION
+File Revision: 1.0.1
+Created: 2026-11-07 UTC
+Created By: Codex GPT-6
+Purpose: Verify canonical CME invocation, idempotent recovery, and independently gated completion.
+Execution Model: Isolated fixture providers and durable-state test double.
+Observability: Invocation traces, output artifacts, and verifier result assertions.
+Dependencies: r3a_runtime.capability_contracts; r3a_runtime.cme.
+Authority: R3 Alpha AP2 capability integration and escalation continuity.
+Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Distinguish first invocation creation from ambiguous recovery in the non-replayable path.
+Supersedes: None.
+Contracts: r3a.capability-invocation.v1; r3a.engineering-work-order.v1; r3a.verification-result.v1.
+Tests: This test module.
+History/Predecessor: Existing AP2 capability integration regression.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -114,8 +131,9 @@ class DurableFixtureStore:
         if previous:
             if previous["request_digest"] != digest:
                 raise ValueError("idempotency conflict")
-            return copy.deepcopy(previous)
-        value = {"idempotency_key": key, "request_digest": digest, "state": "STARTED", "result": None}
+            return {**copy.deepcopy(previous), "created": False}
+        value = {"idempotency_key": key, "request_digest": digest, "state": "STARTED",
+                 "result": None, "created": True}
         self.invocations[key] = value
         return copy.deepcopy(value)
 

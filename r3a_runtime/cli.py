@@ -17,6 +17,7 @@ Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Allow role- and 
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add provider-readiness reporting through the existing local CME control interface.
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Replace caller-authored readiness reports with provider-triggered checks.
 Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Accept structured objective criteria through normal durable intake.
+Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Support explicit activity-scoped grants and caller-assigned activity IDs for bounded authorization setup.
 Supersedes: None.
 Contracts: AP0-007/008/010/013; R3A-019; AP0-M1 D8/D9; r3a.model-route-decision.v1; r3a.model-readiness.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; no model inference in this slice.
@@ -63,12 +64,13 @@ async def _run(args: argparse.Namespace) -> Any:
         payload = {"module_id": args.module_id, "capability_id": args.capability_id}
     elif args.command == "capability-grant":
         payload = {"module_id": args.module_id, "capability_id": args.capability_id,
-                   "reason": args.reason}
+                   "reason": args.reason, "activity_id": args.activity_id}
     elif args.command == "grace-objective-submit":
         payload = {"objective": args.objective, "event_kind": args.event_kind,
                    "required_capabilities": args.required_capability,
                    "required_modalities": args.required_modality,
-                   "acceptance_criteria": json.loads(args.acceptance_criteria_json)}
+                   "acceptance_criteria": json.loads(args.acceptance_criteria_json),
+                   "requested_activity_id": args.requested_activity_id}
         if args.route_id:
             payload["route_id"] = args.route_id
         if args.role_id:
@@ -100,6 +102,7 @@ def main() -> None:
                            help="Required input modality for role selection; may be repeated")
     objective.add_argument("--acceptance-criteria-json", default="[]",
                            help="Versioned, machine-checkable completion criteria as a JSON array")
+    objective.add_argument("--requested-activity-id", help="Optional caller-generated UUID for pre-scoping an institutional grant")
     objective.add_argument("--idempotency-key", required=True)
     readiness = commands.add_parser("model-readiness-refresh",
                                     help="Ask CME to perform a configured model-provider readiness check")
@@ -116,6 +119,7 @@ def main() -> None:
         cmd.add_argument("--capability-id", required=True)
         if name == "capability-grant":
             cmd.add_argument("--reason", required=True)
+            cmd.add_argument("--activity-id", help="Scope an effectful capability grant to one durable activity")
     for name in ("module-install", "module-activate", "module-stop", "module-replace",
                  "capability-check", "capability-grant", "config-reload"):
         commands.choices[name].add_argument("--idempotency-key")

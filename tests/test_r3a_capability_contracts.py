@@ -196,6 +196,34 @@ class CapabilityContractTests(unittest.TestCase):
         canonical["provider"] = write_op["provider"]
         self.assertEqual("isolated_write", operation_from_manifest(canonical)["effect_class"])
 
+    def test_external_call_without_work_order_requires_versioned_activity_budget(self):
+        descriptor = json.loads(json.dumps(self.descriptor))
+        descriptor["effect_class"] = "external_write"
+        descriptor["recovery"].update({"idempotency_required": True, "replay_safe": False})
+        descriptor["execution"]["retry_disposition"] = "never"
+        request = {"contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+                   "invocation_id": "invocation-1", "operation_id": descriptor["operation_id"],
+                   "operation_contract_version": "1.0.0",
+                   "caller": {"principal_id": "resident.grace", "resident_id": "resident.grace",
+                              "service_id": None},
+                   "target": {}, "input": {},
+                   "activity_id": "activity-1", "attempt_id": "attempt-1",
+                   "correlation_id": "correlation-1", "work_order": None,
+                   "evidence_purpose": "bounded external inference", "idempotency_key": "idempotency-1",
+                   "deadline": None, "config_revision": "config-1"}
+        with self.assertRaisesRegex(CapabilityContractError, "requires a durable budget reservation"):
+            validate_invocation_request(request, descriptor)
+        request["budget_reservation"] = {
+            "contract_id": "r3a.activity-budget-reservation.v1", "contract_version": "1.0.0",
+            "reservation_id": "reservation-1", "activity_id": "activity-1",
+            "resource": "completion_tokens", "units": 64, "limit": 128,
+            "policy_revision": "config-1"}
+        self.assertEqual("activity-1",
+                         validate_invocation_request(request, descriptor)["budget_reservation"]["activity_id"])
+        request["budget_reservation"]["activity_id"] = "another-activity"
+        with self.assertRaisesRegex(CapabilityContractError, "does not match invocation lineage"):
+            validate_invocation_request(request, descriptor)
+
     def test_legacy_manifest_adapter_rejects_missing_or_false_read_only(self):
         legacy = {"contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
                   "capability_id": self.descriptor["operation_id"], "plugin_id": "legacy.telemetry",
