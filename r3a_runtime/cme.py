@@ -997,17 +997,17 @@ class CME:
             raise ValueError("resident capability request contract does not match the registered tool")
         if not isinstance(arguments, dict):
             raise ValueError("resident capability arguments must be an object")
-        if capability_id == "institution.knowledge.read":
-            if set(arguments) != {"query"}:
-                raise ValueError("institution.knowledge.read requires exactly one query argument")
-            query = arguments["query"]
-            if not isinstance(query, str) or not query.strip():
-                raise ValueError("institution.knowledge.read query must be nonempty text")
         registry = getattr(self.settings, "capability_registry", None)
         try:
             registered_operation = registry.resolve(capability_id) if registry is not None else None
         except KeyError:
             registered_operation = None
+        if capability_id == "institution.knowledge.read" and registered_operation is None:
+            if set(arguments) != {"query"}:
+                raise ValueError("institution.knowledge.read requires exactly one query argument")
+            query = arguments["query"]
+            if not isinstance(query, str) or not query.strip():
+                raise ValueError("institution.knowledge.read query must be nonempty text")
         if capability_id != "institution.knowledge.read" and registered_operation is None and arguments:
             raise ValueError(f"{capability_id} accepts no arguments")
         if registered_operation is not None:
@@ -1024,11 +1024,11 @@ class CME:
                      if registered_operation is not None else tool["contract_id"],
                      "effect_class": registered_operation.descriptor["effect_class"]
                      if registered_operation is not None else "read",
-                     "query_sha256": hashlib.sha256(query.encode()).hexdigest()
+                     "query_sha256": hashlib.sha256(arguments.get("query", "").encode()).hexdigest()
                      if capability_id == "institution.knowledge.read" else None})
         evidence = []
         capability_output: Any = None
-        if capability_id == "institution.knowledge.read":
+        if capability_id == "institution.knowledge.read" and registered_operation is None:
             for index, path in enumerate(self.settings.knowledge_sources):
                 evidence.extend(retrieve(path, f"knowledge.{index+1}", query))
             capability_output = evidence
@@ -1208,7 +1208,11 @@ class CME:
         registry = getattr(self.settings, "capability_registry", None)
         if registry is None:
             return tuple(tools)
-        for discovery in registry.discover():
+        discoveries = registry.discover()
+        overridden = {item["descriptor"]["operation_id"] for item in discoveries
+                      if item["descriptor"]["effect_class"] == "read"}
+        tools = [tool for tool in tools if tool["capability_id"] not in overridden]
+        for discovery in discoveries:
             operation = registry.resolve(
                 discovery["descriptor"]["operation_id"], discovery["descriptor"]["contract_version"])
             if operation.descriptor["effect_class"] == "read":

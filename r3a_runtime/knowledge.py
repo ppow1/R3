@@ -65,6 +65,12 @@ def _chunks(text: str) -> list[tuple[str, str]]:
 def retrieve(path: Path, source_id: str, query: str) -> list[dict[str, Any]]:
     """Return all matching source facts in relevance order, preserving precise source lineage."""
     raw = path.read_bytes()
+    return retrieve_bytes(raw, path.name, source_id, query)
+
+
+def retrieve_bytes(raw: bytes, source_name: str, source_id: str,
+                   query: str) -> list[dict[str, Any]]:
+    """Retrieve from one already-read document snapshot."""
     text = raw.decode("utf-8")
     query_terms = set(_WORD.findall(query.casefold()))
     if not query_terms:
@@ -96,7 +102,7 @@ def retrieve(path: Path, source_id: str, query: str) -> list[dict[str, Any]]:
     ranked = [item for item in ranked if item[0] == best_score]
     ranked.sort(key=lambda item: item[1])
     source_hash = hashlib.sha256(raw).hexdigest()
-    return [{"source_id": source_id, "source": path.name, "source_sha256": source_hash,
+    return [{"source_id": source_id, "source": source_name, "source_sha256": source_hash,
              "source_path": source_path, "matched_terms": matched, "content": excerpt,
              "sha256": hashlib.sha256(excerpt.encode("utf-8")).hexdigest()}
             for _, source_path, excerpt, matched in ranked]

@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "plugin_id": "r3a.institutional-knowledge",
+  "plugin_version": "1.0.0",
+  "artifact_ref": "plugin.py",
+  "artifact_sha256": "8bc8665b5bc5454ab24faa63f08dbbc3132ffa8bf3936d7f201753654d6e1485",
+  "configuration_schema": {
+    "schema_id": "r3a.institutional-knowledge.config.v1",
+    "type": "object",
+    "required": [
+      "sources",
+      "max_results",
+      "max_document_bytes"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "sources": {
+        "type": "array"
+      },
+      "max_results": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100
+      },
+      "max_document_bytes": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10485760
+      }
+    }
+  },
+  "provider": {
+    "provider_id": "r3a.institutional-knowledge",
+    "provider_version": "1.0.0",
+    "entrypoint": "r3a_plugins.institutional_knowledge.plugin:create_provider",
+    "artifact_sha256": "8bc8665b5bc5454ab24faa63f08dbbc3132ffa8bf3936d7f201753654d6e1485"
+  },
+  "operation": {
+    "contract_id": "r3a.capability-operation.v1",
+    "contract_version": "1.0.0",
+    "operation_id": "institution.knowledge.read",
+    "operation_revision": "1.0.0",
+    "provider": {
+      "provider_id": "r3a.institutional-knowledge",
+      "provider_version": "1.0.0",
+      "entrypoint": "r3a_plugins.institutional_knowledge.plugin:create_provider",
+      "artifact_sha256": "8bc8665b5bc5454ab24faa63f08dbbc3132ffa8bf3936d7f201753654d6e1485"
+    },
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "source_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "required": [
+        "schema_id",
+        "schema_version",
+        "query",
+        "observed_at",
+        "sources",
+        "results"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "r3a.institutional-knowledge-results.v1"
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "query": {
+          "type": "string"
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "effect_class": "read",
+    "caller_constraints": {
+      "allowed_principals": [],
+      "allowed_residents": [
+        "resident.grace"
+      ],
+      "allowed_services": []
+    },
+    "target_scope_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "required_grants": [
+      "institution.knowledge.read"
+    ],
+    "evidence": {
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "verification_obligations": [
+        "return_only_configured_source_content",
+        "preserve_document_digest_revision_uri_and_retrieval_timestamp",
+        "make_stale_or_unavailable_sources_visible",
+        "do_not_infer_or_invent_uncited_facts"
+      ]
+    },
+    "recovery": {
+      "idempotency_required": false,
+      "idempotency_scope": "invocation",
+      "replay_safe": true,
+      "reconciliation_operation_id": null
+    },
+    "execution": {
+      "timeout_seconds": 10,
+      "retry_disposition": "safe_retry"
+    },
+    "lifecycle": {
+      "desired_state": "enabled"
+    },
+    "resident_tool": {
+      "name": "institution_knowledge_read",
+      "description": "Search configured institutional documents and return bounded facts with source URI, revision digest, timestamps, and freshness."
+    }
+  }
+}
