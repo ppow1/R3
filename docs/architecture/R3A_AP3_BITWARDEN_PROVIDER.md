@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_AP3_BITWARDEN_PROVIDER.md
 Component: R3A-AP3-BITWARDEN-PROVIDER
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-07T21:36:43Z
 Created By: Codex GPT-6
 Purpose: Specify the Bitwarden Secrets Manager provider and its shared AP3 identity boundary.
@@ -14,6 +14,7 @@ Changed: 2026-11-07T21:36:43Z | R3A-AP3-M2-ISSUE-50 | Codex GPT-6 | Record provi
 Changed: 2026-11-07T21:59:02Z | R3A-AP3-M2-CONSUMER | Codex GPT-6 | Document the authorized reasoning-service consumer, lease lifecycle, and disclosure controls.
 Changed: 2026-11-07T22:09:29Z | R3A-AP3-M2-CONSUMER | Codex GPT-6 | Version reason-code observability and describe the provider 1.1 contract.
 Changed: 2026-11-07T23:40:56Z | R3A-AP3-M2-TEST-HANDOFF | Codex GPT-6 | Publish exact provider fields, failure mapping, and safe #49 consumer guidance.
+Changed: 2026-11-07T23:52:00Z | R3A-AP3-M2-INTEGRATION-REVIEW | Codex GPT-6 | Record #49 compatibility review and coordinator integration checklist.
 Supersedes: None.
 Contracts: r3a.secrets.provider.v1; r3a.machine-principal.v1; existing CME authorization/audit contracts.
 Tests: tests/test_r3a_bitwarden_secrets.py; tests/test_r3a_bitwarden_consumer_integration.py; live provider acceptance requires configured real Bitwarden access.
@@ -97,11 +98,16 @@ try:
         assertion_key = lease.reveal()
         verify_assertion_with_key(assertion, assertion_key)
         provenance = {
+            "contract_id": SECRET_PROVIDER_CONTRACT_ID,
+            "contract_version": SECRET_PROVIDER_CONTRACT_VERSION,
             "provider_id": lease.provider_id,
             "provider_version": lease.provider_version,
+            "secret_id": lease.secret_id,
             "remote_revision": lease.remote_revision,
             "fetched_at": lease.fetched_at,
             "machine_principal": {
+                "contract_id": lease.machine_principal.contract_id,
+                "contract_version": lease.machine_principal.contract_version,
                 "issuer": lease.machine_principal.issuer,
                 "principal_id": lease.machine_principal.principal_id,
                 "authenticated_at": lease.machine_principal.authenticated_at,
@@ -113,3 +119,11 @@ finally:
 ```
 
 The adapter should translate `AccessUnavailable.reason_code` into the established unavailable response/audit reason while keeping the HTTP response generic. Preserve distinctions among missing machine credentials, missing CLI, access denial, missing secret reference, and provider failure. Persist only the non-secret provenance fields shown above; never persist the assertion key, CLI output, exception text from unrelated failures, signature, or request secret. CME remains the authority for protected capabilities; the machine-principal assertion must not be substituted for the Steward identity assertion or CME grant decision.
+
+### Coordinator integration checklist
+
+1. **Provider registration:** deploy the versioned `r3a.bitwarden-secrets` provider and manifest together; require provider `1.1.0`, contract `r3a.secrets.provider.v1@1.1.0`, and artifact SHA-256 `464b20a0b5fd3a371bd59627407a7efea4d0cf6f0d745d2ebeb1f25f33ca23d8`.
+2. **External configuration:** provide protected external provider JSON with executable, token environment-variable name, configured machine-principal ID, timeout, and optional CLI config/profile. Supply the token outside source control and point the #49 config at the deployed manifest/config paths. Set its assertion reference `provider_version` to `1.1.0`; the reviewed #49 example currently still says `1.0.0` and will fail provider identity matching.
+3. **Consumer binding:** use `load_configured_provider(manifest_path, configuration_path)` and construct `SecretReference` with provider ID/version, secret ID, and contract ID/version. Map both `SecretProviderError.outcome` and `.reason_code` into structured internal availability status; do not parse messages or persist CLI/exception text. The reviewed #49 implementation currently retains only `outcome` in `AccessUnavailable`, losing the reason-code distinction. Preserve provider and machine-principal contract identifiers/versions in durable non-secret provenance; the reviewed #49 projection currently omits these four contract fields.
+4. **Authorization:** verify allowed origin and trusted ingress assertion before resolving its verification-key reference. Close the lease on success and failure. Keep Steward principal/session authority in #49 and protected capability grants/audit in CME; machine-principal provenance grants neither.
+5. **Live smoke:** only after an authorized machine account, CLI, external config, secret reference, and coordinated service window are available, perform one narrow reference resolution and one authenticated consumer/session check. Record provider/revision, configured machine-principal metadata, correlation ID, and success/failure reason only. Confirm lease closure and ensure no secret value appears in stdout/stderr, logs, events, HTTP bodies, notifications, or model context. Do not restart or activate the shared runtime outside the coordinator's window.
