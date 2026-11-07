@@ -59,8 +59,9 @@ REFERENCE_CONFIG = {
 
 
 class FakeSecretProvider:
-    def __init__(self, *, failure: str | None = None):
+    def __init__(self, *, failure: str | None = None, reason_code: str | None = None):
         self.failure = failure
+        self.reason_code = reason_code
         self.lease: SecretLease | None = None
         self.reference = None
         self.correlation_id = None
@@ -69,7 +70,8 @@ class FakeSecretProvider:
         self.reference = reference
         self.correlation_id = correlation_id
         if self.failure:
-            raise SecretProviderError(self.failure, f"synthetic {self.failure.lower()} provider condition")
+            raise SecretProviderError(self.failure, f"synthetic {self.failure.lower()} provider condition",
+                                      reason_code=self.reason_code)
         self.lease = SecretLease(
             secret_id=reference.secret_id, provider_id=reference.provider_id,
             provider_version=reference.provider_version, remote_revision="synthetic-revision-1",
@@ -213,6 +215,54 @@ class BitwardenConsumerIntegrationTests(unittest.TestCase):
         send.assert_not_called()
         self.assertEqual("FAILED", self.cme.store.invocation["result"]["outcome"])
         self.assertNotIn(TOKEN, json.dumps(self.cme.store.invocation["result"]))
+
+    def test_consumer_preserves_provider_reason_codes_without_secret_material(self):
+        failures = [
+            ("UNAVAILABLE", "credentials_unavailable"),
+            ("UNAVAILABLE", "cli_unavailable"),
+            ("DENIED", "access_denied"),
+            ("NOT_FOUND", "reference_not_found"),
+            ("FAILED", "provider_failure"),
+        ]
+        for outcome, reason_code in failures:
+            with self.subTest(reason_code=reason_code):
+                self.cme.store = MemoryStore()
+                self.secret_provider = FakeSecretProvider(failure=outcome, reason_code=reason_code)
+                with patch("r3a_plugins.reasoning_inference.plugin.load_configured_provider",
+                           return_value=self.secret_provider), \
+                     patch("urllib.request.urlopen") as send:
+                    with self.assertRaisesRegex(RuntimeError,
+                                                rf"provider outcome: {outcome} \({reason_code}\)"):
+                        self.invoke()
+                send.assert_not_called()
+                self.assertNotIn(TOKEN, json.dumps(self.cme.store.invocation["result"]))
+                self.assertIn(reason_code, json.dumps(self.cme.store.invocation["result"]))
+
+    def test_cme_authorization_denial_prevents_secret_resolution_and_transport(self):
+        self.cme._authorize_capability = AsyncMock(side_effect=PermissionError("grant denied"))
+        with patch("r3a_plugins.reasoning_inference.plugin.load_configured_provider",
+                   return_value=self.secret_provider) as load_provider, \
+             patch("urllib.request.urlopen") as send:
+            with self.assertRaisesRegex(PermissionError, "grant denied"):
+                self.invoke()
+        self.cme._authorize_capability.assert_awaited_once()
+        load_provider.assert_not_called()
+        self.assertIsNone(self.secret_provider.reference)
+        self.assertIsNone(self.secret_provider.lease)
+        send.assert_not_called()
+        self.assertIsNone(self.cme.store.invocation)
+
+    def test_invalid_external_provider_configuration_fails_closed_without_model_request(self):
+        with patch("r3a_plugins.reasoning_inference.plugin.load_configured_provider",
+                   side_effect=ValueError("synthetic loader detail")), \
+             patch("urllib.request.urlopen") as send:
+            with self.assertRaisesRegex(RuntimeError, "provider_configuration_invalid") as caught:
+                self.invoke()
+        self.assertNotIn("synthetic loader detail", str(caught.exception))
+        send.assert_not_called()
+        durable = json.dumps(self.cme.store.invocation["result"])
+        self.assertEqual("FAILED", self.cme.store.invocation["result"]["outcome"])
+        self.assertNotIn(TOKEN, durable)
 
     def test_http_failure_body_is_not_persisted_and_lease_closes(self):
         http_error = HTTPError(

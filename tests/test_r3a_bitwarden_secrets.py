@@ -104,6 +104,20 @@ class BitwardenSecretsProviderTests(unittest.TestCase):
         with self.assertRaises(SecretProviderError):
             lease.reveal()
 
+    def test_close_is_idempotent_and_context_exit_cleans_lease_after_exception(self):
+        provider = self.provider(lambda *args, **kwargs: completed(FIXTURE_VALUE_A),
+                                 environment={"FIXTURE_BWS_TOKEN": FIXTURE_TOKEN})
+        lease = provider.resolve(reference(), correlation_id="lease-cleanup")
+        with self.assertRaisesRegex(RuntimeError, "synthetic consumer failure"):
+            with lease:
+                raise RuntimeError("synthetic consumer failure")
+        lease.close()
+        self.assertTrue(lease.closed)
+        self.assertEqual(bytes(len(FIXTURE_VALUE_A)), bytes(lease._value))
+        self.assertNotIn(FIXTURE_VALUE_A, repr(lease))
+        with self.assertRaises(SecretProviderError):
+            lease.reveal()
+
     def test_rotation_is_observed_on_each_resolution_without_cache(self):
         responses = iter([completed(FIXTURE_VALUE_A, "revision-a"), completed(FIXTURE_VALUE_B, "revision-b")])
         calls = []
@@ -200,6 +214,64 @@ class BitwardenSecretsProviderTests(unittest.TestCase):
                 self.assertEqual(expected, caught.exception.outcome)
                 if expected == "UNAVAILABLE":
                     self.assertEqual("request_timeout", caught.exception.reason_code)
+
+    def test_failure_reason_codes_are_finite_and_distinguish_provider_conditions(self):
+        token_env = {"FIXTURE_BWS_TOKEN": FIXTURE_TOKEN}
+
+        def failure(run, *, environment=token_env, executable_lookup=lambda _path: "/usr/bin/bws"):
+            provider = self.provider(run, environment=environment, executable_lookup=executable_lookup)
+            with self.assertRaises(SecretProviderError) as caught:
+                provider.resolve(reference(), correlation_id="reason-code-case")
+            return caught.exception
+
+        cases = [
+            (failure(lambda *_args, **_kwargs: None, environment={}),
+             ("UNAVAILABLE", "credentials_unavailable")),
+            (failure(lambda *_args, **_kwargs: None, executable_lookup=lambda _path: None),
+             ("UNAVAILABLE", "cli_unavailable")),
+            (failure(lambda *_args, **_kwargs: (_ for _ in ()).throw(subprocess.TimeoutExpired("bws", 5))),
+             ("UNAVAILABLE", "request_timeout")),
+            (failure(lambda *_args, **_kwargs: (_ for _ in ()).throw(FileNotFoundError())),
+             ("UNAVAILABLE", "cli_unavailable")),
+            (failure(lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError())),
+             ("FAILED", "provider_start_failed")),
+            (failure(lambda *_args, **_kwargs: subprocess.CompletedProcess(
+                ["bws"], 1, "", "permission denied")), ("DENIED", "access_denied")),
+            (failure(lambda *_args, **_kwargs: subprocess.CompletedProcess(
+                ["bws"], 1, "", "secret does not exist")), ("NOT_FOUND", "reference_not_found")),
+            (failure(lambda *_args, **_kwargs: subprocess.CompletedProcess(
+                ["bws"], 1, "", "synthetic backend failure")), ("FAILED", "provider_failure")),
+            (failure(lambda *_args, **_kwargs: subprocess.CompletedProcess(
+                ["bws"], 0, "{", "")), ("FAILED", "response_invalid")),
+            (failure(lambda *_args, **_kwargs: completed(FIXTURE_VALUE_A, secret_id="wrong-id")),
+             ("FAILED", "response_mismatch")),
+        ]
+        for error, expected in cases:
+            with self.subTest(reason_code=expected[1]):
+                self.assertEqual(expected, (error.outcome, error.reason_code))
+                self.assertRegex(error.reason_code, r"^[a-z][a-z0-9_]*$")
+                self.assertNotIn(FIXTURE_TOKEN, str(error))
+                self.assertNotIn(FIXTURE_VALUE_A, str(error))
+
+        with self.assertRaises(SecretProviderError) as caught:
+            self.provider(lambda *_args, **_kwargs: self.fail("CLI must not run"),
+                          environment=token_env).resolve(
+                              reference(provider_version="9.0.0"), correlation_id="bad-version")
+        invalid_reference_reason = caught.exception.reason_code
+        self.assertEqual("invalid_reference", invalid_reference_reason)
+
+        with self.assertRaises(SecretProviderError) as caught:
+            self.provider(lambda *_args, **_kwargs: self.fail("CLI must not run"),
+                          environment=token_env).resolve(reference(), correlation_id=" ")
+        self.assertEqual("invalid_request", caught.exception.reason_code)
+
+        accepted = {"provider_unavailable", "credentials_unavailable", "cli_unavailable", "request_timeout",
+                    "provider_start_failed", "access_denied", "reference_not_found", "provider_failure",
+                    "invalid_reference", "invalid_request", "response_invalid", "response_mismatch"}
+        self.assertEqual(accepted, {
+            error.reason_code for error, _expected in cases
+        } | {invalid_reference_reason, caught.exception.reason_code,
+             SecretProviderError("UNAVAILABLE", "redacted").reason_code})
 
     def test_reference_and_configuration_versions_are_validated(self):
         provider = self.provider(lambda *args, **kwargs: completed(FIXTURE_VALUE_A),
