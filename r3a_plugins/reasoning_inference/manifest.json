@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "plugin_id": "r3a.reasoning-inference",
-  "plugin_version": "1.0.0",
+  "plugin_version": "1.1.0",
   "artifact_ref": "plugin.py",
-  "artifact_sha256": "0f9e0eb7b2db46a6e389624e18ee9375732da82f0ede526e691dced9ccef1234",
+  "artifact_sha256": "0abfb538f0341ded0784e9914c590f6728c5afa3add6a4f6251465034bccab21",
   "configuration_schema": {
-    "schema_id": "r3a.reasoning-inference.config.v1",
+    "schema_id": "r3a.reasoning-inference.config.v2",
     "type": "object",
     "required": [
       "temperature"
@@ -20,6 +20,24 @@
       "api_key_env": {
         "type": "string",
         "pattern": "[A-Z][A-Z0-9_]*"
+      },
+      "secret_reference": {
+        "type": "object",
+        "required": [
+          "provider_id",
+          "provider_version",
+          "secret_id",
+          "manifest_path",
+          "configuration_path"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "provider_id": {"type": "string", "minLength": 1},
+          "provider_version": {"type": "string", "minLength": 1},
+          "secret_id": {"type": "string", "minLength": 1},
+          "manifest_path": {"type": "string", "minLength": 1},
+          "configuration_path": {"type": "string", "minLength": 1}
+        }
       }
     }
   },
@@ -27,12 +45,12 @@
     "contract_id": "r3a.capability-operation.v1",
     "contract_version": "1.0.0",
     "operation_id": "reasoning.model.invoke",
-    "operation_revision": "1.0.0",
+    "operation_revision": "1.1.0",
     "provider": {
       "provider_id": "r3a.reasoning-inference",
-      "provider_version": "1.0.0",
+      "provider_version": "1.1.0",
       "entrypoint": "r3a_plugins.reasoning_inference.plugin:create_provider",
-      "artifact_sha256": "0f9e0eb7b2db46a6e389624e18ee9375732da82f0ede526e691dced9ccef1234"
+      "artifact_sha256": "0abfb538f0341ded0784e9914c590f6728c5afa3add6a4f6251465034bccab21"
     },
     "input_schema": {
       "type": "object",
@@ -206,6 +224,42 @@
             "observed_at": {
               "type": "string",
               "format": "date-time"
+            },
+            "credential_source": {
+              "type": "object",
+              "required": [
+                "contract_id",
+                "contract_version",
+                "provider_id",
+                "provider_version",
+                "secret_id",
+                "remote_revision",
+                "fetched_at",
+                "machine_principal"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "contract_id": {"type": "string", "const": "r3a.secrets.provider.v1"},
+                "contract_version": {"type": "string", "const": "1.1.0"},
+                "provider_id": {"type": "string"},
+                "provider_version": {"type": "string"},
+                "secret_id": {"type": "string"},
+                "remote_revision": {"type": ["string", "null"]},
+                "fetched_at": {"type": "string", "format": "date-time"},
+                "machine_principal": {
+                  "type": "object",
+                  "required": ["contract_id", "contract_version", "issuer", "principal_id", "authenticated_at", "correlation_id"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "contract_id": {"type": "string", "const": "r3a.machine-principal.v1"},
+                    "contract_version": {"type": "string", "const": "1.0.0"},
+                    "issuer": {"type": "string"},
+                    "principal_id": {"type": "string"},
+                    "authenticated_at": {"type": "string", "format": "date-time"},
+                    "correlation_id": {"type": "string"}
+                  }
+                }
+              }
             }
           }
         }
@@ -234,7 +288,7 @@
   },
   "provider": {
     "provider_id": "r3a.reasoning-inference",
-    "provider_version": "1.0.0",
+    "provider_version": "1.1.0",
     "entrypoint": "r3a_plugins.reasoning_inference.plugin:create_provider",
     "artifact_sha256": "0f9e0eb7b2db46a6e389624e18ee9375732da82f0ede526e691dced9ccef1234"
   }

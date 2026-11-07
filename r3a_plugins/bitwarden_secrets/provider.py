@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_plugins/bitwarden_secrets/provider.py
 Component: R3A-PLUG-BITWARDEN
-File Revision: 1.0.0
+File Revision: 1.1.0
 Created: 2026-11-07T21:36:43Z
 Created By: Codex GPT-6
 Purpose: Resolve versioned secret references through the Bitwarden Secrets Manager CLI.
@@ -11,10 +11,11 @@ Observability: Redacted status, correlation ID, provider identity, and remote re
 Dependencies: r3a_runtime.secrets; externally installed/configured Bitwarden `bws` CLI.
 Authority: AP3-M2 Issue #50; returned values are private adapter data, never CME capabilities or model context.
 Changed: 2026-11-07T21:36:43Z | R3A-AP3-M2-ISSUE-50 | Codex GPT-6 | Implement configurable Bitwarden machine-account secret resolution.
+Changed: 2026-11-07T22:09:29Z | R3A-AP3-M2-CONSUMER | Codex GPT-6 | Return distinct non-secret reason codes for credential, CLI, timeout, and provider failures.
 Supersedes: None.
 Contracts: r3a.secrets.provider.v1; r3a.machine-principal.v1.
 Tests: tests/test_r3a_bitwarden_secrets.py.
-History/Predecessor: New file; initial publication recorded in Git.
+History/Predecessor: Revision 1.0.0 at commit d07bade6dfa6e6ef498f454d82866aa592b899ba, blob 3f7ce8d489869bb28c58bffdd2263716441e78ce.
 """
 from __future__ import annotations
 
@@ -61,18 +62,22 @@ class BitwardenSecretsProvider:
                 or reference.provider_id != self.provider_id
                 or reference.provider_version != self.provider_version
                 or not isinstance(reference.secret_id, str) or not reference.secret_id.strip()):
-            raise SecretProviderError("FAILED", "secret reference does not match the configured provider contract")
+            raise SecretProviderError("FAILED", "secret reference does not match the configured provider contract",
+                                      reason_code="invalid_reference")
         if not isinstance(correlation_id, str) or not correlation_id.strip():
-            raise SecretProviderError("FAILED", "secret resolution requires a correlation identifier")
+            raise SecretProviderError("FAILED", "secret resolution requires a correlation identifier",
+                                      reason_code="invalid_request")
 
         token_variable = self.configuration["access_token_env"]
         token = self._environment.get(token_variable)
         if not isinstance(token, str) or not token:
-            raise SecretProviderError("UNAVAILABLE", "Bitwarden machine-account credential is unavailable")
+            raise SecretProviderError("UNAVAILABLE", "Bitwarden machine-account credential is unavailable",
+                                      reason_code="credentials_unavailable")
 
         executable = self.configuration["executable"]
         if not self._executable_lookup(executable):
-            raise SecretProviderError("UNAVAILABLE", "Bitwarden Secrets Manager CLI is unavailable")
+            raise SecretProviderError("UNAVAILABLE", "Bitwarden Secrets Manager CLI is unavailable",
+                                      reason_code="cli_unavailable")
 
         command = [executable, "secret", "get", reference.secret_id, "--output", "json", "--color", "no"]
         if "config_file" in self.configuration:
@@ -85,11 +90,14 @@ class BitwardenSecretsProvider:
             result = self._run(command, check=False, capture_output=True, text=True,
                                timeout=float(self.configuration["timeout_seconds"]), env=environment)
         except FileNotFoundError:
-            raise SecretProviderError("UNAVAILABLE", "Bitwarden Secrets Manager CLI is unavailable") from None
+            raise SecretProviderError("UNAVAILABLE", "Bitwarden Secrets Manager CLI is unavailable",
+                                      reason_code="cli_unavailable") from None
         except subprocess.TimeoutExpired:
-            raise SecretProviderError("UNAVAILABLE", "Bitwarden secret request timed out") from None
+            raise SecretProviderError("UNAVAILABLE", "Bitwarden secret request timed out",
+                                      reason_code="request_timeout") from None
         except OSError:
-            raise SecretProviderError("FAILED", "Bitwarden secret request could not be started") from None
+            raise SecretProviderError("FAILED", "Bitwarden secret request could not be started",
+                                      reason_code="provider_start_failed") from None
 
         if result.returncode != 0:
             diagnostic = (result.stderr or "").lower()
@@ -104,10 +112,12 @@ class BitwardenSecretsProvider:
         try:
             payload = json.loads(result.stdout)
         except (TypeError, json.JSONDecodeError):
-            raise SecretProviderError("FAILED", "Bitwarden returned an invalid secret response") from None
+            raise SecretProviderError("FAILED", "Bitwarden returned an invalid secret response",
+                                      reason_code="response_invalid") from None
         if (not isinstance(payload, dict) or payload.get("id") != reference.secret_id
                 or not isinstance(payload.get("value"), str)):
-            raise SecretProviderError("FAILED", "Bitwarden returned a mismatched or incomplete secret response")
+            raise SecretProviderError("FAILED", "Bitwarden returned a mismatched or incomplete secret response",
+                                      reason_code="response_mismatch")
 
         principal = MachinePrincipalAssertion(
             principal_id=self.configuration["machine_principal_id"],

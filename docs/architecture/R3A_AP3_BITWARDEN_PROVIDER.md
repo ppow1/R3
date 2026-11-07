@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_AP3_BITWARDEN_PROVIDER.md
 Component: R3A-AP3-BITWARDEN-PROVIDER
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-07T21:36:43Z
 Created By: Codex GPT-6
 Purpose: Specify the Bitwarden Secrets Manager provider and its shared AP3 identity boundary.
@@ -11,10 +11,12 @@ Observability: Redacted status, provider/revision metadata, correlation ID and f
 Dependencies: R3A AP3-M2 Issue #50; AP3-M1 Issue #49; AP1/CME Issue #43; R3A secret-reference configuration.
 Authority: Approved R3A Master Roadmap Baseline 1.0; R3A-010/R3A-013; no roadmap exception.
 Changed: 2026-11-07T21:36:43Z | R3A-AP3-M2-ISSUE-50 | Codex GPT-6 | Record provider interface, machine identity, and operational limitations.
+Changed: 2026-11-07T21:59:02Z | R3A-AP3-M2-CONSUMER | Codex GPT-6 | Document the authorized reasoning-service consumer, lease lifecycle, and disclosure controls.
+Changed: 2026-11-07T22:09:29Z | R3A-AP3-M2-CONSUMER | Codex GPT-6 | Version reason-code observability and describe the provider 1.1 contract.
 Supersedes: None.
 Contracts: r3a.secrets.provider.v1; r3a.machine-principal.v1; existing CME authorization/audit contracts.
-Tests: tests/test_r3a_bitwarden_secrets.py; live provider acceptance requires configured real Bitwarden access.
-History/Predecessor: New document; initial publication recorded in Git.
+Tests: tests/test_r3a_bitwarden_secrets.py; tests/test_r3a_bitwarden_consumer_integration.py; live provider acceptance requires configured real Bitwarden access.
+History/Predecessor: Revision 1.0.0 at commit d07bade6dfa6e6ef498f454d82866aa592b899ba, blob 2caa7358ed0cce4d69e3e28b236935462d2c018a.
 -->
 # AP3 Bitwarden Secrets Provider
 
@@ -26,7 +28,7 @@ The adapter is intentionally outside `CapabilityRegistry`: secret values must no
 
 ## Versioned interfaces
 
-`r3a.secrets.provider.v1` version `1.0.0` defines `SecretReference` with `provider_id`, `provider_version`, and Bitwarden `secret_id`, plus contract ID/version. `SecretProvider.resolve(reference, correlation_id)` returns a `SecretLease` with secret value held in a mutable in-process buffer, remote `revisionDate`, fetch time, and machine-principal metadata. Callers consume it through `reveal()` and must use the lease as a context manager or call `close()`; close overwrites the mutable lease buffer. The value is excluded from the lease representation. Python callers may create transient immutable copies when consuming the value, so the adapter must keep its own handling short-lived and must never serialize, log, emit, or place the value into a prompt.
+`r3a.secrets.provider.v1` version `1.1.0` defines `SecretReference` with `provider_id`, `provider_version`, and Bitwarden `secret_id`, plus contract ID/version. `SecretProvider.resolve(reference, correlation_id)` returns a `SecretLease` with secret value held in a mutable in-process buffer, remote `revisionDate`, fetch time, and machine-principal metadata. `SecretProviderError` carries a redacted `outcome` and stable non-secret `reason_code` so consumers can distinguish unavailable credentials/CLI, timeouts, missing references, denied access, and provider failures. Callers consume a successful lease through `reveal()` and must use it as a context manager or call `close()`; close overwrites the mutable lease buffer. The value is excluded from the lease representation. Python callers may create transient immutable copies when consuming the value, so the adapter must keep its own handling short-lived and must never serialize, log, emit, or place the value into a prompt.
 
 `r3a.machine-principal.v1` version `1.0.0` carries `issuer`, stable configured `principal_id`, `authenticated_at`, and `correlation_id`. The assertion is emitted only after a successful authenticated secret retrieval. `principal_id` is the externally configured Bitwarden machine-account identity; the CLI response confirms that its token could retrieve the requested secret but does not return an independently queried machine-account ID. This metadata is a credential-source identity, not the authenticated Steward principal, and must not be accepted as a caller-supplied authorization claim. AP3-M1 owns human principal/session lifecycle; CME remains the grant and audit authority.
 
@@ -46,4 +48,6 @@ The provider is `BLOCKED/UNAVAILABLE` for real Bitwarden retrieval until deploym
 
 ## Coordination and integration
 
-AP3-M1 may consume the lease as a private authentication/credential adapter dependency. Steward identity assertions and session records remain AP3-M1-owned; machine identity is separate. AP3 capability invocation, CME authorization, and audit schemas are unchanged, and the provider is not added as a Grace tool. Integration is coordinated through Issue #43 after review of the versioned interfaces; this implementation branch does not modify a shared runtime or production service.
+The existing CME-authorized `reasoning.model.invoke` provider is the representative AP3-M2 service consumer. It accepts optional external `secret_reference` configuration containing provider ID/version, secret ID, and absolute provider manifest/configuration paths. Only after CME dispatch does the provider resolve that reference; the resulting value is used only in the outbound HTTP `Authorization` header. It is rejected if it appears in the serialized request body. The provider closes the lease after every send outcome, redacts exact value echoes in response content/metadata, and emits generic HTTP/provider errors without response bodies. The durable invocation evidence preserves only non-secret credential-source metadata (provider/secret reference, remote revision, fetch time, and machine-principal assertion). `api_key_env` remains supported for existing configuration; setting both credential sources is rejected.
+
+AP3-M1 may consume the same lease as a private authentication/credential adapter dependency. Steward identity assertions and session records remain AP3-M1-owned; machine identity is separate. CME continues to authorize and audit the model operation; no authorization system or secret registry is added. The secret reference is external provider configuration, not part of invocation input, event data, or Grace model messages. Integration changes remain on the isolated AP3-M2 branch for coordinator review through Issue #43; no shared runtime or production service is restarted by these source changes.

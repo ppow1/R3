@@ -45,7 +45,7 @@ SECRET_ID = "fixture-secret-id"
 def configuration(**overrides):
     value = {
         "provider_id": "r3a.bitwarden-secrets",
-        "provider_version": "1.0.0",
+        "provider_version": "1.1.0",
         "executable": "bws",
         "access_token_env": "FIXTURE_BWS_TOKEN",
         "machine_principal_id": "fixture-machine-account",
@@ -56,7 +56,7 @@ def configuration(**overrides):
 
 
 def reference(**overrides):
-    value = {"provider_id": "r3a.bitwarden-secrets", "provider_version": "1.0.0",
+    value = {"provider_id": "r3a.bitwarden-secrets", "provider_version": "1.1.0",
              "secret_id": SECRET_ID}
     value.update(overrides)
     return SecretReference(**value)
@@ -158,6 +158,7 @@ class BitwardenSecretsProviderTests(unittest.TestCase):
         with self.assertRaises(SecretProviderError) as caught:
             provider.resolve(reference(), correlation_id="missing-token")
         self.assertEqual("UNAVAILABLE", caught.exception.outcome)
+        self.assertEqual("credentials_unavailable", caught.exception.reason_code)
         self.assertEqual([], invoked)
 
         provider = self.provider(lambda *args, **kwargs: completed(FIXTURE_VALUE_A),
@@ -166,6 +167,7 @@ class BitwardenSecretsProviderTests(unittest.TestCase):
         with self.assertRaises(SecretProviderError) as caught:
             provider.resolve(reference(), correlation_id="missing-cli")
         self.assertEqual("UNAVAILABLE", caught.exception.outcome)
+        self.assertEqual("cli_unavailable", caught.exception.reason_code)
 
     def test_authorization_denial_is_explicit_and_cli_text_is_redacted(self):
         sensitive_cli_text = f"forbidden value={FIXTURE_VALUE_A} token={FIXTURE_TOKEN}"
@@ -196,6 +198,8 @@ class BitwardenSecretsProviderTests(unittest.TestCase):
                 with self.assertRaises(SecretProviderError) as caught:
                     provider.resolve(reference(), correlation_id="failure")
                 self.assertEqual(expected, caught.exception.outcome)
+                if expected == "UNAVAILABLE":
+                    self.assertEqual("request_timeout", caught.exception.reason_code)
 
     def test_reference_and_configuration_versions_are_validated(self):
         provider = self.provider(lambda *args, **kwargs: completed(FIXTURE_VALUE_A),
@@ -222,7 +226,7 @@ class BitwardenSecretsProviderTests(unittest.TestCase):
         provider = load_configured_provider(manifest_path, config_path)
         self.assertIsInstance(provider, BitwardenSecretsProvider)
         self.assertEqual("r3a.bitwarden-secrets", provider.provider_id)
-        self.assertEqual("1.0.0", provider.provider_version)
+        self.assertEqual("1.1.0", provider.provider_version)
 
 
 if __name__ == "__main__":
