@@ -580,7 +580,8 @@ def load_settings(path: str | Path) -> Settings:
                              "configuration_schema", "read_only", "artifact_ref", "artifact_sha256"}
         if not isinstance(manifest, dict):
             raise ConfigurationError(f"{where}.manifest must contain an object")
-        _keys(manifest, required_manifest, f"{where}.manifest")
+        _keys(manifest, required_manifest | ({"supporting_artifacts"} if "supporting_artifacts" in manifest else set()),
+              f"{where}.manifest")
         if manifest["schema_version"] != 1 or manifest["read_only"] is not True:
             raise ConfigurationError(f"{where} must declare schema_version 1 and read_only true")
         capability_id = _text(manifest["capability_id"], f"{where}.capability_id")
@@ -601,6 +602,23 @@ def load_settings(path: str | Path) -> Settings:
         if (not re.fullmatch(r"[0-9a-f]{64}", artifact_digest)
                 or hashlib.sha256(artifact_path.read_bytes()).hexdigest() != artifact_digest):
             raise ConfigurationError(f"{where} artifact digest does not match")
+        support_files = manifest.get("supporting_artifacts", [])
+        if not isinstance(support_files, list):
+            raise ConfigurationError(f"{where}.supporting_artifacts must be an array")
+        seen_support: set[str] = set()
+        for support in support_files:
+            if not isinstance(support, dict) or set(support) != {"artifact_ref", "artifact_sha256"}:
+                raise ConfigurationError(f"{where}.supporting_artifacts entry is invalid")
+            support_ref = Path(_text(support["artifact_ref"], f"{where}.supporting_artifacts.artifact_ref"))
+            if support_ref.is_absolute() or str(support_ref) in seen_support:
+                raise ConfigurationError(f"{where}.supporting_artifacts contains duplicate or absolute paths")
+            seen_support.add(str(support_ref))
+            support_path = (manifest_path.parent / support_ref).resolve()
+            support_hash = _text(support["artifact_sha256"], f"{where}.supporting_artifacts.sha256").lower()
+            if (not support_path.is_relative_to(manifest_path.parent) or not support_path.is_file()
+                    or not re.fullmatch(r"[0-9a-f]{64}", support_hash)
+                    or hashlib.sha256(support_path.read_bytes()).hexdigest() != support_hash):
+                raise ConfigurationError(f"{where} supporting artifact digest does not match")
         tool = manifest["tool"]
         if (not isinstance(tool, dict) or set(tool) != {"name", "description", "arguments_schema"}
                 or not isinstance(tool["arguments_schema"], dict)):

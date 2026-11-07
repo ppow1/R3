@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "plugin_id": "r3a.octominer-telemetry",
-  "plugin_version": "1.1.0",
-  "contract_id": "r3a.capability-plugin",
+  "plugin_version": "2.0.0",
+  "contract_id": "r3a.resident-capability-tool",
   "contract_version": "1.0.0",
   "capability_id": "infrastructure.octominer.telemetry.read",
   "tool": {
     "name": "octominer_telemetry_read",
-    "description": "Read freshness-aware GPU and mounted filesystem telemetry directly from the configured host using R3A-owned read-only SSH.",
+    "description": "Read freshness-aware GPU, storage, model-server, ComfyUI, process, request and bounded-history telemetry from independently configured R3A sources.",
     "arguments_schema": {
       "type": "object",
       "properties": {},
@@ -16,9 +16,27 @@
   },
   "entrypoint": "r3a_plugins.octominer_telemetry.plugin:read_telemetry",
   "artifact_ref": "plugin.py",
-  "artifact_sha256": "3d7b1242511c4c6238b73bd6cd06cd347a6073a297885481f077a0c2845f5628",
+  "artifact_sha256": "732b236df886cb2d020f054ff328f2b19ca8d0bc4b21f5c220d15dc71fe6c6cd",
+  "supporting_artifacts": [
+    {
+      "artifact_ref": "http_providers.py",
+      "artifact_sha256": "0839d7dd7003fc5b9d0c8776429ea992cb5c5c59f9a0da3a6c5e5f7e6abfaea1"
+    },
+    {
+      "artifact_ref": "process_providers.py",
+      "artifact_sha256": "c5b3598aecfef13cef48432417cdcef0a1829563593e3d9d8781fb887eb06621"
+    },
+    {
+      "artifact_ref": "request_metrics.py",
+      "artifact_sha256": "2f915fae8987d6ed50e7403adcf2cffad494b598f529cdf2299ac1a0a55d7874"
+    },
+    {
+      "artifact_ref": "history.py",
+      "artifact_sha256": "726a8c264bf389ba9eab3f80981db89aa7f29f42eca7d3ad34b3eb29caa008e0"
+    }
+  ],
   "configuration_schema": {
-    "schema_id": "r3a.octominer-nvidia-smi-ssh.config.v1",
+    "schema_id": "r3a.octominer-independent-telemetry.config.v2",
     "type": "object",
     "required": [
       "host_id",
@@ -28,7 +46,8 @@
       "identity_file",
       "known_hosts_file",
       "timeout_seconds",
-      "max_age_seconds"
+      "max_age_seconds",
+      "history_path_env"
     ],
     "additionalProperties": false,
     "properties": {
@@ -38,7 +57,7 @@
       },
       "ssh_host": {
         "type": "string",
-        "pattern": "[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?"
+        "pattern": "(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|\\$\\{[A-Z][A-Z0-9_]*\\})"
       },
       "ssh_port": {
         "type": "integer",
@@ -47,15 +66,15 @@
       },
       "ssh_user": {
         "type": "string",
-        "pattern": "[A-Za-z_][A-Za-z0-9_-]{0,31}"
+        "pattern": "(?:[A-Za-z_][A-Za-z0-9_-]{0,31}|\\$\\{[A-Z][A-Z0-9_]*\\})"
       },
       "identity_file": {
         "type": "string",
-        "pattern": "/.*"
+        "pattern": "(?:/.*|\\$\\{[A-Z][A-Z0-9_]*\\})"
       },
       "known_hosts_file": {
         "type": "string",
-        "pattern": "/.*"
+        "pattern": "(?:/.*|\\$\\{[A-Z][A-Z0-9_]*\\})"
       },
       "timeout_seconds": {
         "type": "integer",
@@ -66,6 +85,43 @@
         "type": "integer",
         "minimum": 1,
         "maximum": 300
+      },
+      "history_path_env": {
+        "type": "string",
+        "pattern": "[A-Z][A-Z0-9_]*"
+      },
+      "history_window_seconds": {
+        "type": "integer",
+        "minimum": 30,
+        "maximum": 3600
+      },
+      "history_capacity_per_source": {
+        "type": "integer",
+        "minimum": 8,
+        "maximum": 2048
+      },
+      "history_limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 32
+      },
+      "request_activity_limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 500
+      },
+      "request_database_dsn_env": {
+        "type": "string",
+        "pattern": "[A-Z][A-Z0-9_]*"
+      },
+      "model_servers": {
+        "type": "object"
+      },
+      "comfyui": {
+        "type": "object"
+      },
+      "model_process_names": {
+        "type": "object"
       }
     }
   },

@@ -37,9 +37,11 @@ import hashlib
 import json
 import os
 import signal
+import time
 import urllib.error
 import urllib.request
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from .contracts import ContractEnvelope, ContractValidationError
@@ -81,6 +83,23 @@ def resident_action_schema(available_tools: list[dict[str, Any]]) -> dict[str, A
     if capability_ids:
         schema["properties"]["capability_id"]["enum"] = list(dict.fromkeys(capability_ids))
     return schema
+
+
+def provider_usage_record(provider_usage: Any, *, request_ref: str, route_id: str,
+                         provider: str, model: str, started_at: datetime,
+                         finished_at: datetime, elapsed_ms: float) -> dict[str, Any]:
+    """Preserve exact provider token counts and append R3A-measured call timing."""
+    usage = dict(provider_usage) if isinstance(provider_usage, dict) else {}
+    usage["r3a_measurement"] = {
+        "request_ref": request_ref,
+        "request_started_at": started_at.isoformat().replace("+00:00", "Z"),
+        "request_finished_at": finished_at.isoformat().replace("+00:00", "Z"),
+        "elapsed_ms": round(float(elapsed_ms), 3),
+        "route_id": route_id, "provider": provider, "model": model,
+        "stream_deltas": None,
+        "stream_cadence_state": "unavailable_grace_provider_uses_buffered_response",
+    }
+    return usage
 
 
 class GraceResident:
@@ -208,7 +227,11 @@ class GraceResident:
             response: dict[str, Any] | None = None
             choice = ""
             try:
+                request_started_at = datetime.now(timezone.utc)
+                request_started_clock = time.perf_counter()
                 response = await self._model_request(route.endpoint, route.timeout_seconds, request)
+                request_finished_at = datetime.now(timezone.utc)
+                call_elapsed_ms = round((time.perf_counter() - request_started_clock) * 1000, 3)
                 choice = response["choices"][0]["message"]["content"]
                 if not isinstance(choice, str) or not choice.strip():
                     raise ValueError("configured model returned empty content")
@@ -274,6 +297,10 @@ class GraceResident:
                     raise ValueError("model response reached max_tokens before completing")
                 result_ref = str(response.get("id") or uuid.uuid4())
                 result_hash = hashlib.sha256(choice.encode()).hexdigest()
+                usage_record = provider_usage_record(
+                    response.get("usage"), request_ref=request_ref, route_id=route.route_id,
+                    provider=route.provider, model=route.model, started_at=request_started_at,
+                    finished_at=request_finished_at, elapsed_ms=call_elapsed_ms)
                 self.last_activity = {
                     "activity_id": payload["activity_id"], "attempt_id": payload["attempt_id"],
                     "objective": objective, "event_kind": payload.get("event_kind", "objective"),
@@ -284,7 +311,7 @@ class GraceResident:
                               "role_id": payload.get("selected_role_id"),
                               "request_ref": request_ref, "request_sha256": request_hash,
                               "result_ref": result_ref, "result_sha256": result_hash,
-                              "usage": response.get("usage"), "finish_reason": finish_reason},
+                              "usage": usage_record, "finish_reason": finish_reason},
                     "evidence": [{"source_id": item["source_id"], "sha256": item["sha256"]} for item in evidence
                                  if item.get("source_id") in (final_decision or {}).get("evidence_refs", [])],
                     "completed_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),

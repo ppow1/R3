@@ -57,11 +57,15 @@ class OctoMinerPluginTests(unittest.TestCase):
     def test_manifest_is_read_only_versioned_and_digest_pinned(self):
         root = Path(__file__).resolve().parents[1]
         manifest = json.loads((root / "r3a_plugins/octominer_telemetry/manifest.json").read_text())
-        artifact = root / "r3a_plugins/octominer_telemetry" / manifest["artifact_ref"]
+        package = root / "r3a_plugins/octominer_telemetry"
+        artifact = package / manifest["artifact_ref"]
         self.assertEqual(1, manifest["schema_version"])
         self.assertTrue(manifest["read_only"])
         self.assertEqual("1.0.0", manifest["contract_version"])
         self.assertEqual(manifest["artifact_sha256"], hashlib.sha256(artifact.read_bytes()).hexdigest())
+        for support in manifest["supporting_artifacts"]:
+            self.assertEqual(support["artifact_sha256"],
+                             hashlib.sha256((package / support["artifact_ref"]).read_bytes()).hexdigest())
 
     def test_plugin_owned_config_uses_manifest_declared_schema(self):
         root = Path(__file__).resolve().parents[1]
@@ -98,28 +102,31 @@ class OctoMinerPluginTests(unittest.TestCase):
     @patch.object(plugin.subprocess, "run")
     def test_uses_only_pinned_read_only_ssh_query(self, run, _which):
         run.side_effect = [SimpleNamespace(returncode=0, stdout=SAMPLE, stderr=""),
-                           SimpleNamespace(returncode=0, stdout=DF_SAMPLE, stderr="")]
-        gpu, storage = plugin.read_telemetry(self.config)
-        gpu_command, storage_command = [call.args[0] for call in run.call_args_list]
+                           SimpleNamespace(returncode=0, stdout=DF_SAMPLE, stderr=""),
+                           SimpleNamespace(returncode=0, stdout="", stderr="")]
+        evidence = plugin.read_telemetry(self.config)
+        gpu, storage, process = evidence[:3]
+        gpu_command, storage_command, process_command = [call.args[0] for call in run.call_args_list]
         self.assertTrue(gpu["content"]["available"])
         self.assertEqual("fresh", gpu["freshness"]["state"])
         self.assertEqual("octo1", gpu["content"]["host_id"])
-        self.assertEqual("ssh://octo_readonly@192.0.2.10:22/nvidia-smi", gpu["source_path"])
+        self.assertEqual("ssh://octo1/nvidia-smi", gpu["source_path"])
         self.assertEqual("fresh", storage["freshness"]["state"])
         self.assertEqual(1, len(storage["content"]["filesystems"]))
-        for command in [gpu_command, storage_command]:
+        for command in [gpu_command, storage_command, process_command]:
             self.assertIn("StrictHostKeyChecking=yes", command)
             self.assertIn("IdentitiesOnly=yes", command)
             self.assertNotIn("riverview", " ".join(command).lower())
             self.assertEqual(4, run.call_args.kwargs["timeout"])
         self.assertEqual(plugin.REMOTE_QUERY, gpu_command[-1])
         self.assertEqual(plugin.FILESYSTEM_QUERY, storage_command[-1])
+        self.assertEqual(plugin.PROCESS_QUERY, process_command[-1])
+        self.assertEqual("gpu.processes.octo1", process["source_id"])
 
     @patch.object(plugin.shutil, "which", return_value="/usr/bin/ssh")
     @patch.object(plugin.subprocess, "run")
     def test_transport_failure_returns_unavailable_evidence_without_stderr(self, run, _which):
-        run.side_effect = [SimpleNamespace(returncode=255, stdout="", stderr="private host detail"),
-                           SimpleNamespace(returncode=255, stdout="", stderr="private host detail")]
+        run.side_effect = [SimpleNamespace(returncode=255, stdout="", stderr="private host detail") for _ in range(3)]
         evidence = plugin.read_telemetry(self.config)[0]
         self.assertEqual("unavailable", evidence["freshness"]["state"])
         self.assertEqual({"available": False, "host_id": "octo1", "error": "ssh_exit_255"},

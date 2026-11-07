@@ -2,20 +2,21 @@
 # R3 CONTROLLED SOURCE
 # File: r3a_plugins/octominer_telemetry/plugin.py
 # Component: R3A-PLUG-OCTOMINER
-# File Revision: 2.1.0
+# File Revision: 3.0.0
 # Created: 2026-11-07T04:19:12Z
 # Created By: Codex GPT-6
-# Purpose: Collect GPU and filesystem capacity telemetry from configured hosts.
-# Execution Model: In-process adapter invokes OpenSSH with fixed read-only commands.
-# Observability: Host source ID, collection times, metric units, digest, and freshness state.
-# Dependencies: Python standard library; OpenSSH client; remote nvidia-smi.
+# Purpose: Collect direct host, model server, ComfyUI, request and bounded-history telemetry.
+# Execution Model: In-process adapter uses fixed SSH commands and configured HTTP GET sources.
+# Observability: Source IDs, collection times, metric units, digests, provenance and freshness states.
+# Dependencies: Python standard library; OpenSSH client; remote nvidia-smi; R3A database read-only DSN.
 # Authority: Issue #46; explicit R3A capability grant; strict host-key verification; no legacy service calls.
 # Changed: 2026-11-07 | R3A-PLUG-002 | Codex GPT-6 | Add measured GPU fan and filesystem capacity sources.
+# Changed: 2026-11-07 | R3A-PLUG-003 | Codex GPT-6 | Add model, ComfyUI, process, request and rolling-history providers.
 # Changed: 2026-11-07 | R3A-PLUG-001 | Codex GPT-6 | Replace legacy API reader with independent R3A SSH collection.
 # Supersedes: Revision 2.0.0; add measured per-GPU fan and mounted-filesystem capacity.
 # Supersedes: Revision 1.0.0; remove Riverview Octo Control runtime dependency per steward correction.
-# Contracts: r3a.capability-plugin 1.0.0; r3a.octominer-nvidia-smi-ssh.config.v1; Issue #46.
-# Tests: tests/test_r3a_octominer_plugin.py.
+# Contracts: r3a.resident-capability-tool 1.0.0 adapter; r3a.octominer-independent-telemetry.config.v2; Issue #46.
+# Tests: tests/test_r3a_octominer_plugin.py; tests/test_r3a_telemetry_providers.py.
 # History/Predecessor: Git commit dee12de54618e36cce42b8002d7fb5cf1f436ec8.
 
 from __future__ import annotations
@@ -24,12 +25,19 @@ import csv
 import hashlib
 import io
 import json
+import math
+import os
 import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from .history import apply_freshness_and_history
+from .http_providers import read_comfyui, read_model_servers
+from .process_providers import PROCESS_QUERY, read_compute_apps
+from .request_metrics import read_r3a_model_turns
 
 
 QUERY_FIELDS = (
@@ -55,13 +63,16 @@ def _number(value: str) -> float | None:
     if not value or value.upper() in {"N/A", "[NOT SUPPORTED]"}:
         return None
     try:
-        return float(value)
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("nvidia-smi returned a non-finite metric")
+        return number
     except ValueError as exc:
         raise ValueError("nvidia-smi returned a non-numeric metric") from exc
 
 
 def parse_nvidia_smi_csv(output: str, *, host_id: str, collected_at: str) -> list[dict[str, Any]]:
-    """Normalize the fixed ten-column CSV query without trusting runtime ordinals."""
+    """Normalize the fixed eleven-column CSV query without trusting runtime ordinals."""
     devices: list[dict[str, Any]] = []
     for fields in csv.reader(io.StringIO(output)):
         if len(fields) != 11:
@@ -113,16 +124,20 @@ def parse_df_posix(output: str, *, host_id: str, collected_at: str) -> list[dict
 
 def _ssh_command(config: dict[str, Any], remote_command: str = REMOTE_QUERY) -> list[str]:
     """Build an SSH invocation with all transport policy owned by R3A config."""
+    if remote_command not in {REMOTE_QUERY, FILESYSTEM_QUERY, PROCESS_QUERY}:
+        raise RuntimeError("r3a_ssh_command_not_allowlisted")
     ssh = shutil.which("ssh")
     if not ssh:
         raise RuntimeError("openssh_client_unavailable")
-    identity = Path(config["identity_file"]).expanduser().resolve()
-    known_hosts = Path(config["known_hosts_file"]).expanduser().resolve()
+    identity = Path(_configured_value(config["identity_file"])).expanduser().resolve()
+    known_hosts = Path(_configured_value(config["known_hosts_file"])).expanduser().resolve()
     if not identity.is_file() or not known_hosts.is_file():
         raise RuntimeError("r3a_ssh_credential_or_host_key_file_unavailable")
-    if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?", str(config["ssh_host"])):
+    ssh_host = _configured_value(config["ssh_host"])
+    ssh_user = _configured_value(config["ssh_user"])
+    if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?", ssh_host):
         raise RuntimeError("r3a_ssh_host_invalid")
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,31}", str(config["ssh_user"])):
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,31}", ssh_user):
         raise RuntimeError("r3a_ssh_user_invalid")
     port = config["ssh_port"]
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
@@ -138,7 +153,25 @@ def _ssh_command(config: dict[str, Any], remote_command: str = REMOTE_QUERY) -> 
             "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={known_hosts}",
             "-o", "GlobalKnownHostsFile=/dev/null", "-o", "ClearAllForwardings=yes",
             "-o", "PermitLocalCommand=no", "-o", "RequestTTY=no",
-            f"{config['ssh_user']}@{config['ssh_host']}", remote_command]
+            f"{ssh_user}@{ssh_host}", remote_command]
+
+
+def _configured_value(value: str) -> str:
+    match = re.fullmatch(r"\$\{([A-Z][A-Z0-9_]*)\}", str(value))
+    if match:
+        resolved = os.environ.get(match.group(1))
+        if not resolved:
+            raise RuntimeError("r3a_ssh_config_env_unavailable")
+        return resolved
+    return str(value)
+
+
+def _run_ssh_query(config: dict[str, Any], remote_command: str) -> str:
+    completed = subprocess.run(_ssh_command(config, remote_command), capture_output=True, text=True,
+                               timeout=float(config["timeout_seconds"]), check=False)
+    if completed.returncode != 0:
+        raise RuntimeError(f"ssh_exit_{completed.returncode}")
+    return completed.stdout
 
 
 def _collect_source(config: dict[str, Any], *, source_kind: str, value_key: str,
@@ -147,16 +180,13 @@ def _collect_source(config: dict[str, Any], *, source_kind: str, value_key: str,
     host_id = str(config["host_id"])
     source_id = f"{source_kind}.telemetry.{host_id}"
     try:
-        completed = subprocess.run(_ssh_command(config, remote_command), capture_output=True, text=True,
-                                   timeout=float(config["timeout_seconds"]), check=False)
-        if completed.returncode != 0:
-            raise RuntimeError(f"ssh_exit_{completed.returncode}")
+        output = _run_ssh_query(config, remote_command)
         collected_at = _now()
-        values = parser(completed.stdout, host_id=host_id, collected_at=collected_at)
+        values = parser(output, host_id=host_id, collected_at=collected_at)
         content: dict[str, Any] = {"available": True, "host_id": host_id, value_key: values}
         state = "fresh"
         error = None
-    except (OSError, subprocess.SubprocessError, RuntimeError, ValueError) as exc:
+    except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, TypeError, KeyError) as exc:
         collected_at = _now()
         # Do not persist stderr or command output: either can contain host details.
         reason = str(exc) if str(exc).startswith(("ssh_exit_", "openssh_", "r3a_ssh_")) else type(exc).__name__
@@ -166,7 +196,7 @@ def _collect_source(config: dict[str, Any], *, source_kind: str, value_key: str,
         error = reason
     digest = hashlib.sha256(json.dumps(content, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return {
-        "source_id": source_id, "source_path": f"ssh://{config['ssh_user']}@{config['ssh_host']}:{config['ssh_port']}/{remote_command.split()[0]}",
+        "source_id": source_id, "source_path": f"ssh://{config.get('host_id', 'configured-host')}/{remote_command.split()[0]}",
         "content": content, "sha256": digest, "observed_at": collected_at,
         "source_timestamp": None, "source_timestamp_basis": "R3A collection time; source sample timestamp unavailable",
         "units": FIELD_UNITS, "freshness": {"state": state, "age_seconds": 0 if state == "fresh" else None,
@@ -177,10 +207,17 @@ def _collect_source(config: dict[str, Any], *, source_kind: str, value_key: str,
 
 
 def read_telemetry(config: dict[str, Any]) -> list[dict[str, Any]]:
-    """Read bounded GPU and filesystem samples; commands are fixed and read-only."""
-    return [
+    """Collect independently sourced telemetry and append a bounded local sample history."""
+    samples = [
         _collect_source(config, source_kind="gpu", value_key="gpus", remote_command=REMOTE_QUERY,
                         parser=parse_nvidia_smi_csv),
         _collect_source(config, source_kind="storage", value_key="filesystems", remote_command=FILESYSTEM_QUERY,
                         parser=parse_df_posix),
+        read_compute_apps(config, lambda command: _run_ssh_query(config, command)),
     ]
+    samples.extend(read_model_servers(config))
+    samples.extend(read_comfyui(config))
+    samples.append(read_r3a_model_turns(config))
+    normalized, history = apply_freshness_and_history(samples, config)
+    normalized.append(history)
+    return normalized
