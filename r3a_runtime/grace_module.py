@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.7.0
+File Revision: 1.8.0
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
 Purpose: Execute Grace objectives through configured inference and resident-selected capabilities in the authorized canonical runtime.
@@ -25,14 +25,15 @@ Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Gi
 Changed: 2026-11-07T02:41:51Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Deliver the versioned acceptance envelope in the resident inference context.
 Changed: 2026-11-07T03:34:34Z | R3A-019-INBOX-LOOP | Codex GPT-6 | Constrain capability identifiers to the exact configured tool manifest values.
 Supersedes: None.
-Contracts: R3A-019; AP1-M1 Issue #43 acceptance; r3a.resident.execution.v1.
+Contracts: R3A-019; AP1-M1 Issue #43 acceptance; r3a.resident.execution.v1; proposed r3a.resident.result@1.0.0.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; automated inference responses are fixtures.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Support model-selected registered Engineering operations, typed proposals and post-execution resident assessment.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Require evidence-bounded Engineering assessments and prohibit unsupported artifact claims.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Allow Grace to request a configured reasoning role with a rationale; CME remains the authorization and route gate.
 Changed: 2026-11-07T23:41:45Z | R3A-AP2-DELEGATION | Codex GPT-6 | Guide resident-directed office discovery and generic registered handoff selection using authoritative evidence.
 Changed: 2026-11-07T23:50:40Z | R3A-AP2-DELEGATION-CONTINUATION | Codex GPT-6 | Direct Grace to interpret handoff and verification outcomes truthfully and continue only through currently offered actions.
-History/Predecessor: Prior revision preserved at commit ba2aced2683953e7c82b0f124addd24413be40e9, blob 8114f5e7bff7d24a19672c38662e76ae01ba0420.
+Changed: 2026-11-08T00:04:44Z | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Validate and deliver generic versioned institutional results to Grace while rejecting claims that override failed verification.
+History/Predecessor: Prior revision preserved at commit 32d0b71016c77de82b1a1cc98a9cca4152b6a44b, blob 5e98c2704d2dc6d6f1f5246591ccc0b5aa92e727.
 """
 from __future__ import annotations
 
@@ -122,6 +123,62 @@ def resident_action_schema(available_tools: list[dict[str, Any]],
     if operation_ids:
         schema["properties"]["proposal"]["properties"]["operation_id"]["enum"] = list(dict.fromkeys(operation_ids))
     return schema
+
+
+_RESIDENT_RESULT_OUTCOMES = {"PASS", "FAIL", "INCONCLUSIVE", "REJECTED", "RETURNED", "UNAVAILABLE"}
+
+
+def validate_resident_result(value: Any, *, activity_id: str, attempt_id: str,
+                             correlation_id: str | None, resident_id: str,
+                             config_revision: str) -> dict[str, Any]:
+    """Validate generic institutional feedback before exposing it to resident inference."""
+    required = {"contract_id", "contract_version", "activity_id", "attempt_id", "correlation_id",
+                "resident_id", "config_revision", "issued_at", "issuer", "outcome", "evidence",
+                "failure_reasons", "completion_authority"}
+    if not isinstance(value, dict) or set(value) != required:
+        raise ValueError("resident result contract fields are invalid")
+    if value["contract_id"] != "r3a.resident.result" or value["contract_version"] != "1.0.0":
+        raise ValueError("resident result contract is incompatible")
+    expected = {"activity_id": activity_id, "attempt_id": attempt_id, "resident_id": resident_id,
+                "config_revision": config_revision}
+    if any(value.get(key) != expected_value for key, expected_value in expected.items()):
+        raise ValueError("resident result lineage does not match this execution")
+    if not isinstance(correlation_id, str) or not correlation_id.strip() or \
+            not isinstance(value["correlation_id"], str) or \
+            not value["correlation_id"].strip() or value["correlation_id"] != correlation_id:
+        raise ValueError("resident result correlation identity is invalid")
+    if not isinstance(value["issued_at"], str) or not value["issued_at"].strip():
+        raise ValueError("resident result timestamp is required")
+    try:
+        parsed_timestamp = datetime.fromisoformat(value["issued_at"].replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("resident result timestamp must be RFC3339") from exc
+    if parsed_timestamp.tzinfo is None:
+        raise ValueError("resident result timestamp must include a timezone")
+    issuer = value["issuer"]
+    if not isinstance(issuer, dict) or set(issuer) != {"component_id", "decision_ref"} or \
+            any(not isinstance(item, str) or not item.strip() for item in issuer.values()):
+        raise ValueError("resident result issuer provenance is invalid")
+    if not isinstance(value["outcome"], str) or value["outcome"] not in _RESIDENT_RESULT_OUTCOMES:
+        raise ValueError("resident result outcome is unsupported")
+    if not isinstance(value["evidence"], list) or any(
+            not isinstance(item, dict) or set(item) != {"evidence_ref", "kind", "content"} or
+            any(not isinstance(item[key], str) or not item[key].strip() for key in ("evidence_ref", "kind")) or
+            not isinstance(item["content"], dict) for item in value["evidence"]):
+        raise ValueError("resident result evidence is malformed")
+    reasons = value["failure_reasons"]
+    if not isinstance(reasons, list) or any(
+            not isinstance(item, dict) or set(item) != {"code", "message", "evidence_refs"} or
+            not isinstance(item["code"], str) or not item["code"].strip() or
+            not isinstance(item["message"], str) or not item["message"].strip() or
+            not isinstance(item["evidence_refs"], list) or
+            any(not isinstance(ref, str) for ref in item["evidence_refs"]) for item in reasons):
+        raise ValueError("resident result failure reasons are malformed")
+    if value["outcome"] in {"FAIL", "INCONCLUSIVE", "REJECTED", "RETURNED", "UNAVAILABLE"} and not reasons:
+        raise ValueError("non-passing resident results require an explicit failure reason")
+    if value["completion_authority"] is not False:
+        raise ValueError("resident result cannot grant completion authority")
+    return json.loads(json.dumps(value))
 
 
 def provider_usage_record(provider_usage: Any, *, request_ref: str, route_id: str,
@@ -237,6 +294,18 @@ class GraceResident:
                     not isinstance(message, dict) or message.get("role") not in {"assistant", "user"}
                     or not isinstance(message.get("content"), str) for message in conversation):
                 raise ValueError("conversation must contain assistant/user text messages")
+            resident_result_value = payload.get("resident_result")
+            resident_result = None
+            if resident_result_value is not None:
+                execution_envelope = payload.get("contract_envelope")
+                correlation_id = payload.get("correlation_id")
+                if correlation_id is None and isinstance(execution_envelope, dict):
+                    correlation_id = execution_envelope.get("correlation_id")
+                resident_result = validate_resident_result(
+                    resident_result_value, activity_id=str(payload.get("activity_id")),
+                    attempt_id=str(payload.get("attempt_id")),
+                    correlation_id=str(correlation_id) if correlation_id is not None else None,
+                    resident_id=self.module_id, config_revision=str(payload.get("config_revision")))
             request = {
                 "model": route.model,
                 "temperature": 0,
@@ -262,6 +331,7 @@ class GraceResident:
                         "For institutional delegation, first use an available directory capability when office responsibility or resident binding is needed. Evaluate the returned authoritative office, resident, and capability records against the objective. A directory listing or office binding does not establish recipient readiness, execution registration, or authorization. If the current available_tools list contains a registered handoff operation whose advertised contract fits the work, you may select it and provide only target identifiers and evidence actually returned by the directory, plus arguments required by that operation's schema. The institutional runtime still enforces grants and records the result. Do not hardcode an office, resident, or operation identity; do not pretend to delegate if no suitable handoff operation is registered. Continue from returned capability results in this same activity, or return a justified blocked decision when the required handoff is unavailable. "
                         "Interpret each returned capability result by its explicit outcome and explanation. A rejected, returned, denied, or unavailable handoff is not an accepted delegation; consider another currently offered capability only when its contract and the evidence support that choice, otherwise report blocked truthfully. Never claim that a recipient accepted work unless the returned result says so. On recovery, continue from the conversation and evidence supplied for the same objective; do not repeat a completed side effect just to recreate its result. "
                         "If independent-verification evidence is supplied, inspect its outcome and criterion findings. A failed or inconclusive verification is not completion. You may propose a corrective operation only when a currently listed operation and the supplied assignment scope permit it; otherwise return a blocked assessment that identifies the failed criteria. CME and the verifier retain completion authority. Do not claim a correction or verification that has not occurred. "
+                        "A supplied resident_result is versioned institutional feedback tied to this activity and attempt. Treat its issuer, outcome, failure reasons, and evidence as the runtime's recorded result; do not discard or rewrite it. A non-passing result cannot be turned into acceptance by your assertion. You may choose an offered corrective action or report blocked; CME independently enforces completion. "
                         "When more information is needed, return {\"action\":\"invoke_capability\","
                         "\"contract_id\":\"r3a.resident-capability-tool\",\"contract_version\":\"1.0.0\","
                         "\"capability_id\":\"exact capability_id\",\"arguments\":{...},"
@@ -280,6 +350,7 @@ class GraceResident:
                                                                   "engineering_assignment": engineering_assignment,
                                                                   "available_engineering_operations": available_operations,
                                                                   "engineering_execution_result": payload.get("engineering_execution_result"),
+                                                                  "resident_result": resident_result,
                                                                   "dependency_context": payload.get("dependency_context", []),
                                                                   "available_tools": tools,
                                                                   "required_evidence_refs": payload.get("required_evidence_refs", []),
@@ -386,6 +457,9 @@ class GraceResident:
                             or not isinstance(final_decision["evidence_refs"], list)
                             or any(not isinstance(ref, str) for ref in final_decision["evidence_refs"])):
                         raise ValueError("model final decision contains invalid or unauthorized evidence")
+                    if resident_result is not None and resident_result["outcome"] != "PASS" and \
+                            final_decision["status"] == "healthy":
+                        raise ValueError("Grace cannot report a non-passing institutional result as healthy")
                 else:
                     raise ValueError("model returned an unsupported action")
                 finish_reason = response["choices"][0].get("finish_reason")
@@ -405,6 +479,7 @@ class GraceResident:
                     "engineering_proposal": decision.get("proposal") if decision["action"] == "propose_engineering" else None,
                     "engineering_assessment": decision.get("engineering_assessment") if decision["action"] == "engineering_assess" else None,
                     "reasoning_escalation_request": (decision if decision["action"] == "escalate_reasoning" else None),
+                    "resident_result": resident_result,
                     "rationale": decision.get("rationale"),
                     "model_content": choice,
                     "model": {"route_id": route.route_id, "provider": route.provider, "name": route.model,

@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.7.0
+File Revision: 1.8.0
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -35,10 +35,11 @@ Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Keep escalation regr
 Changed: 2026-11-07 | R3A-AP1-CME-OBSERVER-QUEUE | Codex GPT-6 | Prevent terminal activities from multiplying an already pending durable observer queue.
 Changed: 2026-11-07T23:41:45Z | R3A-AP2-DELEGATION | Codex GPT-6 | Cover Grace's evidence-grounded use of a dynamic office-handoff capability and unavailable handoff behavior.
 Changed: 2026-11-07T23:53:20Z | R3A-AP2-DELEGATION-CONTINUATION | Codex GPT-6 | Cover multi-route selection, handoff outcome handling, resumed context, and failed-verification corrective reasoning.
+Changed: 2026-11-08T00:04:44Z | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Verify generic institutional result validation, evidence delivery, corrective action selection, and rejection of false healthy completion claims.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
-History/Predecessor: Prior revision preserved at commit ba2aced2683953e7c82b0f124addd24413be40e9, blob 38a4e551f8f87e16d7978e3584caef797ee4c3b6.
+History/Predecessor: Prior revision preserved at commit 32d0b71016c77de82b1a1cc98a9cca4152b6a44b, blob 49127b8c0101d158abf81dbea6f38d27abff4178.
 """
 from __future__ import annotations
 
@@ -712,6 +713,61 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
                 "config_revision": "config-1", "activity_type": "grace.objective",
                 "objective": "Identify the valid successors from STOPPING", "evidence": [],
                 "available_tools": tools, "conversation": [], "route_id": "local"}
+
+    def _resident_result(self):
+        return {"contract_id": "r3a.resident.result", "contract_version": "1.0.0",
+                "activity_id": "activity-1", "attempt_id": "attempt-1",
+                "correlation_id": "correlation-1", "resident_id": "resident.grace",
+                "config_revision": "config-1", "issued_at": "2026-11-07T23:59:11Z",
+                "issuer": {"component_id": "independent-verifier", "decision_ref": "verification-17"},
+                "outcome": "FAIL",
+                "evidence": [{"evidence_ref": "artifact:result.json", "kind": "artifact",
+                              "content": {"observed": "wrong value"}}],
+                "failure_reasons": [{"code": "criterion_mismatch", "message": "required value differs",
+                                     "evidence_refs": ["artifact:result.json"]}],
+                "completion_authority": False}
+
+    def test_generic_failed_result_evidence_is_delivered_for_resident_decision(self):
+        tool = {"capability_id": "capability.from.current.registry"}
+        response = ('{"action":"invoke_capability","contract_id":"r3a.resident-capability-tool",'
+                    '"contract_version":"1.0.0","capability_id":"capability.from.current.registry",'
+                    '"arguments":{},"rationale":"Use the offered corrective operation against the verifier finding"}')
+        resident = self._resident(response)
+        payload = self._payload([tool])
+        payload["correlation_id"] = "correlation-1"
+        payload["resident_result"] = self._resident_result()
+
+        result = asyncio.run(resident.handle("execute", payload))
+
+        self.assertEqual(result["action"], "invoke_capability")
+        self.assertEqual(result["resident_result"]["outcome"], "FAIL")
+        request = resident._model_request.await_args.args[2]
+        model_input = json.loads(request["messages"][-1]["content"])
+        self.assertEqual(model_input["resident_result"]["failure_reasons"][0]["code"], "criterion_mismatch")
+        self.assertEqual(model_input["resident_result"]["evidence"][0]["content"]["observed"], "wrong value")
+
+    def test_generic_result_with_mismatched_lineage_is_rejected_before_inference(self):
+        resident = self._resident(
+            '{"action":"final","decision":{"assessment":"blocked","status":"blocked",'
+            '"evidence_refs":[],"recommended_action":"none"}}')
+        payload = self._payload([])
+        payload["resident_result"] = self._resident_result()
+        payload["resident_result"]["activity_id"] = "different-activity"
+
+        with self.assertRaisesRegex(ValueError, "lineage"):
+            asyncio.run(resident.handle("execute", payload))
+        resident._model_request.assert_not_awaited()
+
+    def test_grace_cannot_report_failed_verification_as_healthy(self):
+        resident = self._resident(
+            '{"action":"final","decision":{"assessment":"All requirements pass",'
+            '"status":"healthy","evidence_refs":["artifact:result.json"],"recommended_action":"none"}}')
+        payload = self._payload([])
+        payload["correlation_id"] = "correlation-1"
+        payload["resident_result"] = self._resident_result()
+
+        with self.assertRaisesRegex(RuntimeError, "cannot report.*healthy"):
+            asyncio.run(resident.handle("execute", payload))
 
     def test_model_selected_capability_call_is_returned_as_resident_action(self):
         tool = {"capability_id": "institution.knowledge.read"}
