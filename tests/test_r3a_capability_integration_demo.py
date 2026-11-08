@@ -349,6 +349,10 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 "deactivate-engineering-v1.0.1")
             stopped_new = await store.rows("lifecycle_state", ("r3a.isolated_workspace", "1.0.1"))
             self.assertEqual("STOPPED", stopped_new[0]["lifecycle_state"])
+            with self.assertRaisesRegex(ValueError, "provider is stopped"):
+                registry.resolve("engineering.workspace.apply_patch")
+            self.assertEqual("infrastructure.octominer.telemetry.read",
+                             registry.resolve("infrastructure.octominer.telemetry.read").descriptor["operation_id"])
 
         with tempfile.TemporaryDirectory(prefix="r3a-provider-lifecycle-") as temporary:
             try:
