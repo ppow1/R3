@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.10.2
+File Revision: 1.10.3
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -40,6 +40,7 @@ Changed: 2026-11-08T01:07:51Z | R3A-MULTI-RESIDENT | Codex GPT-6 | Verify a dire
 Changed: 2026-11-08T02:44:52Z | R3A-AP1-EVIDENCE-FEEDBACK | Codex GPT-6 | Verify complete evidence inventory delivery, mandatory citation guidance, and provenance retention.
 Changed: 2026-11-08T02:49:00Z | R3A-AP1-EVIDENCE-FEEDBACK | Codex GPT-6 | Verify evidence records retain provider and invocation provenance.
 Changed: 2026-11-08T13:21:02Z | R3A-AP1-EVIDENCE-REASONING | Codex GPT-6 | Cover distinction between claim support, evidence coverage, unavailable records, and bounded corrective decisions.
+Changed: 2026-11-08T13:50:35Z | R3A-AUTONOMY-RECOVERY | Codex GPT-6 | Test failed-capability reasoning guidance and bounded durable activity retry decisions.
 Supersedes: None.
 Contracts: R3A-019; proposed r3a.resident.execution-profile@1.0.0; configured model routing and evidence provenance.
 Tests: This test module.
@@ -56,7 +57,7 @@ from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 import hashlib
-from r3a_runtime.db import Store
+from r3a_runtime.db import Store, _activity_failure_outcome
 
 from r3a_runtime.acceptance import (AcceptanceCriteriaRequired, validate_acceptance,
                                     validate_criteria, validate_required_criteria)
@@ -81,6 +82,16 @@ class ModelRouteTests(unittest.TestCase):
         self.assertEqual(resolve_model_route(routes, "local", "escalated").model, "reasoner")
         with self.assertRaises(ConfigurationError):
             resolve_model_route(routes, "local", "unconfigured")
+
+
+class ActivityRetryBudgetTests(unittest.TestCase):
+    def test_idempotent_execution_retries_only_below_configured_attempt_limit(self):
+        self.assertEqual(_activity_failure_outcome("idempotent", 2, 3),
+                         ("RECOVERING", True, "activity_execution_retryable"))
+        self.assertEqual(_activity_failure_outcome("idempotent", 3, 3),
+                         ("BLOCKED", False, "activity_retry_limit_exhausted"))
+        self.assertEqual(_activity_failure_outcome("manual_reconciliation", 1, 3),
+                         ("BLOCKED", False, "activity_failure_not_replay_safe"))
 
 
 class ObserverSchedulingTests(unittest.TestCase):
@@ -750,6 +761,39 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         self.assertEqual(model_input["resident_result"]["failure_reasons"][0]["code"], "criterion_mismatch")
         self.assertEqual(model_input["resident_result"]["evidence"][0]["content"]["observed"], "wrong value")
 
+    def test_failed_capability_result_is_available_for_a_different_reasoned_next_action(self):
+        knowledge_tool = {"capability_id": "institution.knowledge.read",
+                          "contract_id": "r3a.resident-capability-tool",
+                          "contract_version": "1.0.0",
+                          "arguments_schema": {"type": "object", "properties": {
+                              "query": {"type": "string"}}, "required": ["query"],
+                              "additionalProperties": False}}
+        response = ('{"action":"invoke_capability","contract_id":"r3a.resident-capability-tool",'
+                    '"contract_version":"1.0.0","capability_id":"institution.knowledge.read",'
+                    '"arguments":{"query":"authoritative process transition definition"},'
+                    '"rationale":"The prior telemetry call failed and cannot establish the missing process transition."}')
+        resident = self._resident(response)
+        payload = self._payload([knowledge_tool])
+        payload["conversation"] = [
+            {"role": "assistant", "content": json.dumps({"action": "invoke_capability",
+                "capability_id": "infrastructure.octominer.telemetry.read", "arguments": {}})},
+            {"role": "user", "content": json.dumps({"capability_result": {
+                "outcome": "failed", "capability_id": "infrastructure.octominer.telemetry.read",
+                "error": {"code": "provider_timeout", "message": "Telemetry provider timed out."},
+                "evidence": []}})},
+        ]
+
+        result = asyncio.run(resident.handle("execute", payload))
+
+        self.assertEqual(result["action"], "invoke_capability")
+        self.assertEqual(result["capability_request"]["capability_id"], "institution.knowledge.read")
+        request = resident._model_request.await_args.args[2]
+        self.assertIn(payload["conversation"][-1]["content"],
+                      "\n".join(message["content"] for message in request["messages"]))
+        self.assertIn("treat it as failure evidence only", request["messages"][0]["content"])
+        self.assertIn("Do not repeat the same failed operation with unchanged arguments",
+                      request["messages"][0]["content"])
+
     def test_verifier_citation_feedback_and_full_inventory_reach_grace(self):
         tool = {"capability_id": "institution.knowledge.read", "arguments_schema": {
             "type": "object", "properties": {"query": {"type": "string"}},
@@ -814,6 +858,8 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         self.assertIn("Never infer content from an unavailable record", prompt)
         self.assertIn("Do not repeat an unchanged rejected final", resident._model_request.await_args.args[2]["messages"][0]["content"])
         self.assertIn("materially different evidence-backed correction", prompt)
+        self.assertIn("treat it as failure evidence only", prompt)
+        self.assertIn("Do not repeat the same failed operation with unchanged arguments", prompt)
 
     def test_activity_result_retains_uncited_evidence_provenance(self):
         resident = self._resident(

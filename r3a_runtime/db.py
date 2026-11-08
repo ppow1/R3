@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.9.0
+File Revision: 1.9.1
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -31,6 +31,7 @@ Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist autho
 Changed: 2026-11-07T13:20:00Z | R3A-AP2-CAPABILITY-INTEGRATION | Codex GPT-6 | Store canonical invocation authorization in a nonreserved evidence column and verify durable SQL recovery against isolated PostgreSQL.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Persist typed Engineering assignments in durable Grace inbox intake without relaxing AP1 acceptance criteria.
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Park objective dependencies durably, requeue after prerequisite completion, and expose bounded lineage evidence.
+Changed: 2026-11-08T13:50:35Z | R3A-AUTONOMY-RETRY-BOUND | Codex GPT-6 | Stop idempotent activity retry loops at the configured attempt limit with a durable BLOCKED outcome.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Snapshot the configured escalation policy on each durable objective so continuation uses its original budget and allowed routes.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Persist activity-scoped capability grants and atomically reserve per-activity external invocation budgets.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Persist objective task class and selected role with durable intake for route-safe recovery.
@@ -85,6 +86,16 @@ def _concurrent_index_spec(sql: str) -> tuple[str, str, str]:
     if not match:
         raise RuntimeError("Concurrent-index migrations must contain one simple CREATE INDEX CONCURRENTLY")
     return match.group(1), match.group(2), " ".join(match.group(3).split())
+
+
+def _activity_failure_outcome(recovery_policy: str, attempt_count: int,
+                              max_attempts: int) -> tuple[str, bool, str]:
+    """Select retry versus block from durable retry policy and configured attempt budget."""
+    if recovery_policy != "idempotent":
+        return "BLOCKED", False, "activity_failure_not_replay_safe"
+    if attempt_count >= max_attempts:
+        return "BLOCKED", False, "activity_retry_limit_exhausted"
+    return "RECOVERING", True, "activity_execution_retryable"
 
 
 class Store:
@@ -1498,12 +1509,20 @@ class Store:
                             retry_seconds: float) -> None:
         async with self.pool.connection() as conn, conn.transaction():
             row = await (await conn.execute(
-                "SELECT recovery_policy FROM r3a.activities WHERE activity_id=%s FOR UPDATE",
+                "SELECT recovery_policy,attempt_count FROM r3a.activities WHERE activity_id=%s FOR UPDATE",
                 (activity["activity_id"],),
             )).fetchone()
-            safe = row and row["recovery_policy"] == "idempotent"
-            next_state = "RECOVERING" if safe else "BLOCKED"
-            details = {"type": type(exc).__name__, "message": str(exc)[:2000], "safe_to_resume": bool(safe)}
+            attempt_count = int(row["attempt_count"]) if row else self.settings.max_activity_attempts
+            next_state, retryable, reason_code = _activity_failure_outcome(
+                row["recovery_policy"] if row else "", attempt_count,
+                self.settings.max_activity_attempts)
+            details = {"type": type(exc).__name__, "message": str(exc)[:2000],
+                       "safe_to_resume": retryable, "retryable": retryable,
+                       "reason_code": reason_code, "attempt_count": attempt_count,
+                       "max_activity_attempts": self.settings.max_activity_attempts}
+            reason = ("module execution failed; retry scheduled" if retryable else
+                      "activity retry budget exhausted" if reason_code == "activity_retry_limit_exhausted" else
+                      "module execution failed; activity is not replay safe")
             await conn.execute(
                 "UPDATE r3a.activities SET state=%s,available_at=clock_timestamp()+(%s * interval '1 second'),"
                 "lease_owner=NULL,lease_until=NULL,exception=%s,updated_at=clock_timestamp() "
@@ -1520,12 +1539,12 @@ class Store:
                     (activity["resource_id"],),
                 )
             await self._event(conn, "activity.failed", "activity", str(activity["activity_id"]),
-                              "activity.generic", 1, "RUNNING", next_state, "module execution failed",
-                              details, outcome="retrying" if safe else "blocked",
+                              "activity.generic", 1, "RUNNING", next_state, reason,
+                              details, outcome="retrying" if retryable else "blocked",
                               causation_id=activity["attempt_id"])
             accepted = await self._transition_on_conn(conn, "activity", str(activity["activity_id"]),
                                                       "activity.generic", 1, next_state,
-                                                      "module execution failed", details)
+                                                      reason, details)
             if not accepted:
                 raise InvalidTransition(f"Cannot fail activity {activity['activity_id']}")
 

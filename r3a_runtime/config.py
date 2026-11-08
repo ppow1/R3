@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/config.py
 Component: R3A-BOOTSTRAP-CONFIG
-File Revision: 1.6.0
+File Revision: 1.6.1
 Created: 2026-11-06T15:04:00Z
 Created By: Codex GPT-6
 Purpose: Strictly validate external R3A AP0-M1 bootstrap and operating settings.
@@ -21,6 +21,7 @@ Changed: 2026-11-07 | R3A-PLUG-001 | Codex GPT-6 | Load versioned capability plu
 Changed: 2026-11-07 | R3A-PLUG-002 | Codex GPT-6 | Validate plug-in configuration against each manifest's portable schema, without capability-specific host validation.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Add externally configured v1 escalation policy with per-activity request and completion-token budgets.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Bind configured model roles to task classes and reject cross-class fallback.
+Changed: 2026-11-08T13:50:35Z | R3A-AUTONOMY-RETRY-BOUND | Codex GPT-6 | Add a validated external ceiling for durable activity retries after repeated execution failures.
 Supersedes: None.
 Contracts: AP0-001/008/009; R3A-019; Issue #46; AP0-M1 D7; r3a_runtime.contracts; hints/file-provenance.md.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py.
@@ -247,6 +248,7 @@ class Settings:
     restart_initial_seconds: float
     restart_max_seconds: float
     worker_concurrency: int
+    max_activity_attempts: int
     model_provider: str | None
     model_endpoint: str | None
     model_name: str | None
@@ -733,7 +735,15 @@ def load_settings(path: str | Path) -> Settings:
     timing = value["timing"]
     if not isinstance(timing, dict):
         raise ConfigurationError("timing must be an object")
-    _keys(timing, {"observer_interval_seconds", "scheduler_interval_seconds", "lease_seconds", "heartbeat_interval_seconds", "heartbeat_stale_after_seconds", "diagnostic_stale_after_seconds", "restart_initial_seconds", "restart_max_seconds", "worker_concurrency"}, "timing")
+    timing_required = {"observer_interval_seconds", "scheduler_interval_seconds", "lease_seconds",
+                       "heartbeat_interval_seconds", "heartbeat_stale_after_seconds",
+                       "diagnostic_stale_after_seconds", "restart_initial_seconds",
+                       "restart_max_seconds", "worker_concurrency"}
+    _keys(timing, timing_required | ({"max_activity_attempts"} & timing.keys()), "timing")
+    max_activity_attempts = timing.get("max_activity_attempts", 8)
+    if (isinstance(max_activity_attempts, bool) or not isinstance(max_activity_attempts, int)
+            or not 1 <= max_activity_attempts <= 100):
+        raise ConfigurationError("timing.max_activity_attempts must be an integer from 1 through 100")
     concurrency = timing["worker_concurrency"]
     if isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency < 1:
         raise ConfigurationError("worker_concurrency must be a positive integer")
@@ -778,6 +788,7 @@ def load_settings(path: str | Path) -> Settings:
         restart_initial_seconds=initial,
         restart_max_seconds=maximum,
         worker_concurrency=concurrency,
+        max_activity_attempts=max_activity_attempts,
         model_provider=model_provider,
         model_endpoint=model_endpoint,
         model_name=model_name,
@@ -858,5 +869,6 @@ def sanitized_config(settings: Settings) -> dict[str, Any]:
                    "diagnostic_stale_after_seconds": settings.diagnostic_stale_after_seconds,
                    "restart_initial_seconds": settings.restart_initial_seconds,
                    "restart_max_seconds": settings.restart_max_seconds,
-                   "worker_concurrency": settings.worker_concurrency},
+                   "worker_concurrency": settings.worker_concurrency,
+                   "max_activity_attempts": settings.max_activity_attempts},
     }
