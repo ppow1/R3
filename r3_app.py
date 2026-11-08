@@ -103,6 +103,15 @@ def website_identity(request: Request):
             and not parsed_portal_url.password and not parsed_portal_url.query
             and not parsed_portal_url.fragment):
         identity["account_portal_login_url"] = portal_url
+    roadmap_repository = os.environ.get("R3_WEBSITE_ROADMAP_REPOSITORY", "").strip()
+    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", roadmap_repository):
+        identity["roadmap_repository"] = roadmap_repository
+    roadmap_api_base = os.environ.get("R3_WEBSITE_GITHUB_API_BASE", "").strip().rstrip("/")
+    parsed_api_base = urllib.parse.urlsplit(roadmap_api_base) if roadmap_api_base else None
+    if (parsed_api_base and parsed_api_base.scheme == "https" and parsed_api_base.hostname
+            and not parsed_api_base.username and not parsed_api_base.password
+            and not parsed_api_base.query and not parsed_api_base.fragment):
+        identity["roadmap_api_base"] = roadmap_api_base
     return identity
 
 
@@ -341,6 +350,15 @@ def steward_workspace_module():
     if not module.is_file():
         raise HTTPException(404, "Steward workspace client unavailable")
     return FileResponse(module, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/web/roadmap-status.mjs")
+def roadmap_status_module():
+    module = ROOT / "web" / "roadmap-status.mjs"
+    if not module.is_file():
+        raise HTTPException(404, "Roadmap status interface unavailable")
+    return FileResponse(module, media_type="text/javascript", headers={"Cache-Control": "no-cache",
+                       "X-Content-Type-Options": "nosniff"})
 
 
 

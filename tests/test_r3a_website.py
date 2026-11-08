@@ -52,6 +52,14 @@ class StewardWebsiteApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("r3a.steward-workspace-web.v1", response.text)
 
+    def test_roadmap_module_is_served_and_panel_has_live_provenance_labels(self):
+        module = self.client.get("/web/roadmap-status.mjs")
+        self.assertEqual(module.status_code, 200)
+        self.assertIn("fetchRoadmapIssues", module.text)
+        page = self.client.get("/")
+        self.assertIn('id="nav-roadmap"', page.text)
+        self.assertIn("issue reports are not proof of CME execution", module.text)
+
     def test_website_identity_reports_running_build_version_environment_and_port(self):
         client = TestClient(app, base_url="http://testserver:8311")
         with patch.dict(os.environ, {"R3_WEBSITE_ENVIRONMENT": "Development / Alpha"}):
@@ -76,6 +84,21 @@ class StewardWebsiteApiTests(unittest.TestCase):
         with patch.dict(os.environ, {"R3_STEWARD_PORTAL_LOGIN_URL": "https://attacker.invalid/login"}):
             response = client.get("/api/v1/website/identity")
         self.assertNotIn("account_portal_login_url", response.json())
+
+    def test_identity_exposes_only_valid_external_roadmap_configuration(self):
+        client = TestClient(app, base_url="http://testserver:8311")
+        valid = {"R3_WEBSITE_ROADMAP_REPOSITORY": "ppow1/R3",
+                 "R3_WEBSITE_GITHUB_API_BASE": "https://api.github.com"}
+        with patch.dict(os.environ, valid):
+            response = client.get("/api/v1/website/identity")
+        self.assertEqual(response.json()["roadmap_repository"], "ppow1/R3")
+        self.assertEqual(response.json()["roadmap_api_base"], "https://api.github.com")
+        invalid = {"R3_WEBSITE_ROADMAP_REPOSITORY": "https://attacker.invalid/x",
+                   "R3_WEBSITE_GITHUB_API_BASE": "http://attacker.invalid"}
+        with patch.dict(os.environ, invalid):
+            response = client.get("/api/v1/website/identity")
+        self.assertNotIn("roadmap_repository", response.json())
+        self.assertNotIn("roadmap_api_base", response.json())
 
     def test_steward_login_ui_uses_existing_portal_without_collecting_credentials(self):
         response = self.client.get("/")
