@@ -52,7 +52,36 @@ the resource registry, including the workspace resource, health and metadata.
 `CapabilityRegistry.resolve` rejects invocation of the disabled operation.
 These semantics are covered by `tests/test_r3a_modular_capability_registration.py`.
 
-The coordinator was asked whether a generic descriptor extension is needed
-for explicit resource references. Until that contract is agreed, this branch
-uses only the current target-scope schema and generic resource registry; it
-does not introduce descriptor fields or registry infrastructure.
+The stable machine identity is `engineering.workspace.apply_patch` with
+operation revision and contract version `1.0.0`; the shorthand
+`engineering.workspace.apply_patch@1.0.0` denotes that identity/version pair.
+The manifest presents it separately as “Engineering Workspace Apply Patch.”
+Grace obtains isolated-write descriptors dynamically from
+`CapabilityRegistry.discover()` and constrains the proposal schema to that
+runtime-provided list. Consumers resolve the returned identity/version pair;
+they need not embed the historical identifier. No alias is added because the
+canonical operation contract has no alias field and dynamic discovery already
+provides compatibility.
+
+No generic operation resource-reference extension is needed for this provider:
+the typed target and durable Engineering work order bind a workspace for each
+invocation, while the existing resource registry supplies generic resource
+discovery and health. The coordinator's AP0 module binding already has a
+`resource_refs` field; the Engineering child process can leave it empty because
+its workspace association is invocation-scoped, not a static provider
+dependency. No new schema or registry is needed. If a future module must map a
+typed target field to an authoritative resource identity, the smallest
+versioned operation-contract proposal is optional
+`resource_bindings: [{"resource_type": string, "target_json_pointer": string}]`
+in a new operation-contract version; it should be resolved against the existing
+resource registry at invocation time. That extension is not required or
+implemented for Engineering.
+
+The managed-runtime invocation and independent-verification acceptance
+procedure is prepared in
+`docs/architecture/R3A_ENGINEERING_MANAGED_RUNTIME_ACCEPTANCE.md`; it remains
+unexecuted until the coordinator integrates the provider lifecycle.
+
+The coordinator was asked whether the generic child-process lifecycle consumes
+module `resource_refs` semantically or treats it as descriptive metadata. This
+branch does not introduce descriptor fields or registry infrastructure.

@@ -13,6 +13,7 @@ from pathlib import Path
 from r3a_runtime.config import load_settings
 from r3a_runtime.capability_contracts import CapabilityContractError
 from r3a_runtime.diagnostics import DiagnosticProjection
+from r3a_runtime.grace_module import resident_action_schema
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -81,6 +82,12 @@ class ModularRegistrationConformanceTests(unittest.TestCase):
             registry = settings.capability_registry
             discovered = registry.discover()
             self.assertEqual([OPERATION_ID], [item["descriptor"]["operation_id"] for item in discovered])
+            self.assertEqual("Engineering Workspace Apply Patch", discovered[0]["presentation"]["name"])
+            # Grace consumes the registry's discovered descriptor and presents its ID as a
+            # constrained proposal option; there is no hardcoded operation ID in its selector.
+            schema = resident_action_schema([], [item["descriptor"] for item in discovered])
+            self.assertEqual([discovered[0]["descriptor"]["operation_id"]],
+                             schema["properties"]["proposal"]["properties"]["operation_id"]["enum"])
             operation = registry.resolve(OPERATION_ID)
             self.assertEqual("isolated_write", operation.descriptor["effect_class"])
             self.assertEqual("work_order", operation.descriptor["recovery"]["idempotency_scope"])

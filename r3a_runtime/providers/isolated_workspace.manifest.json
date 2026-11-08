@@ -127,7 +127,7 @@
       "desired_state": "enabled"
     },
     "resident_tool": {
-      "name": "engineering_workspace_apply_patch",
+      "name": "Engineering Workspace Apply Patch",
       "description": "Apply one work-order-authorized file within the configured isolated workspace. CME authorization and independent verification are required."
     }
   }
