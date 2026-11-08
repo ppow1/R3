@@ -552,6 +552,8 @@ class StewardAccess:
                 raise HTTPException(401, "Steward session unavailable") from exc
             except AccessUnavailable as exc:
                 raise HTTPException(503, "Session state unavailable") from exc
+            except HTTPException:
+                raise
             except Exception as exc:
                 raise HTTPException(503, "CME capability registry unavailable") from exc
 
