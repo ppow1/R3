@@ -154,14 +154,31 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   let selectedResident = '';
   let selectedConversation = '';
   let loaded = false;
+  let directoryAvailable = false;
+  let creatingConversation = false;
+  const authorizedResidentIds = new Set();
   let pendingConversationId = null;
   let pendingMessage = null;
+  const newConversationButton = root.getElementById('chat-new');
+  function syncNewConversationButton() {
+    newConversationButton.disabled = !directoryAvailable || !selectedResident || !authorizedResidentIds.has(selectedResident) || creatingConversation;
+    newConversationButton.title = newConversationButton.disabled ? 'Select an authorized resident from the current directory' : 'Start a persistent conversation with the selected resident';
+  }
 
   const unavailable = error => {
     const message = error instanceof WorkspaceApiError ? error.message : 'Resident conversation service unavailable';
     const missing = error?.status === 404 ? 'Authoritative resident directory and conversation APIs are not mounted on this website service. ' : '';
     setText(status, `${error?.status === 401 ? 'Sign in through the Steward session service. ' : missing}${message}${error?.correlationId ? ` · correlation ${error.correlationId}` : ''}`);
     status.dataset.state = error?.status === 401 ? 'unauthenticated' : 'unavailable';
+    if (error?.status === 401) {
+      const signIn = root.createElement('button');
+      signIn.type = 'button';
+      signIn.className = 'chat-sign-in';
+      signIn.textContent = 'Open Steward sign-in';
+      signIn.setAttribute('aria-label', 'Open the shared Steward session panel to sign in');
+      signIn.addEventListener('click', () => root.getElementById('nav-steward')?.click());
+      status.appendChild(signIn);
+    }
   };
 
   async function loadMessages(conversationId) {
@@ -206,30 +223,48 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   async function loadResidents() {
     if (loaded) return;
     loaded = true;
+    directoryAvailable = false;
+    authorizedResidentIds.clear();
+    selectedResident = '';
+    syncNewConversationButton();
+    residentSelect.disabled = true;
+    residentSelect.replaceChildren(new Option('Loading authorized residents…', ''));
     try {
       const result = await api.residents();
+      directoryAvailable = true;
       residentSelect.replaceChildren(new Option('Select a resident…', ''));
       for (const resident of result.residents || []) {
         if (!resident.resident_id || resident.authorized === false) continue;
+        authorizedResidentIds.add(resident.resident_id);
         residentSelect.add(new Option(resident.display_name || resident.resident_id, resident.resident_id));
       }
       residentSelect.disabled = false;
-      root.getElementById('chat-new').disabled = residentSelect.options.length < 2;
+      syncNewConversationButton();
       setText(status, result.freshness === 'current' ? 'Resident directory loaded from the institutional directory.' : `Directory source ${result.freshness || 'unknown'}`);
       status.dataset.state = result.freshness || 'unknown';
       if (!residentSelect.options.length) setText(status, 'No authorized residents were returned by the institutional directory.');
-    } catch (error) { unavailable(error); }
+    } catch (error) {
+      loaded = false;
+      directoryAvailable = false;
+      residentSelect.replaceChildren(new Option(error?.status === 401 ? 'Sign in to load residents' : 'Resident directory unavailable', ''));
+      residentSelect.disabled = true;
+      syncNewConversationButton();
+      unavailable(error);
+    }
   }
 
   residentSelect.addEventListener('change', () => {
     selectedResident = residentSelect.value;
+    syncNewConversationButton();
     selectedConversation = '';
     conversationList.replaceChildren(); messageList.replaceChildren();
     composer.disabled = true; sendButton.disabled = true;
     if (selectedResident) loadConversations();
   });
-  root.getElementById('chat-new').addEventListener('click', async () => {
-    if (!selectedResident) { setText(status, 'Select an authorized resident before creating a conversation.'); return; }
+  newConversationButton.addEventListener('click', async () => {
+    if (newConversationButton.disabled) return;
+    creatingConversation = true;
+    syncNewConversationButton();
     try {
       pendingConversationId ||= crypto.randomUUID();
       const result = await api.createConversation({residentId: selectedResident, clientConversationId: pendingConversationId});
@@ -238,6 +273,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
       pendingConversationId = null;
       await loadConversations();
     } catch (error) { unavailable(error); }
+    finally { creatingConversation = false; syncNewConversationButton(); }
   });
   sendButton.addEventListener('click', async () => {
     const text = composer.value.trim();
@@ -255,7 +291,10 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     finally { sendButton.disabled = false; }
   });
   root.getElementById('nav-chat')?.addEventListener('click', () => loadResidents());
-  root.getElementById('chat-refresh')?.addEventListener('click', () => selectedResident ? loadConversations() : (loaded = false, loadResidents()));
+  root.getElementById('chat-refresh')?.addEventListener('click', () => {
+    if (selectedResident && directoryAvailable) loadConversations();
+    else { loaded = false; loadResidents(); }
+  });
 }
 
 export function mountNotificationInbox({api = new StewardWorkspaceApi(), root = document} = {}) {

@@ -96,6 +96,20 @@ test('message sends preserve client idempotency identity and server correlation'
   assert.equal(result.correlation_id, 'cme-1');
 });
 
+test('new conversation creation routes the selected authoritative resident with a retry key', async () => {
+  let call;
+  const api = new StewardWorkspaceApi(async (...args) => {
+    call = args;
+    return response(201, {contract: WORKSPACE_CONTRACT, freshness: 'current', conversation: {conversation_id: 'conversation-1', resident_id: 'resident:grace'}});
+  });
+  const result = await api.createConversation({residentId: 'resident:grace', clientConversationId: 'request-1'});
+  assert.equal(call[0], '/api/v1/steward/conversations');
+  assert.equal(call[1].method, 'POST');
+  assert.equal(call[1].credentials, 'same-origin');
+  assert.deepEqual(JSON.parse(call[1].body), {resident_id: 'resident:grace', client_conversation_id: 'request-1'});
+  assert.equal(result.conversation.resident_id, 'resident:grace');
+});
+
 test('notification acknowledgment uses the #48 delivery route and idempotency key', async () => {
   let call;
   const api = new StewardWorkspaceApi(async (...args) => {
