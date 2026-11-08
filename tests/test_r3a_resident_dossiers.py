@@ -3,7 +3,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_r3a_resident_dossiers.py
 # Component: R3A-RESIDENT-DOSSIERS-TESTS
-# File Revision: 1.0.2
+# File Revision: 1.0.3
 # Created: 2026-11-08 UTC (exact creation time not captured)
 # Created By: Codex GPT-6
 # Purpose: Cover roster data shape, prompt/config composition, privacy, governance, memory and epistemics.
@@ -14,6 +14,7 @@
 # Changed: 2026-11-08 UTC | CHARACTER-ARCHITECTURE | Codex GPT-6 | Add dossier architecture regressions.
 # Changed: 2026-11-08 UTC | CA-03 | Codex GPT-6 | Assert authorization scope remains immutable within a context pin.
 # Changed: 2026-11-08 UTC | CA-03 | Codex GPT-6 | Assert route and directory binding continuity on resumed boundaries.
+# Changed: 2026-11-08 UTC | CA-05 | Codex GPT-6 | Assert tamper rejection and reference-only memory/communications projections.
 # Supersedes: None
 # Contracts: r3a.resident.dossier.v1; r3a.resident.prompt-composition.v1; memory/relationship/epistemic v1
 # Tests: python3 -m unittest tests.test_r3a_resident_dossiers
@@ -592,6 +593,14 @@ class ResidentDossierTests(unittest.TestCase):
         self.assertEqual(context["classification_scope"], ["public"])
         self.assertEqual(context["office_id"], "office:grace")
         self.assertIs(validate_approved_context(context)["authority_granted"], False)
+        altered_prompt = copy.deepcopy(context)
+        altered_prompt["prompt_text"] += " changed"
+        with self.assertRaisesRegex(ValueError, "prompt digest mismatch"):
+            validate_approved_context(altered_prompt)
+        protected_scope = copy.deepcopy(context)
+        protected_scope["classification_scope"] = ["protected"]
+        with self.assertRaisesRegex(PermissionError, "protected classifications"):
+            validate_approved_context(protected_scope)
         grace_context = project_for_grace_context_v1(context, verified_execution_profile={
             "profile_id": "profile:grace", "profile_revision": "1.2.9",
             "resident_id": "resident:grace", "route_id": "route:grace-primary",
@@ -643,6 +652,11 @@ class ResidentDossierTests(unittest.TestCase):
             principal_ref="memory:authorized", audit=events.append)
         self.assertTrue(memory["context_reference_only"])
         self.assertNotIn("prompt_text", memory)
+        communications = project_context_for_sink(context, sink="communications",
+            authorized_classifications=frozenset({"public", "institutional"}),
+            principal_ref="communications:authorized", audit=events.append)
+        self.assertTrue(communications["context_reference_only"])
+        self.assertNotIn("prompt_text", communications)
         diagnostics = project_context_for_sink(context, sink="diagnostics",
             authorized_classifications=frozenset({"public", "institutional"}),
             principal_ref="diagnostics:authorized", audit=events.append)
@@ -651,7 +665,11 @@ class ResidentDossierTests(unittest.TestCase):
             project_context_for_sink(context, sink="inference",
                 authorized_classifications=frozenset(), principal_ref="inference:denied",
                 audit=events.append)
-        self.assertEqual([event["outcome"] for event in events], ["allowed", "allowed", "denied"])
+        self.assertEqual([event["outcome"] for event in events],
+                         ["allowed", "allowed", "allowed", "denied"])
+        self.assertEqual(set(events[-1]), {
+            "principal_ref", "sink", "pin_ref", "context_sha256", "outcome"})
+        self.assertNotIn("prompt_text", json.dumps(events))
 
     def test_hr_association_adapter_fails_closed_without_hr_provenance_operation(self):
         from types import SimpleNamespace
