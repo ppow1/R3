@@ -1,4 +1,21 @@
-"""Bounded workspace file provider used for isolated Engineering operations."""
+"""
+R3 CONTROLLED SOURCE
+File: r3a_runtime/providers/isolated_workspace.py
+Component: R3A-ENGINEERING-WORKSPACE-PROVIDER
+File Revision: 1.1.0
+Created: 2026-11-07 UTC
+Created By: Codex GPT-6
+Purpose: Create a new bounded UTF-8 artifact within a CME-authorized isolated Engineering workspace.
+Execution Model: Canonical capability provider; CME owns dispatch and invocation-time authorization.
+Observability: Return artifact path, digest, bytes written, and idempotent replay status.
+Dependencies: r3a.capability-operation.v1; durable Engineering work order and workspace configuration.
+Authority: Steward standing modular workstream backlog, Issue #43 comment 6725061460.
+Changed: 2026-11-08 | R3A-ENGINEERING-RELEASE-CONTRACT | Add configurable per-file byte bound while preserving replay-safe create semantics.
+Supersedes: None.
+Contracts: r3a.capability-operation.v1; r3a.engineering-work-order.v1.
+Tests: tests/test_r3a_engineering_provider.py; tests/test_r3a_capability_integration_demo.py.
+History/Predecessor: Existing provider tracked in repository history.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -10,6 +27,11 @@ from typing import Any
 class IsolatedWorkspaceProvider:
     def __init__(self, configuration: dict[str, Any]):
         self.root = Path(configuration["workspace_root"]).resolve(strict=True)
+        maximum_file_bytes = configuration.get("maximum_file_bytes", 1024 * 1024)
+        if (not isinstance(maximum_file_bytes, int) or isinstance(maximum_file_bytes, bool)
+                or maximum_file_bytes < 1):
+            raise ValueError("maximum_file_bytes must be a positive integer")
+        self.maximum_file_bytes = maximum_file_bytes
 
     def invoke(self, arguments: dict[str, Any], *, context: dict[str, Any]) -> dict[str, Any]:
         relative = arguments["path"]
@@ -27,6 +49,8 @@ class IsolatedWorkspaceProvider:
         if self.root not in destination.parents:
             raise PermissionError("workspace path escapes its configured root")
         payload = arguments["content"].encode("utf-8")
+        if len(payload) > self.maximum_file_bytes:
+            raise ValueError("workspace artifact exceeds the configured maximum_file_bytes")
         digest = hashlib.sha256(payload).hexdigest()
         destination.parent.mkdir(parents=True, exist_ok=True)
         if destination.exists():

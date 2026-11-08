@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "plugin_id": "r3a.engineering-workspace",
+  "plugin_version": "1.0.0",
+  "artifact_ref": "plugin.py",
+  "artifact_sha256": "184d16bd5a31a83e605519903a121e2799ffbad4f54cdc454ee55c50c9e90bde",
+  "configuration_schema": {
+    "schema_id": "r3a.engineering-workspace.config.v1",
+    "type": "object",
+    "required": [
+      "workspace_root",
+      "maximum_file_bytes"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "workspace_root": {
+        "type": "string",
+        "pattern": "^/[^\\u0000]*$"
+      },
+      "maximum_file_bytes": {
+        "type": "integer",
+        "minimum": 1
+      }
+    }
+  },
+  "provider": {
+    "provider_id": "r3a.isolated_workspace",
+    "provider_version": "1.0.0",
+    "entrypoint": "r3a_runtime.providers.isolated_workspace:create_provider",
+    "artifact_sha256": "a67c496c5ad476e963c1de5014847c1a1e0355b53db03d7f4018b6f73d4ca70d"
+  },
+  "operation": {
+    "contract_id": "r3a.capability-operation.v1",
+    "contract_version": "1.0.0",
+    "operation_id": "engineering.workspace.apply_patch",
+    "operation_revision": "1.0.0",
+    "provider": {
+      "provider_id": "r3a.isolated_workspace",
+      "provider_version": "1.0.0",
+      "entrypoint": "r3a_runtime.providers.isolated_workspace:create_provider",
+      "artifact_sha256": "a67c496c5ad476e963c1de5014847c1a1e0355b53db03d7f4018b6f73d4ca70d"
+    },
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "path",
+        "content"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content": {
+          "type": "string"
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "required": [
+        "path",
+        "sha256",
+        "bytes_written",
+        "replayed"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "bytes_written": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "replayed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "effect_class": "isolated_write",
+    "caller_constraints": {
+      "allowed_principals": [],
+      "allowed_residents": [],
+      "allowed_services": []
+    },
+    "target_scope_schema": {
+      "type": "object",
+      "required": [
+        "workspace_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "workspace_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "required_grants": [
+      "engineering.workspace.apply_patch"
+    ],
+    "evidence": {
+      "schema": {
+        "type": "object"
+      },
+      "verification_obligations": [
+        "authorization_must_match_the_work_order_workspace_and_activity_scope",
+        "provider_result_is_execution_evidence_not_acceptance",
+        "independent_verifier_must_read_artifact_bytes_and_check_work_order_criteria"
+      ]
+    },
+    "recovery": {
+      "idempotency_required": true,
+      "idempotency_scope": "work_order",
+      "replay_safe": true,
+      "reconciliation_operation_id": null
+    },
+    "execution": {
+      "timeout_seconds": 30,
+      "retry_disposition": "safe_retry"
+    },
+    "lifecycle": {
+      "desired_state": "enabled"
+    },
+    "resident_tool": {
+      "name": "Engineering Workspace File Creation",
+      "description": "Create one new UTF-8 file inside the CME-authorized isolated workspace and work-order path scope. Existing different bytes are never overwritten."
+    }
+  }
+}
