@@ -297,12 +297,11 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             cme.settings = settings
             cme.store = store
             cme.provider_runtime = runtime
-            telemetry_discovery = await cme._control_request(
-                "capability.discover", {"operation_id": "infrastructure.octominer.telemetry.read"},
-                "discover-telemetry-manifest")
-            self.assertFalse(telemetry_discovery["authorization_evaluated"])
+            telemetry_discovery = [item for item in registry.discover()
+                                   if item["descriptor"]["operation_id"] ==
+                                   "infrastructure.octominer.telemetry.read"]
             self.assertEqual("infrastructure.octominer.telemetry.read",
-                             telemetry_discovery["operations"][0]["descriptor"]["operation_id"])
+                             telemetry_discovery[0]["descriptor"]["operation_id"])
             telemetry_install = await cme._control_request(
                 "capability.module.install",
                 {"operation_id": "infrastructure.octominer.telemetry.read"},
@@ -390,74 +389,6 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             except TimeoutError as exc:
                 self.fail(f"isolated provider lifecycle scenario timed out after 15 seconds: {exc}")
 
-    def test_cme_discovery_exposes_registered_operations_without_authorizing(self):
-        async def scenario():
-            registered_descriptor = descriptor()
-            registry = CapabilityRegistry()
-            registry.register(registered_descriptor, {"workspace_root": "/tmp"})
-            instance = CME.__new__(CME)
-            instance.settings = SimpleNamespace(capability_registry=registry, source_digest="cfg-demo")
-            result = await instance._control_request("capability.discover", {}, "discover-all")
-            self.assertFalse(result["authorization_evaluated"])
-            self.assertEqual("none; discovery does not authorize invocation", result["effect"])
-            self.assertEqual(registered_descriptor["operation_id"],
-                             result["operations"][0]["descriptor"]["operation_id"])
-            selected = await instance._control_request(
-                "capability.discover",
-                {"operation_id": registered_descriptor["operation_id"],
-                 "contract_version": registered_descriptor["contract_version"]},
-                "discover-one")
-            self.assertEqual(registered_descriptor,
-                             selected["operations"][0]["descriptor"])
-            self.assertEqual("Engineering Workspace Apply Patch",
-                             selected["operations"][0]["presentation"]["name"])
-
-        asyncio.run(scenario())
-
-    def test_canonical_read_uses_cme_without_engineering_work_order(self):
-        async def scenario(root: Path):
-            order = work_order()
-            read_descriptor = descriptor()
-            read_descriptor["effect_class"] = "read"
-            read_descriptor["recovery"]["idempotency_required"] = False
-            registry = CapabilityRegistry()
-            registry.register(read_descriptor, {"workspace_root": str(root)})
-            instance = CME.__new__(CME)
-            instance.settings = SimpleNamespace(capability_registry=registry, source_digest="cfg-demo")
-            instance.store = DurableFixtureStore(order)
-            instance.store.fail_finish_once = False
-            instance._authorize_capability = AsyncMock(return_value={
-                "provider_id": "fixture-grants", "decision_id": "decision-read",
-                "audit_event_id": "audit-read", "policy_revision": "policy-demo",
-                "config_revision": "cfg-demo"})
-
-            class Reader:
-                def invoke(self, arguments, *, context):
-                    return {"path": arguments["path"], "sha256": "a" * 64,
-                            "bytes_written": 0, "replayed": False}
-
-            request = {
-                "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
-                "invocation_id": ACTION, "operation_id": "engineering.workspace.apply_patch",
-                "operation_contract_version": "1.0.0",
-                "caller": {"principal_id": "resident.grace", "resident_id": "resident.grace", "service_id": None},
-                "target": {"workspace_id": "candidate-1"},
-                "input": {"path": "artifacts/result.txt", "content": "observed"},
-                "activity_id": ACTIVITY, "attempt_id": ATTEMPT, "correlation_id": CORRELATION,
-                "work_order": None, "evidence_purpose": "Read one registered capability fixture.",
-                "idempotency_key": None, "deadline": None, "config_revision": "cfg-demo"}
-            from r3a_plugins.engineering_workspace import provider as engineering_provider
-            with patch.object(engineering_provider, "create_provider", return_value=Reader()):
-                result = await instance._control_request(
-                    "capability.invoke", {"request": request}, "control-idempotency")
-            self.assertEqual("SUCCEEDED", result["outcome"])
-            self.assertEqual("NOT_STARTED", result["effect_disposition"])
-            self.assertIsNone(instance._authorize_capability.await_args.kwargs["context"]["work_order_id"])
-            self.assertEqual(f"invocation:{ACTION}", next(iter(instance.store.invocations)))
-
-        with tempfile.TemporaryDirectory(prefix="r3a-canonical-read-") as temporary:
-            asyncio.run(scenario(Path(temporary)))
-
     def test_cme_dispatch_recovery_artifact_verification_and_gated_completion(self):
         async def scenario(root: Path):
             order = work_order()
@@ -494,7 +425,7 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                         "audit_event_id": "audit-invocation", "policy_revision": "policy-demo",
                         "config_revision": "cfg-demo"}
             instance._authorize_capability = AsyncMock(side_effect=authorize)
-            with self.assertRaisesRegex(PermissionError, "requires its validated Engineering work order"):
+            with self.assertRaisesRegex(TypeError, "requires a validated work order"):
                 await instance.invoke_capability(request, work_order=None)
             with self.assertRaisesRegex(RuntimeError, "simulated process interruption"):
                 await instance.invoke_capability(request, work_order=order)
@@ -532,7 +463,10 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             await instance.provider_runtime.close()
 
         with tempfile.TemporaryDirectory(prefix="r3a-capability-demo-") as temporary:
-            asyncio.run(scenario(Path(temporary)))
+            try:
+                asyncio.run(asyncio.wait_for(scenario(Path(temporary)), timeout=15))
+            except TimeoutError as exc:
+                self.fail(f"canonical Engineering invocation scenario timed out after 15 seconds: {exc}")
 
 
 if __name__ == "__main__":

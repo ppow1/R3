@@ -1,0 +1,577 @@
+{
+  "acceptance_id": "r3a-engineering-live-acceptance-2026-11-08",
+  "artifacts": [
+    {
+      "content": "{\"attempt\": 1, \"workspace_id\": \"wrong-workspace\"}",
+      "path": "/tmp/r3a-eng-acceptance/workspace/artifacts/attempt-1.json",
+      "sha256": "sha256:d8819557f8eaf8bf8763da6255b1a61e4cf1dae5a2ea1a90daa2c393039ebd5d",
+      "workspace_relative_path": "artifacts/attempt-1.json"
+    },
+    {
+      "content": "{\"attempt\": 2, \"workspace_id\": \"candidate-1\"}",
+      "path": "/tmp/r3a-eng-acceptance/workspace/artifacts/attempt-2.json",
+      "sha256": "sha256:90192ea52f4797cdadee828279d2241f80a13dde75d957d3a7ddb889d70855bf",
+      "workspace_relative_path": "artifacts/attempt-2.json"
+    }
+  ],
+  "async_invocation_stall": {
+    "finding": "Invocation and provider lifecycle completed within bound in the isolated run; root cause of the previous report was not reproduced.",
+    "guard": "15 second asyncio.wait_for bound with actionable test failure message",
+    "reproduced": false
+  },
+  "authorization_provider": "bounded-engineering-acceptance test policy; synthetic authorization constrained to resident.grace, candidate-1, artifacts/**; actual operation ran through CME canonical authorize/invoke/persist path",
+  "branch": "integration/r3a-grace-engineering-20261107",
+  "capability_invocations": [
+    {
+      "authorization_evidence": {
+        "allowed": true,
+        "audit_event_id": "2d70db47-420f-4d0f-82d1-c435e0d93559",
+        "config_revision": "fd70f4b84515dd4e29e7a3ad5c887439bcdddd58ef2ac2b743ff7e8847119ce5",
+        "decision_id": "a005d44a-baa8-4804-ba46-a55cd6c9d067",
+        "policy_revision": "bounded-isolated-engineering-acceptance-v1",
+        "provider_id": "bounded-engineering-acceptance"
+      },
+      "idempotency_key": "c16679a8-7fde-4d02-a13d-aca78272be96:engineering.workspace.apply_patch:v1",
+      "invocation_id": "a005d44a-baa8-4804-ba46-a55cd6c9d067",
+      "operation_id": "engineering.workspace.apply_patch",
+      "request": {
+        "activity_id": "1ebbc86a-8ce5-4c27-8842-d30d6a2cd4c2",
+        "attempt_id": "517778cf-3308-4cde-8a51-fbd67237e81d",
+        "caller": {
+          "principal_id": "resident.grace",
+          "resident_id": "resident.grace",
+          "service_id": null
+        },
+        "config_revision": "fd70f4b84515dd4e29e7a3ad5c887439bcdddd58ef2ac2b743ff7e8847119ce5",
+        "contract_id": "r3a.capability-invocation.v1",
+        "contract_version": "1.0.0",
+        "correlation_id": "cb902db2-212d-4b95-a553-1267b8716217",
+        "deadline": null,
+        "evidence_purpose": "Write an isolated Engineering artifact for independent verification.",
+        "idempotency_key": "c16679a8-7fde-4d02-a13d-aca78272be96:engineering.workspace.apply_patch:v1",
+        "input": {
+          "content": "{\"attempt\": 1, \"workspace_id\": \"wrong-workspace\"}",
+          "path": "artifacts/attempt-1.json"
+        },
+        "invocation_id": "a005d44a-baa8-4804-ba46-a55cd6c9d067",
+        "operation_contract_version": "1.0.0",
+        "operation_id": "engineering.workspace.apply_patch",
+        "target": {
+          "workspace_id": "candidate-1"
+        },
+        "work_order": {
+          "version": 1,
+          "work_order_id": "c16679a8-7fde-4d02-a13d-aca78272be96"
+        }
+      },
+      "result": {
+        "activity_id": "1ebbc86a-8ce5-4c27-8842-d30d6a2cd4c2",
+        "attempt_id": "517778cf-3308-4cde-8a51-fbd67237e81d",
+        "authorization": {
+          "allowed": true,
+          "audit_event_id": "2d70db47-420f-4d0f-82d1-c435e0d93559",
+          "config_revision": "fd70f4b84515dd4e29e7a3ad5c887439bcdddd58ef2ac2b743ff7e8847119ce5",
+          "decision_id": "a005d44a-baa8-4804-ba46-a55cd6c9d067",
+          "policy_revision": "bounded-isolated-engineering-acceptance-v1",
+          "provider_id": "bounded-engineering-acceptance"
+        },
+        "contract_id": "r3a.capability-invocation.v1",
+        "contract_version": "1.0.0",
+        "correlation_id": "cb902db2-212d-4b95-a553-1267b8716217",
+        "effect_disposition": "COMMITTED",
+        "error": null,
+        "evidence": [
+          {
+            "bytes_written": 49,
+            "path": "artifacts/attempt-1.json",
+            "replayed": false,
+            "sha256": "d8819557f8eaf8bf8763da6255b1a61e4cf1dae5a2ea1a90daa2c393039ebd5d"
+          }
+        ],
+        "finished_at": "2026-11-08T14:17:51.679151+00:00",
+        "invocation_id": "a005d44a-baa8-4804-ba46-a55cd6c9d067",
+        "operation_contract_version": "1.0.0",
+        "operation_id": "engineering.workspace.apply_patch",
+        "outcome": "SUCCEEDED",
+        "output": {
+          "bytes_written": 49,
+          "path": "artifacts/attempt-1.json",
+          "replayed": false,
+          "sha256": "d8819557f8eaf8bf8763da6255b1a61e4cf1dae5a2ea1a90daa2c393039ebd5d"
+        },
+        "provider": {
+          "artifact_sha256": "0b92d126ed33c972ddee65d67b94c57794bcf64122ebe304c8a0e1ffeb064126",
+          "provider_id": "r3a.isolated_workspace",
+          "provider_version": "1.0.0"
+        },
+        "reconciliation_ref": null,
+        "retryable": false,
+        "started_at": "2026-11-08T14:17:51.642585+00:00"
+      },
+      "state": "SUCCEEDED"
+    },
+    {
+      "authorization_evidence": {
+        "allowed": true,
+        "audit_event_id": "834e3da1-f661-4cdf-bf0e-e2647c3448e1",
+        "config_revision": "fd70f4b84515dd4e29e7a3ad5c887439bcdddd58ef2ac2b743ff7e8847119ce5",
+        "decision_id": "2139c75b-df69-4897-8ff0-b17309b9f69f",
+        "policy_revision": "bounded-isolated-engineering-acceptance-v1",
+        "provider_id": "bounded-engineering-acceptance"
+      },
+      "idempotency_key": "7320d961-3d32-4c10-a9f4-1d5ff9cfc871:engineering.workspace.apply_patch:v1",
+      "invocation_id": "2139c75b-df69-4897-8ff0-b17309b9f69f",
+      "operation_id": "engineering.workspace.apply_patch",
+      "request": {
+        "activity_id": "ffd24694-df2a-46c1-8d04-0fbe76cc9cba",
+        "attempt_id": "177834e1-de67-408d-b261-9df7d7e518c5",
+        "caller": {
+          "principal_id": "resident.grace",
+          "resident_id": "resident.grace",
+          "service_id": null
+        },
+        "config_revision": "fd70f4b84515dd4e29e7a3ad5c887439bcdddd58ef2ac2b743ff7e8847119ce5",
+        "contract_id": "r3a.capability-invocation.v1",
+        "contract_version": "1.0.0",
+        "correlation_id": "b27e43a2-2c55-4d55-9ad9-9b9f73c38801",
+        "deadline": null,
+        "evidence_purpose": "Write an isolated Engineering artifact for independent verification.",
+        "idempotency_key": "7320d961-3d32-4c10-a9f4-1d5ff9cfc871:engineering.workspace.apply_patch:v1",
+        "input": {
+          "content": "{\"attempt\": 2, \"workspace_id\": \"candidate-1\"}",
+          "path": "artifacts/attempt-2.json"
+        },
+        "invocation_id": "2139c75b-df69-4897-8ff0-b17309b9f69f",
+        "operation_contract_version": "1.0.0",
+        "operation_id": "engineering.workspace.apply_patch",
+        "target": {
+          "workspace_id": "candidate-1"
+        },
+        "work_order": {
+          "version": 1,
+          "work_order_id": "7320d961-3d32-4c10-a9f4-1d5ff9cfc871"
+        }
+      },
+      "result": {
+        "activity_id": "ffd24694-df2a-46c1-8d04-0fbe76cc9cba",
+        "attempt_id": "177834e1-de67-408d-b261-9df7d7e518c5",
+        "authorization": {
+          "allowed": true,
+          "audit_event_id": "834e3da1-f661-4cdf-bf0e-e2647c3448e1",
+          "config_revision": "fd70f4b84515dd4e29e7a3ad5c887439bcdddd58ef2ac2b743ff7e8847119ce5",
+          "decision_id": "2139c75b-df69-4897-8ff0-b17309b9f69f",
+          "policy_revision": "bounded-isolated-engineering-acceptance-v1",
+          "provider_id": "bounded-engineering-acceptance"
+        },
+        "contract_id": "r3a.capability-invocation.v1",
+        "contract_version": "1.0.0",
+        "correlation_id": "b27e43a2-2c55-4d55-9ad9-9b9f73c38801",
+        "effect_disposition": "COMMITTED",
+        "error": null,
+        "evidence": [
+          {
+            "bytes_written": 45,
+            "path": "artifacts/attempt-2.json",
+            "replayed": false,
+            "sha256": "90192ea52f4797cdadee828279d2241f80a13dde75d957d3a7ddb889d70855bf"
+          }
+        ],
+        "finished_at": "2026-11-08T14:17:51.838001+00:00",
+        "invocation_id": "2139c75b-df69-4897-8ff0-b17309b9f69f",
+        "operation_contract_version": "1.0.0",
+        "operation_id": "engineering.workspace.apply_patch",
+        "outcome": "SUCCEEDED",
+        "output": {
+          "bytes_written": 45,
+          "path": "artifacts/attempt-2.json",
+          "replayed": false,
+          "sha256": "90192ea52f4797cdadee828279d2241f80a13dde75d957d3a7ddb889d70855bf"
+        },
+        "provider": {
+          "artifact_sha256": "0b92d126ed33c972ddee65d67b94c57794bcf64122ebe304c8a0e1ffeb064126",
+          "provider_id": "r3a.isolated_workspace",
+          "provider_version": "1.0.0"
+        },
+        "reconciliation_ref": null,
+        "retryable": false,
+        "started_at": "2026-11-08T14:17:51.796889+00:00"
+      },
+      "state": "SUCCEEDED"
+    }
+  ],
+  "database": "private PostgreSQL 16 cluster; port 55973; socket under the acceptance data directory",
+  "deployment_location": "/tmp/r3a-eng-acceptance",
+  "evidence_source": "durable PostgreSQL projections/events and live filesystem bytes",
+  "independent_verifier": "r3a_runtime.engineering_verifier.verify_workspace_artifact",
+  "instance_id": "r3a_engineering",
+  "managed_cme_touched": false,
+  "module": {
+    "artifact_digest": "0b92d126ed33c972ddee65d67b94c57794bcf64122ebe304c8a0e1ffeb064126",
+    "health": "stopped",
+    "lifecycle_state": "STOPPED",
+    "module_id": "r3a.isolated_workspace",
+    "module_version": "1.0.0"
+  },
+  "module_lifecycle_events": [
+    {
+      "evidence": {
+        "health": "unknown",
+        "idempotency_key": "install-engineering",
+        "source": "control.install",
+        "version": "1.0.0"
+      },
+      "next_state": "INSTALLED",
+      "occurred_at": "2026-11-08 09:17:51.134070-05:00",
+      "outcome": "accepted",
+      "prior_state": null
+    },
+    {
+      "evidence": {
+        "health": "starting",
+        "version": "1.0.0"
+      },
+      "next_state": "ACTIVATING",
+      "occurred_at": "2026-11-08 09:17:51.174488-05:00",
+      "outcome": "accepted",
+      "prior_state": "INSTALLED"
+    },
+    {
+      "evidence": {
+        "health": "healthy",
+        "observed_contract": {
+          "contract_id": "r3a.capability-provider.v1",
+          "module_id": "r3a.isolated_workspace",
+          "module_version": "1.0.0",
+          "supported_protocol": {
+            "major": 1,
+            "max_minor": 0,
+            "min_minor": 0
+          }
+        },
+        "pid": 1760478,
+        "version": "1.0.0"
+      },
+      "next_state": "ACTIVE",
+      "occurred_at": "2026-11-08 09:17:51.570358-05:00",
+      "outcome": "accepted",
+      "prior_state": "ACTIVATING"
+    },
+    {
+      "evidence": {
+        "health": "draining",
+        "inflight_invocations": 0,
+        "version": "1.0.0"
+      },
+      "next_state": "STOPPING",
+      "occurred_at": "2026-11-08 09:17:51.916535-05:00",
+      "outcome": "accepted",
+      "prior_state": "ACTIVE"
+    },
+    {
+      "evidence": {
+        "exit_code": 0,
+        "health": "stopped",
+        "version": "1.0.0"
+      },
+      "next_state": "STOPPED",
+      "occurred_at": "2026-11-08 09:17:52.027120-05:00",
+      "outcome": "accepted",
+      "prior_state": "STOPPING"
+    },
+    {
+      "evidence": {
+        "health": "starting",
+        "recovery_from": "STOPPED",
+        "version": "1.0.0"
+      },
+      "next_state": "ACTIVATING",
+      "occurred_at": "2026-11-08 09:17:52.057283-05:00",
+      "outcome": "accepted",
+      "prior_state": "STOPPED"
+    },
+    {
+      "evidence": {
+        "health": "healthy",
+        "observed_contract": {
+          "contract_id": "r3a.capability-provider.v1",
+          "module_id": "r3a.isolated_workspace",
+          "module_version": "1.0.0",
+          "supported_protocol": {
+            "major": 1,
+            "max_minor": 0,
+            "min_minor": 0
+          }
+        },
+        "pid": 1760481,
+        "version": "1.0.0"
+      },
+      "next_state": "ACTIVE",
+      "occurred_at": "2026-11-08 09:17:52.485845-05:00",
+      "outcome": "accepted",
+      "prior_state": "ACTIVATING"
+    },
+    {
+      "evidence": {
+        "health": "unavailable",
+        "reason": "provider process exited before stop request",
+        "version": "1.0.0"
+      },
+      "next_state": "FAILED",
+      "occurred_at": "2026-11-08 09:19:18.183873-05:00",
+      "outcome": "accepted",
+      "prior_state": "ACTIVE"
+    },
+    {
+      "evidence": {
+        "already_stopped": true,
+        "health": "stopped",
+        "version": "1.0.0"
+      },
+      "next_state": "STOPPED",
+      "occurred_at": "2026-11-08 09:19:18.205500-05:00",
+      "outcome": "accepted",
+      "prior_state": "FAILED"
+    }
+  ],
+  "module_process": "real r3a_runtime.capability_worker subprocess activated and used for Engineering writes; orderly protocol checkpoint/stop completed",
+  "regression_tests": {
+    "command": ".venv/bin/python -m pytest -q --tb=short tests/test_r3a_engineering.py tests/test_r3a_engineering_autonomy.py tests/test_r3a_capability_integration_demo.py",
+    "result": "23 passed in 3.35s"
+  },
+  "repository": "ppow1/R3",
+  "resident_inference": "synthetic; no Grace model/runtime route used",
+  "work_orders": [
+    {
+      "details": {
+        "activity_id": "1ebbc86a-8ce5-4c27-8842-d30d6a2cd4c2",
+        "attempt_id": "517778cf-3308-4cde-8a51-fbd67237e81d",
+        "authorization": {
+          "activity_id": "1ebbc86a-8ce5-4c27-8842-d30d6a2cd4c2",
+          "allowed": true,
+          "attempt_id": "517778cf-3308-4cde-8a51-fbd67237e81d",
+          "authorization_audit_event_id": "1ff7eb38-1522-4e57-83b7-5e48532961d4",
+          "authorization_decision_id": "f8cb699d-979e-4c1d-a7e1-f91fde4af795",
+          "config_revision": "fd70f4b84515dd4e29e7a3ad5c887439bcdddd58ef2ac2b743ff7e8847119ce5",
+          "correlation_id": "cb902db2-212d-4b95-a553-1267b8716217",
+          "observed_at": "2026-11-08T14:17:51.594495+00:00",
+          "policy_revision": "bounded-isolated-engineering-acceptance-v1",
+          "provider_id": "bounded-engineering-acceptance",
+          "reason": "bounded isolated acceptance policy",
+          "retryable": false
+        },
+        "contract_id": "r3a.engineering-work-order",
+        "contract_version": "1.0.0",
+        "correlation_id": "cb902db2-212d-4b95-a553-1267b8716217",
+        "execution_owner": "CME",
+        "follow_up_attempt": 2,
+        "invocation_id": "a005d44a-baa8-4804-ba46-a55cd6c9d067",
+        "transition_attempt_id": "517778cf-3308-4cde-8a51-fbd67237e81d",
+        "verification_result": {
+          "activity_id": "1ebbc86a-8ce5-4c27-8842-d30d6a2cd4c2",
+          "artifact_digests": [
+            "sha256:d8819557f8eaf8bf8763da6255b1a61e4cf1dae5a2ea1a90daa2c393039ebd5d"
+          ],
+          "contract_id": "r3a.verification-result",
+          "contract_version": "1.0.0",
+          "outcome": "FAIL",
+          "policy_revision": "engineering-verifier-policy-v1",
+          "results": [
+            {
+              "criterion_id": "artifact_matches_authorized_workspace",
+              "evidence_refs": [
+                "workspace:artifacts/attempt-1.json"
+              ],
+              "rationale": "1 declared artifact bindings differ",
+              "status": "FAIL"
+            }
+          ],
+          "verification_id": "3f5cd047-5871-4186-97ea-7c08d24f1062",
+          "verified_at": "2026-11-08T14:17:51.716358+00:00",
+          "verifier_id": "engineering.independent-workspace-verifier",
+          "verifier_version": "1.0.0",
+          "work_order_id": "c16679a8-7fde-4d02-a13d-aca78272be96",
+          "work_order_version": 1
+        },
+        "work_order": {
+          "activity_id": "1ebbc86a-8ce5-4c27-8842-d30d6a2cd4c2",
+          "allowed_paths": [
+            "artifacts/**"
+          ],
+          "attempt_id": "517778cf-3308-4cde-8a51-fbd67237e81d",
+          "authorization_audit_event_id": "1ff7eb38-1522-4e57-83b7-5e48532961d4",
+          "authorization_decision_id": "f8cb699d-979e-4c1d-a7e1-f91fde4af795",
+          "authorization_expires_at": null,
+          "authorization_provider_id": "bounded-engineering-acceptance",
+          "baseline_ref": "9925c7a408707162e6f070a4121dcc83f5fe0e0a",
+          "command_profiles": [
+            "file-write-demo"
+          ],
+          "config_revision": "fd70f4b84515dd4e29e7a3ad5c887439bcdddd58ef2ac2b743ff7e8847119ce5",
+          "contract_id": "r3a.engineering-work-order",
+          "contract_version": "1.0.0",
+          "correlation_id": "cb902db2-212d-4b95-a553-1267b8716217",
+          "criteria": [
+            {
+              "artifact_path": "artifacts/attempt-1.json",
+              "bindings": [
+                {
+                  "artifact_pointer": "/workspace_id",
+                  "source": "work_order",
+                  "source_pointer": "/workspace_id"
+                }
+              ],
+              "criterion_id": "artifact_matches_authorized_workspace",
+              "type": "json_fields_equal"
+            }
+          ],
+          "issued_at": "2026-11-08T14:17:51.595060+00:00",
+          "operation_refs": [
+            {
+              "contract_id": "r3a.capability-operation.v1",
+              "contract_version": "1.0.0",
+              "effect_class": "isolated_write",
+              "inputs": {
+                "content": "{\"attempt\": 1, \"workspace_id\": \"wrong-workspace\"}",
+                "path": "artifacts/attempt-1.json"
+              },
+              "operation_id": "engineering.workspace.apply_patch",
+              "target": {
+                "workspace_id": "candidate-1"
+              }
+            }
+          ],
+          "policy_revision": "bounded-isolated-engineering-acceptance-v1",
+          "proposal_digest": "sha256:22e971ef187286f3238ccf7f6552a1605434b5fc3684ef3b642cf011166b253f",
+          "proposal_id": "ee274f61-e961-4fbf-9b40-6f17d712a2ca",
+          "proposal_revision": 1,
+          "repository": "ppow1/R3",
+          "resident_id": "resident.grace",
+          "work_order_id": "c16679a8-7fde-4d02-a13d-aca78272be96",
+          "work_order_version": 1,
+          "workspace_id": "candidate-1"
+        },
+        "work_order_id": "c16679a8-7fde-4d02-a13d-aca78272be96"
+      },
+      "state": "REWORK_REQUIRED",
+      "work_order_id": "c16679a8-7fde-4d02-a13d-aca78272be96"
+    },
+    {
+      "details": {
+        "activity_id": "ffd24694-df2a-46c1-8d04-0fbe76cc9cba",
+        "artifact_digests": [
+          "sha256:90192ea52f4797cdadee828279d2241f80a13dde75d957d3a7ddb889d70855bf"
+        ],
+        "attempt_id": "177834e1-de67-408d-b261-9df7d7e518c5",
+        "authorization": {
+          "activity_id": "ffd24694-df2a-46c1-8d04-0fbe76cc9cba",
+          "allowed": true,
+          "attempt_id": "177834e1-de67-408d-b261-9df7d7e518c5",
+          "authorization_audit_event_id": "33e21af9-7bcb-43d4-8283-4899ead9c1e4",
+          "authorization_decision_id": "9ccd870d-06c9-44c2-b114-67088ef46141",
+          "config_revision": "fd70f4b84515dd4e29e7a3ad5c887439bcdddd58ef2ac2b743ff7e8847119ce5",
+          "correlation_id": "b27e43a2-2c55-4d55-9ad9-9b9f73c38801",
+          "observed_at": "2026-11-08T14:17:51.749786+00:00",
+          "policy_revision": "bounded-isolated-engineering-acceptance-v1",
+          "provider_id": "bounded-engineering-acceptance",
+          "reason": "bounded isolated acceptance policy",
+          "retryable": false
+        },
+        "contract_id": "r3a.engineering-work-order",
+        "contract_version": "1.0.0",
+        "correlation_id": "b27e43a2-2c55-4d55-9ad9-9b9f73c38801",
+        "execution_owner": "CME",
+        "invocation_id": "2139c75b-df69-4897-8ff0-b17309b9f69f",
+        "transition_attempt_id": "177834e1-de67-408d-b261-9df7d7e518c5",
+        "verification_id": "1a62951f-65ad-4860-8e73-e5df0e7149d7",
+        "verification_result": {
+          "activity_id": "ffd24694-df2a-46c1-8d04-0fbe76cc9cba",
+          "artifact_digests": [
+            "sha256:90192ea52f4797cdadee828279d2241f80a13dde75d957d3a7ddb889d70855bf"
+          ],
+          "contract_id": "r3a.verification-result",
+          "contract_version": "1.0.0",
+          "outcome": "PASS",
+          "policy_revision": "engineering-verifier-policy-v1",
+          "results": [
+            {
+              "criterion_id": "artifact_matches_authorized_workspace",
+              "evidence_refs": [
+                "workspace:artifacts/attempt-2.json"
+              ],
+              "rationale": "1 declared bindings match inspected artifact bytes",
+              "status": "PASS"
+            }
+          ],
+          "verification_id": "1a62951f-65ad-4860-8e73-e5df0e7149d7",
+          "verified_at": "2026-11-08T14:17:51.875311+00:00",
+          "verifier_id": "engineering.independent-workspace-verifier",
+          "verifier_version": "1.0.0",
+          "work_order_id": "7320d961-3d32-4c10-a9f4-1d5ff9cfc871",
+          "work_order_version": 1
+        },
+        "verifier_id": "engineering.independent-workspace-verifier",
+        "work_order": {
+          "activity_id": "ffd24694-df2a-46c1-8d04-0fbe76cc9cba",
+          "allowed_paths": [
+            "artifacts/**"
+          ],
+          "attempt_id": "177834e1-de67-408d-b261-9df7d7e518c5",
+          "authorization_audit_event_id": "33e21af9-7bcb-43d4-8283-4899ead9c1e4",
+          "authorization_decision_id": "9ccd870d-06c9-44c2-b114-67088ef46141",
+          "authorization_expires_at": null,
+          "authorization_provider_id": "bounded-engineering-acceptance",
+          "baseline_ref": "9925c7a408707162e6f070a4121dcc83f5fe0e0a",
+          "command_profiles": [
+            "file-write-demo"
+          ],
+          "config_revision": "fd70f4b84515dd4e29e7a3ad5c887439bcdddd58ef2ac2b743ff7e8847119ce5",
+          "contract_id": "r3a.engineering-work-order",
+          "contract_version": "1.0.0",
+          "correlation_id": "b27e43a2-2c55-4d55-9ad9-9b9f73c38801",
+          "criteria": [
+            {
+              "artifact_path": "artifacts/attempt-2.json",
+              "bindings": [
+                {
+                  "artifact_pointer": "/workspace_id",
+                  "source": "work_order",
+                  "source_pointer": "/workspace_id"
+                }
+              ],
+              "criterion_id": "artifact_matches_authorized_workspace",
+              "type": "json_fields_equal"
+            }
+          ],
+          "issued_at": "2026-11-08T14:17:51.750180+00:00",
+          "operation_refs": [
+            {
+              "contract_id": "r3a.capability-operation.v1",
+              "contract_version": "1.0.0",
+              "effect_class": "isolated_write",
+              "inputs": {
+                "content": "{\"attempt\": 2, \"workspace_id\": \"candidate-1\"}",
+                "path": "artifacts/attempt-2.json"
+              },
+              "operation_id": "engineering.workspace.apply_patch",
+              "target": {
+                "workspace_id": "candidate-1"
+              }
+            }
+          ],
+          "policy_revision": "bounded-isolated-engineering-acceptance-v1",
+          "proposal_digest": "sha256:82af7c8b7375f882eadeecb447cfa388d39da01cad0a7955293a6ef31a96faff",
+          "proposal_id": "3feae9eb-133f-433c-8157-c43a68c2b73d",
+          "proposal_revision": 2,
+          "repository": "ppow1/R3",
+          "resident_id": "resident.grace",
+          "work_order_id": "7320d961-3d32-4c10-a9f4-1d5ff9cfc871",
+          "work_order_version": 1,
+          "workspace_id": "candidate-1"
+        },
+        "work_order_id": "7320d961-3d32-4c10-a9f4-1d5ff9cfc871"
+      },
+      "state": "COMPLETED",
+      "work_order_id": "7320d961-3d32-4c10-a9f4-1d5ff9cfc871"
+    }
+  ]
+}
