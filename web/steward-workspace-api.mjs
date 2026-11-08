@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: web/steward-workspace-api.js
 Component: R3A-STEWARD-WORKSPACE-CLIENT
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Same-origin client for versioned resident conversation and notification contracts
@@ -11,7 +11,7 @@ Observability: Preserves server correlation IDs and exposes explicit unavailable
 Dependencies: r3a.steward-workspace-web.v1 proposal; #49 opaque Steward session boundary
 Authority: Contract proposal documented in docs/architecture/R3A_STEWARD_WORKSPACE_WEB_API_V1.md
 Changed: 2026-11-07 | R3A-007/R3A-010 | Add same-origin persistent chat and notification inbox clients
-Changed: 2026-11-08 | R3A-007/R3A-010 | Show exact unmounted API state and render source UTC with configured IANA presentation zone
+Changed: 2026-11-08 | R3A-007/R3A-010 | Show exact unmounted API state and render source UTC with configured IANA presentation zone. Preserve browser fetch receiver.
 Tests: tests/test_steward_workspace_api.mjs uses mocked fetch only as a labeled development test
 */
 
@@ -53,7 +53,9 @@ export function formatPresentationTimestamp(value, timezone = '') {
 export class StewardWorkspaceApi {
   constructor(fetchImpl = globalThis.fetch) {
     if (typeof fetchImpl !== 'function') throw new TypeError('A fetch implementation is required');
-    this.fetch = fetchImpl;
+    // Native Window.fetch requires its global receiver. Preserve that receiver
+    // when this transport invokes fetch as a stored client method.
+    this.fetch = fetchImpl.bind(globalThis);
   }
 
   async request(path, {method = 'GET', body, signal, contract = WORKSPACE_CONTRACT} = {}) {

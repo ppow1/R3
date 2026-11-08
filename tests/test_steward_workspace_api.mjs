@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_steward_workspace_api.mjs
 Component: R3A-STEWARD-WORKSPACE-CLIENT-TESTS
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Verify the versioned workspace browser client transport and denial behavior.
@@ -140,4 +140,13 @@ test('presentation timestamps preserve UTC and use only an explicit IANA zone ac
   assert.match(formatPresentationTimestamp('2026-01-15T17:00:00Z'), /presentation timezone not configured/);
   assert.match(formatPresentationTimestamp('2026-01-15T17:00:00Z', 'Not/AZone'), /invalid presentation timezone/);
   assert.match(formatPresentationTimestamp('2026-01-15 17:00:00', 'America/New_York'), /offset missing; not converted/);
+});
+
+
+test('native fetch is called with its global receiver', async () => {
+  let receiver;
+  function fetchMock() { receiver = this; return Promise.resolve(response(200, {contract: WORKSPACE_CONTRACT, freshness: 'current', residents: []})); }
+  const api = new StewardWorkspaceApi(fetchMock);
+  await api.residents();
+  assert.equal(receiver, globalThis);
 });
