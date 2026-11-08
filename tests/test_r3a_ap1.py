@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.5.0
+File Revision: 1.9.0
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -33,10 +33,13 @@ Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Verify diagnostics
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Cover observer activity context while preserving capability authorization at actual invocation.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Keep escalation regression on the configured primary reasoning route.
 Changed: 2026-11-07 | R3A-AP1-CME-OBSERVER-QUEUE | Codex GPT-6 | Prevent terminal activities from multiplying an already pending durable observer queue.
+Changed: 2026-11-07T23:41:45Z | R3A-AP2-DELEGATION | Codex GPT-6 | Cover Grace's evidence-grounded use of a dynamic office-handoff capability and unavailable handoff behavior.
+Changed: 2026-11-07T23:53:20Z | R3A-AP2-DELEGATION-CONTINUATION | Codex GPT-6 | Cover multi-route selection, handoff outcome handling, resumed context, and failed-verification corrective reasoning.
+Changed: 2026-11-08T00:04:44Z | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Verify generic institutional result validation, evidence delivery, corrective action selection, and rejection of false healthy completion claims.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
-History/Predecessor: Git blob 10d0d5896ba9027203f652ed10109e1d45f73d59 at commit 8e89ada52fda4768782b712f23281150e71b11e3.
+History/Predecessor: Prior revision preserved at commit 32d0b71016c77de82b1a1cc98a9cca4152b6a44b, blob 49127b8c0101d158abf81dbea6f38d27abff4178.
 """
 from __future__ import annotations
 
@@ -299,6 +302,369 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         self.assertNotIn("institution_knowledge_read",
                          schema["properties"]["capability_id"]["enum"])
 
+    def test_grace_uses_directory_evidence_to_select_a_dynamic_handoff_operation(self):
+        directory_tool = {
+            "contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
+            "capability_id": "directory.operation.from.registry",
+            "name": "Institutional Directory", "description": "Returns offices and capability ownership.",
+            "arguments_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+        }
+        handoff_tool = {
+            "contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
+            "capability_id": "handoff.operation.from.registry",
+            "name": "Office Assignment Handoff", "description": "Submits a bounded assignment to a discovered office.",
+            "arguments_schema": {"type": "object", "properties": {
+                "office_id": {"type": "string"}, "resident_id": {"type": "string"},
+                "objective": {"type": "string"}, "evidence_ref": {"type": "string"}},
+                "required": ["office_id", "objective", "evidence_ref"], "additionalProperties": False},
+        }
+        directory_decision = (
+            '{"action":"invoke_capability","contract_id":"r3a.resident-capability-tool",'
+            '"contract_version":"1.0.0","capability_id":"directory.operation.from.registry",'
+            '"arguments":{},"rationale":"I need authoritative office responsibilities before deciding who should handle this."}'
+        )
+        handoff_decision = (
+            '{"action":"invoke_capability","contract_id":"r3a.resident-capability-tool",'
+            '"contract_version":"1.0.0","capability_id":"handoff.operation.from.registry",'
+            '"arguments":{"office_id":"office:engineering","resident_id":"resident:bound-7",'
+            '"objective":"Review the supplied patch against the stated criteria.",'
+            '"evidence_ref":"directory-snapshot:sha256:abc"},'
+            '"rationale":"The directory assigns this capability to the active office and returns this current resident binding."}'
+        )
+        resident = self._resident(directory_decision)
+        resident._model_request = AsyncMock(side_effect=[
+            {"id": "directory-choice", "usage": {}, "choices": [{"finish_reason": "stop",
+             "message": {"content": directory_decision}}]},
+            {"id": "handoff-choice", "usage": {}, "choices": [{"finish_reason": "stop",
+             "message": {"content": handoff_decision}}]},
+        ])
+        payload = self._payload([directory_tool, handoff_tool])
+        payload["objective"] = "Find the responsible office and ask it to review the patch against the criteria."
+
+        first = asyncio.run(resident.handle("execute", payload))
+        self.assertEqual(first["action"], "invoke_capability")
+        self.assertEqual(first["capability_request"]["capability_id"], directory_tool["capability_id"])
+
+        directory_result = {"outcome": "succeeded", "output": {"offices": [{
+            "office_id": "office:engineering", "status": "active",
+            "capabilities": [{"capability_id": "capability:review", "enabled": True}],
+        }], "residents": [{"resident_id": "resident:bound-7", "office_id": "office:engineering",
+                            "office_status": "active", "availability_state": "measured",
+                            "availability": "available"}],
+            "source": {"source_id": "directory-snapshot", "snapshot_sha256": "abc"}},
+            "evidence": [{"source_id": "directory-snapshot:sha256:abc"}]}
+        continuation = dict(payload)
+        continuation["conversation"] = [
+            {"role": "assistant", "content": directory_decision},
+            {"role": "user", "content": json.dumps({"capability_result": directory_result})},
+        ]
+        second = asyncio.run(resident.handle("execute", continuation))
+        self.assertEqual(second["action"], "invoke_capability")
+        self.assertEqual(second["capability_request"]["capability_id"], handoff_tool["capability_id"])
+        self.assertEqual(second["capability_request"]["arguments"]["office_id"], "office:engineering")
+        self.assertEqual(second["capability_request"]["arguments"]["resident_id"], "resident:bound-7")
+        self.assertEqual(second["capability_request"]["arguments"]["evidence_ref"],
+                         "directory-snapshot:sha256:abc")
+        request = resident._model_request.await_args_list[1].args[2]
+        self.assertIn("does not establish recipient readiness", request["messages"][0]["content"])
+        self.assertIn("handoff.operation.from.registry", request["messages"][-1]["content"])
+        self.assertNotIn("engineering.workspace.apply_patch", request["messages"][-1]["content"])
+
+    def test_grace_does_not_invent_a_handoff_when_registry_offers_none(self):
+        directory_tool = {"capability_id": "directory.operation.from.registry",
+                          "name": "Directory", "description": "Discovers offices."}
+        decision = ("{\"action\":\"final\",\"decision\":{\"assessment\":"
+                    "\"Directory evidence identifies an office, but no registered handoff operation is available.\","
+                    "\"status\":\"blocked\",\"evidence_refs\":[\"directory-snapshot\"],"
+                    "\"recommended_action\":\"Wait for a registered office handoff capability.\"}}")
+        resident = self._resident(decision)
+        payload = self._payload([directory_tool])
+        directory_result = {"offices": [{"office_id": "office:unbound", "status": "active",
+                                          "capabilities": [{"capability_id": "catalog:handoff",
+                                                            "enabled": True}]}],
+                            "residents": [{"resident_id": "resident:unknown",
+                                           "office_id": "office:unbound",
+                                           "availability_state": "unavailable"}],
+                            "source": {"source_id": "directory-snapshot", "snapshot_sha256": "digest"}}
+        payload["conversation"] = [{"role": "user", "content": json.dumps(
+            {"capability_result": {"outcome": "succeeded", "output": directory_result}})}]
+        payload["evidence"] = [{"source_id": "directory-snapshot", "sha256": "digest",
+                                "content": json.dumps(directory_result)}]
+        result = asyncio.run(resident.handle("execute", payload))
+        self.assertEqual(result["action"], "final")
+        self.assertEqual(result["decision"]["status"], "blocked")
+        self.assertIn("no registered handoff operation is available",
+                      result["decision"]["assessment"])
+        schema = resident._model_request.await_args.args[2]["response_format"]["schema"]
+        self.assertEqual(schema["properties"]["capability_id"]["enum"],
+                         ["directory.operation.from.registry"])
+
+    def test_grace_selects_between_dynamic_handoff_capabilities_using_objective_and_directory_evidence(self):
+        tools = [
+            {"capability_id": "handoff.for.archive", "name": "Archive Handoff",
+             "description": "Route records work to the archive office.",
+             "arguments_schema": {"type": "object", "properties": {
+                 "office_id": {"type": "string"}, "evidence_ref": {"type": "string"}},
+                 "required": ["office_id", "evidence_ref"], "additionalProperties": False}},
+            {"capability_id": "handoff.for.engineering", "name": "Engineering Handoff",
+             "description": "Route software review work to its owning office.",
+             "arguments_schema": {"type": "object", "properties": {
+                 "office_id": {"type": "string"}, "evidence_ref": {"type": "string"}},
+                 "required": ["office_id", "evidence_ref"], "additionalProperties": False}},
+        ]
+        decision = ('{"action":"invoke_capability","contract_id":"r3a.resident-capability-tool",'
+                    '"contract_version":"1.0.0","capability_id":"handoff.for.engineering",'
+                    '"arguments":{"office_id":"office:engineering",'
+                    '"evidence_ref":"directory:sha256:eng"},'
+                    '"rationale":"The objective requests software review and the directory assigns that responsibility to this office."}')
+        resident = self._resident(decision)
+        payload = self._payload(tools)
+        payload["objective"] = "Ask the office responsible for reviewing this software change to assess it."
+        payload["conversation"] = [{"role": "user", "content": json.dumps({
+            "capability_result": {"outcome": "succeeded", "output": {
+                "offices": [
+                    {"office_id": "office:archive", "responsibilities": ["records preservation"]},
+                    {"office_id": "office:engineering", "responsibilities": ["software review"]}],
+                "source": {"snapshot_sha256": "eng"}},
+                "evidence": [{"source_id": "directory:sha256:eng"}]}})}]
+
+        result = asyncio.run(resident.handle("execute", payload))
+        self.assertEqual(result["action"], "invoke_capability")
+        self.assertEqual(result["capability_request"]["capability_id"], "handoff.for.engineering")
+        self.assertEqual(result["capability_request"]["arguments"]["office_id"], "office:engineering")
+        request = resident._model_request.await_args.args[2]
+        self.assertEqual(set(request["response_format"]["schema"]["properties"]["capability_id"]["enum"]),
+                         {"handoff.for.archive", "handoff.for.engineering"})
+        request_text = json.dumps(request["messages"])
+        self.assertIn("office:engineering", request_text)
+        self.assertIn("directory:sha256:eng", request_text)
+
+    def test_grace_handles_returned_handoff_and_blocks_rejected_or_unavailable_results_truthfully(self):
+        directory_tool = {"capability_id": "directory.dynamic", "name": "Directory",
+                          "description": "Returns authoritative offices."}
+        rejected = ("{\"action\":\"final\",\"decision\":{\"assessment\":"
+                    "\"The office rejected the request and gave no authorized alternative.\","
+                    "\"status\":\"blocked\",\"evidence_refs\":[\"handoff.result\"],"
+                    "\"recommended_action\":\"Report the rejection and its reason.\"}}")
+        alternate = ("{\"action\":\"invoke_capability\",\"contract_id\":"
+                     "\"r3a.resident-capability-tool\",\"contract_version\":\"1.0.0\","
+                     "\"capability_id\":\"alternate.handoff.dynamic\","
+                     "\"arguments\":{\"office_id\":\"office:alternate\"},"
+                     "\"rationale\":\"The first recipient returned the assignment as unavailable; the directory evidence identifies this offered alternate.\"}")
+        cases = [
+            ("REJECTED", "The work is outside this office's responsibility.", [], rejected, "final", "blocked"),
+            ("RETURNED", "Recipient unavailable; directory evidence lists an alternate.", [
+                {"capability_id": "alternate.handoff.dynamic", "name": "Alternate handoff",
+                 "description": "Submits to an alternate office.",
+                 "arguments_schema": {"type": "object", "properties": {"office_id": {"type": "string"}},
+                                      "required": ["office_id"], "additionalProperties": False}}],
+             alternate, "invoke_capability", "alternate.handoff.dynamic"),
+            ("UNAVAILABLE", "The handoff provider is not available.", [], rejected, "final", "blocked"),
+        ]
+        for outcome, explanation, extra_tools, response, expected_action, expected_value in cases:
+            with self.subTest(outcome=outcome):
+                resident = self._resident(response)
+                payload = self._payload([directory_tool, *extra_tools])
+                payload["conversation"] = [{"role": "user", "content": json.dumps({
+                    "capability_result": {"outcome": outcome.lower(), "output": {
+                        "status": outcome, "explanation": explanation},
+                        "authorization": {"allowed": outcome == "RETURNED"}}})}]
+                result = asyncio.run(resident.handle("execute", payload))
+                self.assertEqual(expected_action, result["action"])
+                if expected_action == "final":
+                    self.assertEqual(expected_value, result["decision"]["status"])
+                else:
+                    self.assertEqual(expected_value, result["capability_request"]["capability_id"])
+                request = resident._model_request.await_args.args[2]
+                self.assertIn(explanation, json.dumps(request["messages"]))
+
+    def test_grace_resumes_from_persisted_handoff_result_without_repeating_the_side_effect(self):
+        handoff_tool = {"capability_id": "handoff.dynamic", "name": "Office handoff",
+                        "description": "Submits a scoped assignment."}
+        followup_tool = {"capability_id": "followup.dynamic", "name": "Review evidence",
+                         "description": "Reads the durable office response."}
+        response = ('{"action":"invoke_capability","contract_id":"r3a.resident-capability-tool",'
+                    '"contract_version":"1.0.0","capability_id":"followup.dynamic",'
+                    '"arguments":{},"rationale":"The prior handoff was accepted; inspect its durable result before reporting."}')
+        resident = self._resident(response)
+        payload = self._payload([handoff_tool, followup_tool])
+        payload["activity_id"] = "same-activity-after-recovery"
+        payload["conversation"] = [
+            {"role": "assistant", "content": "prior model action: handoff.dynamic"},
+            {"role": "user", "content": json.dumps({"capability_result": {
+                "outcome": "succeeded", "output": {"status": "ACCEPTED", "handoff_id": "handoff-42"},
+                "evidence": [{"source_id": "handoff:42", "sha256": "d" * 64}]}})},
+        ]
+        payload["evidence"] = [{"source_id": "handoff:42", "sha256": "d" * 64,
+                                 "content": "ACCEPTED by the office; handoff_id=handoff-42"}]
+
+        result = asyncio.run(resident.handle("execute", payload))
+        self.assertEqual(result["activity_id"], "same-activity-after-recovery")
+        self.assertEqual(result["action"], "invoke_capability")
+        self.assertEqual(result["capability_request"]["capability_id"], "followup.dynamic")
+        self.assertEqual(resident._model_request.await_count, 1)
+        request = resident._model_request.await_args.args[2]
+        self.assertIn("handoff-42", request["messages"][-1]["content"])
+        self.assertIn("handoff-42", json.dumps(request["messages"]))
+
+    def test_cme_checkpoints_handoff_result_and_recovers_same_activity_without_reinvoking_it(self):
+        class StoreFake:
+            def __init__(self):
+                self.checkpoint = None
+                self.failed = None
+                self.blocked = None
+                self.progress = []
+
+            async def record_progress(self, _activity, progress, checkpoint):
+                self.progress.append(dict(progress))
+                self.checkpoint = json.loads(json.dumps(checkpoint))
+
+            async def fail_activity(self, activity, error, retry_seconds):
+                self.failed = (activity["activity_id"], str(error), retry_seconds)
+
+            async def block_activity(self, activity, reason, details):
+                self.blocked = (activity["activity_id"], reason, details)
+
+            async def finish_activity(self, activity, result):
+                raise AssertionError("this recovery fixture ends truthfully blocked")
+
+        async def exercise():
+            route = {"route_id": "configured-primary", "provider": "fixture", "model": "fixture-model",
+                     "endpoint": "http://127.0.0.1:1/chat", "timeout_seconds": 1, "max_tokens": 64}
+            base = {"activity_type": "grace.objective", "activity_id": "activity-42",
+                    "attempt_id": "attempt-1", "objective": "Have the responsible office review this change.",
+                    "event_kind": "objective", "route_id": "configured-primary", "model_route": route,
+                    "evidence_format": "r3a.knowledge-evidence.v1", "required_evidence_refs": [],
+                    "evidence": [], "available_tools": [{"contract_id": "r3a.resident-capability-tool",
+                    "contract_version": "1.0.0", "capability_id": "handoff.dynamic"}],
+                    "available_engineering_operations": [], "engineering_assignment": None,
+                    "reasoning_escalation": {"enabled": False}, "conversation": [],
+                    "reasoning_state": {}, "pending_final": None, "config_revision": "config-42",
+                    "acceptance_criteria": []}
+            store = StoreFake()
+            cme = CME.__new__(CME)
+            cme.settings = SimpleNamespace(restart_initial_seconds=1, restart_max_seconds=2,
+                                            module_capabilities=("handoff.dynamic",))
+            cme.module_process = SimpleNamespace(returncode=None)
+            cme.module_id = "resident.grace"
+            cme.module_version = "test"
+            cme.store = store
+            cme.active_activities = {}
+            contexts = []
+
+            async def objective_context(activity):
+                checkpoint = activity.get("checkpoint") or {}
+                reasoning_state = checkpoint.get("reasoning_state") or {}
+                context = dict(base)
+                context.update({"activity_id": activity["activity_id"],
+                                "attempt_id": activity["attempt_id"],
+                                "conversation": list(reasoning_state.get("conversation", [])),
+                                "reasoning_state": reasoning_state,
+                                "evidence": list(checkpoint.get("evidence", [])),
+                                "required_evidence_refs": list(checkpoint.get("required_evidence_refs", [])),
+                                "request_ref": f"request-{activity['attempt_id']}"})
+                contexts.append(context)
+                return context
+
+            cme._objective_context = objective_context
+            handoff_action = {"action": "invoke_capability", "contract_id": "r3a.resident-capability-tool",
+                              "contract_version": "1.0.0", "capability_id": "handoff.dynamic",
+                              "arguments": {"office_ref": "directory-returned-office"},
+                              "rationale": "The directory evidence identifies this office as responsible."}
+            handoff_result = {"contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
+                              "capability_id": "handoff.dynamic", "outcome": "succeeded",
+                              "output": {"status": "ACCEPTED", "handoff_id": "handoff-42"},
+                              "evidence": [{"source_id": "handoff:42", "sha256": "e" * 64,
+                                            "content": "Office accepted handoff-42."}],
+                              "authorization": {"audit_event_id": "audit-42"}}
+            cme._invoke_resident_capability = AsyncMock(return_value=handoff_result)
+            call_count = 0
+            resumed_payloads = []
+
+            async def module_call(_operation, payload, **_kwargs):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    return {"result": {"action": "invoke_capability", "capability_request": handoff_action,
+                        "model_content": json.dumps(handoff_action), "model": {"request_ref": "model-1",
+                        "request_sha256": "a" * 64, "result_ref": "result-1", "result_sha256": "b" * 64}}}
+                if call_count == 2:
+                    raise RuntimeError("simulated interruption after durable handoff result")
+                resumed_payloads.append(json.loads(json.dumps(payload)))
+                blocked = {"action": "final", "decision": {"assessment": "The accepted handoff exists, but no attributable office work result is available yet.",
+                           "status": "blocked", "evidence_refs": ["handoff:42"],
+                           "recommended_action": "Resume when the office result is available."}}
+                return {"result": {"action": "final", "decision": blocked["decision"],
+                    "model_content": json.dumps(blocked), "model": {"request_ref": "model-2",
+                    "request_sha256": "c" * 64, "result_ref": "result-2", "result_sha256": "d" * 64}}}
+
+            cme._module_call = module_call
+            first = {"activity_type": "grace.objective", "activity_id": "activity-42",
+                     "attempt_id": "attempt-1", "attempt_count": 0,
+                     "input": {"objective": base["objective"], "correlation_id": "correlation-42"},
+                     "checkpoint": {}}
+            await cme._run_activity(first)
+            self.assertIsNotNone(store.failed)
+            checkpoint = store.checkpoint
+            self.assertIsNotNone(checkpoint)
+            self.assertEqual(len(checkpoint["reasoning_state"]["capability_invocations"]), 1)
+            self.assertIn("handoff-42", json.dumps(checkpoint["reasoning_state"]["conversation"]))
+
+            resumed = {**first, "attempt_id": "attempt-2", "attempt_count": 1,
+                       "checkpoint": checkpoint}
+            await cme._run_activity(resumed)
+            self.assertEqual(cme._invoke_resident_capability.await_count, 1)
+            self.assertEqual(store.blocked[0], "activity-42")
+            restored = checkpoint["reasoning_state"]["conversation"]
+            self.assertEqual(contexts[1]["conversation"][:len(restored)], restored)
+            self.assertIn("handoff-42", json.dumps(resumed_payloads[0]["conversation"]))
+            self.assertEqual(contexts[0]["activity_id"], contexts[1]["activity_id"])
+
+        asyncio.run(exercise())
+
+    def test_grace_proposes_a_scoped_correction_after_failed_verification(self):
+        operation_id = "registered.operation.from.current-manifest"
+        operation = {"operation_id": operation_id, "contract_version": "1.0.0"}
+        proposal = ("{\"action\":\"propose_engineering\",\"rationale\":"
+                    "\"The verifier found the generated field does not match the requested value; revise that artifact within the assigned workspace.\","
+                    "\"proposal\":{\"operation_id\":\"registered.operation.from.current-manifest\","
+                    "\"contract_version\":\"1.0.0\",\"target\":{\"workspace_id\":\"workspace:assigned\"},"
+                    "\"inputs\":{\"path\":\"deliverables/result.json\",\"content\":\"{\\\"value\\\":\\\"corrected\\\"}\"},"
+                    "\"verification_plan\":{\"criteria\":[\"criterion:value-match\"]}}}")
+        resident = self._resident(proposal)
+        payload = self._payload([])
+        payload["engineering_assignment"] = {"workspace_id": "workspace:assigned",
+                                              "allowed_paths": ["deliverables/**"],
+                                              "criteria": ["criterion:value-match"]}
+        payload["available_engineering_operations"] = [operation]
+        payload["conversation"] = [{"role": "user", "content": json.dumps({
+            "independent_verification": {"outcome": "FAIL", "criterion_results": [
+                {"criterion_id": "criterion:value-match", "outcome": "FAIL",
+                 "message": "actual value differs from the required value"}]}})}]
+
+        result = asyncio.run(resident.handle("execute", payload))
+        self.assertEqual(result["action"], "propose_engineering")
+        self.assertEqual(result["engineering_proposal"]["operation_id"], operation_id)
+        request = resident._model_request.await_args.args[2]
+        self.assertIn("FAIL", json.dumps(request["messages"]))
+        self.assertIn("failed criteria", request["messages"][0]["content"])
+
+    def test_grace_reports_failed_verification_blocked_when_no_corrective_operation_is_offered(self):
+        response = ("{\"action\":\"engineering_assess\",\"engineering_assessment\":{"
+                    "\"status\":\"blocked\",\"assessment\":"
+                    "\"Independent verification failed and no authorized corrective operation is available.\","
+                    "\"evidence_refs\":[\"verification:42\"]}}")
+        resident = self._resident(response)
+        payload = self._payload([])
+        payload["conversation"] = [{"role": "user", "content": json.dumps({
+            "independent_verification": {"outcome": "FAIL", "verification_id": "verification:42",
+                                          "criterion_results": [{"criterion_id": "required-value",
+                                                                 "outcome": "FAIL"}]}})}]
+        result = asyncio.run(resident.handle("execute", payload))
+        self.assertEqual(result["action"], "engineering_assess")
+        self.assertEqual(result["engineering_assessment"]["status"], "blocked")
+        self.assertEqual(resident._model_request.await_count, 1)
+
     def test_legacy_activity_without_acceptance_criteria_is_blocked_before_resident_execution(self):
         class StoreFake:
             def __init__(self):
@@ -347,6 +713,61 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
                 "config_revision": "config-1", "activity_type": "grace.objective",
                 "objective": "Identify the valid successors from STOPPING", "evidence": [],
                 "available_tools": tools, "conversation": [], "route_id": "local"}
+
+    def _resident_result(self):
+        return {"contract_id": "r3a.resident.result", "contract_version": "1.0.0",
+                "activity_id": "activity-1", "attempt_id": "attempt-1",
+                "correlation_id": "correlation-1", "resident_id": "resident.grace",
+                "config_revision": "config-1", "issued_at": "2026-11-07T23:59:11Z",
+                "issuer": {"component_id": "independent-verifier", "decision_ref": "verification-17"},
+                "outcome": "FAIL",
+                "evidence": [{"evidence_ref": "artifact:result.json", "kind": "artifact",
+                              "content": {"observed": "wrong value"}}],
+                "failure_reasons": [{"code": "criterion_mismatch", "message": "required value differs",
+                                     "evidence_refs": ["artifact:result.json"]}],
+                "completion_authority": False}
+
+    def test_generic_failed_result_evidence_is_delivered_for_resident_decision(self):
+        tool = {"capability_id": "capability.from.current.registry"}
+        response = ('{"action":"invoke_capability","contract_id":"r3a.resident-capability-tool",'
+                    '"contract_version":"1.0.0","capability_id":"capability.from.current.registry",'
+                    '"arguments":{},"rationale":"Use the offered corrective operation against the verifier finding"}')
+        resident = self._resident(response)
+        payload = self._payload([tool])
+        payload["correlation_id"] = "correlation-1"
+        payload["resident_result"] = self._resident_result()
+
+        result = asyncio.run(resident.handle("execute", payload))
+
+        self.assertEqual(result["action"], "invoke_capability")
+        self.assertEqual(result["resident_result"]["outcome"], "FAIL")
+        request = resident._model_request.await_args.args[2]
+        model_input = json.loads(request["messages"][-1]["content"])
+        self.assertEqual(model_input["resident_result"]["failure_reasons"][0]["code"], "criterion_mismatch")
+        self.assertEqual(model_input["resident_result"]["evidence"][0]["content"]["observed"], "wrong value")
+
+    def test_generic_result_with_mismatched_lineage_is_rejected_before_inference(self):
+        resident = self._resident(
+            '{"action":"final","decision":{"assessment":"blocked","status":"blocked",'
+            '"evidence_refs":[],"recommended_action":"none"}}')
+        payload = self._payload([])
+        payload["resident_result"] = self._resident_result()
+        payload["resident_result"]["activity_id"] = "different-activity"
+
+        with self.assertRaisesRegex(ValueError, "lineage"):
+            asyncio.run(resident.handle("execute", payload))
+        resident._model_request.assert_not_awaited()
+
+    def test_grace_cannot_report_failed_verification_as_healthy(self):
+        resident = self._resident(
+            '{"action":"final","decision":{"assessment":"All requirements pass",'
+            '"status":"healthy","evidence_refs":["artifact:result.json"],"recommended_action":"none"}}')
+        payload = self._payload([])
+        payload["correlation_id"] = "correlation-1"
+        payload["resident_result"] = self._resident_result()
+
+        with self.assertRaisesRegex(RuntimeError, "cannot report.*healthy"):
+            asyncio.run(resident.handle("execute", payload))
 
     def test_model_selected_capability_call_is_returned_as_resident_action(self):
         tool = {"capability_id": "institution.knowledge.read"}
