@@ -62,6 +62,10 @@ class StewardWebsiteApiTests(unittest.TestCase):
         self.assertIn("if(p.roadmap)", page.text)
         self.assertIn('id="notifications-opacity"', page.text)
         self.assertIn('id="roadmap-opacity"', page.text)
+        workspace = self.client.get("/web/steward-workspace-api.mjs")
+        self.assertIn("r3:steward-session-established", workspace.text)
+        self.assertIn("r3:steward-session-revoked", workspace.text)
+        self.assertIn("new CustomEvent('r3:steward-session-established')", page.text)
         self.assertIn("issue reports are not proof of CME execution", module.text)
 
     def test_website_identity_reports_running_build_version_environment_and_port(self):

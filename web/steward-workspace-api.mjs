@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: web/steward-workspace-api.js
 Component: R3A-STEWARD-WORKSPACE-CLIENT
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Same-origin client for versioned resident conversation and notification contracts
@@ -13,6 +13,7 @@ Authority: Contract proposal documented in docs/architecture/R3A_STEWARD_WORKSPA
 Changed: 2026-11-07 | R3A-007/R3A-010 | Add same-origin persistent chat and notification inbox clients
 Changed: 2026-11-08 | R3A-007/R3A-010 | Show exact unmounted API state and render source UTC with configured IANA presentation zone. Preserve browser fetch receiver.
 Changed: 2026-11-08 | #48/#51 | Render canonical notification details, recipient lifecycle, service deep links, and cursor-paged history.
+Changed: 2026-11-08 | #49/#51 | Refresh directory on shared session establishment and clear resident conversation view on revocation/401.
 Tests: tests/test_steward_workspace_api.mjs uses mocked fetch only as a labeled development test
 */
 
@@ -193,6 +194,19 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     setText(status, `${error?.status === 401 ? 'Sign in through the Steward session service. ' : missing}${message}${error?.correlationId ? ` · correlation ${error.correlationId}` : ''}`);
     status.dataset.state = error?.status === 401 ? 'unauthenticated' : 'unavailable';
     if (error?.status === 401) {
+      directoryAvailable = false;
+      loaded = false;
+      selectedResident = '';
+      selectedConversation = '';
+      pendingMessage = null;
+      composer.value = '';
+      residentSelect.disabled = true;
+      residentSelect.replaceChildren(new Option('Sign in to load residents', ''));
+      conversationList.replaceChildren();
+      messageList.replaceChildren();
+      composer.disabled = true;
+      sendButton.disabled = true;
+      syncNewConversationButton();
       const signIn = root.createElement('button');
       signIn.type = 'button';
       signIn.className = 'chat-sign-in';
@@ -277,6 +291,9 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
 
   residentSelect.addEventListener('change', () => {
     selectedResident = residentSelect.value;
+    pendingConversationId = null;
+    pendingMessage = null;
+    composer.value = '';
     syncNewConversationButton();
     selectedConversation = '';
     conversationList.replaceChildren(); messageList.replaceChildren();
@@ -310,9 +327,26 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
       setText(status, `Message accepted by service · ${result.message.delivery_state || 'state unknown'}${result.correlation_id ? ` · correlation ${result.correlation_id}` : ''}`);
       await loadMessages(selectedConversation);
     } catch (error) { unavailable(error); }
-    finally { sendButton.disabled = false; }
+    finally { sendButton.disabled = !selectedConversation; }
   });
   root.getElementById('nav-chat')?.addEventListener('click', () => loadResidents());
+  root.addEventListener?.('r3:steward-session-established', () => {
+    loaded = false; directoryAvailable = false; selectedResident = ''; selectedConversation = '';
+    pendingConversationId = null; pendingMessage = null; authorizedResidentIds.clear();
+    residentSelect.disabled = true; residentSelect.replaceChildren(new Option('Loading authorized residents…', ''));
+    conversationList.replaceChildren(); messageList.replaceChildren(); composer.value = '';
+    composer.disabled = true; sendButton.disabled = true; syncNewConversationButton();
+    loadResidents();
+  });
+  root.addEventListener?.('r3:steward-session-revoked', () => {
+    loaded = false; directoryAvailable = false; selectedResident = ''; selectedConversation = '';
+    pendingConversationId = null; pendingMessage = null; composer.value = '';
+    authorizedResidentIds.clear(); residentSelect.disabled = true;
+    residentSelect.replaceChildren(new Option('Sign in to load residents', ''));
+    conversationList.replaceChildren(); messageList.replaceChildren();
+    composer.disabled = true; sendButton.disabled = true; syncNewConversationButton();
+    setText(status, 'Steward session revoked · conversation data cleared from this view.'); status.dataset.state = 'unauthenticated';
+  });
   root.getElementById('chat-refresh')?.addEventListener('click', () => {
     if (selectedResident && directoryAvailable) loadConversations();
     else { loaded = false; loadResidents(); }
