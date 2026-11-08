@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: web/steward-workspace-api.js
 Component: R3A-STEWARD-WORKSPACE-CLIENT
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Same-origin client for versioned resident conversation and notification contracts
@@ -12,6 +12,7 @@ Dependencies: r3a.steward-workspace-web.v1 proposal; #49 opaque Steward session 
 Authority: Contract proposal documented in docs/architecture/R3A_STEWARD_WORKSPACE_WEB_API_V1.md
 Changed: 2026-11-07 | R3A-007/R3A-010 | Add same-origin persistent chat and notification inbox clients
 Changed: 2026-11-08 | R3A-007/R3A-010 | Show exact unmounted API state and render source UTC with configured IANA presentation zone. Preserve browser fetch receiver.
+Changed: 2026-11-08 | #48/#51 | Render canonical notification details, recipient lifecycle, service deep links, and cursor-paged history.
 Tests: tests/test_steward_workspace_api.mjs uses mocked fetch only as a labeled development test
 */
 
@@ -335,6 +336,8 @@ export function mountNotificationInbox({api = new StewardWorkspaceApi(), root = 
   }
 
   async function refresh({cursor = null, append = false} = {}) {
+    const olderControl = append ? list.querySelector?.('.notification-load-older') : null;
+    if (olderControl) olderControl.disabled = true;
     setText(status, 'Loading recipient-specific notifications…');
     try {
       const result = await api.notifications({cursor});
@@ -422,9 +425,10 @@ export function mountNotificationInbox({api = new StewardWorkspaceApi(), root = 
       setText(status, `Notifications loaded from recipient service · ${result.freshness || 'freshness unknown'} · ${result.presentation_timezone || 'presentation timezone unavailable'}`);
       status.dataset.state = result.freshness || 'unknown';
     } catch (error) {
-      list.replaceChildren();
+      if (!append) list.replaceChildren();
+      if (olderControl) olderControl.disabled = false;
       const unavailable = error.status === 404 ? 'Recipient notification inbox API is not mounted on this website service. ' : '';
-      setText(status, `${error.status === 401 ? 'Sign in through the Steward session service. ' : unavailable}${error.message}${error.correlationId ? ` · correlation ${error.correlationId}` : ''}`);
+      setText(status, `${error.status === 401 ? 'Sign in through the Steward session service. ' : unavailable}${append ? 'Older notification history unavailable; previously loaded records are retained. ' : ''}${error.message}${error.correlationId ? ` · correlation ${error.correlationId}` : ''}`);
       status.dataset.state = error.status === 401 ? 'unauthenticated' : 'unavailable';
     }
   }
