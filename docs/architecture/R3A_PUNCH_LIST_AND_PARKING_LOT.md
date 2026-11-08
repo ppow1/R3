@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_PUNCH_LIST_AND_PARKING_LOT.md
 Component: R3A-PUNCH-LIST
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-06T03:39:05Z
 Created By: Codex GPT-6
 Purpose: Track R3A requirements, dependencies, acceptance and intentionally unresolved decisions.
@@ -15,10 +15,11 @@ Changed: 2026-11-06T04:57:50Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Alig
 Changed: 2026-11-06T05:03:56Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Record milestone issue/integration authority prerequisite.
 Changed: 2026-11-06T05:18:48Z | AP0-M1-PLAN | Codex GPT-6 | Link AP0-M1 decision plan and separate selected implementation details from deferred policy decisions.
 Changed: 2026-11-08T18:43:38Z | R3A-RESOURCE-MONITOR-001 | Codex GPT-6 | Mark partially evidenced registry/recovery items and add the directed resource telemetry milestone after reviewing R3/R3A punch lists.
+Changed: 2026-11-08T19:29:50Z | R3A-HOST-DIAGNOSTICS-001 | Codex GPT-6 | Record the first configured host diagnostics provider while preserving the unverified Camrui source gap.
 Supersedes: None; supplements rather than closes docs/PUNCH_LIST.md and docs/PARKING_LOT.md.
 Contracts: R3A Architecture Charter; State Machine and Diagnostic Contract; Bounded Testing and Acceptance Policy.
 Tests: Not run; documentation only.
-History/Predecessor: Git blob 5cf02f9b4fa3e6c4e64c088c4f978df598311624 at d78f0188d39cb02b9f184b8cfc1d9b43c0960b59; R3/R3A punch lists remain open unless explicitly narrowed.
+History/Predecessor: Git blob 13334f0e5775d355271cae3dcd4bc565ed7c326e at 1d2eff3f91c7f0c32b7050255edd812cbf44c7f9; R3/R3A punch lists remain open unless explicitly narrowed.
 -->
 # R3A Punch List and Parking Lot
 
@@ -47,7 +48,7 @@ History/Predecessor: Git blob 5cf02f9b4fa3e6c4e64c088c4f978df598311624 at d78f01
 | R3A-017 | P0 | Preserve R3 provenance and coding standards. | `hints/file-provenance.md`; explicit R3A supplement approval for any change. | All controlled files meet headers/predecessor/version requirements; no silent policy relaxation. | PLANNED |
 | R3A-018 | P0 | Establish basic AP0 database/configuration backup and restore provisions alongside recovery. | AP0-M1 plan D9; AP0 schema/config; isolated storage. | A consistent backup of disposable AP0 state/config references can be restored and reconciled; evidence records source revision/schema/config and restore result. No production state is used. | PLANNED — AP0 |
 | R3A-019 | P1 | Establish Grace autonomy, event-driven continuation, model routing, knowledge use and notifications. | AP0 module/event/recovery/registry contracts; model, knowledge and notification source inventory. | Grace repeatedly receives real events, continues authorized work across interruption, routes models and grounds knowledge through configured providers, and observes notification outcomes or explicit blockers. | PLANNED — AP1 |
-| R3A-024 | P1 | Independently inventory host physical resources and installed software while reusing capability telemetry providers. | Canonical capability registry, host-owned source/configuration, resource identity and authorization. | Disk SMART/health/capacity and GPU/VRAM/inference evidence remain source-attributed and measured/stale/unavailable; physical devices, callable operations and installed software are separate related inventories. | IN PROGRESS — disk/SAS parser and software inventory provider added; host SMART and OctoMiner live evidence remain unavailable |
+| R3A-024 | P1 | Independently inventory host physical resources and installed software while reusing capability telemetry providers. | Canonical capability registry, host-owned source/configuration, resource identity and authorization. | Disk SMART/health/capacity and GPU/VRAM/inference evidence remain source-attributed and measured/stale/unavailable; physical devices, callable operations and installed software are separate related inventories. | IN PROGRESS — disk/SAS parser, software inventory, and local host diagnostics providers added; Camrui, host SMART, and OctoMiner live evidence remain unverified |
 | R3A-021 | P2 | Support institutional expansion, onboarding and resident responsibilities, including Jessica's character-development role. | AP0 module/identity; AP1 continuity; HR/personnel and privacy ownership. | Additional institutional responsibilities enter through versioned contracts with verified ownership, authorization and provenance. | PLANNED — AP4 |
 | R3A-023 | P3 | Advance future capabilities, mature resilience and approved deferred enhancements. | AP0–AP5 durable contracts; Steward decisions for each deferred capability. | Each addition preserves compatibility, recoverability and truthful status; acceptance is defined per approved work item. | DEFERRED — AP6 |
 | R3A-GOV-01 | P0 | Enforce approved roadmap traceability and deviation control. | Steward-approved roadmap revision; exception register. | Every assignment cites the required roadmap fields; no deviation executes until its versioned exception has explicit Steward approval. | PLANNED — governance |

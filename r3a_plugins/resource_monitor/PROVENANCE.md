@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: r3a_plugins/resource_monitor/PROVENANCE.md
 Component: R3A-PLUG-RESOURCE-MONITOR-PROVENANCE
-File Revision: 1.0.0
+File Revision: 1.1.0
 Created: 2026-11-08T18:43:38Z
 Created By: Codex GPT-6
 Purpose: Sidecar provenance and registration notes for JSON module configuration and manifests.
@@ -10,11 +10,11 @@ Execution Model: N/A; package record.
 Observability: Git history and immutable artifact SHA-256 pins in operation manifests.
 Dependencies: Issue #46; unified CME capability registry.
 Authority: No managed runtime activation or grant is included by this package.
-Changed: 2026-11-08T18:43:38Z | R3A-RESOURCE-MONITOR-001 | Codex GPT-6 | Record source files and registration ownership.
+Changed: 2026-11-08T19:29:50Z | R3A-HOST-DIAGNOSTICS-001 | Codex GPT-6 | Register the independent host diagnostics provider package assets.
 Supersedes: None.
-Contracts: r3a.capability-operation.v1; r3a.physical-resource-inventory.v1; r3a.software-environment-inventory.v1.
-Tests: tests/test_r3a_resource_monitor.py.
-History/Predecessor: New file.
+Contracts: r3a.capability-operation.v1; r3a.physical-resource-inventory.v1; r3a.software-environment-inventory.v1; r3a.host-diagnostics.v1.
+Tests: tests/test_r3a_resource_monitor.py; tests/test_r3a_host_diagnostics.py.
+History/Predecessor: Git blob c97103457e196134fda88f89c13e68b15f135086 at 1d2eff3f91c7f0c32b7050255edd812cbf44c7f9.
 -->
 # Resource monitor package provenance
 
@@ -22,6 +22,7 @@ Manifest files use standard JSON and therefore carry their provenance in this si
 
 - `disk-health.manifest.json` registers `infrastructure.resources.disk-health.read`.
 - `software-environments.manifest.json` registers `infrastructure.software-environments.discover`.
+- `host-diagnostics.manifest.json` registers `infrastructure.host-diagnostics.read` with its own provider process identity.
 - `config.example.json` contains a placeholder host identifier and example bounded executable list. Replace it in externally managed configuration; do not activate the example unchanged.
 - `monitor.py` issues only read-only `lsblk` and `smartctl --json --all` commands, and resolves software executables without executing them.
 

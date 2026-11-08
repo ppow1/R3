@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_RESOURCE_INVENTORY_AND_TELEMETRY.md
 Component: R3A-RESOURCE-INVENTORY-CONTRACT
-File Revision: 1.0.0
+File Revision: 1.1.0
 Created: 2026-11-08T18:43:38Z
 Created By: Codex GPT-6
 Purpose: Define resource, capability, and installed software inventory boundaries and source evidence.
@@ -10,11 +10,11 @@ Execution Model: N/A; provider architecture and acceptance record.
 Observability: Provider schemas, digests, timestamps, state distinctions, and local read-only evidence.
 Dependencies: Existing CME capability registry; local lsblk/smartctl; OctoMiner telemetry plug-in.
 Authority: Issue #46; no managed runtime activation, production access, or service restart.
-Changed: 2026-11-08T18:43:38Z | R3A-RESOURCE-MONITOR-001 | Codex GPT-6 | Document independent resource inventory operation contracts and evidence limits.
+Changed: 2026-11-08T19:29:50Z | R3A-HOST-DIAGNOSTICS-001 | Codex GPT-6 | Add independent host diagnostics provider and local evidence.
 Supersedes: None.
 Contracts: r3a.capability-operation.v1; r3a.physical-resource-inventory.v1; r3a.software-environment-inventory.v1.
 Tests: tests/test_r3a_resource_monitor.py.
-History/Predecessor: New file.
+History/Predecessor: Git blob 46b20135decc5402a69c5dcd9d75070ca695926b at 1d2eff3f91c7f0c32b7050255edd812cbf44c7f9.
 -->
 # R3A resource inventory and monitoring boundary
 
@@ -30,6 +30,7 @@ R3A keeps three related inventories separate:
 |---|---|---|---|
 | `infrastructure.resources.disk-health.read` | `r3a.resource-monitor` 1.0.0 | Physical block-device and SMART evidence | Local read-only `lsblk` and `smartctl`; no SMART self-tests or device writes. SMART may be unavailable without the binary or OS permission. SAS/SCSI JSON fields are parsed when present. |
 | `infrastructure.software-environments.discover` | `r3a.resource-monitor` 1.0.0 | Host and configured executable availability | Reports resolution path and Python runtime version; does not inventory packages, CUDA libraries, services, or model installations. |
+| `infrastructure.host-diagnostics.read` | `r3a.host-diagnostics` 1.0.0 | Configured host load average, memory, uptime, filesystem capacity and optional sensor readings | Local Linux interfaces; sensor/fan readings are unavailable when lm-sensors or sensor inputs are absent. A source host must be verified before labeling this as Camrui telemetry. |
 | `infrastructure.octominer.telemetry.read` | `r3a.octominer-telemetry` 2.0.0 | GPU/VRAM/load/fan, mounted filesystem capacity, process-to-GPU mapping, model-server readiness, ComfyUI queues, R3A request metrics, bounded sample history | Existing independent configured SSH/HTTP/database collectors remain the owner of these domains. Native token throughput is not inferred. |
 
 Physical inventory identities and telemetry observations can be joined by configured host and resource identifiers. The provider does not enumerate or assume OctoMiner hosts, endpoints, credentials, SAS devices, or GPU models. Register each manifest and its external configuration through the existing `capability_operations` input. Keep grants in the existing authorization authority.
@@ -41,6 +42,8 @@ Each provider response includes an observation timestamp, source path, source ti
 ## Source evidence in this development environment
 
 Read-only local collection on 2026-11-08 observed one block disk (`sda`, SATA, 256,060,514,304 bytes) through `lsblk`. `smartctl` was not installed, so its health state is explicitly `unavailable`; this is not evidence of healthy media and is not evidence about any OctoMiner or SAS host. The SAS fixture tests demonstrate parsing only, not a live SAS measurement. The OctoMiner plug-in's GPU and inference providers remain registered as a separate implementation; no live remote access was performed in this increment.
+
+The host diagnostic operation was then exercised read-only on local host identifier `admin1-Default-string`: 4 logical processors; measured load averages 21.55 / 29.13 / 36.10 for 1/5/15 minutes; memory 8,159,784,960 bytes total and 779,534,336 available; root filesystem 249,792,131,072 bytes total and 84.22% used. Sensor collection reported `unavailable` because `sensors` was absent. These values identify the current development host only; they do not establish that this host is Camrui. Result digest: `7ddb0f809d0c37ed4231ba450889e62c4723794f8962e31f3057fb59f6208748`.
 
 ## Backlog relationship
 
