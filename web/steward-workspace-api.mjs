@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: web/steward-workspace-api.js
 Component: R3A-STEWARD-WORKSPACE-CLIENT
-File Revision: 1.0.4
+File Revision: 1.0.5
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Same-origin client for versioned resident conversation and notification contracts
@@ -14,6 +14,7 @@ Changed: 2026-11-07 | R3A-007/R3A-010 | Add same-origin persistent chat and noti
 Changed: 2026-11-08 | R3A-007/R3A-010 | Show exact unmounted API state and render source UTC with configured IANA presentation zone. Preserve browser fetch receiver.
 Changed: 2026-11-08 | #48/#51 | Render canonical notification details, recipient lifecycle, service deep links, and cursor-paged history.
 Changed: 2026-11-08 | #49/#51 | Refresh directory on shared session establishment and clear resident conversation view on revocation/401.
+Changed: 2026-11-08 | #51 | Gate creation on current resident selection and expose request progress accessibly.
 Tests: tests/test_steward_workspace_api.mjs uses mocked fetch only as a labeled development test
 */
 
@@ -185,7 +186,8 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   const newConversationButton = root.getElementById('chat-new');
   function syncNewConversationButton() {
     newConversationButton.disabled = !directoryAvailable || !selectedResident || !authorizedResidentIds.has(selectedResident) || creatingConversation;
-    newConversationButton.title = newConversationButton.disabled ? 'Select an authorized resident from the current directory' : 'Start a persistent conversation with the selected resident';
+    newConversationButton.setAttribute('aria-busy', String(creatingConversation));
+    newConversationButton.title = creatingConversation ? 'Conversation creation in progress' : newConversationButton.disabled ? 'Select an authorized resident from the current directory' : 'Start a persistent conversation with the selected resident';
   }
 
   const unavailable = error => {
@@ -304,6 +306,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     if (newConversationButton.disabled) return;
     creatingConversation = true;
     syncNewConversationButton();
+    setText(status, 'Creating a persistent conversation through the institutional service…');
     try {
       pendingConversationId ||= crypto.randomUUID();
       const result = await api.createConversation({residentId: selectedResident, clientConversationId: pendingConversationId});
