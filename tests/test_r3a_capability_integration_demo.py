@@ -253,24 +253,53 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             store = ProviderLifecycleFixtureStore()
             settings = SimpleNamespace(data_dir=root / "data")
             runtime = ProviderProcessManager(settings, store, registry)
-            await runtime.install_all()
+            cme = CME.__new__(CME)
+            cme.settings = SimpleNamespace(capability_registry=registry, source_digest="lifecycle-demo",
+                                           data_dir=root / "data")
+            cme.store = store
+            cme.provider_runtime = runtime
+            telemetry_discovery = await cme._control_request(
+                "capability.discover", {"operation_id": "infrastructure.octominer.telemetry.read"},
+                "discover-telemetry-manifest")
+            self.assertFalse(telemetry_discovery["authorization_evaluated"])
+            self.assertEqual("infrastructure.octominer.telemetry.read",
+                             telemetry_discovery["operations"][0]["descriptor"]["operation_id"])
+            telemetry_install = await cme._control_request(
+                "capability.module.install",
+                {"operation_id": "infrastructure.octominer.telemetry.read"},
+                "install-telemetry-manifest")
+            self.assertTrue(telemetry_install["installed"])
+            install = await cme._control_request(
+                "capability.module.install",
+                {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.0"},
+                "install-engineering-v1")
+            self.assertTrue(install["installed"])
+            install_new = await cme._control_request(
+                "capability.module.install",
+                {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.1"},
+                "install-engineering-v1.0.1")
+            self.assertTrue(install_new["installed"])
             installed = await store.rows("lifecycle_state", ("r3a.isolated_workspace", "1.0.0"))
             self.assertEqual("INSTALLED", installed[0]["lifecycle_state"])
 
             old = registry.resolve_provider("engineering.workspace.apply_patch", "1.0.0")
-            await runtime.activate(old)
+            await cme._control_request(
+                "capability.module.activate",
+                {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.0"},
+                "activate-engineering-v1")
             context = {"invocation_id": "lifecycle-fixture", "effect_class": "isolated_write",
                        "target": {"workspace_id": "candidate-1"},
                        "work_order": {"workspace_id": "candidate-1", "allowed_paths": ["artifacts/**"]}}
             result = await runtime.invoke(old, {"path": "artifacts/result.txt", "content": "R3A module lifecycle\n"}, context)
             self.assertFalse(result["replayed"])
 
-            new = registry.resolve_provider("engineering.workspace.apply_patch", "1.0.1")
-            await runtime.begin_replacement("r3a.isolated_workspace", "1.0.0")
-            await runtime.activate(new)
-            registry.activate_provider("engineering.workspace.apply_patch", "1.0.1")
-            await runtime.stop("r3a.isolated_workspace", "1.0.0")
-            await store.record_module_replacement("r3a.isolated_workspace", "1.0.0", "1.0.1")
+            replacement = await cme._control_request(
+                "capability.module.replace",
+                {"operation_id": "engineering.workspace.apply_patch",
+                 "old_module_id": "r3a.isolated_workspace", "old_version": "1.0.0",
+                 "new_provider_version": "1.0.1"},
+                "replace-engineering-provider")
+            self.assertTrue(replacement["replaced"])
             active = registry.resolve("engineering.workspace.apply_patch")
             self.assertEqual("1.0.1", active.descriptor["provider"]["provider_version"])
             self.assertNotEqual(first["provider"]["artifact_sha256"],
@@ -291,7 +320,18 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             stopped = await store.rows("lifecycle_state", ("r3a.isolated_workspace", "1.0.0"))
             self.assertEqual("STOPPED", stopped[0]["lifecycle_state"])
             self.assertEqual([("r3a.isolated_workspace", "1.0.0", "1.0.1")], store.replacements)
-            await runtime.stop("r3a.isolated_workspace", "1.0.1")
+            status = await cme._control_request(
+                "capability.module.status",
+                {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.1"},
+                "status-engineering-v1.0.1")
+            self.assertEqual("1.0.1", status["provider_version"])
+            self.assertEqual("ACTIVE", status["module"]["lifecycle_state"])
+            await cme._control_request(
+                "capability.module.deactivate",
+                {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.1"},
+                "deactivate-engineering-v1.0.1")
+            stopped_new = await store.rows("lifecycle_state", ("r3a.isolated_workspace", "1.0.1"))
+            self.assertEqual("STOPPED", stopped_new[0]["lifecycle_state"])
 
         with tempfile.TemporaryDirectory(prefix="r3a-provider-lifecycle-") as temporary:
             asyncio.run(scenario(Path(temporary)))
