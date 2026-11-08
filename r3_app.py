@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.14
+# File Revision: 1.0.15
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Initial shared institutional API with optional AP3 Steward access router
@@ -10,6 +10,7 @@
 # Dependencies: FastAPI, Git checkout, local artwork folder; optional r3a_runtime Steward access module
 # Authority: R3 engineering guidance; AP3-M1 Issue #49; approved charter prevails
 # Changed: 2026-11-07T21:48:11Z | AP3-M1 | Codex GPT-6 | Apply no-store headers and keep the authenticated status response freshness-aware.
+# Changed: 2026-11-07T23:53:17Z | AP3-M1/#51 | Codex GPT-6 | Retain the shared StewardAccess service on app state for protected Website adapters.
 # Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Serve the fixed resident avatar frontend module
 # Changed: 2026-11-01 UTC | R3-PANEL-INTERACTION-002 | ChatGPT GPT-6 | Align snapshot anchors and report dragged Infrastructure marker
 # Supersedes: None
@@ -40,6 +41,7 @@ ROOT = Path(os.environ.get("R3_REPO", Path(__file__).resolve().parent)).resolve(
 ART = (ROOT / "assets" / "artwork").resolve()
 EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 app = FastAPI(title="R3 Institutional Capabilities", version="0.1.0")
+app.state.steward_access = None
 
 
 @app.middleware("http")
@@ -55,8 +57,9 @@ async def steward_no_store_headers(request, call_next):
 # Authenticated access is opt-in and fails closed when explicitly configured but invalid.
 # There is no default listener, identity, credential, session store, or public route exposure.
 if os.environ.get("R3A_STEWARD_ACCESS_CONFIG"):
-    from r3a_runtime.steward_access import create_router_from_environment
-    app.include_router(create_router_from_environment())
+    from r3a_runtime.steward_access import create_access_from_environment
+    app.state.steward_access = create_access_from_environment()
+    app.include_router(app.state.steward_access.router())
 
 def git(*args):
     p = subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True,

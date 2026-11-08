@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: docs/architecture/R3A_STEWARD_WEBSITE_SESSION_CONTRACT.md
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.0.1
+File Revision: 1.0.3
 Created: 2026-11-07T23:43:25Z
 Created By: Codex GPT-6
 Purpose: Publish the versioned Steward principal/session contract and integration instructions for website clients.
@@ -12,6 +12,8 @@ Dependencies: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-se
 Authority: AP3-M1 Issue #49; coordinated with #50 and #51.
 Changed: 2026-11-07T23:43:25Z | AP3-M1 | Codex GPT-6 | Publish website session contract and integration instructions.
 Changed: 2026-11-07T23:43:25Z | AP3-M1 | Codex GPT-6 | Publish standalone principal schema alongside the session schema.
+Changed: 2026-11-07T23:53:17Z | AP3-M1/#51 | Codex GPT-6 | Add the FastAPI dependency hook for Website routes to share session/revocation state.
+Changed: 2026-11-07T23:57:23Z | AP3-M1/#51 | Codex GPT-6 | Document the shared /api/v1 cookie scope, unsafe-method Origin check, and generic capability discovery contract.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1.
 Tests: tests/test_r3a_steward_access.py validates provider replacement and session responses.
@@ -34,6 +36,7 @@ Base path: `/api/v1/steward`. Requests are same-origin only, use `credentials: "
 | `POST /session` | Empty body; the trusted ingress supplies its signed assertion to the server. Website must not send identity or principal fields. | 200 `r3a.steward-session.v1` with authoritative `principal`, `expires_at`, `freshness`, `correlation_id`; sets cookie. | 401 unauthenticated/invalid identity; 403 origin denied; 503 identity or session store unavailable. |
 | `GET /session` | Cookie only. | 200 `r3a.steward-session.v1` with server-derived principal and expiry. | 401 missing, expired, or revoked session; 503 session store unavailable. |
 | `DELETE /session` | Cookie and `Origin`. | 200 `{contract, state:"revoked", revoked:true, principal_id, correlation_id}`; clears cookie. | 401 invalid session; 403 origin denied; 503 session/audit state unavailable. |
+| `GET /capabilities` | Cookie only. | 200 `r3a.steward-capability-discovery.v1`; current registered operations, audit/correlation references; discovery does not authorize. | 401 no valid session; 503 session/CME registry unavailable. |
 | `GET /status` | Cookie only. | 200 `r3a.steward-access-status.v1` with session principal, CME health/freshness, audit event ID, correlation. | 401 no valid session; 503 session state unavailable. CME unavailable/stale is represented in the 200 status body, not as healthy. |
 | `POST /operations/invoke` | Cookie, `Origin`, `{request: <r3a.capability-invocation.v1>}`. | 200 `r3a.steward-operation-result.v1`, authoritative result, audit event ID, correlation. | 401 unauthenticated; 403 CME grant denied; 422 malformed invocation; 503 CME/session/audit unavailable. |
 
@@ -46,3 +49,5 @@ The current contract has no refresh endpoint. When a session expires, check `GET
 `StewardAccess` receives one `IdentityProvider` implementation through dependency injection. The default `HmacIngressIdentityProvider` validates short-lived ingress assertions and resolves its verification key through Issue #50's `r3a.secrets.provider.v1` lease. A replacement OIDC/portal adapter must implement `r3a.identity-provider.v1` and normalize its trusted result into `IdentityAssertion`; the session router, durable store, CSRF/origin enforcement, status/operation endpoints, and CME grant path remain shared. The adapter must never emit credential material, create a parallel session authority, or treat #50's `r3a.machine-principal.v1` as the Steward principal.
 
 For #51: consume the paths and JSON contract above from the same origin. Replace any website-local bearer-token behavior with this cookie session. Keep capability controls schema/discovery-driven where available and send operations through the generic invocation endpoint. This contract does not claim a live identity-provider, database, or CME connection; integration testing must distinguish mocked contract tests from an authenticated institutional runtime trace.
+
+For same-process FastAPI composition, mount the shared service returned by `create_access_from_environment()` as `app.state.steward_access`, include its `router()`, and protect Website-owned route adapters with `Depends(require_steward_principal)` or `await app.state.steward_access.authenticated_principal(request, action)`. The cookie path is `/api/v1` so session-bound Website and notification APIs share it. Unsafe methods are checked against configured `Origin`. The dependency returns the canonical `r3a.steward-principal.v1` projection from the same database-backed cookie session and records denied access; after `DELETE /session`, Website routes protected this way deny the same cookie immediately. Keep Website presentation and route ownership in #51.

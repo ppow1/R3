@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: r3a_plugins/steward_access.config.example.json
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-07T21:37:42Z
 Created By: Codex GPT-6
 Purpose: Document externally owned configuration for optional Steward identity, session, CME, and remote transport wiring.
@@ -13,6 +13,7 @@ Authority: AP3-M1 Issue #49; no public exposure by default.
 Changed: 2026-11-07T21:37:42Z | AP3-M1 | Codex GPT-6 | Add safe example with placeholders and remote ingress disabled.
 Changed: 2026-11-07T22:00:10Z | AP3-M1 | Codex GPT-6 | Use Issue #50's Bitwarden SecretReference and explicit AP0 freshness threshold.
 Changed: 2026-11-07T22:02:18Z | AP3-M1 | Codex GPT-6 | Document external database timeout behavior.
+Changed: 2026-11-07T23:53:17Z | AP3-M1 | Codex GPT-6 | Align assertion SecretReference with Bitwarden provider version 1.1.0.
 Supersedes: None.
 Contracts: r3a.steward-access.config.v1; r3a.secrets.provider.v1; r3a.machine-principal.v1.
 Tests: Config validation tests in tests/test_r3a_steward_access.py.
