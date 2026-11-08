@@ -32,6 +32,9 @@ from .workflow import (CharacterRevision, CharacterGovernance, transition_revisi
 from .runtime_context import (RuntimePrincipal, load_runtime_context,
                               validate_runtime_character_context)
 from .governance import (GovernedActor, GovernancePolicy, authorize_workflow_action)
+from .postgres_repository import PostgresDossierRepository
+from .workflow_service import CharacterWorkflowService
+from .hr_gateway import HRCapabilityIdentityResolver
 
 __all__ = [
     "DossierRepository", "DossierError", "RevisionConflict",
@@ -46,4 +49,6 @@ __all__ = [
     "load_runtime_context",
     "validate_runtime_character_context",
     "GovernedActor", "GovernancePolicy", "authorize_workflow_action",
+    "PostgresDossierRepository", "CharacterWorkflowService",
+    "HRCapabilityIdentityResolver",
 ]

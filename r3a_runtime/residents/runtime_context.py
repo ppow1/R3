@@ -25,7 +25,7 @@ def load_runtime_context(*, institutional_id: str, principal: RuntimePrincipal,
                          load_dossier: Callable[[str], dict[str, Any]],
                          defaults: dict[str, int], overrides: list[dict[str, Any]],
                          provider_id: str) -> dict[str, Any]:
-    """Resolve canonical HR ID first, then apply only approved and permitted dossier material."""
+    """Resolve canonical HR ID first, then apply only activated and permitted dossier material."""
     identity = resolve_identity(institutional_id)
     canonical_id = identity.get("institutional_id")
     if (not canonical_id or identity.get("status") != "authoritative"
@@ -36,14 +36,14 @@ def load_runtime_context(*, institutional_id: str, principal: RuntimePrincipal,
     dossier = load_dossier(canonical_id)
     if dossier["identity"]["resident_id"] != canonical_id:
         raise ValueError("dossier identity does not match authoritative HR identity")
-    if dossier["governance"].get("approval_status") != "approved":
-        raise PermissionError("unapproved character dossier cannot enter operational inference")
+    if dossier["governance"].get("approval_status") != "active":
+        raise PermissionError("character dossier must be published and activated before inference")
     effective_classifications = sorted(set(principal.allowed_classifications) & {"public", "institutional"})
     safe = {**dossier, "prompt_components": [component for component in dossier["prompt_components"]
             if component["classification"] in effective_classifications]}
     prompt = compose_prompt(safe, provider_id=provider_id)
     if not prompt.source_refs:
-        raise PermissionError("approved prompt context has no source provenance")
+        raise PermissionError("activated prompt context has no source provenance")
     settings, setting_sources = resolve_personality(
         defaults, dossier["personality"]["settings"], dossier["personality"].get("overrides", []),
         resident_id=canonical_id)
@@ -81,8 +81,8 @@ def validate_runtime_character_context(bundle: Any, *, directory_resident_id: st
         raise ValueError("resident character context contract is incompatible")
     if bundle["directory_resident_id"] != directory_resident_id or bundle["identity_binding_status"] != "authoritative":
         raise ValueError("resident character context identity binding is not authoritative")
-    if bundle["approval_status"] != "approved" or bundle["authority_granted"] is not False:
-        raise ValueError("unapproved character context or authority-bearing context is forbidden")
+    if bundle["approval_status"] != "active" or bundle["authority_granted"] is not False:
+        raise ValueError("inactive character context or authority-bearing context is forbidden")
     if not all(isinstance(bundle[key], str) and bundle[key] for key in
                ("resident_id", "identity_revision", "dossier_revision", "authorization_ref", "provider_id")):
         raise ValueError("resident character context identity, revisions, and authorization ref are required")

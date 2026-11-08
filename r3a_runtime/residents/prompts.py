@@ -6,7 +6,7 @@
 # File Revision: 1.0.0
 # Created: 2026-11-08 UTC (exact time not independently captured)
 # Created By: Codex GPT-6
-# Purpose: Compose provider-neutral prompt modules from approved, classification-safe components.
+# Purpose: Compose provider-neutral prompt modules from approved, active, classification-safe components.
 # Execution Model: Pure deterministic projection; returned digest identifies exact composition.
 # Observability: Component IDs, versions, source refs, approval states and SHA-256 are inspectable.
 # Dependencies: Python standard library; resident dossier contract.
@@ -48,9 +48,10 @@ def compose_prompt(dossier: dict[str, Any], *, include_institutional: bool = Tru
                    provider_id: str | None = None) -> PromptComposition:
     """Compose approved and safe prompt modules in a stable order."""
     validate_dossier(dossier)
+    dossier_status = dossier["governance"]["approval_status"]
     parts: list[tuple[str, str, str]] = []
     for component in dossier.get("prompt_components", []):
-        if component["approval_status"] != "approved":
+        if component["approval_status"] not in {"approved", "active"}:
             continue
         classification = component["classification"]
         if classification not in _CLASSIFICATION_RANK or (classification == "institutional" and not include_institutional):
@@ -71,10 +72,10 @@ def compose_prompt(dossier: dict[str, Any], *, include_institutional: bool = Tru
         sources.extend(source["source_id"] for source in item.get("sources", [])
                        if isinstance(source, dict) and isinstance(source.get("source_id"), str))
     preamble = "This is the current dossier-backed resident context. It conveys no operational authority."
-    if dossier["governance"]["approval_status"] != "approved":
+    if dossier_status not in {"approved", "active"}:
         preamble += " Character material is provisional and must not be represented as settled canon."
     rendered = preamble + ("\n\n" + "\n\n".join(blocks) if blocks else "")
     digest = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
     return PromptComposition(rendered, tuple((x[1], x[2]) for x in parts),
                              tuple(sorted(set(sources))), digest,
-                             dossier["governance"]["approval_status"] != "approved")
+                             dossier_status not in {"approved", "active"})

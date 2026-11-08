@@ -35,6 +35,7 @@ from r3a_runtime.residents import (
     CharacterRevision, CharacterGovernance, transition_revision, RuntimePrincipal, load_runtime_context,
     validate_runtime_character_context,
     GovernedActor, GovernancePolicy, authorize_workflow_action,
+    HRCapabilityIdentityResolver,
 )
 from r3a_runtime.residents.validation import validate_epistemic_span
 from r3a_runtime.residents.legacy_import import extract_legacy_hr_candidates
@@ -344,7 +345,8 @@ class ResidentDossierTests(unittest.TestCase):
             frozenset({"principal:hr"}), frozenset({"principal:character"}),
             frozenset({"principal:reviewer"}), frozenset({"principal:publisher"}),
             frozenset({"principal:runtime"}), frozenset({"principal:steward"}),
-            frozenset({"principal:character"}), "governance://policy/revision-4")
+            frozenset({"principal:character"}), frozenset({"principal:hr", "principal:character"}),
+            "governance://policy/revision-4")
         authorize_workflow_action(GovernedActor("principal:hr", "auth-ref:hr"), policy, "hr.office.assign")
         authorize_workflow_action(GovernedActor("principal:character", "auth-ref:char"), policy,
                                   "character.propose")
@@ -360,6 +362,16 @@ class ResidentDossierTests(unittest.TestCase):
         authorize_workflow_action(GovernedActor("principal:reviewer", "auth-ref:review"), policy,
                                   "character.approve", revision_author_id="principal:character",
                                   durable_canon_change=True)
+        self_review_policy = GovernancePolicy(
+            policy.hr_managers, policy.character_architects,
+            frozenset({"principal:character"}), policy.character_publishers,
+            policy.runtime_activators, policy.stewards, policy.steward_context_readers,
+            policy.dossier_readers, policy.policy_ref)
+        with self.assertRaises(PermissionError):
+            authorize_workflow_action(GovernedActor("principal:character", "auth-ref:char"),
+                                      self_review_policy, "character.approve",
+                                      revision_author_id="principal:character",
+                                      durable_canon_change=True)
         with self.assertRaises(PermissionError):
             authorize_workflow_action(GovernedActor("principal:character", "auth-ref:char"), policy,
                                       "character.propose", target_classification="STEWARD")
@@ -367,9 +379,35 @@ class ResidentDossierTests(unittest.TestCase):
             authorize_workflow_action(GovernedActor("principal:character", "auth-ref:char"), policy,
                                       "steward.identity.update", target_classification="STEWARD")
 
+    def test_existing_hr_capability_is_used_for_canonical_identity_resolution(self):
+        from types import SimpleNamespace
+
+        class HRCapabilityStub:
+            def __init__(self):
+                self.calls = []
+            def read(self, principal, resident_id):
+                self.calls.append((principal.principal_id, resident_id))
+                if resident_id == "r3:missing":
+                    return None
+                return {"resident_id": resident_id, "revision": 4, "status": "onboarding"}
+
+        hr = HRCapabilityStub()
+        resolver = HRCapabilityIdentityResolver(
+            hr, resolve_verified_principal=lambda actor: SimpleNamespace(
+                principal_id="principal:verified", role="character_architect"))
+        actor = GovernedActor("principal:jessica", "auth-ref:authenticated-session")
+        identity = resolver(actor, "r3:vicky")
+        self.assertEqual(identity, {
+            "institutional_id": "r3:vicky", "status": "authoritative",
+            "classification": "RESIDENT", "revision": 4,
+            "source_ref": "hr://record/r3:vicky@4",
+        })
+        self.assertEqual(hr.calls, [("principal:verified", "r3:vicky")])
+        self.assertEqual(resolver(actor, "r3:missing")["status"], "missing")
+
     def test_runtime_context_resolves_hr_identity_before_applying_prompt(self):
         dossier = self.repo.get("r3:grace")
-        dossier["governance"]["approval_status"] = "approved"
+        dossier["governance"]["approval_status"] = "active"
         identity = {"institutional_id": "r3:grace", "status": "authoritative", "revision": 7}
         context = load_runtime_context(institutional_id="r3:grace",
             principal=RuntimePrincipal("resident.grace", "conversation", frozenset({"public", "institutional"}), "hr-authz:1"),

@@ -8,12 +8,12 @@
 -- Execution Model: Transactional PostgreSQL migration; R3A database only.
 -- Observability: Revision and approval/rollback events persist with source/evidence references.
 -- Dependencies: AP0 migration 001; PostgreSQL JSONB; future approved least-privilege role grants.
--- Authority: Steward Character Architecture directive authorizes migration work; apply only after verified HR integration, isolated backup, and R3A deployment procedure.
+-- Authority: Steward Character Architecture directive authorizes additive migration in isolated development; production use requires verified HR integration and the established R3A deployment procedure.
 -- Changed: 2026-11-08 UTC | CHARACTER-ARCHITECTURE | Codex GPT-6 | Add additive dossier persistence schema.
 -- Changed: 2026-11-08 UTC | CHARACTER-ARCHITECTURE | Codex GPT-6 | Clarify current deployment prerequisites under amended Steward authority.
 -- Supersedes: None
 -- Contracts: r3a.resident.dossier.v1; r3a.resident.dossier-event.v1
--- Tests: SQL static review; live migration not run.
+-- Tests: Applied through Store.migrate() to isolated UTF-8 development PostgreSQL on 2026-11-08; workflow integration test passed.
 -- History/Predecessor: New file.
 
 CREATE TABLE r3a.resident_dossier_revisions (
@@ -22,7 +22,8 @@ CREATE TABLE r3a.resident_dossier_revisions (
     schema_version integer NOT NULL CHECK (schema_version > 0),
     dossier jsonb NOT NULL,
     dossier_sha256 char(64) NOT NULL CHECK (dossier_sha256 ~ '^[a-f0-9]{64}$'),
-    approval_status text NOT NULL CHECK (approval_status IN ('proposed','in_review','approved','superseded','rejected')),
+    approval_status text NOT NULL CHECK (approval_status IN ('proposed','in_review','approved','published','active','superseded','rejected')),
+    hr_identity_revision text NOT NULL,
     source_refs jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(source_refs) = 'array'),
     created_by text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
@@ -44,9 +45,10 @@ CREATE TABLE r3a.resident_dossier_current (
 );
 
 CREATE TABLE r3a.resident_dossier_events (
+    event_sequence bigserial UNIQUE NOT NULL,
     event_id uuid PRIMARY KEY,
     resident_id text NOT NULL,
-    event_type text NOT NULL CHECK (event_type IN ('created','proposed','approved','rejected','superseded','rollback')),
+    event_type text NOT NULL CHECK (event_type IN ('created','proposed','submitted_for_review','approved','rejected','published','activated','superseded','rollback')),
     dossier_revision text NOT NULL,
     prior_revision text,
     actor_ref text NOT NULL,
@@ -64,7 +66,23 @@ CREATE TABLE r3a.resident_dossier_events (
 CREATE INDEX resident_dossier_event_subject_time_idx
     ON r3a.resident_dossier_events(resident_id, occurred_at DESC);
 
+CREATE FUNCTION r3a.reject_resident_dossier_history_mutation()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'resident dossier history is append-only';
+END;
+$$;
+
+CREATE TRIGGER resident_dossier_revisions_immutable
+    BEFORE UPDATE OR DELETE ON r3a.resident_dossier_revisions
+    FOR EACH ROW EXECUTE FUNCTION r3a.reject_resident_dossier_history_mutation();
+
+CREATE TRIGGER resident_dossier_events_immutable
+    BEFORE UPDATE OR DELETE ON r3a.resident_dossier_events
+    FOR EACH ROW EXECUTE FUNCTION r3a.reject_resident_dossier_history_mutation();
+
 -- Role grants are intentionally deployment-owned. Runtime must not receive UPDATE/DELETE
--- on revision or event tables; a separate narrowly scoped transaction will move current pointers.
+-- on revision or event tables; append-only triggers enforce this even if grants drift.
+-- Runtime may only move current pointers through the governed workflow transaction.
 -- HR personnel-sensitive fields and protected character sources require a distinct store/access
 -- projection and must not be bulk-copied into dossier JSON or prompts by this migration.

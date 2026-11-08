@@ -867,7 +867,7 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         return {"contract_id": "r3a.resident.runtime-character-context", "contract_version": "1.0.0",
                 "resident_id": "r3:grace", "directory_resident_id": "resident.grace",
                 "identity_binding_status": "authoritative", "identity_revision": "7",
-                "dossier_revision": "1.0.1", "approval_status": "approved",
+                "dossier_revision": "1.0.1", "approval_status": "active",
                 "classification_scope": classification_scope or ["public", "institutional"],
                 "authorization_ref": "hr.audit:context-read-1", "prompt_text": prompt_text,
                 "prompt_sha256": hashlib.sha256(prompt_text.encode()).hexdigest(),

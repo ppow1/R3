@@ -22,6 +22,7 @@ class GovernancePolicy:
     runtime_activators: FrozenSet[str]
     stewards: FrozenSet[str]
     steward_context_readers: FrozenSet[str]
+    dossier_readers: FrozenSet[str]
     policy_ref: str
 
 
@@ -60,14 +61,21 @@ def authorize_workflow_action(actor: GovernedActor, policy: GovernancePolicy, ac
         if principal not in policy.hr_managers:
             raise PermissionError("HR governance authority denied")
         return
+    if action == "character.dossier.read":
+        if principal not in policy.dossier_readers:
+            raise PermissionError("character dossier read authority denied")
+        return
+    if action == "character.history.read":
+        if principal not in policy.dossier_readers | policy.character_architects:
+            raise PermissionError("character history read authority denied")
+        return
     if action in {"character.propose", "character.history.review", "character.drift.review"}:
         if principal not in policy.character_architects:
             raise PermissionError("Character Architecture authority denied")
         return
     if action == "character.approve":
         if durable_canon_change and revision_author_id == principal:
-            if principal not in policy.independent_character_reviewers:
-                raise PermissionError("self-authored canon requires an independent configured reviewer")
+            raise PermissionError("an author cannot independently approve their own durable canon")
         elif principal not in policy.character_architects | policy.independent_character_reviewers:
             raise PermissionError("Character Architecture review authority denied")
         return
@@ -78,5 +86,9 @@ def authorize_workflow_action(actor: GovernedActor, policy: GovernancePolicy, ac
     if action == "character.activate":
         if principal not in policy.runtime_activators:
             raise PermissionError("runtime activation authority denied")
+        return
+    if action == "character.rollback":
+        if principal not in policy.runtime_activators:
+            raise PermissionError("runtime rollback authority denied")
         return
     raise PermissionError("workflow action is not granted by institutional governance")
