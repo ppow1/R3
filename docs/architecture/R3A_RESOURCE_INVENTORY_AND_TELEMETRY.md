@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_RESOURCE_INVENTORY_AND_TELEMETRY.md
 Component: R3A-RESOURCE-INVENTORY-CONTRACT
-File Revision: 1.1.0
+File Revision: 1.1.1
 Created: 2026-11-08T18:43:38Z
 Created By: Codex GPT-6
 Purpose: Define resource, capability, and installed software inventory boundaries and source evidence.
@@ -10,11 +10,11 @@ Execution Model: N/A; provider architecture and acceptance record.
 Observability: Provider schemas, digests, timestamps, state distinctions, and local read-only evidence.
 Dependencies: Existing CME capability registry; local lsblk/smartctl; OctoMiner telemetry plug-in.
 Authority: Issue #46; no managed runtime activation, production access, or service restart.
-Changed: 2026-11-08T19:29:50Z | R3A-HOST-DIAGNOSTICS-001 | Codex GPT-6 | Add independent host diagnostics provider and local evidence.
+Changed: 2026-11-08T19:34:54Z | R3A-RESOURCE-MONITOR-002 | Codex GPT-6 | Correct provider identities and clarify process/entrypoint separation.
 Supersedes: None.
 Contracts: r3a.capability-operation.v1; r3a.physical-resource-inventory.v1; r3a.software-environment-inventory.v1.
 Tests: tests/test_r3a_resource_monitor.py.
-History/Predecessor: Git blob 46b20135decc5402a69c5dcd9d75070ca695926b at 1d2eff3f91c7f0c32b7050255edd812cbf44c7f9.
+History/Predecessor: Git blob 571e4755665996ea916dbfefd1c10deff15938de at 30e05ce9ad483e8aecf3485b408bf3cc8867863b.
 -->
 # R3A resource inventory and monitoring boundary
 
@@ -28,8 +28,8 @@ R3A keeps three related inventories separate:
 
 | Operation | Provider | Output | Limitations |
 |---|---|---|---|
-| `infrastructure.resources.disk-health.read` | `r3a.resource-monitor` 1.0.0 | Physical block-device and SMART evidence | Local read-only `lsblk` and `smartctl`; no SMART self-tests or device writes. SMART may be unavailable without the binary or OS permission. SAS/SCSI JSON fields are parsed when present. |
-| `infrastructure.software-environments.discover` | `r3a.resource-monitor` 1.0.0 | Host and configured executable availability | Reports resolution path and Python runtime version; does not inventory packages, CUDA libraries, services, or model installations. |
+| `infrastructure.resources.disk-health.read` | `r3a.disk-health-monitor` 1.0.0 | Physical block-device and SMART evidence | Local read-only `lsblk` and `smartctl`; no SMART self-tests or device writes. SMART may be unavailable without the binary or OS permission. SAS/SCSI JSON fields are parsed when present. |
+| `infrastructure.software-environments.discover` | `r3a.software-environment-inventory` 1.0.0 | Host and configured executable availability | Reports resolution path and Python runtime version; does not inventory packages, CUDA libraries, services, or model installations. |
 | `infrastructure.host-diagnostics.read` | `r3a.host-diagnostics` 1.0.0 | Configured host load average, memory, uptime, filesystem capacity and optional sensor readings | Local Linux interfaces; sensor/fan readings are unavailable when lm-sensors or sensor inputs are absent. A source host must be verified before labeling this as Camrui telemetry. |
 | `infrastructure.octominer.telemetry.read` | `r3a.octominer-telemetry` 2.0.0 | GPU/VRAM/load/fan, mounted filesystem capacity, process-to-GPU mapping, model-server readiness, ComfyUI queues, R3A request metrics, bounded sample history | Existing independent configured SSH/HTTP/database collectors remain the owner of these domains. Native token throughput is not inferred. |
 
