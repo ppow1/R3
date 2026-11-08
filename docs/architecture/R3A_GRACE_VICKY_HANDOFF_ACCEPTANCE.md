@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_GRACE_VICKY_HANDOFF_ACCEPTANCE.md
 Component: R3A-AP2-GRACE-DELEGATION-ACCEPTANCE
-File Revision: 1.0.1
+File Revision: 1.0.4
 Created: 2026-11-08T13:21:02Z
 Created By: Codex GPT-6
 Purpose: Define a bounded, evidence-based first live Grace-to-Engineering-resident handoff acceptance case without asserting that a recipient is currently directory-bound or dispatchable.
@@ -12,10 +12,12 @@ Dependencies: Authoritative directory binding; generic CME resident dispatch; re
 Authority: Steward directive RESUME GRACE AUTONOMY; no directory mutation, grant, activation, or runtime change authorized by this document.
 Changed: 2026-11-08T13:21:02Z | R3A-AP2-GRACE-DELEGATION | Codex GPT-6 | Prepare first bounded Grace-to-Vicky handoff acceptance case and record current integration gate.
 Changed: 2026-11-08T15:37:17Z | R3A-CHARACTER-CONTEXT-CONSUMER | Codex GPT-6 | Add approved character-context and revision-pinning observations to the future handoff acceptance.
+Changed: 2026-11-08T17:31:16Z | R3A-CHARACTER-CONTEXT-V2 | Codex GPT-6 | Reference Character Architecture's approved v2 activity/conversation pin contract.
+Changed: 2026-11-08T17:34:06Z | R3A-CHARACTER-CONTEXT-V2 | Codex GPT-6 | Record the immediate predecessor revision.
 Supersedes: None
-Contracts: r3a.resident.execution-profile@1.0.0; canonical capability invocation; generic resident result feedback; CME durable activity lifecycle.
+Contracts: r3a.resident.execution-profile@1.0.0; r3a.resident.approved-character-context@2.0.0; canonical capability invocation; generic resident result feedback; CME durable activity lifecycle.
 Tests: N/A; this is a live acceptance plan, not execution evidence.
-History/Predecessor: Prior revision preserved at commit 89c544f9b091f9b11e28c00210021b321adf312d, blob 19d2ef4cd7b070df79e6fc1840681233c1b8970a.
+History/Predecessor: Prior revision preserved at commit 6c4f4e6d5b7f3f5c55b37fe34b0cf09b1fe47d65, blob ea0a5580f760e8d8c1b084fe4798029e34fe0cfb.
 -->
 # Grace to Engineering resident handoff: acceptance case
 
@@ -23,7 +25,7 @@ History/Predecessor: Prior revision preserved at commit 89c544f9b091f9b11e28c002
 
 Run this case only after one authoritative directory query returns the resident principal, active office binding, office role/responsibility evidence, and directory snapshot provenance for the Engineering Manager candidate; CME resolves that same principal to an independently configured resident profile and process; a suitable generic handoff operation is registered and discoverable; and CME confirms the necessary invocation grants. A display-name or legacy HR dossier is not sufficient. The reported managed directory result at 2026-11-08 08:17 EST contained only Grace, so `r3:vicky` is **not currently verified for activation**. The current CME dispatch path is also reported as a singleton resident process. No recipient, grant, operation, or completed delegation is asserted here.
 
-Before live inference, the governed Character Architecture provider must return `r3a.resident.runtime-character-context@1.0.0` for each verified resident binding. Each bundle must identify an approved active dossier revision, exact resident crosswalk, classification scope limited to authorized prompt material, source provenance, and prompt digest. Grace's parent objective remains pinned to Grace's character revision; the delegated activity is separately pinned to Vicky's revision. A refreshed authorization observation may change, but a resumed activity must not silently switch identity or character revision. Do not place protected HR/relationship material in either prompt, messages, memory, or diagnostics. If the approved active dossier or identity crosswalk is missing, report that dependency; do not fill it with a draft or fixture.
+Before live inference, the governed Character Architecture provider must return `r3a.resident.approved-character-context@2.0.0` for the exact `inference_activity` boundary and activity UUID. Its durable `pin_ref` binds the approved active dossier revision/digests to verified HR identity, directory snapshot/binding and provider. Grace's parent objective remains pinned to Grace's character revision; the delegated activity is separately pinned to Vicky's revision. A refreshed authorization observation may change, but a resumed activity must reload the same pin. Do not place protected HR/relationship material in either prompt, messages, memory, or diagnostics. If the approved active dossier or identity crosswalk is missing, report that dependency; do not fill it with a draft or fixture.
 
 ## Bounded objective to submit after the gate passes
 
@@ -50,7 +52,7 @@ Record the actual table/schema names from the integrated database before queryin
 
 - Parent activity intake, claim/lease, attempts, checkpoints, transitions, terminal or waiting state, and correlation lineage.
 - Model request/result provenance for Grace and the recipient, including configured role/model route and config revision.
-- The pinned character-context contract/version, verified resident binding, identity and dossier revisions, approved prompt digest, classification scope, provider/source provenance, and the durable point where each revision was fixed. The full prompt text and personality values must not be copied into diagnostics.
+- The pinned character-context contract/version, pin reference, verified resident binding, identity and dossier revisions/digests, context/prompt digest, classification scope, provider, and durable activity boundary. Full prompt text, personality values, authorization references, and HR/directory source references must not be copied into inference diagnostics; the governed pin store retains those references.
 - Capability invocations, idempotency key, authorization decision/audit, provider identity, result, and evidence references.
 - Directory snapshot/evidence and the selected directory-bound recipient identity and binding revision.
 - Durable handoff/child activity and result correlation to the parent.
@@ -64,6 +66,6 @@ The acceptance query must demonstrate one lineage across parent and delegated wo
 - **Grace-side profile/action logic:** implemented and fixture-tested in the Grace branch; not loaded by the managed service.
 - **Evidence handling:** full provenance inventory is delivered to inference; this branch now makes the distinction between claim-support references and required evidence-coverage references explicit and prohibits treating unrelated/unavailable items as support.
 - **Managed integration:** coordinator reported the managed Ring0/CME baseline at `c1818d5`; multi-resident dispatch and durable handoff remain incomplete.
-- **Character context:** the consumer is fixture-tested in the Grace branch; no approved active Grace dossier/context has been delivered to inference in a managed run. The authoritative Grace HR-to-directory crosswalk remains unverified, so this document makes no operational character-continuity claim.
+- **Character context:** the Grace consumer is fixture-tested against v2; no approved active Grace dossier/context has been delivered to inference in a managed run. The authoritative Grace HR-to-directory crosswalk remains unverified, so this document makes no operational character-continuity claim.
 - **Canonical target identity:** not verified in the managed directory snapshot reported to #56; the report contained only Grace. Do not activate a Vicky profile or infer `r3:vicky` from another source.
 - **Live Grace-to-recipient execution:** not performed. This document is preparation, not runtime evidence.
