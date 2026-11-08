@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/capability_worker.py
 Component: R3A-CAPABILITY-PROVIDER-WORKER
-File Revision: 1.0.0
+File Revision: 1.1.0
 Created: 2026-11-07
 Created By: Codex GPT-6
 Purpose: Load and execute one digest-pinned provider under the generic module protocol.
@@ -11,6 +11,7 @@ Observability: Versioned hello, readiness, health, checkpoint, execute, and stop
 Dependencies: Python standard library; r3a_runtime.protocol; manifest provider package.
 Authority: Steward directive, "Implement the Approved Modular Foundation", 2026-11-07.
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Implement a generic provider worker with pinned artifact checks and sanitized execution errors.
+Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Serialize typed provider output/evidence over the JSON module protocol.
 Supersedes: None.
 Contracts: MOD-001–MOD-010; r3a.capability-provider.v1; AP0-M1 JSON-lines protocol.
 Tests: tests/test_r3a_capability_integration_demo.py.
@@ -27,6 +28,7 @@ import signal
 from pathlib import Path
 from typing import Any
 
+from .capability_contracts import CapabilityProviderResult
 from .protocol import ModuleProtocolServer
 
 
@@ -88,6 +90,10 @@ class CapabilityWorker:
                 result = self.provider.invoke(arguments, context=context)
             except Exception as exc:
                 raise RuntimeError(f"provider execution failed ({type(exc).__name__})") from None
+            if isinstance(result, CapabilityProviderResult):
+                result = {"contract_id": "r3a.capability-provider-result.v1",
+                          "contract_version": "1.0.0",
+                          "output": result.output, "evidence": result.evidence}
             try:
                 json.dumps(result)
             except (TypeError, ValueError):

@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/provider_runtime.py
 Component: R3A-CAPABILITY-MODULE-RUNTIME
-File Revision: 1.1.0
+File Revision: 1.2.0
 Created: 2026-11-07
 Created By: Codex GPT-6
 Purpose: Supervise generic manifest-declared capability provider processes.
@@ -12,6 +12,7 @@ Dependencies: r3a_runtime.protocol; r3a_runtime.capability_contracts; Store modu
 Authority: Steward directive, "Implement the Approved Modular Foundation", 2026-11-07.
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Implement install, activation, invocation, deactivation, replacement, and failure handling for provider versions.
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-002 | Close admission and drain in-flight provider invocations before checkpoint and stop.
+Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Restore the versioned typed output/evidence provider result after JSON transport.
 Supersedes: None.
 Contracts: MOD-001–MOD-010; module.lifecycle v2; r3a.capability-provider.v1.
 Tests: tests/test_r3a_capability_integration_demo.py.
@@ -30,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .capability_contracts import RegisteredOperation
+from .capability_contracts import CapabilityProviderResult, RegisteredOperation
 from .protocol import PROTOCOL_MAJOR, PROTOCOL_MINOR, request
 
 
@@ -293,7 +294,13 @@ class ProviderProcessManager:
             response = await request(binding.socket, binding.module_id, binding.version, "execute",
                                      {"arguments": arguments, "context": context},
                                      timeout=operation.descriptor["execution"]["timeout_seconds"])
-            return response["result"]["provider_result"]
+            result = response["result"]["provider_result"]
+            if isinstance(result, dict) and result.get("contract_id") == "r3a.capability-provider-result.v1":
+                if set(result) != {"contract_id", "contract_version", "output", "evidence"} or \
+                        result.get("contract_version") != "1.0.0":
+                    raise RuntimeError("provider returned an invalid typed-result envelope")
+                return CapabilityProviderResult(result["output"], result["evidence"])
+            return result
         finally:
             async with self._lock:
                 binding.inflight -= 1

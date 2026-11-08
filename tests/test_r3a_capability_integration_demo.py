@@ -53,13 +53,14 @@ if importlib.util.find_spec("psycopg_pool") is None:
     sys.modules["psycopg_pool"] = pool_module
 
 from r3a_runtime.capability_contracts import (CapabilityRegistry, operation_from_manifest,
-                                              validate_invocation_request)
+                                              CapabilityProviderResult, validate_invocation_request)
 from r3a_runtime.cme import CME
 from r3a_runtime.config import _validate_plugin_config, load_settings
 from r3a_runtime.engineering import (CapabilityOperationRef, CriterionResult, EngineeringWorkOrder,
                                     VerificationResult, validate_completion)
 from r3a_runtime.db import utcnow
 from r3a_runtime.provider_runtime import ProviderProcessManager, _module_environment
+from r3a_runtime.capability_worker import CapabilityWorker
 from tests.test_r3a_modular_autonomy import make_config
 
 
@@ -98,6 +99,41 @@ def test_engineering_operation_is_defined_by_external_versioned_manifest():
     incompatible["module_manifest"]["binding"]["protocol_min_minor"] = 1
     with pytest.raises(ValueError, match="protocol range"):
         operation_from_manifest(incompatible)
+
+
+def test_generic_provider_worker_round_trips_typed_output_and_evidence():
+    async def scenario():
+        output = {"schema_id": "knowledge.results.v1", "results": [{"source_id": "knowledge.policy"}]}
+        evidence = [{"evidence_id": "knowledge.policy", "document_sha256": "a" * 64}]
+        worker = CapabilityWorker("r3a.knowledge", "1.1.0", "fixture:create_provider",
+                                  Path("/unused"), "a" * 64)
+        worker.state = "ACTIVE"
+        worker.provider = SimpleNamespace(invoke=lambda _arguments, *, context:
+                                           CapabilityProviderResult(output, evidence))
+        wire = await worker.handle("execute", {"arguments": {"query": "policy"}, "context": {}})
+        assert {"contract_id": "r3a.capability-provider-result.v1",
+                "contract_version": "1.0.0", "output": output, "evidence": evidence} == \
+            wire["provider_result"]
+        json.dumps(wire)
+
+        manager = ProviderProcessManager.__new__(ProviderProcessManager)
+        manager._lock = asyncio.Lock()
+        manager.processes = {}
+        binding = SimpleNamespace(module_id="r3a.knowledge", version="1.1.0",
+                                  socket=Path("/unused"), admission_open=True,
+                                  inflight=0, drained=asyncio.Event())
+        binding.drained.set()
+        manager.processes[(binding.module_id, binding.version)] = binding
+        manager._ensure_active = AsyncMock(return_value=binding)
+        operation = SimpleNamespace(descriptor={"execution": {"timeout_seconds": 2}})
+        with patch("r3a_runtime.provider_runtime.request",
+                   new=AsyncMock(return_value={"result": wire})):
+            restored = await manager.invoke(operation, {"query": "policy"}, context={})
+        assert isinstance(restored, CapabilityProviderResult)
+        assert output == restored.output
+        assert evidence == restored.evidence
+
+    asyncio.run(scenario())
 
 
 def work_order() -> EngineeringWorkOrder:
