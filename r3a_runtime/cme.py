@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.10.0
+File Revision: 1.11.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -13,6 +13,7 @@ Authority: AP1 / R3A-019 and AP1 Slices 1–2 authorized by Steward; isolated R3
 Changed: 2026-11-06T15:22:00Z | R3A-AP0-M1 | Codex GPT-6 | Implement CME process, scheduler, module worker and control plane.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Reconcile orphaned module processes, record live health and correct replacement status.
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Dispatch durable Grace objectives, authorize bounded evidence reads and renew long-running leases.
+Changed: 2026-11-08 | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Persist generic verifier results and ask Grace for a scoped corrective decision before blocking.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
 Changed: 2026-11-06T18:16:39Z | R3A-019 | Codex GPT-6 | Bound module-child termination when a model request does not drain.
@@ -1398,6 +1399,59 @@ class CME:
         return {"source_id": source_id, "source_path": source_id, "content": content,
                 "sha256": digest}
 
+    def _resident_result_from_verification(self, activity: dict[str, Any],
+                                           verification: VerificationResult) -> dict[str, Any]:
+        verification_value = verification.to_dict()
+        evidence_ref = f"verification:{verification.verification_id}"
+        failure_reasons = [
+            {"code": "criterion_failed" if result.status == "FAIL" else "criterion_inconclusive",
+             "message": result.rationale,
+             "evidence_refs": list(result.evidence_refs) or [evidence_ref]}
+            for result in verification.results if result.status != "PASS"
+        ]
+        if verification.outcome != "PASS" and not failure_reasons:
+            failure_reasons = [{"code": "verification_non_pass",
+                                "message": "Independent verification did not pass.",
+                                "evidence_refs": [evidence_ref]}]
+        return {
+            "contract_id": "r3a.resident.result", "contract_version": "1.0.0",
+            "activity_id": str(activity["activity_id"]),
+            "attempt_id": str(activity["attempt_id"]),
+            "correlation_id": str(activity["input"]["correlation_id"]),
+            "resident_id": self.module_id,
+            "config_revision": self.settings.source_digest,
+            "issued_at": verification.verified_at,
+            "issuer": {"component_id": "independent-verifier", "decision_ref": evidence_ref},
+            "outcome": verification.outcome,
+            "evidence": [{"evidence_ref": evidence_ref,
+                          "kind": "independent_verification", "content": verification_value}],
+            "failure_reasons": failure_reasons,
+            "completion_authority": False,
+        }
+
+    async def _resident_verification_decision(self, activity: dict[str, Any],
+                                              context: dict[str, Any],
+                                              resident_result: dict[str, Any],
+                                              conversation: list[dict[str, Any]]) -> dict[str, Any]:
+        """Ask Grace to choose a scoped correction or blocked disposition from durable feedback."""
+        decision_context = dict(context)
+        decision_context["resident_result"] = resident_result
+        decision_context["available_tools"] = []
+        decision_context["reasoning_escalation"] = {"enabled": False, "available_roles": []}
+        decision_context["conversation"] = list(conversation) + [{
+            "role": "user",
+            "content": json.dumps({"instruction": (
+                "This is the post-verification continuation decision for the same Engineering activity. "
+                "Inspect the supplied resident_result and its failure evidence. If one currently listed "
+                "Engineering operation can correct the failed criteria within this assignment, propose "
+                "one bounded correction. Otherwise return an engineering_assess decision with status "
+                "blocked. Do not assert completion or verification; CME and the independent verifier "
+                "retain those authorities."), "resident_result": resident_result}, separators=(",", ":")),
+        }]
+        decision_context["request_ref"] = str(uuid.uuid4())
+        return (await self._module_call("execute", decision_context,
+                                        timeout=context["model_route"]["timeout_seconds"] + 15))["result"]
+
     async def _lease_heartbeat(self, activity: dict[str, Any]) -> None:
         interval = max(1.0, self.settings.lease_seconds / 3.0)
         while True:
@@ -1480,10 +1534,11 @@ class CME:
         proposal = typed_proposal
         if proposal is None:
             model_ref = state.get("proposal_model") or {}
+            proposal_revision = int(state.get("proposal_revision", 1))
             proposal = EngineeringProposal(
                 proposal_id=str(uuid.uuid5(uuid.UUID(str(activity["activity_id"])),
-                                           "grace-engineering-proposal-v1")),
-                proposal_revision=1, activity_id=str(activity["activity_id"]),
+                                           f"grace-engineering-proposal-v{proposal_revision}")),
+                proposal_revision=proposal_revision, activity_id=str(activity["activity_id"]),
                 attempt_id=str(activity["attempt_id"]),
                 correlation_id=str(activity["input"]["correlation_id"]),
                 resident_id=self.module_id, config_revision=self.settings.source_digest,
@@ -1648,13 +1703,107 @@ class CME:
                  "verification_outcome": verification.outcome,
                  "artifact_digests": list(verification.artifact_digests)})
         if verification.outcome != "PASS":
+            resident_result = self._resident_result_from_verification(activity, verification)
+            await checkpoint("engineering.verification_feedback.requested",
+                             resident_result=resident_result)
+            correction_count = int(state.get("verification_correction_count", 0))
+            if correction_count >= 1:
+                correction_response = {
+                    "action": "engineering_assess",
+                    "engineering_assessment": {
+                        "status": "blocked",
+                        "assessment": "The single bounded correction did not pass independent verification.",
+                        "evidence_refs": [resident_result["issuer"]["decision_ref"]]},
+                    "model": {},
+                    "model_content": "",
+                }
+            else:
+                correction_response = await self._resident_verification_decision(
+                    activity, context, resident_result, conversation)
+            correction_model = correction_response.get("model") or {}
+            model_turns.append({"action": correction_response.get("action"),
+                                "request_ref": correction_model.get("request_ref"),
+                                "result_ref": correction_model.get("result_ref"),
+                                "request_sha256": correction_model.get("request_sha256"),
+                                "result_sha256": correction_model.get("result_sha256"),
+                                "usage": correction_model.get("usage"),
+                                "content": correction_response.get("model_content"),
+                                "observed_at": utcnow().isoformat(),
+                                "resident_result_ref": resident_result["issuer"]["decision_ref"]})
+            correction_conversation = conversation + [
+                {"role": "user", "content": json.dumps({"resident_result": resident_result,
+                                                          "instruction": "Choose one scoped correction or block."},
+                                                         separators=(",", ":"))},
+                {"role": "assistant", "content": correction_response.get("model_content", "")},
+            ]
+            if correction_response.get("action") == "propose_engineering":
+                correction_proposal = correction_response.get("engineering_proposal")
+                if not isinstance(correction_proposal, dict):
+                    raise ValueError("Grace corrective action omitted its Engineering proposal")
+                descriptor = next((entry for entry in context["available_engineering_operations"]
+                                   if entry.get("operation_id") == correction_proposal.get("operation_id")
+                                   and entry.get("contract_version") == correction_proposal.get("contract_version")), None)
+                if descriptor is None or descriptor.get("effect_class") != "isolated_write":
+                    raise PermissionError("Grace corrective proposal is not a currently offered isolated_write operation")
+                operation = self.settings.capability_registry.resolve(
+                    descriptor["operation_id"], descriptor["contract_version"])
+                validate_json(correction_proposal["target"], descriptor["target_scope_schema"], path="$.target")
+                validate_json(correction_proposal["inputs"], descriptor["input_schema"], path="$.input")
+                if correction_proposal["target"].get("workspace_id") != assignment["workspace_id"]:
+                    raise PermissionError("Grace corrective target is outside the institution-assigned workspace")
+                correction_path = correction_proposal["inputs"].get("path")
+                if not isinstance(correction_path, str) or not any(
+                        correction_path == allowed or (allowed.endswith("**")
+                                                       and correction_path.startswith(allowed[:-2]))
+                        for allowed in assignment["allowed_paths"]):
+                    raise PermissionError("Grace corrective output is outside the institution-assigned allowlist")
+                proposal_revision = max(int(state.get("proposal_revision", 1)),
+                                        int((state.get("proposal") or {}).get("proposal_revision", 1))) + 1
+                state.update({"proposal": correction_proposal, "proposal_revision": proposal_revision,
+                              "proposal_rationale": correction_response.get("rationale"),
+                              "proposal_model": correction_model,
+                              "verification_correction_count": int(state.get("verification_correction_count", 0)) + 1,
+                              "resident_result": resident_result, "model_turns": model_turns,
+                              "conversation": correction_conversation})
+                for prior_key in ("grace_assessment", "execution_evidence", "verification_preview",
+                                  "verification_outcome", "invocation", "invocation_id"):
+                    state.pop(prior_key, None)
+                await checkpoint("engineering.corrective_proposal.selected",
+                                 resident_result=resident_result,
+                                 corrective_proposal=correction_proposal,
+                                 proposal_revision=proposal_revision,
+                                 model_turns=model_turns, conversation=correction_conversation,
+                                 correction_model=correction_model)
+                await self.store.transition_engineering_work_order(
+                    order_id, "BLOCKED", work_order.activity_id, str(activity["attempt_id"]),
+                    work_order.correlation_id, "Independent verification did not PASS; Grace proposed a new revision",
+                    {"verification_result": verification.to_dict(),
+                     "resident_result": resident_result,
+                     "corrective_proposal_revision": proposal_revision})
+                await self.store.fail_activity(
+                    activity, "Grace selected a scoped corrective proposal after failed verification", 0)
+                return
+            decision = correction_response.get("engineering_assessment")
+            if not isinstance(decision, dict) or decision.get("status") != "blocked":
+                decision = {"status": "blocked",
+                            "assessment": "Grace did not return a bounded corrective proposal; completion remains blocked.",
+                            "evidence_refs": [resident_result["issuer"]["decision_ref"]]}
+            await checkpoint("engineering.verification_feedback.decided",
+                             resident_result=resident_result,
+                             verification_feedback_decision=decision,
+                             model_turns=model_turns, conversation=correction_conversation,
+                             correction_model=correction_model)
             await self.store.transition_engineering_work_order(
                 order_id, "BLOCKED", work_order.activity_id, str(activity["attempt_id"]),
                 work_order.correlation_id, "Independent verification did not PASS",
-                {"verification_result": verification.to_dict()})
+                {"verification_result": verification.to_dict(),
+                 "resident_result": resident_result,
+                 "verification_feedback_decision": decision})
             await self.store.block_activity(activity, "Independent Engineering verification did not pass",
                                             {"work_order_id": order_id,
                                              "verification": verification.to_dict(),
+                                             "resident_result": resident_result,
+                                             "verification_feedback_decision": decision,
                                              "grace_assessment": assessment,
                                              "model_turns": model_turns, "invocation": invocation})
             return

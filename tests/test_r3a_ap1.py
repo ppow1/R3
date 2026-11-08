@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.9.0
+File Revision: 1.10.0
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -36,6 +36,7 @@ Changed: 2026-11-07 | R3A-AP1-CME-OBSERVER-QUEUE | Codex GPT-6 | Prevent termina
 Changed: 2026-11-07T23:41:45Z | R3A-AP2-DELEGATION | Codex GPT-6 | Cover Grace's evidence-grounded use of a dynamic office-handoff capability and unavailable handoff behavior.
 Changed: 2026-11-07T23:53:20Z | R3A-AP2-DELEGATION-CONTINUATION | Codex GPT-6 | Cover multi-route selection, handoff outcome handling, resumed context, and failed-verification corrective reasoning.
 Changed: 2026-11-08T00:04:44Z | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Verify generic institutional result validation, evidence delivery, corrective action selection, and rejection of false healthy completion claims.
+Changed: 2026-11-08T01:20:00Z | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Cover CME construction and delivery of generic independent-verifier results.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
@@ -62,6 +63,7 @@ from r3a_runtime.config import (ConfigurationError, ModelReadinessPolicy, ModelR
 from r3a_runtime.grace_module import GraceResident, resident_action_schema
 from r3a_runtime.knowledge import retrieve
 from r3a_runtime.diagnostics import DiagnosticProjection
+from r3a_runtime.engineering import CriterionResult, VerificationResult
 
 
 class ModelRouteTests(unittest.TestCase):
@@ -622,6 +624,7 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
 
         asyncio.run(exercise())
 
+
     def test_grace_proposes_a_scoped_correction_after_failed_verification(self):
         operation_id = "registered.operation.from.current-manifest"
         operation = {"operation_id": operation_id, "contract_version": "1.0.0"}
@@ -1084,6 +1087,66 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
 
         asyncio.run(exercise())
 
+
+
+class ResidentVerificationFeedbackIntegrationTests(unittest.TestCase):
+    def _fixture(self):
+        cme = CME.__new__(CME)
+        cme.module_id = "resident.grace"
+        cme.settings = SimpleNamespace(source_digest="config-r1")
+        activity = {
+            "activity_id": "11111111-1111-4111-8111-111111111111",
+            "attempt_id": "22222222-2222-4222-8222-222222222222",
+            "input": {"correlation_id": "33333333-3333-4333-8333-333333333333"},
+        }
+        verification = VerificationResult(
+            verification_id="44444444-4444-4444-8444-444444444444",
+            activity_id=activity["activity_id"],
+            work_order_id="55555555-5555-4555-8555-555555555555",
+            work_order_version=1, verifier_id="independent.verifier", verifier_version="1.0.0",
+            policy_revision="policy-r1", artifact_digests=("sha256:" + "a" * 64,),
+            results=(CriterionResult("required-value", "FAIL", ("workspace:result.json",),
+                                     "Observed value differs from the assigned value."),),
+            verified_at="2026-11-08T01:20:00Z", outcome="FAIL")
+        return cme, activity, verification
+
+    def test_cme_builds_lineage_bound_non_authoritative_verifier_result(self):
+        cme, activity, verification = self._fixture()
+        result = cme._resident_result_from_verification(activity, verification)
+
+        self.assertEqual(result["contract_id"], "r3a.resident.result")
+        self.assertEqual(result["activity_id"], activity["activity_id"])
+        self.assertEqual(result["attempt_id"], activity["attempt_id"])
+        self.assertEqual(result["correlation_id"], activity["input"]["correlation_id"])
+        self.assertEqual(result["resident_id"], "resident.grace")
+        self.assertEqual(result["outcome"], "FAIL")
+        self.assertFalse(result["completion_authority"])
+        self.assertEqual(result["issuer"]["decision_ref"],
+                         "verification:" + verification.verification_id)
+        self.assertEqual(result["failure_reasons"][0]["evidence_refs"],
+                         ["workspace:result.json"])
+
+    def test_cme_delivers_result_to_grace_with_only_scoped_engineering_actions(self):
+        cme, activity, verification = self._fixture()
+        result = cme._resident_result_from_verification(activity, verification)
+        expected = {"action": "engineering_assess", "engineering_assessment": {
+            "status": "blocked", "assessment": "No safe correction is available.",
+            "evidence_refs": [result["issuer"]["decision_ref"]]}}
+        cme._module_call = AsyncMock(return_value={"result": expected})
+        context = {"activity_id": activity["activity_id"], "attempt_id": activity["attempt_id"],
+                   "correlation_id": activity["input"]["correlation_id"],
+                   "config_revision": "config-r1", "model_route": {"timeout_seconds": 1},
+                   "available_tools": [{"capability_id": "unrelated.tool"}],
+                   "reasoning_escalation": {"enabled": True}}
+
+        response = asyncio.run(cme._resident_verification_decision(activity, context, result, []))
+
+        self.assertEqual(response, expected)
+        payload = cme._module_call.await_args.args[1]
+        self.assertEqual(payload["resident_result"], result)
+        self.assertEqual(payload["available_tools"], [])
+        self.assertEqual(payload["reasoning_escalation"], {"enabled": False, "available_roles": []})
+        self.assertIn(result["issuer"]["decision_ref"], payload["conversation"][-1]["content"])
 
 if __name__ == "__main__":
     unittest.main()
