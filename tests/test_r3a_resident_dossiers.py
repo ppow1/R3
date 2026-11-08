@@ -264,6 +264,11 @@ class ResidentDossierTests(unittest.TestCase):
         unresolved = reconcile_records(snapshot, ["r3:grace"], ["r3:grace"])
         self.assertEqual({item.state for item in unresolved}, {
             "hr_identity_crosswalk_missing", "directory_identity_crosswalk_missing"})
+        same_spelling = {"source": {"availability": "measured", "freshness": "fresh"},
+                         "residents": [{"resident_id": "r3:grace"}]}
+        same_id_unresolved = reconcile_records(same_spelling, ["r3:grace"], ["r3:grace"])
+        self.assertEqual({item.state for item in same_id_unresolved}, {
+            "hr_identity_crosswalk_missing", "directory_identity_crosswalk_missing"})
         result = reconcile_records(snapshot, ["r3:grace"], [],
                                    confirmed_crosswalk={"directory:grace": "r3:grace"})
         self.assertEqual([(item.institutional_id, item.state) for item in result],
@@ -285,6 +290,9 @@ class ResidentDossierTests(unittest.TestCase):
         self.assertEqual(reconcile_records(truncated, ["r3:grace"], ["r3:grace"],
                                            confirmed_crosswalk={"directory:grace": "r3:grace"})[0].state,
                          "directory_projection_incomplete")
+        crosswalk_conflict = reconcile_records(snapshot, ["r3:grace", "r3:other"], [],
+            confirmed_crosswalk={"directory:grace": "r3:grace", "directory:other": "r3:grace"})
+        self.assertEqual(crosswalk_conflict[0].state, "identity_crosswalk_conflict")
 
     def test_steward_classification_excludes_resident_lifecycle(self):
         identity = InstitutionalIdentity("configured-authority-id", "Steward", "STEWARD", "governance://steward")
