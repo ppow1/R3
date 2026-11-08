@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: web/steward-workspace-api.js
 Component: R3A-STEWARD-WORKSPACE-CLIENT
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Same-origin client for versioned resident conversation and notification contracts
@@ -11,6 +11,7 @@ Observability: Preserves server correlation IDs and exposes explicit unavailable
 Dependencies: r3a.steward-workspace-web.v1 proposal; #49 opaque Steward session boundary
 Authority: Contract proposal documented in docs/architecture/R3A_STEWARD_WORKSPACE_WEB_API_V1.md
 Changed: 2026-11-07 | R3A-007/R3A-010 | Add same-origin persistent chat and notification inbox clients
+Changed: 2026-11-08 | R3A-007/R3A-010 | Show exact unmounted API state and render source UTC with configured IANA presentation zone
 Tests: tests/test_steward_workspace_api.mjs uses mocked fetch only as a labeled development test
 */
 
@@ -24,6 +25,28 @@ export class WorkspaceApiError extends Error {
     this.status = status;
     this.code = code;
     this.correlationId = correlationId;
+  }
+}
+
+// Convert a server timestamp only when the institution supplied an explicit
+// IANA presentation zone. Keep the source instant visible so a conversion
+// never hides the authoritative UTC value.
+export function formatPresentationTimestamp(value, timezone = '') {
+  if (typeof value !== 'string' || !value.trim()) return 'time unavailable · UTC source unavailable';
+  const source = value.trim();
+  if (!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(source)) return `${source} · UTC offset missing; not converted`;
+  const instant = new Date(source);
+  if (!Number.isFinite(instant.getTime())) return `${source} · invalid timestamp; not converted`;
+  const utc = `${instant.toISOString().replace('.000Z', 'Z')} UTC`;
+  if (typeof timezone !== 'string' || !timezone.trim()) return `${utc} · presentation timezone not configured`;
+  try {
+    const local = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone, year: 'numeric', month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+    }).format(instant);
+    return `${utc} · ${local} (${timezone})`;
+  } catch {
+    return `${utc} · invalid presentation timezone (${timezone}); not converted`;
   }
 }
 
@@ -134,7 +157,8 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
 
   const unavailable = error => {
     const message = error instanceof WorkspaceApiError ? error.message : 'Resident conversation service unavailable';
-    setText(status, `${error?.status === 401 ? 'Sign in through the Steward session service. ' : ''}${message}${error?.correlationId ? ` · correlation ${error.correlationId}` : ''}`);
+    const missing = error?.status === 404 ? 'Authoritative resident directory and conversation APIs are not mounted on this website service. ' : '';
+    setText(status, `${error?.status === 401 ? 'Sign in through the Steward session service. ' : missing}${message}${error?.correlationId ? ` · correlation ${error.correlationId}` : ''}`);
     status.dataset.state = error?.status === 401 ? 'unauthenticated' : 'unavailable';
   };
 
@@ -145,7 +169,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
       const result = await api.messages(conversationId);
       messageList.replaceChildren();
       for (const message of result.messages || []) {
-        const item = row('article', `workspace-message ${message.sender?.kind || 'unknown'}`, message.sender?.display_name || message.sender?.id || 'Unknown sender', `${message.created_at || 'time unavailable'} · ${message.delivery_state || 'state unavailable'}`);
+        const item = row('article', `workspace-message ${message.sender?.kind || 'unknown'}`, message.sender?.display_name || message.sender?.id || 'Unknown sender', `${formatPresentationTimestamp(message.created_at, root.documentElement?.dataset.presentationTimezone)} · ${message.delivery_state || 'state unavailable'}`);
         const body = document.createElement('p');
         body.textContent = message.text || '';
         item.appendChild(body);
@@ -256,7 +280,7 @@ export function mountNotificationInbox({api = new StewardWorkspaceApi(), root = 
         const item = document.createElement('article');
         item.className = 'notification-item';
         const lifecycle = notification.lifecycle_status || notification.status || 'unknown';
-        const heading = row('div', 'notification-heading', notification.title || notification.delivery_id || notification.notification_id, `${notification.severity || notification.urgency || 'severity unknown'} · ${notification.created_at || notification.received_at || 'time unavailable'} · ${notification.source_id || notification.source || 'source unknown'} · correlation ${notification.correlation_id || notification.source_correlation_id || 'not supplied'}`);
+        const heading = row('div', 'notification-heading', notification.title || notification.delivery_id || notification.notification_id, `${notification.severity || notification.urgency || 'severity unknown'} · ${formatPresentationTimestamp(notification.created_at || notification.received_at, root.documentElement?.dataset.presentationTimezone)} · ${notification.source_id || notification.source || 'source unknown'} · correlation ${notification.correlation_id || notification.source_correlation_id || 'not supplied'}`);
         const body = document.createElement('p'); body.textContent = notification.summary || notification.message || '';
         const requiresAction = notification.actionable === true || notification.action_required === true || notification.requires_action === true;
         const state = document.createElement('p'); state.textContent = `Status: ${lifecycle} · ${requiresAction ? 'Actionable' : notification.actionable === false || notification.action_required === false || notification.requires_action === false ? 'Informational' : 'Actionability unknown'}`;
@@ -306,12 +330,14 @@ export function mountNotificationInbox({api = new StewardWorkspaceApi(), root = 
       status.dataset.state = result.freshness || 'unknown';
     } catch (error) {
       list.replaceChildren();
-      setText(status, `${error.status === 401 ? 'Sign in through the Steward session service. ' : ''}${error.message}${error.correlationId ? ` · correlation ${error.correlationId}` : ''}`);
+      const unavailable = error.status === 404 ? 'Recipient notification inbox API is not mounted on this website service. ' : '';
+      setText(status, `${error.status === 401 ? 'Sign in through the Steward session service. ' : unavailable}${error.message}${error.correlationId ? ` · correlation ${error.correlationId}` : ''}`);
       status.dataset.state = error.status === 401 ? 'unauthenticated' : 'unavailable';
     }
   }
   root.getElementById('nav-notifications')?.addEventListener('click', refresh);
   root.getElementById('notifications-refresh')?.addEventListener('click', refresh);
+  root.addEventListener?.('r3:presentation-timezone', refresh);
 }
 
 if (typeof document !== 'undefined') {

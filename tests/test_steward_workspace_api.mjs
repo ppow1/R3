@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_steward_workspace_api.mjs
 Component: R3A-STEWARD-WORKSPACE-CLIENT-TESTS
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Verify the versioned workspace browser client transport and denial behavior.
@@ -11,6 +11,7 @@ Observability: Asserts routes, session credentials mode, contract headers, error
 Dependencies: web/steward-workspace-api.mjs; Node.js built-in test modules.
 Authority: R3A Class I website development, Issue #51.
 Changed: 2026-11-07 | R3A-007/R3A-010/R3A-019 | Add chat, notification, session, objective, and capability client tests.
+Changed: 2026-11-08 | R3A-007/R3A-010 | Cover DST-aware UTC-preserving time display and unavailable API routing.
 Supersedes: None.
 Contracts: r3a.steward-workspace-web.v1; r3a.steward-session.v1; r3a.notification-inbox.v1; r3a.grace-objective-submission.v1.
 Tests: node --test tests/test_steward_workspace_api.mjs.
@@ -19,7 +20,7 @@ History/Predecessor: New file; initial publication recorded in Git.
 // Mock fetch never supplies live institutional data.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT} from '../web/steward-workspace-api.mjs';
+import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp} from '../web/steward-workspace-api.mjs';
 
 function response(status, payload, headers = {}) {
   return {
@@ -123,4 +124,20 @@ test('HTTP denials and contract mismatches remain explicit', async () => {
   await assert.rejects(denied.notifications(), error => error instanceof WorkspaceApiError && error.status === 401 && error.code === 'session_required');
   const mismatch = new StewardWorkspaceApi(async () => response(200, {contract: 'other.v1'}));
   await assert.rejects(mismatch.notifications(), error => error instanceof WorkspaceApiError && error.code === 'contract_mismatch');
+});
+
+
+test('presentation timestamps preserve UTC and use only an explicit IANA zone across DST', () => {
+  const winter = formatPresentationTimestamp('2026-01-15T17:00:00Z', 'America/New_York');
+  const summer = formatPresentationTimestamp('2026-07-15T16:00:00Z', 'America/New_York');
+  const foldEarly = formatPresentationTimestamp('2026-11-01T05:30:00Z', 'America/New_York');
+  const foldLate = formatPresentationTimestamp('2026-11-01T06:30:00Z', 'America/New_York');
+  assert.match(winter, /2026-01-15T17:00:00Z UTC/); assert.match(winter, /EST/);
+  assert.match(summer, /2026-07-15T16:00:00Z UTC/); assert.match(summer, /EDT/);
+  assert.match(foldEarly, /EDT/); assert.match(foldLate, /EST/);
+  assert.notEqual(foldEarly, foldLate);
+  assert.match(formatPresentationTimestamp('2026-03-08T07:30:00Z', 'America/New_York'), /EDT/);
+  assert.match(formatPresentationTimestamp('2026-01-15T17:00:00Z'), /presentation timezone not configured/);
+  assert.match(formatPresentationTimestamp('2026-01-15T17:00:00Z', 'Not/AZone'), /invalid presentation timezone/);
+  assert.match(formatPresentationTimestamp('2026-01-15 17:00:00', 'America/New_York'), /offset missing; not converted/);
 });
