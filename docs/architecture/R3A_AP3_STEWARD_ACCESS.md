@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_AP3_STEWARD_ACCESS.md
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.0.7
+File Revision: 1.0.9
 Created: 2026-11-07T21:37:42Z
 Created By: Codex GPT-6
 Purpose: Specify the AP3-M1 identity/session boundary, portal endpoints, authority delegation, and freshness behavior.
@@ -17,6 +17,9 @@ Changed: 2026-11-07T21:53:47Z | AP3-M1 | Codex GPT-6 | Align secret resolution a
 Changed: 2026-11-07T22:00:10Z | AP3-M1 | Codex GPT-6 | Define minimum database privileges and session factor metadata.
 Changed: 2026-11-07T22:02:18Z | AP3-M1 | Codex GPT-6 | Document configurable database acquisition timeout and durable invalid-session/origin denials.
 Changed: 2026-11-07T22:03:19Z | AP3-M1 | Codex GPT-6 | Specify mandatory Secure session cookies for configured remote transport.
+Changed: 2026-11-07T23:53:17Z | AP3-M1/AP3-M2 | Codex GPT-6 | Record Bitwarden 1.1.0 compatibility, safe reason codes, and complete contract provenance.
+Changed: 2026-11-07T23:53:17Z | AP3-M1/#51 | Codex GPT-6 | Document the shared Website principal dependency and coordinated prototype demonstration.
+Changed: 2026-11-07T23:57:23Z | AP3-M1/#51 | Codex GPT-6 | Share one /api/v1 cookie with Website APIs and expose generic CME operation discovery.
 Supersedes: None.
 Contracts: r3a.steward-identity.v1; r3a.steward-session.v1; r3a.steward-operation-result.v1; r3a.steward-access-status.v1.
 Tests: tests/test_r3a_steward_access.py; live transport remains unconfigured.
@@ -35,17 +38,17 @@ History/Predecessor: New file; initial publication recorded in Git.
 
 ## Existing authority boundaries
 
-The existing `r3_app.py` had no login or session API. The R3A directory provider is read-only discovery and does not grant authority. CME's `r3a.capability-invocation.v1` path and configured authorization provider remain responsible for operation grants, denials, and capability audit. The portal does not create or modify grants.
+The AP3 Website had no login or session API. The existing R3 account portal remains the human identity authority, and the AP3 router stores only its own revocable session. The R3A directory provider is read-only discovery and does not grant authority. CME's `r3a.capability-invocation.v1` path and configured authorization provider remain responsible for operation grants, denials, and capability audit. The AP3 session gateway does not create or modify grants.
 
 ## Contracts and flow
 
-The ingress verifies the existing identity authority and sends an HMAC signed assertion using `X-R3-Identity-Issuer`, `X-R3-Identity-Subject`, `X-R3-Identity-ID`, `X-R3-Identity-Time`, `X-R3-Identity-Authenticated-At`, `X-R3-Identity-Factors`, and `X-R3-Identity-Signature`. The signature covers the six preceding values joined with newlines, in that order. Factor references and original authentication time are retained as versioned hooks for TOTP/YubiKey. The portal accepts only the configured issuer and exact Steward principal and validates signature and assertion age. The edge must remove any client-supplied assertion headers before inserting its own. Assertion key resolution uses the Issue #50 `r3a.secrets.provider.v1` API and its closeable `SecretLease`; machine-principal and remote secret revision provenance are included in the session event without the secret value.
+Identity is provided by one replaceable `r3a.identity-provider.v1` adapter. `HmacIngressIdentityProvider` supports trusted ingress assertions using `X-R3-Identity-Issuer`, `X-R3-Identity-Subject`, `X-R3-Identity-ID`, `X-R3-Identity-Time`, `X-R3-Identity-Authenticated-At`, `X-R3-Identity-Factors`, and `X-R3-Identity-Signature`. Its signing key is resolved through Issue #50 `r3a.secrets.provider.v1@1.1.0` and a closeable `SecretLease`; durable non-secret provenance includes provider and machine-principal contract IDs/versions, secret reference, remote revision, and fetch time. The machine account remains secret-fetch metadata and never becomes the Steward principal. `R3AccountSessionIdentityProvider` binds the already deployed R3 account portal by forwarding only the `rv_account_session` cookie to its loopback session endpoint and requiring its authoritative `steward` role. It does not accept browser-supplied identity claims or create another identity authority. Both adapters feed the same durable AP3 session store, principal contract, origin checks, generic CME invocation, and revocation flow.
 
 On success, the portal creates a cryptographically random bearer token, stores only its SHA-256 digest plus principal/issuer/authentication-time/factor/expiry/revocation metadata in `r3a.steward_sessions`, and sets an HttpOnly, Secure (configurable for local testing), SameSite=Strict cookie. A unique assertion ID prevents replay. Logout revokes the durable session and expires the browser cookie. Session lookup reads the durable database each time, so revocation and unavailable state are visible immediately.
 
 `GET /api/v1/steward/status` reads live CME health through its private control socket and records a correlated state-read event. If CME cannot be reached, health and freshness report `unavailable`; no configured endpoint is presented as live. `POST /api/v1/steward/operations/invoke` takes one canonical capability invocation. The portal overwrites caller principal with the authenticated session subject, clears resident/service self-claims, supplies a server correlation ID, and passes the request through the existing CME local control socket. CME evaluates the configured grant and operation/effect contract. The browser cannot make a caller-supplied grant authoritative. The CME authorization audit and portal correlation are returned with successful results; a denial remains a refusal and is audited.
 
-Endpoints are opt-in via `R3A_STEWARD_ACCESS_CONFIG`; no auth route or listener is added by default. The configuration requires a session DSN and explicitly records `public_exposure: false`. Remote transport status remains `unavailable` until a real encrypted ingress is provisioned. The current repository does not contain a deployed identity ingress, Bitwarden credentials, or configured R3A DSN; therefore the prototype is not yet operational for remote use.
+Endpoints are opt-in via `R3A_STEWARD_ACCESS_CONFIG`; no auth route or listener is added by default. The configured `StewardAccess` instance is retained on `app.state.steward_access`; Website route adapters under `/api/v1/steward/` can use `Depends(require_steward_principal)` so desktop and mobile clients share the same cookie, durable session, and revocation authority. The generic `/operations/invoke` endpoint remains the capability gateway and CME remains the grant authority. The configuration requires a session DSN and explicitly records `public_exposure: false`. Remote transport status remains `unavailable` until a real encrypted ingress is provisioned. The loopback R3 account portal is available as the existing identity authority, but AP0's session migration and a least-privilege Steward database role/DSN are not provisioned; the AP3 router is therefore not yet operational.
 
 ## Security and freshness
 
@@ -56,5 +59,7 @@ Endpoints are opt-in via `R3A_STEWARD_ACCESS_CONFIG`; no auth route or listener 
 - Remote transport configuration requires `Secure` session cookies; same-origin and request-origin checks protect browser mutations.
 - The portal database role needs `USAGE` on schema `r3a`; `SELECT`, `INSERT`, and column-level `UPDATE(revoked_at)` on `r3a.steward_sessions`; and `INSERT` on `r3a.institution_events`. Migrations remain owned by the existing migration identity. The portal role does not need event update/delete, session delete, grant, or schema ownership privileges.
 - The session and operation endpoints fail closed on missing or stale identity, session, database, or CME state. They do not serve cached authentication or fabricate operation success.
-- The reverse proxy/identity ingress remains an externally configured replaceable component. Bitwarden secret retrieval uses Issue #50's versioned provider contract; live retrieval still requires configured machine credentials and a secret reference.
+- The R3 account-session endpoint is available locally at `127.0.0.1:8767`; the AP3 binding validates its existing cookie without acquiring another identity credential. The HMAC-ingress adapter remains available when a trusted ingress is deployed and uses Issue #50's versioned Bitwarden provider. AP0 still needs to provision the Steward session migration, least-privilege role/DSN, and confirm the supported CME socket binding.
+- `SecretProviderError.reason_code` is retained as a finite internal audit/status reason; the HTTP response remains generic and the exception message/CLI output is discarded. Provider outcomes such as credential unavailable, access denied, reference not found, and provider failure remain distinct internally.
+- Development E2E sequence, once AP0 provisions the session migration/least-privilege role and confirms the CME socket binding: authenticate through the existing R3 account portal; verify durable current AP3 session; submit a known authorized generic CME invocation and retain its activity/correlation/audit references; delete the AP3 session; repeat the invocation and verify denial plus durable denial audit. Local provider tests are simulated; no live AP3 session run is claimed yet.
 - TOTP and YubiKey have no current implementation; the assertion contract preserves issuer and authentication-factor provenance hooks for the next adapter revision.
