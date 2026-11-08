@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.10.4
+File Revision: 1.10.6
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -10,6 +10,10 @@ Execution Model: Python unittest, isolated temporary fixtures.
 Observability: Deterministic assertions and unittest results.
 Dependencies: Python standard library; r3a_runtime.config and r3a_runtime.knowledge.
 Authority: AP1 / R3A-019 targeted verification authorized by Steward.
+Supersedes: None.
+Contracts: R3A-019; r3a.resident.runtime-character-context@1.0.0; r3a.resident.execution-profile@1.0.0; configured model routing and evidence provenance.
+Tests: This test module.
+History: Prior revision preserved at commit 11d4c898eea1fef6caf6a22b72bbd827217ccf15, blob 1872ea87c658fad39fd180170ecbd3fb7c23ca41.
 Changed: 2026-11-06T18:05:53Z | R3A-019 | Codex GPT-6 | Add focused route and knowledge retrieval checks.
 Changed: 2026-11-06T18:07:21Z | R3A-019 | Codex GPT-6 | Verify source-state transition retrieval returns all four permitted successors.
 Changed: 2026-11-06T18:07:40Z | R3A-019 | Codex GPT-6 | Extend the fixture to include all four RUNNING successors.
@@ -42,10 +46,9 @@ Changed: 2026-11-08T02:49:00Z | R3A-AP1-EVIDENCE-FEEDBACK | Codex GPT-6 | Verify
 Changed: 2026-11-08T13:21:02Z | R3A-AP1-EVIDENCE-REASONING | Codex GPT-6 | Cover distinction between claim support, evidence coverage, unavailable records, and bounded corrective decisions.
 Changed: 2026-11-08T13:50:35Z | R3A-AUTONOMY-RECOVERY | Codex GPT-6 | Test failed-capability reasoning guidance and bounded durable activity retry decisions.
 Changed: 2026-11-08T15:02:05Z | R3A-CONTEXT-RECOVERY | Codex GPT-6 | Verify bounded projection of evidence and actual prior tool messages plus single changed-request recovery after provider rejection.
-Supersedes: None.
-Contracts: R3A-019; proposed r3a.resident.execution-profile@1.0.0; configured model routing and evidence provenance.
-Tests: This test module.
-History/Predecessor: Prior revision preserved at commit 11d4c898eea1fef6caf6a22b72bbd827217ccf15, blob 1872ea87c658fad39fd180170ecbd3fb7c23ca41.
+Changed: 2026-11-08T15:30:31Z | R3A-CHARACTER-CONTEXT-CONSUMER | Codex GPT-6 | Verify approved context validation, prompt use, privacy-safe provenance, and durable revision pinning.
+Changed: 2026-11-08T15:37:17Z | R3A-CHARACTER-CONTEXT-CONSUMER | Codex GPT-6 | Verify an authorization refresh preserves the same character revision and keep required header metadata visible to the checker.
+History (continued): Per-change provenance continues in the repository history.
 """
 from __future__ import annotations
 
@@ -70,6 +73,8 @@ from r3a_runtime.config import (ConfigurationError, ModelReadinessPolicy, ModelR
 from r3a_runtime.grace_module import (GraceResident, ModelContextLimitError,
                                       compact_evidence_for_context, estimate_prompt_tokens,
                                       fit_model_request_context, resident_action_schema)
+from r3a_runtime.resident_character_context import (character_context_binding,
+                                                    require_character_context_pin)
 from r3a_runtime.knowledge import retrieve
 from r3a_runtime.diagnostics import DiagnosticProjection
 
@@ -1452,6 +1457,91 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
                 self.assertEqual(len(continuation_contexts), 2)
 
         asyncio.run(exercise())
+
+
+    def _character_context(self, *, resident_id="hr:grace", directory_id="resident.grace"):
+        prompt_text = "Use a calm, curious, professionally direct voice."
+        return {"contract_id": "r3a.resident.runtime-character-context", "contract_version": "1.0.0",
+                "resident_id": resident_id, "directory_resident_id": directory_id,
+                "identity_binding_status": "authoritative", "identity_revision": "hr-rev-12",
+                "dossier_revision": "1.2.0", "approval_status": "active",
+                "classification_scope": ["public", "institutional"],
+                "authorization_ref": "hr.audit:context-read-17", "prompt_text": prompt_text,
+                "prompt_sha256": hashlib.sha256(prompt_text.encode()).hexdigest(),
+                "prompt_component_refs": [["dossier:grace", "voice"]],
+                "source_refs": ["approved-dossier:grace:voice"],
+                "personality": {"warmth": 65, "humor": 20, "formality": 55, "assertiveness": 60,
+                                "curiosity": 80, "spontaneity": 35, "empathy": 75,
+                                "expressiveness": 45, "professional_directness": 80},
+                "personality_sources": {"warmth": "dossier:grace:voice"},
+                "provider_id": "governed-character-context", "authority_granted": False}
+
+    def test_approved_character_context_is_used_and_only_safe_revision_provenance_is_returned(self):
+        response = ('{"action":"final","decision":{"assessment":"The evidence supports the answer.",'
+                    '"status":"healthy","evidence_refs":[],"recommended_action":"none"}}')
+        resident = self._resident(response)
+        payload = self._payload([])
+        context = self._character_context()
+        payload["resident_character_context"] = context
+
+        result = asyncio.run(resident.handle("execute", payload))
+
+        request = resident._model_request.await_args.args[2]
+        system = request["messages"][0]["content"]
+        user = json.loads(request["messages"][-1]["content"])
+        self.assertIn(context["prompt_text"], system)
+        self.assertIn("shape the resident's character and manner", system)
+        self.assertEqual(user["resident_character_context"], character_context_binding(context))
+        self.assertEqual(result["model"]["usage"]["resident_character_context"],
+                         character_context_binding(context))
+        self.assertNotIn(context["prompt_text"], json.dumps(result))
+        self.assertNotIn(json.dumps(context["personality"]), json.dumps(result))
+
+    def test_character_context_fails_closed_before_inference_for_unapproved_or_protected_scope(self):
+        for field, value in (("approval_status", "draft"),
+                             ("classification_scope", ["public", "protected"]),
+                             ("authority_granted", True)):
+            resident = self._resident('{"action":"final"}')
+            payload = self._payload([])
+            context = self._character_context()
+            context[field] = value
+            payload["resident_character_context"] = context
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                asyncio.run(resident.handle("execute", payload))
+            resident._model_request.assert_not_awaited()
+
+    def test_resumed_activity_cannot_change_or_drop_its_pinned_character_revision(self):
+        context = self._character_context()
+        binding = character_context_binding(context)
+        changed = {**context, "dossier_revision": "1.3.0",
+                   "prompt_text": "A changed approved context.",
+                   "prompt_sha256": hashlib.sha256(b"A changed approved context.").hexdigest()}
+        for next_context in (None, changed):
+            resident = self._resident('{"action":"final"}')
+            payload = self._payload([])
+            payload["resident_character_context"] = next_context
+            payload["reasoning_state"] = {"model_turns": [{"usage": {
+                "resident_character_context": binding}}]}
+            with self.subTest(next_context=next_context is not None), self.assertRaisesRegex(
+                    ValueError, "pinned revision"):
+                asyncio.run(resident.handle("execute", payload))
+            resident._model_request.assert_not_awaited()
+
+    def test_initial_absence_of_character_context_is_pinned_for_the_activity(self):
+        resident = self._resident('{"action":"final"}')
+        payload = self._payload([])
+        payload["reasoning_state"] = {"model_turns": [{"usage": {"resident_character_context": None}}]}
+        payload["resident_character_context"] = self._character_context()
+        with self.assertRaisesRegex(ValueError, "pinned revision"):
+            asyncio.run(resident.handle("execute", payload))
+        resident._model_request.assert_not_awaited()
+
+    def test_same_character_revision_allows_a_fresh_authorization_observation(self):
+        context = self._character_context()
+        prior = character_context_binding(context)
+        current = {**prior, "authorization_ref": "hr.audit:refreshed-read-18"}
+        require_character_context_pin(current, {"model_turns": [{"usage": {
+            "resident_character_context": prior}}]})
 
 
 if __name__ == "__main__":

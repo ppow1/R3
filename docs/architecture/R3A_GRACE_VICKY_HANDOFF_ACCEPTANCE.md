@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_GRACE_VICKY_HANDOFF_ACCEPTANCE.md
 Component: R3A-AP2-GRACE-DELEGATION-ACCEPTANCE
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-08T13:21:02Z
 Created By: Codex GPT-6
 Purpose: Define a bounded, evidence-based first live Grace-to-Engineering-resident handoff acceptance case without asserting that a recipient is currently directory-bound or dispatchable.
@@ -11,16 +11,19 @@ Observability: Activity, model, directory, authorization, handoff, execution, ve
 Dependencies: Authoritative directory binding; generic CME resident dispatch; registered handoff operation; configured recipient model route; recipient grants; resident-result continuation contract.
 Authority: Steward directive RESUME GRACE AUTONOMY; no directory mutation, grant, activation, or runtime change authorized by this document.
 Changed: 2026-11-08T13:21:02Z | R3A-AP2-GRACE-DELEGATION | Codex GPT-6 | Prepare first bounded Grace-to-Vicky handoff acceptance case and record current integration gate.
+Changed: 2026-11-08T15:37:17Z | R3A-CHARACTER-CONTEXT-CONSUMER | Codex GPT-6 | Add approved character-context and revision-pinning observations to the future handoff acceptance.
 Supersedes: None
 Contracts: r3a.resident.execution-profile@1.0.0; canonical capability invocation; generic resident result feedback; CME durable activity lifecycle.
 Tests: N/A; this is a live acceptance plan, not execution evidence.
-History/Predecessor: New controlled document.
+History/Predecessor: Prior revision preserved at commit 89c544f9b091f9b11e28c00210021b321adf312d, blob 19d2ef4cd7b070df79e6fc1840681233c1b8970a.
 -->
 # Grace to Engineering resident handoff: acceptance case
 
 ## Readiness gate
 
 Run this case only after one authoritative directory query returns the resident principal, active office binding, office role/responsibility evidence, and directory snapshot provenance for the Engineering Manager candidate; CME resolves that same principal to an independently configured resident profile and process; a suitable generic handoff operation is registered and discoverable; and CME confirms the necessary invocation grants. A display-name or legacy HR dossier is not sufficient. The reported managed directory result at 2026-11-08 08:17 EST contained only Grace, so `r3:vicky` is **not currently verified for activation**. The current CME dispatch path is also reported as a singleton resident process. No recipient, grant, operation, or completed delegation is asserted here.
+
+Before live inference, the governed Character Architecture provider must return `r3a.resident.runtime-character-context@1.0.0` for each verified resident binding. Each bundle must identify an approved active dossier revision, exact resident crosswalk, classification scope limited to authorized prompt material, source provenance, and prompt digest. Grace's parent objective remains pinned to Grace's character revision; the delegated activity is separately pinned to Vicky's revision. A refreshed authorization observation may change, but a resumed activity must not silently switch identity or character revision. Do not place protected HR/relationship material in either prompt, messages, memory, or diagnostics. If the approved active dossier or identity crosswalk is missing, report that dependency; do not fill it with a draft or fixture.
 
 ## Bounded objective to submit after the gate passes
 
@@ -33,10 +36,10 @@ This is a limited source-and-test assignment with no external side effects. Grac
 | Stage | Evidence to capture | Authority |
 |---|---|---|
 | Objective intake | Durable activity UUID, objective and acceptance criteria, parent/correlation lineage, initial state and timestamp | CME/store |
-| Grace planning | Actual primary-model route/model, request/result references and digests, model-selected action, rationale, evidence refs | Grace inference provenance |
+| Grace planning | Actual primary-model route/model, request/result references and digests, model-selected action, rationale, evidence refs, approved context revision/digest and classification scope | Grace inference provenance |
 | Directory discovery | Capability invocation ID, authorization decision/audit ID, returned office/resident/binding/capability data, source snapshot digest/time | CME + directory provider |
 | Delegation | Grace's actual selected handoff contract/typed arguments; CME's recipient resolution and grant decision; durable handoff/child activity ID and lineage | Grace decision; CME enforcement/persistence |
-| Recipient execution | Recipient identity/profile revision and model route; independent model request/result refs; provider invocation and idempotency key; artifact path and digest | CME + recipient + canonical provider |
+| Recipient execution | Recipient identity/profile revision, its own approved character-context revision/digest, and model route; independent model request/result refs; provider invocation and idempotency key; artifact path and digest | CME + recipient + canonical provider |
 | Independent verification | Verifier ID/version, each acceptance criterion result, inspected artifact digest, PASS/FAIL and failure evidence | Independent verifier |
 | Grace continuation | Exact returned result envelope and evidence; Grace's actual decision to finish, revise, gather evidence, or block | CME result delivery; Grace inference |
 | Closure | Durable final state, transition/event IDs and timestamps; no completion unless independent verification passes | CME only |
@@ -47,6 +50,7 @@ Record the actual table/schema names from the integrated database before queryin
 
 - Parent activity intake, claim/lease, attempts, checkpoints, transitions, terminal or waiting state, and correlation lineage.
 - Model request/result provenance for Grace and the recipient, including configured role/model route and config revision.
+- The pinned character-context contract/version, verified resident binding, identity and dossier revisions, approved prompt digest, classification scope, provider/source provenance, and the durable point where each revision was fixed. The full prompt text and personality values must not be copied into diagnostics.
 - Capability invocations, idempotency key, authorization decision/audit, provider identity, result, and evidence references.
 - Directory snapshot/evidence and the selected directory-bound recipient identity and binding revision.
 - Durable handoff/child activity and result correlation to the parent.
@@ -59,6 +63,7 @@ The acceptance query must demonstrate one lineage across parent and delegated wo
 
 - **Grace-side profile/action logic:** implemented and fixture-tested in the Grace branch; not loaded by the managed service.
 - **Evidence handling:** full provenance inventory is delivered to inference; this branch now makes the distinction between claim-support references and required evidence-coverage references explicit and prohibits treating unrelated/unavailable items as support.
-- **Managed integration:** coordinator reports provider workers active at commit `7202d5c`, but multi-resident dispatch and durable handoff remain incomplete.
+- **Managed integration:** coordinator reported the managed Ring0/CME baseline at `c1818d5`; multi-resident dispatch and durable handoff remain incomplete.
+- **Character context:** the consumer is fixture-tested in the Grace branch; no approved active Grace dossier/context has been delivered to inference in a managed run. The authoritative Grace HR-to-directory crosswalk remains unverified, so this document makes no operational character-continuity claim.
 - **Canonical target identity:** not verified in the managed directory snapshot reported to #56; the report contained only Grace. Do not activate a Vicky profile or infer `r3:vicky` from another source.
 - **Live Grace-to-recipient execution:** not performed. This document is preparation, not runtime evidence.
