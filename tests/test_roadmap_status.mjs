@@ -1,7 +1,7 @@
 /* Development test mocks only; no GitHub or institutional records are asserted as live. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fetchRoadmapIssues} from '../web/roadmap-status.mjs';
+import {fetchLatestIssueUpdates, fetchRoadmapIssues} from '../web/roadmap-status.mjs';
 
 test('roadmap reads configured repository issue pages and excludes pull requests', async () => {
   const calls = [];
@@ -21,4 +21,16 @@ test('roadmap reads configured repository issue pages and excludes pull requests
 test('roadmap requires externally configured repository and HTTPS API origin', async () => {
   await assert.rejects(fetchRoadmapIssues({repository: '', apiBase: 'https://api.example.test', fetchImpl: async () => {throw new Error('must not fetch');}}), /not configured/);
   await assert.rejects(fetchRoadmapIssues({repository: 'owner/repo', apiBase: 'http://api.example.test', fetchImpl: async () => {throw new Error('must not fetch');}}), /not configured/);
+});
+
+test('latest evidence drilldown reads the selected issue comment history on demand', async () => {
+  let call;
+  const comments = [
+    {body: 'Older report', created_at: '2026-11-08T10:00:00Z', user: {login: 'steward'}},
+    {body: 'Latest blocker and next action', created_at: '2026-11-08T12:00:00Z', user: {login: 'owner'}},
+  ];
+  const result = await fetchLatestIssueUpdates({repository: 'team/R3', issueNumber: 51, apiBase: 'https://api.example.test', fetchImpl: async url => { call = url; return {ok: true, json: async () => comments}; }});
+  assert.match(call, /repos\/team\/R3\/issues\/51\/comments/);
+  assert.match(call, /sort=updated&direction=desc/);
+  assert.equal(result[0].body, 'Latest blocker and next action');
 });

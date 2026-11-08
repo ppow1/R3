@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: web/roadmap-status.mjs
 Component: R3A-WEBSITE-ROADMAP-STATUS
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-08 UTC
 Created By: Codex GPT-6
 Purpose: Read and render live GitHub roadmap/workstream issue records with explicit provenance.
@@ -11,6 +11,7 @@ Observability: Reports repository, issue source, timestamps, and explicit unavai
 Dependencies: r3a.website-identification.v1; GitHub REST API; shared AP3 session status API.
 Authority: Issue #51, comment 6725058145.
 Tests: tests/test_roadmap_status.mjs uses development-only mocked fetch responses.
+Changed: 2026-11-08 | #51 | Add on-demand latest issue update drilldown for owner evidence and reported blockers/actions.
 */
 
 const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -33,6 +34,18 @@ export async function fetchRoadmapIssues({repository, apiBase, fetchImpl = globa
     next = links.split(',').map(part => part.trim()).find(part => /rel="next"/.test(part))?.match(/<([^>]+)>/)?.[1] || '';
   }
   return issues.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+}
+
+export async function fetchLatestIssueUpdates({repository, issueNumber, apiBase, fetchImpl = globalThis.fetch, signal} = {}) {
+  if (!REPOSITORY_PATTERN.test(repository || '') || !Number.isInteger(issueNumber) || issueNumber < 1 || !/^https:\/\/[^/?#]+(?:\/[^?#]*)?$/.test(apiBase || '')) {
+    throw new Error('Roadmap issue update request is not configured');
+  }
+  const url = `${apiBase.replace(/\/$/, '')}/repos/${repository}/issues/${issueNumber}/comments?per_page=100&sort=updated&direction=desc`;
+  const response = await fetchImpl.call(globalThis, url, {headers: {Accept: 'application/vnd.github+json'}, signal, cache: 'no-store'});
+  if (!response.ok) throw new Error(`Issue update source unavailable (${response.status})`);
+  const comments = await response.json();
+  if (!Array.isArray(comments)) throw new Error('Issue update source returned an invalid response');
+  return comments.sort((a, b) => (b.updated_at || b.created_at || '').localeCompare(a.updated_at || a.created_at || '')).slice(0, 5);
 }
 
 export function mountRoadmapStatus({root = document, fetchImpl = globalThis.fetch} = {}) {
@@ -81,7 +94,28 @@ export function mountRoadmapStatus({root = document, fetchImpl = globalThis.fetc
         const summary = root.createElement('summary'); summary.textContent = 'Issue description and status context';
         const description = root.createElement('pre'); description.textContent = issue.body || 'No issue description supplied.';
         body.append(summary, description);
-        article.append(header, metadata, body); fragment.appendChild(article);
+        const updateBox = root.createElement('details');
+        const updateSummary = root.createElement('summary'); updateSummary.textContent = 'Latest reported evidence, blockers, and next actions';
+        const loadUpdates = root.createElement('button'); loadUpdates.type = 'button'; loadUpdates.textContent = 'Load latest issue updates';
+        const updates = root.createElement('div'); updates.className = 'roadmap-updates';
+        loadUpdates.addEventListener('click', async () => {
+          loadUpdates.disabled = true; loadUpdates.textContent = 'Loading issue updates…';
+          try {
+            const comments = await fetchLatestIssueUpdates({repository: identity.roadmap_repository, issueNumber: issue.number, apiBase: identity.roadmap_api_base, fetchImpl});
+            updates.replaceChildren();
+            for (const comment of comments) {
+              const entry = root.createElement('article');
+              const attribution = root.createElement('p'); attribution.textContent = `${comment.user?.login || 'Author unavailable'} · ${displayDate(comment.updated_at || comment.created_at)}`;
+              const content = root.createElement('pre'); content.textContent = comment.body || 'Empty issue update.';
+              entry.append(attribution, content); updates.appendChild(entry);
+            }
+            if (!comments.length) updates.textContent = 'No issue updates have been reported.';
+            loadUpdates.textContent = 'Refresh latest issue updates';
+          } catch (error) { updates.textContent = `Issue updates unavailable: ${error.message}`; loadUpdates.textContent = 'Retry latest issue updates'; }
+          finally { loadUpdates.disabled = false; }
+        });
+        updateBox.append(updateSummary, loadUpdates, updates);
+        article.append(header, metadata, body, updateBox); fragment.appendChild(article);
       }
       list.appendChild(fragment);
       if (!issues.length) list.textContent = 'No issue records returned.';
