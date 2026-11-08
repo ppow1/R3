@@ -37,6 +37,14 @@ The actual CME process ran against a private PostgreSQL cluster and worktree cod
 
 The isolated runtime was stopped after evidence capture. No production or shared managed runtime was changed.
 
+## Lifecycle hardening follow-up — 2026-11-08
+
+- Missing and disabled required dependencies are checked before provider readiness; unresolved dependencies fail closed. Restart reconciliation restores durably active or interrupted configured versions, recursively bringing their version-matched dependencies up before dependents. Explicitly stopped versions remain stopped.
+- Provider IPC retains the managed `r3a.capability-provider.v1` protocol 1.0 envelope and 65,536-byte frame ceiling. A response too large for the frame now becomes a bounded `ok: false`, `error_code: response_too_large` message. This keeps oversized telemetry history from escaping as an unhandled stream-reader exception.
+- The installable `r3a-ap0-runtime` wheel now includes provider manifests and plug-in JSON assets. It was installed into a separate venv and used for a second live CME/PostgreSQL lifecycle run. Module A v1.0.0 depended on telemetry B v2.0.0; version 1.0.2 replaced it; failed 1.0.3 left 1.0.2 active; 1.0.4 then replaced 1.0.2. Killing A's process produced durable `FAILED`, then activation restarted only A while B's PID stayed unchanged. A hard CME kill restored A 1.0.4 and B 2.0.0 with new PIDs, both healthy. Detailed process IDs and PostgreSQL event records are in the [lifecycle hardening evidence](../evidence/R3A_MODULE_LIFECYCLE_HARDENING_20261108.json).
+- Stronger filesystem isolation was investigated with Bubblewrap. A standalone probe demonstrated a read-only root with a selected writable workspace. The provider manager does not launch workers inside that sandbox yet; a versioned manifest/config policy for writable/readable paths and network needs must be agreed with the Coordinator first.
+- The current isolated acceptance runtime and its private database were stopped after evidence capture. No managed CME or shared runtime was activated.
+
 ## Limits and coordinator integration
 
 - Child workers currently run under the CME OS identity. Process separation and private sockets isolate faults, but this is not a separate-user or syscall sandbox.

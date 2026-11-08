@@ -1,0 +1,770 @@
+{
+  "capture_point": "after successful hard CME restart and provider health checks; before orderly shutdown",
+  "core_health_after_restart": "RUNNING/healthy; CME PID 1793233",
+  "core_pids": {
+    "after_hard_restart": 1793233,
+    "before_hard_restart": 1791038
+  },
+  "durable_module_lifecycle_events": [
+    {
+      "evidence": {
+        "health": "unknown",
+        "source": "capability manifest",
+        "version": "1.0.0"
+      },
+      "next_state": "INSTALLED",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:48:47.801691+00:00",
+      "prior_state": null,
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.0"
+    },
+    {
+      "evidence": {
+        "health": "unknown",
+        "source": "capability manifest",
+        "version": "1.0.2"
+      },
+      "next_state": "INSTALLED",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:48:48.440126+00:00",
+      "prior_state": null,
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.2"
+    },
+    {
+      "evidence": {
+        "health": "unknown",
+        "source": "capability manifest",
+        "version": "2.0.0"
+      },
+      "next_state": "INSTALLED",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:48:48.665452+00:00",
+      "prior_state": null,
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.octominer-telemetry@2.0.0"
+    },
+    {
+      "evidence": {
+        "health": "starting",
+        "version": "2.0.0"
+      },
+      "next_state": "ACTIVATING",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:48:50.621343+00:00",
+      "prior_state": "INSTALLED",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.octominer-telemetry@2.0.0"
+    },
+    {
+      "evidence": {
+        "health": "healthy",
+        "observed_contract": {
+          "contract_id": "r3a.capability-provider.v1",
+          "module_id": "r3a.octominer-telemetry",
+          "module_version": "2.0.0",
+          "supported_protocol": {
+            "major": 1,
+            "max_minor": 0,
+            "min_minor": 0
+          }
+        },
+        "pid": 1790641,
+        "version": "2.0.0"
+      },
+      "next_state": "ACTIVE",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:48:54.257511+00:00",
+      "prior_state": "ACTIVATING",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.octominer-telemetry@2.0.0"
+    },
+    {
+      "evidence": {
+        "health": "starting",
+        "version": "1.0.0"
+      },
+      "next_state": "ACTIVATING",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:48:54.455314+00:00",
+      "prior_state": "INSTALLED",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.0"
+    },
+    {
+      "evidence": {
+        "health": "healthy",
+        "observed_contract": {
+          "contract_id": "r3a.capability-provider.v1",
+          "module_id": "r3a.isolated-workspace",
+          "module_version": "1.0.0",
+          "supported_protocol": {
+            "major": 1,
+            "max_minor": 0,
+            "min_minor": 0
+          }
+        },
+        "pid": 1790685,
+        "version": "1.0.0"
+      },
+      "next_state": "ACTIVE",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:48:55.889796+00:00",
+      "prior_state": "ACTIVATING",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.0"
+    },
+    {
+      "evidence": {
+        "health": "stopping",
+        "version": "2.0.0"
+      },
+      "next_state": "STOPPING",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:48:56.888213+00:00",
+      "prior_state": "ACTIVE",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.octominer-telemetry@2.0.0"
+    },
+    {
+      "evidence": {
+        "exit_code": 0,
+        "health": "stopped",
+        "version": "2.0.0"
+      },
+      "next_state": "STOPPED",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:48:57.164186+00:00",
+      "prior_state": "STOPPING",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.octominer-telemetry@2.0.0"
+    },
+    {
+      "evidence": {
+        "health": "stopping",
+        "version": "1.0.0"
+      },
+      "next_state": "STOPPING",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:48:57.233581+00:00",
+      "prior_state": "ACTIVE",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.0"
+    },
+    {
+      "evidence": {
+        "exit_code": 0,
+        "health": "stopped",
+        "version": "1.0.0"
+      },
+      "next_state": "STOPPED",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:48:57.858312+00:00",
+      "prior_state": "STOPPING",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.0"
+    },
+    {
+      "evidence": {
+        "health": "starting",
+        "recovery_from": "STOPPED",
+        "version": "2.0.0"
+      },
+      "next_state": "ACTIVATING",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:49:33.554244+00:00",
+      "prior_state": "STOPPED",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.octominer-telemetry@2.0.0"
+    },
+    {
+      "evidence": {
+        "health": "healthy",
+        "observed_contract": {
+          "contract_id": "r3a.capability-provider.v1",
+          "module_id": "r3a.octominer-telemetry",
+          "module_version": "2.0.0",
+          "supported_protocol": {
+            "major": 1,
+            "max_minor": 0,
+            "min_minor": 0
+          }
+        },
+        "pid": 1791220,
+        "version": "2.0.0"
+      },
+      "next_state": "ACTIVE",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:49:37.247389+00:00",
+      "prior_state": "ACTIVATING",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.octominer-telemetry@2.0.0"
+    },
+    {
+      "evidence": {
+        "health": "starting",
+        "recovery_from": "STOPPED",
+        "version": "1.0.0"
+      },
+      "next_state": "ACTIVATING",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:49:37.387218+00:00",
+      "prior_state": "STOPPED",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.0"
+    },
+    {
+      "evidence": {
+        "health": "healthy",
+        "observed_contract": {
+          "contract_id": "r3a.capability-provider.v1",
+          "module_id": "r3a.isolated-workspace",
+          "module_version": "1.0.0",
+          "supported_protocol": {
+            "major": 1,
+            "max_minor": 0,
+            "min_minor": 0
+          }
+        },
+        "pid": 1791278,
+        "version": "1.0.0"
+      },
+      "next_state": "ACTIVE",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:49:38.685807+00:00",
+      "prior_state": "ACTIVATING",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.0"
+    },
+    {
+      "evidence": {
+        "health": "transitioning",
+        "replacement_started": true,
+        "version": "1.0.0"
+      },
+      "next_state": "REPLACING",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:49:51.247627+00:00",
+      "prior_state": "ACTIVE",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.0"
+    },
+    {
+      "evidence": {
+        "health": "starting",
+        "version": "1.0.2"
+      },
+      "next_state": "ACTIVATING",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:49:51.364992+00:00",
+      "prior_state": "INSTALLED",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.2"
+    },
+    {
+      "evidence": {
+        "health": "healthy",
+        "observed_contract": {
+          "contract_id": "r3a.capability-provider.v1",
+          "module_id": "r3a.isolated-workspace",
+          "module_version": "1.0.2",
+          "supported_protocol": {
+            "major": 1,
+            "max_minor": 0,
+            "min_minor": 0
+          }
+        },
+        "pid": 1791486,
+        "version": "1.0.2"
+      },
+      "next_state": "ACTIVE",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:49:55.034435+00:00",
+      "prior_state": "ACTIVATING",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.2"
+    },
+    {
+      "evidence": {
+        "health": "stopping",
+        "version": "1.0.0"
+      },
+      "next_state": "STOPPING",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:49:55.165690+00:00",
+      "prior_state": "REPLACING",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.0"
+    },
+    {
+      "evidence": {
+        "exit_code": 0,
+        "health": "stopped",
+        "version": "1.0.0"
+      },
+      "next_state": "STOPPED",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:49:55.967962+00:00",
+      "prior_state": "STOPPING",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.0"
+    },
+    {
+      "evidence": {
+        "module_id": "r3a.isolated-workspace",
+        "new_version": "1.0.2",
+        "old_version": "1.0.0"
+      },
+      "next_state": "STOPPED",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:49:56.001808+00:00",
+      "prior_state": "STOPPED",
+      "reason": "module replacement completed",
+      "subject_id": "r3a.isolated-workspace@1.0.0"
+    },
+    {
+      "evidence": {
+        "health": "unknown",
+        "source": "capability manifest",
+        "version": "1.0.3"
+      },
+      "next_state": "INSTALLED",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:50:28.570468+00:00",
+      "prior_state": null,
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.3"
+    },
+    {
+      "evidence": {
+        "health": "unknown",
+        "source": "capability manifest",
+        "version": "1.0.4"
+      },
+      "next_state": "INSTALLED",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:50:28.869314+00:00",
+      "prior_state": null,
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.4"
+    },
+    {
+      "evidence": {
+        "health": "transitioning",
+        "replacement_started": true,
+        "version": "1.0.2"
+      },
+      "next_state": "REPLACING",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:50:38.476765+00:00",
+      "prior_state": "ACTIVE",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.2"
+    },
+    {
+      "evidence": {
+        "health": "starting",
+        "version": "1.0.3"
+      },
+      "next_state": "ACTIVATING",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:50:38.570055+00:00",
+      "prior_state": "INSTALLED",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.3"
+    },
+    {
+      "evidence": {
+        "error_type": "RuntimeError",
+        "health": "unavailable",
+        "version": "1.0.3"
+      },
+      "next_state": "FAILED",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:50:40.152204+00:00",
+      "prior_state": "ACTIVATING",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.3"
+    },
+    {
+      "evidence": {
+        "health": "healthy",
+        "replacement_candidate_failed": true,
+        "version": "1.0.2"
+      },
+      "next_state": "ACTIVE",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:50:40.230586+00:00",
+      "prior_state": "REPLACING",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.2"
+    },
+    {
+      "evidence": {
+        "health": "transitioning",
+        "replacement_started": true,
+        "version": "1.0.2"
+      },
+      "next_state": "REPLACING",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:50:51.629853+00:00",
+      "prior_state": "ACTIVE",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.2"
+    },
+    {
+      "evidence": {
+        "health": "starting",
+        "version": "1.0.4"
+      },
+      "next_state": "ACTIVATING",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:50:51.673913+00:00",
+      "prior_state": "INSTALLED",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.4"
+    },
+    {
+      "evidence": {
+        "health": "healthy",
+        "observed_contract": {
+          "contract_id": "r3a.capability-provider.v1",
+          "module_id": "r3a.isolated-workspace",
+          "module_version": "1.0.4",
+          "supported_protocol": {
+            "major": 1,
+            "max_minor": 0,
+            "min_minor": 0
+          }
+        },
+        "pid": 1792382,
+        "version": "1.0.4"
+      },
+      "next_state": "ACTIVE",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:50:52.767295+00:00",
+      "prior_state": "ACTIVATING",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.4"
+    },
+    {
+      "evidence": {
+        "health": "stopping",
+        "version": "1.0.2"
+      },
+      "next_state": "STOPPING",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:50:52.816182+00:00",
+      "prior_state": "REPLACING",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.2"
+    },
+    {
+      "evidence": {
+        "exit_code": 0,
+        "health": "stopped",
+        "version": "1.0.2"
+      },
+      "next_state": "STOPPED",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:50:53.316595+00:00",
+      "prior_state": "STOPPING",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.2"
+    },
+    {
+      "evidence": {
+        "module_id": "r3a.isolated-workspace",
+        "new_version": "1.0.4",
+        "old_version": "1.0.2"
+      },
+      "next_state": "STOPPED",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:50:53.341139+00:00",
+      "prior_state": "STOPPED",
+      "reason": "module replacement completed",
+      "subject_id": "r3a.isolated-workspace@1.0.2"
+    },
+    {
+      "evidence": {
+        "exit_code": -9,
+        "health": "unavailable",
+        "reason": "provider process exited",
+        "version": "1.0.4"
+      },
+      "next_state": "FAILED",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:51:38.950393+00:00",
+      "prior_state": "ACTIVE",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.4"
+    },
+    {
+      "evidence": {
+        "health": "starting",
+        "recovery_from": "FAILED",
+        "version": "1.0.4"
+      },
+      "next_state": "ACTIVATING",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:51:39.285817+00:00",
+      "prior_state": "FAILED",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.4"
+    },
+    {
+      "evidence": {
+        "health": "healthy",
+        "observed_contract": {
+          "contract_id": "r3a.capability-provider.v1",
+          "module_id": "r3a.isolated-workspace",
+          "module_version": "1.0.4",
+          "supported_protocol": {
+            "major": 1,
+            "max_minor": 0,
+            "min_minor": 0
+          }
+        },
+        "pid": 1793030,
+        "version": "1.0.4"
+      },
+      "next_state": "ACTIVE",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:51:40.599874+00:00",
+      "prior_state": "ACTIVATING",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.4"
+    },
+    {
+      "evidence": {
+        "health": "stale",
+        "prior_state": "ACTIVE",
+        "reason": "provider process did not survive CME restart",
+        "version": "1.0.4"
+      },
+      "next_state": "FAILED",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:51:57.799765+00:00",
+      "prior_state": "ACTIVE",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.4"
+    },
+    {
+      "evidence": {
+        "health": "stale",
+        "prior_state": "ACTIVE",
+        "reason": "provider process did not survive CME restart",
+        "version": "2.0.0"
+      },
+      "next_state": "FAILED",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:51:57.970200+00:00",
+      "prior_state": "ACTIVE",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.octominer-telemetry@2.0.0"
+    },
+    {
+      "evidence": {
+        "health": "starting",
+        "recovery_from": "FAILED",
+        "version": "2.0.0"
+      },
+      "next_state": "ACTIVATING",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:51:58.032983+00:00",
+      "prior_state": "FAILED",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.octominer-telemetry@2.0.0"
+    },
+    {
+      "evidence": {
+        "health": "healthy",
+        "observed_contract": {
+          "contract_id": "r3a.capability-provider.v1",
+          "module_id": "r3a.octominer-telemetry",
+          "module_version": "2.0.0",
+          "supported_protocol": {
+            "major": 1,
+            "max_minor": 0,
+            "min_minor": 0
+          }
+        },
+        "pid": 1793282,
+        "version": "2.0.0"
+      },
+      "next_state": "ACTIVE",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:51:58.776630+00:00",
+      "prior_state": "ACTIVATING",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.octominer-telemetry@2.0.0"
+    },
+    {
+      "evidence": {
+        "health": "starting",
+        "recovery_from": "FAILED",
+        "version": "1.0.4"
+      },
+      "next_state": "ACTIVATING",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:51:58.826539+00:00",
+      "prior_state": "FAILED",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.4"
+    },
+    {
+      "evidence": {
+        "health": "healthy",
+        "observed_contract": {
+          "contract_id": "r3a.capability-provider.v1",
+          "module_id": "r3a.isolated-workspace",
+          "module_version": "1.0.4",
+          "supported_protocol": {
+            "major": 1,
+            "max_minor": 0,
+            "min_minor": 0
+          }
+        },
+        "pid": 1793289,
+        "version": "1.0.4"
+      },
+      "next_state": "ACTIVE",
+      "outcome": "accepted",
+      "persisted_at_utc": "2026-11-08T14:51:59.342182+00:00",
+      "prior_state": "ACTIVATING",
+      "reason": "module lifecycle observed",
+      "subject_id": "r3a.isolated-workspace@1.0.4"
+    }
+  ],
+  "durable_module_records": [
+    {
+      "artifact_sha256": "f7f095583882c89b9cbb39c3fe7f5408ce0b2a5b9f6a168464db4ba3b989ccaf",
+      "diagnostic": {
+        "exit_code": 0
+      },
+      "health": "stopped",
+      "lifecycle_state": "STOPPED",
+      "module_id": "r3a.isolated-workspace",
+      "observed_at_utc": "2026-11-08T14:49:55.973254+00:00",
+      "version": "1.0.0"
+    },
+    {
+      "artifact_sha256": "f7f095583882c89b9cbb39c3fe7f5408ce0b2a5b9f6a168464db4ba3b989ccaf",
+      "diagnostic": {
+        "source": "capability manifest"
+      },
+      "health": "unknown",
+      "lifecycle_state": "INSTALLED",
+      "module_id": "r3a.isolated-workspace",
+      "observed_at_utc": "2026-11-08T14:51:57.627279+00:00",
+      "version": "1.0.1"
+    },
+    {
+      "artifact_sha256": "f7f095583882c89b9cbb39c3fe7f5408ce0b2a5b9f6a168464db4ba3b989ccaf",
+      "diagnostic": {
+        "exit_code": 0
+      },
+      "health": "stopped",
+      "lifecycle_state": "STOPPED",
+      "module_id": "r3a.isolated-workspace",
+      "observed_at_utc": "2026-11-08T14:50:53.321875+00:00",
+      "version": "1.0.2"
+    },
+    {
+      "artifact_sha256": "f7f095583882c89b9cbb39c3fe7f5408ce0b2a5b9f6a168464db4ba3b989ccaf",
+      "diagnostic": {
+        "error_type": "RuntimeError"
+      },
+      "health": "unavailable",
+      "lifecycle_state": "FAILED",
+      "module_id": "r3a.isolated-workspace",
+      "observed_at_utc": "2026-11-08T14:50:40.154213+00:00",
+      "version": "1.0.3"
+    },
+    {
+      "artifact_sha256": "f7f095583882c89b9cbb39c3fe7f5408ce0b2a5b9f6a168464db4ba3b989ccaf",
+      "diagnostic": {
+        "checked_at": "2026-11-08T14:53:50.542122+00:00",
+        "module_state": "ACTIVE",
+        "pid": 1793289
+      },
+      "health": "healthy",
+      "lifecycle_state": "ACTIVE",
+      "module_id": "r3a.isolated-workspace",
+      "observed_at_utc": "2026-11-08T14:53:50.545458+00:00",
+      "version": "1.0.4"
+    },
+    {
+      "artifact_sha256": "af8aae26cad6f603f69658fea6dde2b868eadf1f4bdce6106b46f4c561587a86",
+      "diagnostic": {
+        "checked_at": "2026-11-08T14:53:50.528800+00:00",
+        "module_state": "ACTIVE",
+        "pid": 1793282
+      },
+      "health": "healthy",
+      "lifecycle_state": "ACTIVE",
+      "module_id": "r3a.octominer-telemetry",
+      "observed_at_utc": "2026-11-08T14:53:50.531075+00:00",
+      "version": "2.0.0"
+    }
+  ],
+  "environment": "isolated running prototype built from installed wheel; private PostgreSQL cluster; no Coordinator CME/DB/runtime changes",
+  "isolated_runtime_cleanup": {
+    "cme_stopped_cleanly": true,
+    "coordinator_runtime_touched": false,
+    "private_postgresql_stopped": true,
+    "provider_children_remaining": false
+  },
+  "isolation_research": {
+    "bubblewrap": "available and tested: read-only root mount, isolated tmpfs, selected workspace bind writable; test write under workspace succeeded and host /etc write failed with read-only filesystem",
+    "limitation": "provider process remains same OS user in current implementation; no bwrap wrapper activated pending Coordinator agreement on manifest/config filesystem/network policy",
+    "systemd_user_manager": "available; a basic transient user scope ran, but requested NoNewPrivileges scope property was rejected by this manager"
+  },
+  "managed_provider_protocol": {
+    "contract_id": "r3a.capability-provider.v1",
+    "error_response": "response_too_large; bounded JSON error envelope",
+    "max_frame_bytes": 65536,
+    "protocol_major": 1,
+    "protocol_minor": 0
+  },
+  "modules": [
+    {
+      "dependency": {
+        "module_id": "r3a.octominer-telemetry",
+        "version_range": "==2.0.0"
+      },
+      "lifecycle": "1.0.0 activated; 1.0.2 replacement succeeded; 1.0.3 candidate failed because configured workspace did not exist and 1.0.2 stayed ACTIVE; replacement to 1.0.4 succeeded; child 1792382 was killed, durable FAILED was observed, activation restarted it as PID 1793030; hard CME restart restored it as PID 1793289",
+      "module_id": "r3a.isolated-workspace",
+      "role": "Engineering Module A",
+      "versions_exercised": [
+        "1.0.0",
+        "1.0.2",
+        "1.0.3",
+        "1.0.4"
+      ]
+    },
+    {
+      "lifecycle": "auto-activated before Engineering; PID 1791220 remained alive through failed and successful upgrades and Engineering child termination; after hard CME restart it restored as PID 1793282",
+      "module_id": "r3a.octominer-telemetry",
+      "role": "Module B / dependency",
+      "version": "2.0.0"
+    }
+  ],
+  "observed_date": "2026-11-08",
+  "registered_versions_after_restart": [
+    "r3a.isolated-workspace@1.0.0=STOPPED",
+    "r3a.isolated-workspace@1.0.1=INSTALLED",
+    "r3a.isolated-workspace@1.0.2=STOPPED",
+    "r3a.isolated-workspace@1.0.3=FAILED",
+    "r3a.isolated-workspace@1.0.4=ACTIVE",
+    "r3a.octominer-telemetry@2.0.0=ACTIVE"
+  ],
+  "runtime_package": {
+    "imported_runtime_path": "/tmp/r3a-module-hardening-20261108/venv/lib/python3.12/site-packages/r3a_runtime",
+    "name": "r3a-ap0-runtime",
+    "provider_result_contract": "r3a.capability-provider-result.v1@1.0.0",
+    "version": "0.1.0",
+    "wheel_sha256": "dea5bbd7cc6a6be50a61cebf0034f60d93e20afffa5fa67f5af7bf307109d0a2"
+  }
+}

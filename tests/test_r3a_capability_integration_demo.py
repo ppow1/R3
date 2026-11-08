@@ -81,6 +81,27 @@ def descriptor() -> dict:
         "resident_tool": {"name": "engineering_workspace_apply_patch", "description": "Apply one bounded file."}}
 
 
+def lifecycle_manifest(operation: dict, artifact: Path, *, dependencies=()) -> dict:
+    provider = operation["provider"]
+    return {
+        "module_manifest": {
+            "module_id": provider["provider_id"], "module_version": provider["provider_version"],
+            "owner": "R3A lifecycle integration fixture",
+            "binding": {"contract_id": "r3a.capability-provider.v1", "protocol_major": 1,
+                        "protocol_min_minor": 0, "protocol_max_minor": 0,
+                        "entrypoint": provider["entrypoint"]},
+            "dependencies": list(dependencies),
+            "configuration": {"schema_ref": "fixture.config.v1", "configuration_ref": "external"},
+            "capability_refs": [operation["operation_id"]], "resource_refs": [],
+            "state_namespace": provider["provider_id"], "migration_contract": "none.v1",
+            "recovery_policy": "idempotent.v1",
+            "artifact": {"artifact_ref": str(artifact), "artifact_sha256": provider["artifact_sha256"]}},
+        "configuration_schema": {"schema_id": "fixture.config.v1"},
+        "artifact_ref": str(artifact), "_provider_artifact_path": str(artifact),
+        "_pinned_artifact_paths": {},
+    }
+
+
 def work_order() -> EngineeringWorkOrder:
     operation = CapabilityOperationRef("engineering.workspace.apply_patch", "1.0.0", "isolated_write",
                                        {"workspace_id": "candidate-1"},
@@ -205,6 +226,23 @@ class ProviderLifecycleFixtureStore:
 
 
 class IsolatedCapabilityIntegrationTests(unittest.TestCase):
+    def test_activation_fails_closed_when_required_dependency_is_missing(self):
+        async def scenario(root: Path):
+            operation = descriptor()
+            registry = CapabilityRegistry()
+            registry.register(operation, {"workspace_root": str(root)}, legacy_manifest={
+                "module_manifest": {"dependencies": [{"module_id": "r3a.required.missing",
+                                                       "version_range": "^1.0.0"}]}})
+            store = ProviderLifecycleFixtureStore()
+            runtime = ProviderProcessManager(SimpleNamespace(data_dir=root / "data"), store, registry)
+            with self.assertRaisesRegex(RuntimeError, "module dependency is not configured"):
+                await runtime.activate(registry.resolve("engineering.workspace.apply_patch"))
+            self.assertEqual({}, runtime.processes)
+            self.assertFalse(any(transition[2] == "ACTIVE" for transition in store.transitions))
+
+        with tempfile.TemporaryDirectory(prefix="r3a-provider-missing-dependency-") as temporary:
+            asyncio.run(scenario(Path(temporary)))
+
     def test_generic_provider_worker_round_trips_typed_output_and_evidence(self):
         async def scenario():
             output = {"schema_id": "knowledge.results.v1", "results": [{"source_id": "knowledge.policy"}]}
@@ -252,9 +290,6 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             bad_upgrade["provider"]["provider_version"] = "1.0.2"
             bad_upgrade["provider"]["artifact_sha256"] = "0" * 64
             registry = CapabilityRegistry()
-            registry.register(first, {"workspace_root": str(root)})
-            registry.register(second, {"workspace_root": str(root)})
-            registry.register(bad_upgrade, {"workspace_root": str(root)})
             telemetry_root = Path(__file__).parents[1] / "r3a_plugins/octominer_telemetry"
             telemetry_manifest = json.loads((telemetry_root / "manifest.json").read_text())
             telemetry_config = json.loads((telemetry_root / "config.example.json").read_text())
@@ -269,6 +304,20 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             registry.register(telemetry_operation, telemetry_config, legacy_manifest=telemetry_manifest)
             telemetry_registered = registry.resolve_provider(
                 telemetry_operation["operation_id"], telemetry_operation["provider"]["provider_version"])
+            telemetry_provider_id = telemetry_operation["provider"]["provider_id"]
+            telemetry_provider_version = telemetry_operation["provider"]["provider_version"]
+            requires_telemetry = [{"module_id": telemetry_provider_id,
+                                   "version_range": f"=={telemetry_provider_version}"}]
+            original_artifact = Path(__file__).parents[1] / "r3a_runtime/providers/isolated_workspace.py"
+            registry.register(first, {"workspace_root": str(root)},
+                              legacy_manifest=lifecycle_manifest(first, original_artifact,
+                                                                 dependencies=requires_telemetry))
+            registry.register(second, {"workspace_root": str(root)},
+                              legacy_manifest=lifecycle_manifest(second, replacement_artifact,
+                                                                 dependencies=requires_telemetry))
+            registry.register(bad_upgrade, {"workspace_root": str(root)},
+                              legacy_manifest=lifecycle_manifest(bad_upgrade, replacement_artifact,
+                                                                 dependencies=requires_telemetry))
             store = ProviderLifecycleFixtureStore()
             settings = SimpleNamespace(data_dir=root / "data")
             runtime = ProviderProcessManager(settings, store, registry)
@@ -278,7 +327,8 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
 
             old = registry.resolve_provider("engineering.workspace.apply_patch", "1.0.0")
             await runtime.activate(old)
-            await runtime.activate(telemetry_registered)
+            # The declared dependency starts before the Engineering provider and
+            # is available without an explicit second activation request.
             telemetry_provider = telemetry_registered.descriptor["provider"]
             telemetry_binding = runtime.processes[(telemetry_provider["provider_id"],
                                                    telemetry_provider["provider_version"])]
@@ -292,6 +342,18 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                        "work_order": {"workspace_id": "candidate-1", "allowed_paths": ["artifacts/**"]}}
             result = await runtime.invoke(old, {"path": "artifacts/result.txt", "content": "R3A module lifecycle\n"}, context)
             self.assertFalse(result["replayed"])
+            old_binding = runtime.processes[("r3a.isolated_workspace", "1.0.0")]
+            old_pid = old_binding.process.pid
+            old_binding.process.terminate()
+            await old_binding.process.wait()
+            await runtime.check_health()
+            self.assertEqual("FAILED", registry._provider_states[("r3a.isolated_workspace", "1.0.0")][0])
+            self.assertIsNone(telemetry_binding.process.returncode,
+                              "unrelated dependency process stays alive after a sibling crash")
+            restarted = await runtime.activate(old)
+            self.assertNotEqual(old_pid, restarted["pid"])
+            self.assertEqual("ACTIVE", (await store.rows(
+                "lifecycle_state", ("r3a.isolated_workspace", "1.0.0")))[0]["lifecycle_state"])
 
             new = registry.resolve_provider("engineering.workspace.apply_patch", "1.0.1")
             await runtime.begin_replacement("r3a.isolated_workspace", "1.0.0")
@@ -335,6 +397,10 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                                     telemetry_provider["provider_version"])))[0]["lifecycle_state"])
             self.assertEqual("1.0.1", registry.resolve("engineering.workspace.apply_patch").descriptor[
                 "provider"]["provider_version"])
+            self.assertEqual({("r3a.isolated_workspace", "1.0.1"),
+                              (telemetry_provider["provider_id"], telemetry_provider["provider_version"])},
+                             set(restored.processes),
+                             "restart restores the active provider version and its declared dependency")
             await restored.close()
 
         with tempfile.TemporaryDirectory(prefix="r3a-provider-lifecycle-") as temporary:
