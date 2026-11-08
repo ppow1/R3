@@ -132,6 +132,9 @@ class PostgresDossierRepository:
                     directory_snapshot_sha256: str, directory_source_ref: str,
                     hr_source_ref: str, hr_principal_association_ref: str,
                     office_id: str, office_role: str,
+                    execution_profile_id: str, execution_profile_revision: str,
+                    execution_profile_resident_id: str, execution_route_id: str,
+                    execution_profile_source_ref: str,
                     provider_id: str, principal_ref: str) -> dict[str, Any]:
         """Pin one immutable approved revision to an inference/conversation boundary.
 
@@ -144,6 +147,9 @@ class PostgresDossierRepository:
         required = (resident_id, revision, dossier_sha256, execution_ref,
                     identity_revision, directory_resident_id, directory_source_ref,
                     hr_source_ref, hr_principal_association_ref, office_id, office_role,
+                    execution_profile_id, execution_profile_revision,
+                    execution_profile_resident_id, execution_route_id,
+                    execution_profile_source_ref,
                     provider_id, principal_ref)
         if any(not isinstance(value, str) or not value.strip() for value in required):
             raise ValueError("character context pin requires identity and revision references")
@@ -160,7 +166,9 @@ class PostgresDossierRepository:
                 "SELECT p.pin_id::text,p.dossier_revision,p.dossier_sha256,p.identity_revision,"
                 "p.directory_resident_id,p.binding_revision,p.provider_id,p.principal_ref,"
                 "p.directory_snapshot_sha256,p.directory_source_ref,p.hr_source_ref,"
-                "p.hr_principal_association_ref,p.office_id,p.office_role "
+                "p.hr_principal_association_ref,p.office_id,p.office_role,"
+                "p.execution_profile_id,p.execution_profile_revision,p.execution_profile_resident_id,"
+                "p.execution_route_id,p.execution_profile_source_ref "
                 "FROM r3a.resident_character_context_pins p "
                 "WHERE p.resident_id=%s AND p.execution_kind=%s AND p.execution_ref=%s FOR UPDATE",
                 (resident_id, execution_kind, execution_ref),
@@ -172,7 +180,12 @@ class PostgresDossierRepository:
                 existing_evidence = (row[8].strip() if row[8] else None, *row[9:14])
                 requested_evidence = (directory_snapshot_sha256, directory_source_ref,
                                       hr_source_ref, hr_principal_association_ref, office_id, office_role)
-                if existing != requested or existing_evidence != requested_evidence:
+                existing_profile = tuple(row[14:19])
+                requested_profile = (execution_profile_id, execution_profile_revision,
+                                     execution_profile_resident_id, execution_route_id,
+                                     execution_profile_source_ref)
+                if (existing != requested or existing_evidence != requested_evidence
+                        or existing_profile != requested_profile):
                     raise RevisionConflict("execution boundary is already pinned to another identity or character revision")
                 return {"pin_id": row[0], "resident_id": resident_id,
                         "dossier_revision": row[1], "dossier_sha256": row[2].strip(),
@@ -183,7 +196,12 @@ class PostgresDossierRepository:
                         "directory_snapshot_sha256": row[8].strip() if row[8] else None,
                         "directory_source_ref": row[9], "hr_source_ref": row[10],
                         "hr_principal_association_ref": row[11],
-                        "office_id": row[12], "office_role": row[13]}
+                        "office_id": row[12], "office_role": row[13],
+                        "execution_profile_id": row[14],
+                        "execution_profile_revision": row[15],
+                        "execution_profile_resident_id": row[16],
+                        "execution_route_id": row[17],
+                        "execution_profile_source_ref": row[18]}
             active = connection.execute(
                 "SELECT r.dossier_sha256 FROM r3a.resident_dossier_current c "
                 "JOIN r3a.resident_dossier_revisions r USING (resident_id,dossier_revision) "
@@ -205,12 +223,17 @@ class PostgresDossierRepository:
                 "(pin_id,resident_id,dossier_revision,dossier_sha256,execution_kind,execution_ref,"
                 "identity_revision,directory_resident_id,binding_revision,provider_id,principal_ref,"
                 "directory_snapshot_sha256,directory_source_ref,hr_source_ref,"
-                "hr_principal_association_ref,office_id,office_role) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "hr_principal_association_ref,office_id,office_role,execution_profile_id,"
+                "execution_profile_revision,execution_profile_resident_id,execution_route_id,"
+                "execution_profile_source_ref) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (pin_id, resident_id, revision, dossier_sha256, execution_kind,
                  execution_ref, identity_revision, directory_resident_id, binding_revision,
                  provider_id, principal_ref, directory_snapshot_sha256, directory_source_ref,
-                 hr_source_ref, hr_principal_association_ref, office_id, office_role),
+                 hr_source_ref, hr_principal_association_ref, office_id, office_role,
+                 execution_profile_id, execution_profile_revision,
+                 execution_profile_resident_id, execution_route_id,
+                 execution_profile_source_ref),
             )
         return {"pin_id": pin_id, "resident_id": resident_id,
                 "dossier_revision": revision, "dossier_sha256": dossier_sha256,
@@ -221,6 +244,11 @@ class PostgresDossierRepository:
                 "directory_source_ref": directory_source_ref, "hr_source_ref": hr_source_ref,
                 "hr_principal_association_ref": hr_principal_association_ref,
                 "office_id": office_id, "office_role": office_role,
+                "execution_profile_id": execution_profile_id,
+                "execution_profile_revision": execution_profile_revision,
+                "execution_profile_resident_id": execution_profile_resident_id,
+                "execution_route_id": execution_route_id,
+                "execution_profile_source_ref": execution_profile_source_ref,
                 "provider_id": provider_id,
                 "principal_ref": principal_ref, "execution_kind": execution_kind,
                 "execution_ref": execution_ref, "created": True}
@@ -233,7 +261,9 @@ class PostgresDossierRepository:
                 "SELECT pin_id::text,dossier_revision,dossier_sha256,identity_revision,"
                 "directory_resident_id,binding_revision,provider_id,principal_ref,created_at,"
                 "directory_snapshot_sha256,directory_source_ref,hr_source_ref,"
-                "hr_principal_association_ref,office_id,office_role "
+                "hr_principal_association_ref,office_id,office_role,execution_profile_id,"
+                "execution_profile_revision,execution_profile_resident_id,execution_route_id,"
+                "execution_profile_source_ref "
                 "FROM r3a.resident_character_context_pins "
                 "WHERE resident_id=%s AND execution_kind=%s AND execution_ref=%s",
                 (resident_id, execution_kind, execution_ref),
@@ -249,7 +279,10 @@ class PostgresDossierRepository:
                 "directory_snapshot_sha256": row[9].strip() if row[9] else None,
                 "directory_source_ref": row[10], "hr_source_ref": row[11],
                 "hr_principal_association_ref": row[12],
-                "office_id": row[13], "office_role": row[14]}
+                "office_id": row[13], "office_role": row[14],
+                "execution_profile_id": row[15], "execution_profile_revision": row[16],
+                "execution_profile_resident_id": row[17], "execution_route_id": row[18],
+                "execution_profile_source_ref": row[19]}
 
     def revision_metadata(self, resident_id: str, revision: str) -> dict[str, Any]:
         with self._connect() as connection:

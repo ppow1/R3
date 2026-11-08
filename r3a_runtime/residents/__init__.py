@@ -38,7 +38,8 @@ from .hr_gateway import HRCapabilityIdentityResolver
 from .r3_authority_adapter import R3CapabilityGrantAdapter
 from .identity_association import validate_identity_association
 from .approved_context import (ApprovedCharacterContextProvider,
-                               project_context_for_sink, validate_approved_context)
+                               project_context_for_sink, project_for_grace_context_v1,
+                               validate_approved_context)
 from .hr_association import (HRPrincipalAssociationAdapter,
                              validate_association_evidence)
 
@@ -59,6 +60,7 @@ __all__ = [
     "HRCapabilityIdentityResolver",
     "R3CapabilityGrantAdapter", "validate_identity_association",
     "ApprovedCharacterContextProvider", "project_context_for_sink",
+    "project_for_grace_context_v1",
     "validate_approved_context", "HRPrincipalAssociationAdapter",
     "validate_association_evidence",
 ]

@@ -38,7 +38,7 @@ from r3a_runtime.residents import (
     HRCapabilityIdentityResolver,
     R3CapabilityGrantAdapter, validate_identity_association,
     ApprovedCharacterContextProvider, project_context_for_sink,
-    validate_approved_context, HRPrincipalAssociationAdapter,
+    project_for_grace_context_v1, validate_approved_context, HRPrincipalAssociationAdapter,
 )
 from r3a_runtime.residents.validation import validate_epistemic_span
 from r3a_runtime.residents.legacy_import import extract_legacy_hr_candidates
@@ -532,8 +532,20 @@ class ResidentDossierTests(unittest.TestCase):
                             "identity_revision": kwargs["identity_revision"],
                             "directory_resident_id": kwargs["directory_resident_id"],
                             "binding_revision": kwargs["binding_revision"],
+                            "directory_snapshot_sha256": kwargs["directory_snapshot_sha256"],
+                            "directory_source_ref": kwargs["directory_source_ref"],
+                            "hr_source_ref": kwargs["hr_source_ref"],
+                            "hr_principal_association_ref": kwargs["hr_principal_association_ref"],
+                            "office_id": kwargs["office_id"], "office_role": kwargs["office_role"],
+                            "execution_profile_id": kwargs["execution_profile_id"],
+                            "execution_profile_revision": kwargs["execution_profile_revision"],
+                            "execution_profile_resident_id": kwargs["execution_profile_resident_id"],
+                            "execution_route_id": kwargs["execution_route_id"],
+                            "execution_profile_source_ref": kwargs["execution_profile_source_ref"],
                             "provider_id": kwargs["provider_id"],
-                            "principal_ref": kwargs["principal_ref"]}
+                            "principal_ref": kwargs["principal_ref"],
+                            "execution_kind": kwargs["execution_kind"],
+                            "execution_ref": kwargs["execution_ref"]}
                 return self.pin
             @staticmethod
             def assert_identity(resident_id):
@@ -555,6 +567,11 @@ class ResidentDossierTests(unittest.TestCase):
                 "directory_snapshot_sha256": "c" * 64,
                 "directory_snapshot_fresh": True,
                 "office_id": "office:grace", "office_role": "Director of Operations",
+                "execution_profile_id": "profile:grace",
+                "execution_profile_revision": "1.2.9",
+                "execution_profile_resident_id": "resident:grace",
+                "execution_route_id": "route:grace-primary",
+                "execution_profile_source_ref": "profile://grace@1.2.9",
             },
             authorize_context=lambda actor, action, scope: (
                 action == "character.context.read" and scope == "r3:grace"),
@@ -568,6 +585,33 @@ class ResidentDossierTests(unittest.TestCase):
         self.assertEqual(context["classification_scope"], ["public"])
         self.assertEqual(context["office_id"], "office:grace")
         self.assertIs(validate_approved_context(context)["authority_granted"], False)
+        grace_context = project_for_grace_context_v1(context, verified_execution_profile={
+            "profile_id": "profile:grace", "profile_revision": "1.2.9",
+            "resident_id": "resident:grace", "route_id": "route:grace-primary",
+            "source_ref": "profile://grace@1.2.9",
+        })
+        self.assertEqual(grace_context["contract_version"], "1.0.0")
+        self.assertEqual(set(grace_context), {
+            "contract_id", "contract_version", "resident_id", "directory_resident_id",
+            "identity_binding_status", "identity_revision", "dossier_revision", "approval_status",
+            "classification_scope", "authorization_ref", "prompt_text", "prompt_sha256",
+            "prompt_component_refs", "source_refs", "personality", "personality_sources",
+            "provider_id", "authority_granted",
+        })
+        self.assertIn("context-pin:1", grace_context["source_refs"])
+        self.assertIn("character-context-sha256:" + context["context_sha256"],
+                      grace_context["source_refs"])
+        with self.assertRaises(PermissionError):
+            project_for_grace_context_v1(context, verified_execution_profile={
+                "profile_id": "profile:grace", "profile_revision": "1.2.9",
+                "resident_id": "resident.grace", "route_id": "route:grace-primary",
+                "source_ref": "profile://grace@1.2.9",
+            })
+        resumed = provider.retrieve(actor, resident_id="r3:grace",
+            execution_kind="conversation_boundary", execution_ref="conversation:turn:1",
+            provider_id="model:grace")
+        self.assertEqual(resumed["pin_ref"], context["pin_ref"])
+        self.assertEqual(resumed["context_sha256"], context["context_sha256"])
         events = []
         memory = project_context_for_sink(context, sink="memory",
             authorized_classifications=frozenset({"public", "institutional"}),

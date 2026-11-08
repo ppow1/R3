@@ -30,7 +30,7 @@ class ApprovedCharacterContextProvider:
     """
 
     def __init__(self, repository: Any, *, resolve_hr_identity: Callable[..., dict[str, Any]],
-                 authorize_context: Callable[[GovernedActor, str, str], bool],
+                 authorize_context: Callable[[GovernedActor, str, str], Any],
                  defaults: dict[str, int], personality_overrides: list[dict[str, Any]] | None = None):
         for method in ("get", "revision_digest", "get_context_pin", "pin_context"):
             if not callable(getattr(repository, method, None)):
@@ -53,6 +53,17 @@ class ApprovedCharacterContextProvider:
         if not all(isinstance(v, str) and v.strip() for v in (resident_id, execution_ref, provider_id)):
             raise ValueError("canonical resident, execution boundary, and provider references are required")
 
+        authorization = self._authorize(actor, "character.context.read", resident_id)
+        if authorization is True:
+            # A boolean grant has no classification detail; fail to the public tier.
+            authorized_classifications = {"public"}
+        elif isinstance(authorization, (set, frozenset, tuple, list)):
+            authorized_classifications = set(authorization) & _SAFE_CLASSIFICATIONS
+        else:
+            raise PermissionError("character context capability denied")
+        if not authorized_classifications:
+            raise PermissionError("character context grant has no usable classification scope")
+
         identity = self._resolve_identity(actor, resident_id)
         if (not isinstance(identity, dict) or identity.get("institutional_id") != resident_id
                 or identity.get("status") != "authoritative"
@@ -66,20 +77,14 @@ class ApprovedCharacterContextProvider:
                 or identity.get("directory_snapshot_fresh") is not True
                 or not isinstance(identity.get("directory_snapshot_sha256"), str)
                 or not identity.get("office_id") or not identity.get("office_role")
+                or not identity.get("execution_profile_id")
+                or not identity.get("execution_profile_revision")
+                or identity.get("execution_profile_resident_id") != identity.get("directory_resident_id")
+                or not identity.get("execution_route_id")
+                or not identity.get("execution_profile_source_ref")
                 or type(identity.get("binding_revision")) is not int
                 or identity["binding_revision"] < 1):
             raise PermissionError("source-verified HR principal association and current directory office binding are required")
-        authorization = self._authorize(actor, "character.context.read", resident_id)
-        if authorization is True:
-            # A boolean grant has no classification detail; fail to the public tier.
-            authorized_classifications = {"public"}
-        elif isinstance(authorization, (set, frozenset, tuple, list)):
-            authorized_classifications = set(authorization) & _SAFE_CLASSIFICATIONS
-        else:
-            raise PermissionError("character context capability denied")
-        if not authorized_classifications:
-            raise PermissionError("character context grant has no usable classification scope")
-
         pin = self.repository.get_context_pin(
             resident_id=resident_id, execution_kind=execution_kind,
             execution_ref=execution_ref,
@@ -90,12 +95,18 @@ class ApprovedCharacterContextProvider:
                         pin["binding_revision"], pin["directory_snapshot_sha256"],
                         pin["directory_source_ref"], pin["hr_source_ref"],
                         pin["hr_principal_association_ref"], pin["office_id"], pin["office_role"],
+                        pin["execution_profile_id"], pin["execution_profile_revision"],
+                        pin["execution_profile_resident_id"], pin["execution_route_id"],
+                        pin["execution_profile_source_ref"],
                         pin["provider_id"], pin["principal_ref"])
             current = (identity_revision, identity["directory_resident_id"],
                        identity["binding_revision"], identity["directory_snapshot_sha256"],
                        identity["directory_source_ref"], identity["source_ref"],
                        identity["principal_association_ref"], identity["office_id"],
-                       identity["office_role"], provider_id, actor.principal_id)
+                       identity["office_role"], identity["execution_profile_id"],
+                       identity["execution_profile_revision"],
+                       identity["execution_profile_resident_id"], identity["execution_route_id"],
+                       identity["execution_profile_source_ref"], provider_id, actor.principal_id)
             if current != expected:
                 raise PermissionError("pinned character context identity, binding, or provider changed")
             revision = pin["dossier_revision"]
@@ -126,6 +137,11 @@ class ApprovedCharacterContextProvider:
                 hr_source_ref=identity["source_ref"],
                 hr_principal_association_ref=identity["principal_association_ref"],
                 office_id=identity["office_id"], office_role=identity["office_role"],
+                execution_profile_id=identity["execution_profile_id"],
+                execution_profile_revision=identity["execution_profile_revision"],
+                execution_profile_resident_id=identity["execution_profile_resident_id"],
+                execution_route_id=identity["execution_route_id"],
+                execution_profile_source_ref=identity["execution_profile_source_ref"],
                 provider_id=provider_id,
                 principal_ref=actor.principal_id,
             )
@@ -147,7 +163,8 @@ class ApprovedCharacterContextProvider:
         )
         source_refs = list(dict.fromkeys([
             identity["source_ref"], identity["principal_association_ref"],
-            identity["directory_source_ref"], *prompt.source_refs]))
+            identity["directory_source_ref"], identity["execution_profile_source_ref"],
+            f"character-context-pin://{pin['pin_id']}", *prompt.source_refs]))
         composed = {"prompt_text": prompt.text, "personality": settings,
                     "prompt_component_refs": [list(x) for x in prompt.component_refs],
                     "source_refs": source_refs,
@@ -168,6 +185,11 @@ class ApprovedCharacterContextProvider:
             "hr_principal_association_ref": identity["principal_association_ref"],
             "office_id": identity["office_id"],
             "office_role": identity["office_role"],
+            "execution_profile_id": identity["execution_profile_id"],
+            "execution_profile_revision": identity["execution_profile_revision"],
+            "execution_profile_resident_id": identity["execution_profile_resident_id"],
+            "execution_route_id": identity["execution_route_id"],
+            "execution_profile_source_ref": identity["execution_profile_source_ref"],
             "execution_kind": execution_kind,
             "execution_ref": execution_ref,
             "pin_ref": pin["pin_id"],
@@ -213,6 +235,9 @@ def project_context_for_sink(context: dict[str, Any], *, sink: str,
         "resident_id", "directory_resident_id", "identity_revision",
         "directory_snapshot_sha256", "directory_source_ref", "hr_source_ref",
         "hr_principal_association_ref", "office_id", "office_role",
+        "execution_profile_id", "execution_profile_revision",
+        "execution_profile_resident_id", "execution_route_id",
+        "execution_profile_source_ref",
         "directory_binding_revision", "execution_kind", "execution_ref", "pin_ref",
         "provider_id", "dossier_revision", "dossier_sha256", "context_sha256",
         "classification_scope", "source_refs")}
@@ -232,12 +257,65 @@ def project_context_for_sink(context: dict[str, Any], *, sink: str,
     return projection
 
 
+def project_for_grace_context_v1(context: dict[str, Any], *,
+                                 verified_execution_profile: dict[str, Any]) -> dict[str, Any]:
+    """Project v2 into Grace's existing v1 consumer only under an exact profile match.
+
+    The profile must be resolved by the authenticated runtime host, not accepted from a
+    message/request. This adapter preserves the v2 identity, binding, profile and pin refs
+    as provenance references. It never manufactures an alias between HR, directory, and
+    executable IDs.
+    """
+    context = validate_approved_context(context)
+    required_profile_fields = {"profile_id", "profile_revision", "resident_id",
+                               "route_id", "source_ref"}
+    if (not isinstance(verified_execution_profile, dict)
+            or set(verified_execution_profile) != required_profile_fields):
+        raise ValueError("server-verified execution profile evidence is required")
+    expected = (context["execution_profile_id"], context["execution_profile_revision"],
+                context["execution_profile_resident_id"], context["execution_route_id"],
+                context["execution_profile_source_ref"])
+    observed = tuple(verified_execution_profile[key] for key in (
+        "profile_id", "profile_revision", "resident_id", "route_id", "source_ref"))
+    if observed != expected or observed[2] != context["directory_resident_id"]:
+        raise PermissionError("verified execution profile does not match the approved identity binding")
+    source_refs = list(dict.fromkeys([
+        *context["source_refs"], context["pin_ref"],
+        f"directory-snapshot:sha256:{context['directory_snapshot_sha256']}",
+        f"office-binding:{context['office_id']}@{context['directory_binding_revision']}",
+        f"dossier-sha256:{context['dossier_sha256']}",
+        f"character-context-sha256:{context['context_sha256']}",
+    ]))
+    return {
+        "contract_id": "r3a.resident.runtime-character-context",
+        "contract_version": "1.0.0",
+        "resident_id": context["resident_id"],
+        "directory_resident_id": context["directory_resident_id"],
+        "identity_binding_status": "authoritative",
+        "identity_revision": context["identity_revision"],
+        "dossier_revision": context["dossier_revision"],
+        "approval_status": "active",
+        "classification_scope": list(context["classification_scope"]),
+        "authorization_ref": context["authorization_ref"],
+        "prompt_text": context["prompt_text"],
+        "prompt_sha256": context["prompt_sha256"],
+        "prompt_component_refs": context["prompt_component_refs"],
+        "source_refs": source_refs,
+        "personality": context["personality"],
+        "personality_sources": context["personality_sources"],
+        "provider_id": context["provider_id"],
+        "authority_granted": False,
+    }
+
+
 def validate_approved_context(value: Any) -> dict[str, Any]:
     """Fail-closed validator for the provider-neutral v2 active-context envelope."""
     required = {"contract_id", "contract_version", "resident_id", "directory_resident_id",
                 "identity_revision", "directory_binding_revision", "directory_snapshot_sha256",
                 "directory_source_ref", "hr_source_ref", "hr_principal_association_ref",
-                "office_id", "office_role", "execution_kind",
+                "office_id", "office_role", "execution_profile_id",
+                "execution_profile_revision", "execution_profile_resident_id",
+                "execution_route_id", "execution_profile_source_ref", "execution_kind",
                 "execution_ref", "pin_ref", "provider_id", "dossier_revision",
                 "dossier_sha256", "context_sha256", "activation_status",
                 "classification_scope", "authorization_ref", "prompt_text", "prompt_sha256",
@@ -256,7 +334,10 @@ def validate_approved_context(value: Any) -> dict[str, Any]:
     for key in ("resident_id", "directory_resident_id", "identity_revision", "execution_ref",
                 "pin_ref", "provider_id", "dossier_revision", "dossier_sha256",
                 "context_sha256", "authorization_ref", "directory_source_ref",
-                "hr_source_ref", "hr_principal_association_ref", "office_id", "office_role"):
+                "hr_source_ref", "hr_principal_association_ref", "office_id", "office_role",
+                "execution_profile_id", "execution_profile_revision",
+                "execution_profile_resident_id", "execution_route_id",
+                "execution_profile_source_ref"):
         if not isinstance(value[key], str) or not value[key]:
             raise ValueError("approved context identity and provenance fields are required")
     for key in ("dossier_sha256", "context_sha256", "prompt_sha256", "directory_snapshot_sha256"):
@@ -284,6 +365,8 @@ def validate_approved_context(value: Any) -> dict[str, Any]:
     if (not isinstance(value["personality_sources"], dict)
             or any(not isinstance(source, str) for source in value["personality_sources"].values())):
         raise ValueError("approved context personality provenance is invalid")
+    if value["execution_profile_resident_id"] != value["directory_resident_id"]:
+        raise ValueError("execution profile identity does not match the authoritative directory principal")
     composed = {"prompt_text": value["prompt_text"], "personality": settings,
                 "prompt_component_refs": value["prompt_component_refs"],
                 "source_refs": value["source_refs"],

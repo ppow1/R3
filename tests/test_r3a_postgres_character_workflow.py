@@ -99,11 +99,15 @@ class PostgresCharacterWorkflowTests(unittest.TestCase):
             hr_source_ref="hr://resident/test@1",
             hr_principal_association_ref="hr://association/test@1",
             office_id="office:test", office_role="Test role",
+            execution_profile_id="profile:test", execution_profile_revision="1.0.0",
+            execution_profile_resident_id="resident:test", execution_route_id="route:test",
+            execution_profile_source_ref="profile://test@1.0.0",
             provider_id="model:test", principal_ref=self.ids["reader"],
         )
         self.assertTrue(pin["created"])
         self.assertEqual(pin["directory_snapshot_sha256"], "b" * 64)
         self.assertEqual(pin["hr_principal_association_ref"], "hr://association/test@1")
+        self.assertEqual(pin["execution_profile_id"], "profile:test")
 
         second_dossier = copy.deepcopy(self.dossier)
         second_dossier["revision"] = "1.0.1"
@@ -130,6 +134,9 @@ class PostgresCharacterWorkflowTests(unittest.TestCase):
             hr_source_ref="hr://resident/test@1",
             hr_principal_association_ref="hr://association/test@1",
             office_id="office:test", office_role="Test role",
+            execution_profile_id="profile:test", execution_profile_revision="1.0.0",
+            execution_profile_resident_id="resident:test", execution_route_id="route:test",
+            execution_profile_source_ref="profile://test@1.0.0",
             provider_id="model:test", principal_ref=self.ids["reader"],
         )
         self.assertFalse(existing_pin["created"])
@@ -145,6 +152,9 @@ class PostgresCharacterWorkflowTests(unittest.TestCase):
                 hr_source_ref="hr://resident/test@1",
                 hr_principal_association_ref="hr://association/test@1",
                 office_id="office:test", office_role="Test role",
+                execution_profile_id="profile:test", execution_profile_revision="1.0.0",
+                execution_profile_resident_id="resident:test", execution_route_id="route:test",
+                execution_profile_source_ref="profile://test@1.0.0",
                 provider_id="model:test", principal_ref=self.ids["reader"],
             )
 
