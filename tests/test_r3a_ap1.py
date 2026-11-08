@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.10.12
+File Revision: 1.10.13
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -53,6 +53,7 @@ Changed: 2026-11-08T17:33:14Z | R3A-CHARACTER-CONTEXT-V2 | Codex GPT-6 | Cover t
 Changed: 2026-11-08T17:34:06Z | R3A-CHARACTER-CONTEXT-V2 | Codex GPT-6 | Preserve immediate test-file predecessor provenance.
 Changed: 2026-11-08T17:35:30Z | R3A-CHARACTER-CONTEXT-V2 | Codex GPT-6 | Reject activity-crossing and content-digest substitution before inference.
 Changed: 2026-11-08T18:29:46Z | R3A-CONTEXT-PIN-RECOVERY | Codex GPT-6 | Verify a compacted provider-rejection retry preserves the v2 pin without exposing protected provenance.
+Changed: 2026-11-08T20:25:26Z | R3A-CONTEXT-RETRY-BOUND | Codex GPT-6 | Verify a second provider context rejection blocks after one changed retry and is never resubmitted unchanged.
 History (continued): Per-change provenance continues in the repository history.
 """
 from __future__ import annotations
@@ -458,6 +459,35 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         self.assertNotIn(context["authorization_ref"], json.dumps(result))
         self.assertNotIn(context["hr_principal_association_ref"], json.dumps(result))
         self.assertEqual("provider_context_recovery", result["context_compaction"]["mode"])
+
+    def test_second_context_rejection_blocks_after_one_changed_retry(self):
+        tool = {"capability_id": "institution.telemetry.read",
+                "arguments_schema": {"type": "object", "properties": {}, "required": []}}
+        resident = self._resident('{"action":"final"}')
+        resident._model_request = AsyncMock(side_effect=[
+            ModelContextLimitError(23154, 16384, "provider context limit"),
+            ModelContextLimitError(18001, 16384, "compacted request still exceeds context"),
+        ])
+        payload = self._payload([tool])
+        payload["objective"] = "Inspect current telemetry and report the configured model availability."
+        payload["evidence"] = [{"source_id": "telemetry:history", "sha256": "history-digest",
+                                "provider_id": "telemetry-provider", "invocation_id": "invoke-1",
+                                "content": {"observations": [
+                                    {"model_id": f"model-{i}", "availability": "ready",
+                                     "detail": "x" * 500} for i in range(120)]}}]
+
+        result = asyncio.run(resident.handle("execute", payload))
+
+        self.assertEqual(2, resident._model_request.await_count)
+        first, compacted = [call.args[2] for call in resident._model_request.await_args_list]
+        self.assertNotEqual(first, compacted)
+        self.assertIn("context_recovery_feedback", json.loads(compacted["messages"][-1]["content"]))
+        self.assertEqual("final", result["action"])
+        self.assertEqual("blocked", result["decision"]["status"])
+        self.assertEqual("context_budget_blocked", result["model"]["finish_reason"])
+        self.assertEqual(18001, result["context_compaction"]["recovery_failure"]["prompt_tokens"])
+        self.assertEqual(result["model"]["request_sha256"],
+                         result["context_compaction"]["recovery_failure"]["request_sha256"])
 
     def test_provider_context_rejection_is_parsed_with_reported_prompt_and_window(self):
         resident = self._resident('{"action":"final"}')
