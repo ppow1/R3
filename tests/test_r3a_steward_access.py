@@ -604,6 +604,33 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
                 load_access_config(handle.name)
         os.environ.pop("R3A_TEST_STEWARD_DSN", None)
 
+    async def test_remote_transport_rejects_http_origin_even_with_secure_cookie(self):
+        import json
+        import tempfile
+        cfg = config()
+        cfg["remote_transport"]["state"] = "configured"
+        cfg["session"]["secure_cookie"] = True
+        with patch.dict(os.environ, {"R3A_TEST_STEWARD_DSN": "postgresql://not-used"}):
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8") as handle:
+                json.dump(cfg, handle)
+                handle.flush()
+                with self.assertRaisesRegex(AccessUnavailable,
+                                            "https_origin_required_for_remote_transport"):
+                    load_access_config(handle.name)
+
+    async def test_remote_transport_accepts_private_https_origin_with_secure_cookie(self):
+        import json
+        import tempfile
+        cfg = config()
+        cfg["remote_transport"]["state"] = "configured"
+        cfg["session"]["secure_cookie"] = True
+        cfg["session"]["allowed_origins"] = ["https://steward.lan.example:8443"]
+        with patch.dict(os.environ, {"R3A_TEST_STEWARD_DSN": "postgresql://not-used"}):
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8") as handle:
+                json.dump(cfg, handle)
+                handle.flush()
+                self.assertEqual(cfg, load_access_config(handle.name))
+
 
 if __name__ == "__main__":
     unittest.main()

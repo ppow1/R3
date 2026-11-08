@@ -762,6 +762,16 @@ def load_access_config(path: str | Path) -> dict[str, Any]:
         raise AccessUnavailable("steward_access_session_configuration_invalid")
     if transport.get("state") == "configured" and not session["secure_cookie"]:
         raise AccessUnavailable("secure_cookie_required_for_remote_transport")
+    if transport.get("state") == "configured":
+        origins = session["allowed_origins"]
+        if not origins:
+            raise AccessUnavailable("https_origin_required_for_remote_transport")
+        for origin in origins:
+            parsed_origin = urllib.parse.urlsplit(origin)
+            if (parsed_origin.scheme != "https" or not parsed_origin.hostname
+                    or parsed_origin.username or parsed_origin.password
+                    or parsed_origin.path or parsed_origin.query or parsed_origin.fragment):
+                raise AccessUnavailable("https_origin_required_for_remote_transport")
     if (not isinstance(cme.get("control_socket"), str) or not Path(cme["control_socket"]).is_absolute()
             or not isinstance(cme.get("request_timeout_seconds"), (int, float))
             or isinstance(cme.get("request_timeout_seconds"), bool)
