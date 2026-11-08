@@ -188,7 +188,9 @@ class ProviderProcessManager:
                 "SELECT lifecycle_state,diagnostic,manifest FROM r3a.module_registry "
                 "WHERE module_id=%s AND module_version=%s",
                 key)
-            if rows and rows[0].get("manifest") is not None and rows[0]["manifest"] != manifest:
+            declared_manifest = (operation.legacy_manifest or {}).get("module_manifest")
+            if (declared_manifest is not None and rows and rows[0].get("manifest") is not None
+                    and rows[0]["manifest"] != manifest):
                 raise RuntimeError(
                     f"installed module {key[0]}@{key[1]} manifest is immutable; publish a new version")
             previous = rows[0]["lifecycle_state"] if rows else "INSTALLED"
@@ -264,7 +266,8 @@ class ProviderProcessManager:
                 await self._state(*key, "INSTALLED", "unknown", {"source": "capability manifest"})
             elif rows[0]["artifact_digest"].strip() != manifest["artifact_digest"]:
                 raise RuntimeError("provider artifact changed under an installed version")
-            elif rows[0].get("manifest") is not None and rows[0]["manifest"] != manifest:
+            elif ((operation.legacy_manifest or {}).get("module_manifest") is not None
+                  and rows[0].get("manifest") is not None and rows[0]["manifest"] != manifest):
                 raise RuntimeError("provider module manifest changed under an installed version")
             state = rows[0]["lifecycle_state"] if rows else "INSTALLED"
             if state in {"ACTIVE", "ACTIVATING", "STOPPING", "REPLACING"}:
