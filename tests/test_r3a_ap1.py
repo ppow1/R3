@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.10.13
+File Revision: 1.10.14
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -54,6 +54,7 @@ Changed: 2026-11-08T17:34:06Z | R3A-CHARACTER-CONTEXT-V2 | Codex GPT-6 | Preserv
 Changed: 2026-11-08T17:35:30Z | R3A-CHARACTER-CONTEXT-V2 | Codex GPT-6 | Reject activity-crossing and content-digest substitution before inference.
 Changed: 2026-11-08T18:29:46Z | R3A-CONTEXT-PIN-RECOVERY | Codex GPT-6 | Verify a compacted provider-rejection retry preserves the v2 pin without exposing protected provenance.
 Changed: 2026-11-08T20:25:26Z | R3A-CONTEXT-RETRY-BOUND | Codex GPT-6 | Verify a second provider context rejection blocks after one changed retry and is never resubmitted unchanged.
+Changed: 2026-11-08T20:25:26Z | R3A-DURABLE-RESIDENT-RESUME | Codex GPT-6 | Round-trip a Grace tool result and v2 context pin through a durable checkpoint into a fresh resident instance and same-activity continuation.
 History (continued): Per-change provenance continues in the repository history.
 """
 from __future__ import annotations
@@ -488,6 +489,63 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         self.assertEqual(18001, result["context_compaction"]["recovery_failure"]["prompt_tokens"])
         self.assertEqual(result["model"]["request_sha256"],
                          result["context_compaction"]["recovery_failure"]["request_sha256"])
+
+    def test_new_resident_instance_continues_same_activity_from_serialized_evidence_and_context_pin(self):
+        context = self._character_context()
+        tool = {"capability_id": "institution.knowledge.read",
+                "arguments_schema": {"type": "object", "properties": {
+                    "query": {"type": "string"}}, "required": ["query"],
+                    "additionalProperties": False}}
+        selected = ('{"action":"invoke_capability","contract_id":"r3a.resident-capability-tool",'
+                    '"contract_version":"1.0.0","capability_id":"institution.knowledge.read",'
+                    '"arguments":{"query":"process lifecycle successor"},'
+                    '"rationale":"The objective needs authoritative transition evidence."}')
+        first = self._resident(selected)
+        first_payload = self._payload([tool])
+        first_payload["resident_character_context"] = context
+        first_result = asyncio.run(first.handle("execute", first_payload))
+        self.assertEqual("invoke_capability", first_result["action"])
+
+        evidence = [{"source_id": "knowledge.process", "source_path": "transitions.STOPPING",
+                     "content": "STOPPING may transition to STOPPED or FAILED.",
+                     "sha256": "a" * 64, "source_sha256": "b" * 64}]
+        capability_result = {"capability_id": tool["capability_id"], "outcome": "succeeded",
+                             "output": {"record_count": 1}, "evidence": evidence}
+        conversation = [
+            {"role": "assistant", "content": first_result["model_content"]},
+            {"role": "user", "content": json.dumps({"capability_result": capability_result})},
+        ]
+        checkpoint = json.loads(json.dumps({
+            "conversation": conversation,
+            "model_turns": [{"action": first_result["action"],
+                             "usage": first_result["model"]["usage"]}],
+            "capability_invocations": [{"capability_request": first_result["capability_request"],
+                                         "result": capability_result}],
+        }))
+
+        final = ('{"action":"final","decision":{"assessment":"The cited knowledge record directly lists both successors.",'
+                 '"status":"healthy","evidence_refs":["knowledge.process"],"recommended_action":"none"}}')
+        resumed_resident = self._resident(final)
+        resumed_payload = self._payload([tool])
+        resumed_payload["attempt_id"] = "attempt-2"
+        resumed_payload["resident_character_context"] = context
+        resumed_payload["reasoning_state"] = checkpoint
+        resumed_payload["conversation"] = checkpoint["conversation"]
+        resumed_payload["evidence"] = evidence
+
+        resumed_result = asyncio.run(resumed_resident.handle("execute", resumed_payload))
+
+        self.assertEqual("activity-1", resumed_result["activity_id"])
+        self.assertEqual("attempt-2", resumed_result["attempt_id"])
+        self.assertEqual("final", resumed_result["action"])
+        self.assertEqual(character_context_binding(context),
+                         resumed_result["model"]["usage"]["resident_character_context"])
+        self.assertEqual(first_result["model"]["usage"]["resident_character_context"],
+                         checkpoint["model_turns"][0]["usage"]["resident_character_context"])
+        resumed_request = resumed_resident._model_request.await_args.args[2]
+        self.assertIn("knowledge.process", resumed_request["messages"][-1]["content"])
+        self.assertIn("STOPPING", resumed_request["messages"][-1]["content"])
+        self.assertNotIn(context["authorization_ref"], json.dumps(resumed_result))
 
     def test_provider_context_rejection_is_parsed_with_reported_prompt_and_window(self):
         resident = self._resident('{"action":"final"}')
