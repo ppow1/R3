@@ -1,3 +1,21 @@
+<!--
+R3 CONTROLLED DOCUMENT
+File: docs/architecture/R3A_MODULAR_LIFECYCLE_READINESS.md
+Component: R3A-MODULAR-LIFECYCLE-READINESS
+File Revision: 1.1.0
+Created: 2026-11-08 (original date verified from Git; exact time unavailable)
+Created By: Codex GPT-6
+Purpose: Record isolated module lifecycle evidence, recovery limits, and integration compatibility.
+Execution Model: N/A; acceptance and integration record.
+Observability: Source commits, isolated runtime evidence and provider contract tests.
+Dependencies: Unified capability registry, CME, module.lifecycle v2.
+Authority: Issue #46; no managed service modification.
+Changed: 2026-11-08T18:43:38Z | R3A-MODULAR-LIFECYCLE-001 | Codex GPT-6 | Add typed-result and branch compatibility findings plus resource provider boundary.
+Supersedes: None; extends the existing readiness record.
+Contracts: r3a.capability-operation.v1; r3a.capability-invocation.v1; r3a.capability-provider.v1.
+Tests: Referenced isolated lifecycle and provider contract tests.
+History/Predecessor: Git blob d28db710d71df0dfb32999508cd0c91ce8a18ee2 at d78f0188d39cb02b9f184b8cfc1d9b43c0960b59.
+-->
 # R3A Modular Lifecycle Readiness
 
 Status: isolated prototype integration exercised on 2026-11-08.
@@ -51,3 +69,13 @@ The isolated runtime was stopped after evidence capture. No production or shared
 - Module config values are immutable for a running worker version; a changed configuration should be released as a new provider version.
 - The prototype does not migrate module-owned durable state between versions. Modules declaring a migration contract still need a generic migration runner before stateful upgrades are accepted.
 - Resource-reference resolution continues through the existing shared registry contract. The coordinator should integrate these lifecycle controls and manifests into the managed CME after its normal branch integration review.
+
+## Contract compatibility and resource modules — 2026-11-08
+
+The lifecycle provider boundary returns either plain JSON output or the existing typed `r3a.capability-provider-result.v1@1.0.0` envelope with separate `output` and `evidence`. The worker validates JSON serializability; the registered operation validates the typed output/evidence schemas after provider resolution. Replacement is versioned, dependency ranges are resolved before activation, dependency cycles fail closed, and only the affected module is stopped/restarted. The isolated tests cover missing-dependency denial, typed result transport, rollback to the previous active version, provider child death and activation recovery, plus CME desired-state restoration with a matching dependency version.
+
+The 65,536-byte provider frame remains a provider-protocol limit. A larger resident-execution envelope in the Coordinator branch is a separate outer contract and must not make oversized provider replies valid. Preserve `ProtocolFrameTooLarge` / `error_code=response_too_large` at the inner boundary and translate it to a bounded typed invocation failure before the resident sees it. The Live Modular acceptance at `f7ec1161846be67365bc9f60cecd94d3d79d794f` and the Coordinator head `c02c882c4b8459a58df8ead4b8e41fd8f1065395` are separate worktrees; their current contract diffs have not been merged or tested from this branch. In particular, durable module-scoped evidence for manifest/dependency rejection before provider registration remains a cross-owner integration item.
+
+The first independently configured resource-monitor package adds `infrastructure.resources.disk-health.read` and `infrastructure.software-environments.discover`, each under the existing CME capability registry and `infrastructure.resource-inventory.read` grant. They do not register physical devices as callable capabilities. Existing OctoMiner telemetry remains the provider for GPU/VRAM/load/fan, GPU process mapping, inference-server and ComfyUI status, mounted filesystem capacity, request metrics and bounded history. The two inventories join by configured host/resource ID without assuming deployment endpoints.
+
+Local read-only evidence is deliberately limited: `lsblk` observed one SATA disk on the development host with 256,060,514,304 bytes; `smartctl` was absent, so health was unavailable. No SAS or remote OctoMiner live measurement is claimed. Fixture tests cover SCSI/SAS smartctl JSON including a nonzero status bit with valid health data. Resource provider manifests are external inputs; this change does not activate them in CME or restart a managed service.
