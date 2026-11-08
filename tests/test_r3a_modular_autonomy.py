@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_modular_autonomy.py
 Component: R3A-AP1-MODULAR-AUTONOMY-REGRESSION
-File Revision: 1.4.0
+File Revision: 1.4.1
 Created: 2026-11-06T23:19:46Z
 Created By: Codex GPT-6
 Purpose: Permanently verify versioned autonomy contracts, external model roles, readiness routing, deferral, and authorization-provider compatibility.
@@ -19,6 +19,7 @@ Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Verify vers
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Verify external escalation policy version, registered routes, authorization identity and per-activity token limits.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Verify grant provider receives activity scope for external invocation authorization.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Verify task-class role defaults, reject autonomic reasoning, preserve vision routing, and forbid cross-class fallback.
+Changed: 2026-11-08 | R3A-CONTEXT-RECOVERY | R3A Coordinator | Verify resident requests use the larger bounded frame without relaxing provider limits.
 Supersedes: None.
 Contracts: AP0-003–010; R3A-019; MOD-006; r3a.contract-envelope.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
 Tests: This test module.
@@ -43,6 +44,7 @@ from r3a_runtime.contracts import (ActivityDependencySet, ContractEnvelope, Cont
                                    ReadinessObservation, resolve_role)
 from r3a_runtime.cme import CME, ModelRoleUnavailable
 from r3a_runtime.diagnostics import project_resource_readiness
+from r3a_runtime.protocol import MAX_RESIDENT_EXECUTION_FRAME_BYTES
 from r3a_runtime.protocol import ModuleProtocolServer, request as module_request
 
 
@@ -634,9 +636,9 @@ class ExistingModuleRpcCompatibilityTests(unittest.IsolatedAsyncioTestCase):
             cme = CME(settings, authorization_provider=Provider())
             captured = {}
 
-            async def fake_request(socket, module_id, version, operation, payload, timeout):
+            async def fake_request(socket, module_id, version, operation, payload, timeout, **options):
                 captured.update(socket=socket, module_id=module_id, version=version,
-                                operation=operation, payload=payload, timeout=timeout)
+                                operation=operation, payload=payload, timeout=timeout, **options)
                 return {"ok": True, "result": {}}
 
             payload = {"activity_type": "grace.objective", "activity_id": "activity-1",
@@ -645,6 +647,7 @@ class ExistingModuleRpcCompatibilityTests(unittest.IsolatedAsyncioTestCase):
                 await cme._module_call("execute", payload, timeout=30)
             self.assertEqual(captured["operation"], "execute")
             self.assertEqual(captured["module_id"], "resident.grace")
+            self.assertEqual(captured["max_message_bytes"], MAX_RESIDENT_EXECUTION_FRAME_BYTES)
             envelope = ContractEnvelope.from_dict(
                 captured["payload"]["contract_envelope"], expected_contract="r3a.resident.execution")
             self.assertEqual(envelope.activity_id, "activity-1")

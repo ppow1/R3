@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.13.0
+File Revision: 1.14.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -44,6 +44,7 @@ Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Dispatch escalatio
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Resolve routes by configured task class and reject autonomic objective inference before model execution.
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Bind manifest-declared capability provider versions through the generic CME module lifecycle while preserving CME authorization and invocation persistence.
 Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | R3A Coordinator | Reload external module manifests through lifecycle manager and refresh provider health independently.
+Changed: 2026-11-08 | R3A-CONTEXT-RECOVERY | R3A Coordinator | Apply the larger bounded frame to generic resident execution while preserving provider IPC bounds.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; module.lifecycle v2; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py; tests/test_r3a_telemetry_providers.py; tests/test_r3a_capability_contracts.py; tests/test_r3a_engineering.py.
@@ -86,7 +87,8 @@ from .notifications import INSTITUTION_EVENT_SOURCE, validate_notification_envel
 from .acceptance import (AcceptanceCriteriaRequired, OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
                          OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, evidence_fingerprint,
                          validate_acceptance, validate_required_criteria)
-from .protocol import PROTOCOL_MAJOR, PROTOCOL_MINOR, request as module_request
+from .protocol import (MAX_RESIDENT_EXECUTION_FRAME_BYTES, PROTOCOL_MAJOR, PROTOCOL_MINOR,
+                       request as module_request)
 from .provider_runtime import ProviderProcessManager
 from .grace_module import validate_resident_profile
 
@@ -415,8 +417,11 @@ class CME:
                 str(payload.get("correlation_id") or payload["activity_id"]),
                 resident_id, str(payload["config_revision"]), utcnow().isoformat(),
                 {"operation": "execute", "continuation_ref": payload.get("continuation_ref")}).to_dict()
-        return await module_request(socket, resident_id, version,
-                                    operation, payload, timeout=timeout)
+        frame_limit = MAX_RESIDENT_EXECUTION_FRAME_BYTES if operation == "execute" else None
+        request_options = {"timeout": timeout}
+        if frame_limit is not None:
+            request_options["max_message_bytes"] = frame_limit
+        return await module_request(socket, resident_id, version, operation, payload, **request_options)
 
     async def _ensure_resident_module(self, value: dict[str, Any]) -> ResidentProcessBinding:
         profile = validate_resident_profile(value, resident_id=str(value.get("resident_id", "")),

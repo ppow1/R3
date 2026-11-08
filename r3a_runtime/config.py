@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/config.py
 Component: R3A-BOOTSTRAP-CONFIG
-File Revision: 1.8.0
+File Revision: 1.8.1
 Created: 2026-11-06T15:04:00Z
 Created By: Codex GPT-6
 Purpose: Strictly validate external R3A AP0-M1 bootstrap and operating settings.
@@ -24,9 +24,10 @@ Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Bind configured mode
 Changed: 2026-11-07 | R3A-AP1-N1 | Codex GPT-6 | Add externally configured versioned service-event notification sources.
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Preserve immutable provider-version registrations and pass resolved pinned artifact paths to the generic CME binding.
 Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | R3A Coordinator | Resolve module dependency ranges and reject missing providers or cycles.
+Changed: 2026-11-08 | R3A-CONTEXT-RECOVERY | R3A Coordinator | Configure route context windows while preserving legacy configuration digests.
 Supersedes: None.
 Contracts: AP0-001/008/009; R3A-019; Issue #46; AP0-M1 D7; r3a_runtime.contracts; hints/file-provenance.md.
-Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py.
+Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_context_recovery.py; tests/test_r3a_octominer_plugin.py.
 History/Predecessor: Git blob 189c6ef7ef3821f9140bddbeac8d04c177ca32ac at commit ad16700f1e94dd36c81cac5383f9f2e2771a98a1.
 """
 from __future__ import annotations
@@ -57,6 +58,7 @@ class ModelRoute:
     model: str
     timeout_seconds: float
     max_tokens: int
+    context_window_tokens: int = 16384
 
 
 @dataclass(frozen=True)
@@ -486,7 +488,8 @@ def load_settings(path: str | Path) -> Settings:
             where = f"grace.routes[{index}]"
             if not isinstance(item, dict):
                 raise ConfigurationError(f"{where} must be an object")
-            _keys(item, {"route_id", "provider", "endpoint", "model", "timeout_seconds", "max_tokens"}, where)
+            route_keys = {"route_id", "provider", "endpoint", "model", "timeout_seconds", "max_tokens"}
+            _keys(item, route_keys | ({"context_window_tokens"} & item.keys()), where)
             route_id = _text(item["route_id"], f"{where}.route_id")
             if not re.fullmatch(r"[A-Za-z0-9._-]+", route_id) or route_id in route_ids:
                 raise ConfigurationError(f"{where}.route_id must be unique and use letters, numbers, dot, underscore or hyphen")
@@ -500,7 +503,13 @@ def load_settings(path: str | Path) -> Settings:
             max_tokens = item["max_tokens"]
             if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or not 64 <= max_tokens <= 512:
                 raise ConfigurationError(f"{where}.max_tokens must be an integer from 64 through 512")
-            parsed_routes.append(ModelRoute(route_id, provider, endpoint, model, timeout, max_tokens))
+            context_window = item.get("context_window_tokens", 16384)
+            if (isinstance(context_window, bool) or not isinstance(context_window, int)
+                    or not 1024 <= context_window <= 1_000_000 or context_window <= max_tokens):
+                raise ConfigurationError(
+                    f"{where}.context_window_tokens must exceed max_tokens and be from 1024 through 1000000")
+            parsed_routes.append(ModelRoute(route_id, provider, endpoint, model, timeout, max_tokens,
+                                            context_window))
         if default_model_route not in route_ids:
             raise ConfigurationError("grace.default_route must identify a configured route")
         model_routes = tuple(parsed_routes)
@@ -968,7 +977,9 @@ def sanitized_config(settings: Settings) -> dict[str, Any]:
         "grace": ({"default_route": settings.default_model_route,
                    "routes": [{"route_id": route.route_id, "provider": route.provider,
                                "endpoint": route.endpoint, "model": route.model,
-                               "timeout_seconds": route.timeout_seconds, "max_tokens": route.max_tokens}
+                               "timeout_seconds": route.timeout_seconds, "max_tokens": route.max_tokens,
+                               **({"context_window_tokens": route.context_window_tokens}
+                                  if route.context_window_tokens != 16384 else {})}
                               for route in settings.model_routes],
                    "knowledge_sources": [str(path) for path in settings.knowledge_sources],
                    "role_registry": ({"schema_version": 1, "default_role": settings.default_model_role,
