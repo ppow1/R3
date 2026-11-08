@@ -36,7 +36,7 @@ from .protocol import PROTOCOL_MAJOR, PROTOCOL_MINOR, request
 
 
 def _module_environment(operation: RegisteredOperation) -> dict[str, str]:
-    """Pass only runtime basics and environment variables explicitly named by config."""
+    """Pass only runtime basics and config references admitted by the module manifest."""
     allowed = {name: value for name in ("PATH", "HOME", "LANG", "LC_ALL")
                if (value := os.environ.get(name)) is not None}
     names: set[str] = set()
@@ -54,10 +54,13 @@ def _module_environment(operation: RegisteredOperation) -> dict[str, str]:
             names.update(re.findall(r"\$\{([A-Z][A-Z0-9_]*)\}", value))
 
     visit(operation.configuration)
+    declared = (operation.legacy_manifest or {}).get("module_manifest") or {}
+    secret_allowlist = set((declared.get("environment") or {}).get("allowlist", []))
     for name in names:
-        # AP0-M1 modules never receive credentials for direct access to CME's
-        # institutional database. Database-backed observations cross via CME APIs.
-        if re.search(r"(?:^|_)(?:DB|DATABASE|POSTGRES|PSYCOPG|PG)(?:_|$)", name):
+        # Database credential references are forwarded only when a versioned
+        # module manifest explicitly declares that environment variable.
+        if (re.search(r"(?:^|_)(?:DB|DATABASE|POSTGRES|PSYCOPG|PG)(?:_|$)", name)
+                and name not in secret_allowlist):
             continue
         if name in os.environ:
             allowed[name] = os.environ[name]
@@ -114,6 +117,7 @@ class ProviderProcessManager:
                     "configuration_schema": legacy["configuration_schema"],
                     "configuration_ref": declared["configuration"]["configuration_ref"],
                     "capability_refs": declared["capability_refs"],
+                    "environment_allowlist": (declared.get("environment") or {}).get("allowlist", []),
                     "migration_contract": declared["migration_contract"],
                     "artifact_ref": artifact["artifact_ref"], "artifact_digest": artifact["artifact_sha256"],
                     "recovery_policy": declared["recovery_policy"],
@@ -132,6 +136,7 @@ class ProviderProcessManager:
 
     async def install_all(self) -> None:
         seen = set()
+        restore: list[RegisteredOperation] = []
         for item in self.registry.discover(include_disabled=True, include_versions=True):
             descriptor = item["descriptor"]
             if descriptor["lifecycle"]["desired_state"] != "enabled":
@@ -155,18 +160,35 @@ class ProviderProcessManager:
                 continue
             await self.store.register_module(manifest, "INSTALLED", "unknown")
             rows = await self.store.rows(
-                "SELECT lifecycle_state FROM r3a.module_registry WHERE module_id=%s AND module_version=%s",
+                "SELECT lifecycle_state,diagnostic FROM r3a.module_registry WHERE module_id=%s AND module_version=%s",
                 key)
-            if rows and rows[0]["lifecycle_state"] == "INSTALLED":
+            previous = rows[0]["lifecycle_state"] if rows else "INSTALLED"
+            diagnostic = rows[0].get("diagnostic") if rows else {}
+            if not isinstance(diagnostic, dict):
+                diagnostic = {}
+            restore_on_start = (previous in {"ACTIVE", "ACTIVATING", "STOPPING", "REPLACING"}
+                                or (previous == "STOPPED" and diagnostic.get("resume_on_start") is True))
+            if previous == "INSTALLED":
                 await self._state(*key, "INSTALLED", "unknown", {"source": "capability manifest"})
-            elif rows and rows[0]["lifecycle_state"] in {"ACTIVE", "ACTIVATING", "STOPPING", "REPLACING"}:
+            elif previous in {"ACTIVE", "ACTIVATING", "STOPPING", "REPLACING"}:
                 await self._state(*key, "FAILED", "stale",
                                               {"reason": "provider process did not survive CME restart",
-                                               "prior_state": rows[0]["lifecycle_state"]})
-            state = ("FAILED" if rows and rows[0]["lifecycle_state"] in
-                     {"ACTIVE", "ACTIVATING", "STOPPING", "REPLACING"} else
-                     rows[0]["lifecycle_state"] if rows else "INSTALLED")
+                                               "prior_state": previous,
+                                               "resume_on_start": True})
+            state = "FAILED" if previous in {"ACTIVE", "ACTIVATING", "STOPPING", "REPLACING"} else previous
             self.registry.set_provider_state(*key, state, {"source": "module registry"})
+            if restore_on_start:
+                restore.append(operation)
+
+        # Restores only modules whose persisted lifecycle says they had been active.
+        # Explicit deactivation writes STOPPED without resume_on_start and remains off.
+        for operation in restore:
+            try:
+                await self.activate(operation)
+            except Exception:
+                # A single unavailable provider must not prevent CME or other modules
+                # from starting; its lifecycle/diagnostic record carries the failure.
+                continue
 
     async def _ensure_active(self, operation: RegisteredOperation) -> ProviderProcess:
         key = self._provider(operation)
@@ -312,7 +334,7 @@ class ProviderProcessManager:
         return {"module_id": binding.module_id, "version": binding.version,
                 "state": "ACTIVE", "pid": binding.process.pid}
 
-    async def stop(self, module_id: str, version: str) -> dict[str, Any]:
+    async def stop(self, module_id: str, version: str, *, restore_on_start: bool = False) -> dict[str, Any]:
         key = (module_id, version)
         async with self._lock:
             binding = self.processes.get(key)
@@ -323,7 +345,8 @@ class ProviderProcessManager:
                     await self._state(*key, "FAILED", "unavailable",
                                       {"reason": "provider process exited before stop request"})
                 if rows and rows[0]["lifecycle_state"] != "STOPPED":
-                    await self._state(*key, "STOPPED", "stopped", {"already_stopped": True})
+                    await self._state(*key, "STOPPED", "stopped",
+                                      {"already_stopped": True, "resume_on_start": restore_on_start})
                 self.registry.set_provider_state(*key, "STOPPED", {"already_stopped": True})
                 return {"module_id": module_id, "version": version, "stopped": True,
                         "already_stopped": True}
@@ -348,7 +371,9 @@ class ProviderProcessManager:
                     binding.process.kill()
                     await binding.process.wait()
             self.processes.pop(key, None)
-            await self._state(*key, "STOPPED", "stopped", {"exit_code": binding.process.returncode})
+            await self._state(*key, "STOPPED", "stopped",
+                              {"exit_code": binding.process.returncode,
+                               "resume_on_start": restore_on_start})
             self.registry.set_provider_state(*key, "STOPPED", {})
             return {"module_id": module_id, "version": version, "stopped": True}
 
@@ -368,9 +393,14 @@ class ProviderProcessManager:
     async def close(self) -> None:
         for module_id, version in list(self.processes):
             try:
-                await self.stop(module_id, version)
+                await self.stop(module_id, version, restore_on_start=True)
             except Exception:
                 binding = self.processes.pop((module_id, version), None)
                 if binding and binding.process.returncode is None:
                     binding.process.terminate()
                     await binding.process.wait()
+                try:
+                    await self._state(module_id, version, "STOPPED", "stopped",
+                                      {"resume_on_start": True, "shutdown_error": True})
+                except Exception:
+                    pass

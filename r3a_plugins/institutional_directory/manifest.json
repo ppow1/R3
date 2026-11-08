@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "plugin_id": "r3a.institutional-directory",
-  "plugin_version": "1.1.0",
+  "plugin_version": "1.1.1",
   "artifact_ref": "plugin.py",
-  "artifact_sha256": "0756de2608cd846779f511fd8a6bda91b6563c8f4b4ea65410c2038e563a679a",
+  "artifact_sha256": "cb2fe69b62b13e9fb885fffb9f127e4dab5bedcbe850ca95e5061ec484fbc145",
   "configuration_schema": {
     "schema_id": "r3a.institutional-directory.config.v1",
     "type": "object",
@@ -31,20 +31,20 @@
   },
   "provider": {
     "provider_id": "r3a.institutional-directory",
-    "provider_version": "1.1.0",
+    "provider_version": "1.1.1",
     "entrypoint": "r3a_plugins.institutional_directory.plugin:create_provider",
-    "artifact_sha256": "0756de2608cd846779f511fd8a6bda91b6563c8f4b4ea65410c2038e563a679a"
+    "artifact_sha256": "cb2fe69b62b13e9fb885fffb9f127e4dab5bedcbe850ca95e5061ec484fbc145"
   },
   "operation": {
     "contract_id": "r3a.capability-operation.v1",
     "contract_version": "1.0.0",
     "operation_id": "institutional.directory.discover",
-    "operation_revision": "1.1.0",
+    "operation_revision": "1.1.1",
     "provider": {
       "provider_id": "r3a.institutional-directory",
-      "provider_version": "1.1.0",
+      "provider_version": "1.1.1",
       "entrypoint": "r3a_plugins.institutional_directory.plugin:create_provider",
-      "artifact_sha256": "0756de2608cd846779f511fd8a6bda91b6563c8f4b4ea65410c2038e563a679a"
+      "artifact_sha256": "cb2fe69b62b13e9fb885fffb9f127e4dab5bedcbe850ca95e5061ec484fbc145"
     },
     "input_schema": {
       "type": "object",
@@ -502,6 +502,41 @@
     "resident_tool": {
       "name": "institutional_directory_discover",
       "description": "Read Riverview authoritative institutional offices, current resident bindings, and office-owned capability catalog metadata with snapshot provenance. Directory discovery does not authorize invocation."
+    }
+  },
+  "module_manifest": {
+    "contract_id": "r3a.module-manifest.v1",
+    "contract_version": "1.0.0",
+    "module_id": "r3a.institutional-directory",
+    "module_version": "1.1.1",
+    "owner": "Institutional Directory",
+    "binding": {
+      "contract_id": "r3a.capability-provider.v1",
+      "protocol_major": 1,
+      "protocol_min_minor": 0,
+      "protocol_max_minor": 0,
+      "entrypoint": "r3a_plugins.institutional_directory.plugin:create_provider"
+    },
+    "dependencies": [],
+    "configuration": {
+      "schema_ref": "r3a.institutional-directory.config.v1",
+      "configuration_ref": "capability_operations[].configuration"
+    },
+    "capability_refs": [
+      "institutional.directory.discover"
+    ],
+    "resource_refs": [],
+    "state_namespace": "r3a.institutional-directory",
+    "migration_contract": "r3a.stateless-provider.v1",
+    "recovery_policy": "operation-contract.v1",
+    "artifact": {
+      "artifact_ref": "plugin.py",
+      "artifact_sha256": "cb2fe69b62b13e9fb885fffb9f127e4dab5bedcbe850ca95e5061ec484fbc145"
+    },
+    "environment": {
+      "allowlist": [
+        "R3A_DIRECTORY_POSTGRES_DSN"
+      ]
     }
   }
 }

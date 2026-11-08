@@ -101,6 +101,60 @@ def test_engineering_operation_is_defined_by_external_versioned_manifest():
         operation_from_manifest(incompatible)
 
 
+def test_provider_environment_forwards_only_manifest_authorized_database_references():
+    package = Path(__file__).resolve().parents[1] / "r3a_plugins/institutional_directory"
+    manifest = json.loads((package / "manifest.json").read_text())
+    operation = operation_from_manifest(manifest)
+    registry = CapabilityRegistry()
+    registered = registry.register(operation, json.loads((package / "config.example.json").read_text()),
+                                   legacy_manifest=manifest)
+    with patch.dict("os.environ", {"R3A_DIRECTORY_POSTGRES_DSN": "directory-secret-reference",
+                                    "R3A_TELEMETRY_DATABASE_DSN": "unrelated-database-secret"}):
+        environment = _module_environment(registered)
+    assert environment["R3A_DIRECTORY_POSTGRES_DSN"] == "directory-secret-reference"
+    assert "R3A_TELEMETRY_DATABASE_DSN" not in environment
+
+
+def test_provider_lifecycle_restores_only_durably_active_modules():
+    async def scenario():
+        operation = SimpleNamespace(descriptor={
+            "operation_id": "institutional.directory.discover",
+            "lifecycle": {"desired_state": "enabled"},
+            "provider": {"provider_id": "r3a.institutional-directory", "provider_version": "1.1.1"},
+        }, legacy_manifest={})
+        class Registry:
+            def __init__(self):
+                self.states = []
+            def discover(self, **_kwargs):
+                return [{"descriptor": operation.descriptor}]
+            def resolve_provider(self, *_args):
+                return operation
+            def set_provider_state(self, *args):
+                self.states.append(args)
+        class Store:
+            def __init__(self, resume):
+                self.resume = resume
+            async def register_module(self, *_args, **_kwargs):
+                return None
+            async def rows(self, *_args, **_kwargs):
+                return [{"lifecycle_state": "STOPPED",
+                         "diagnostic": {"resume_on_start": self.resume}}]
+            async def module_state(self, *_args, **_kwargs):
+                return None
+        manifest = {"module_id": "r3a.institutional-directory", "module_version": "1.1.1",
+                    "protocol_major": 1, "protocol_min_minor": 0, "protocol_max_minor": 0,
+                    "artifact_digest": "a" * 64}
+        for resume, expected in ((True, 1), (False, 0)):
+            registry, store = Registry(), Store(resume)
+            runtime = ProviderProcessManager(SimpleNamespace(), store, registry)
+            runtime._manifest = lambda _operation: manifest
+            runtime.activate = AsyncMock(return_value={"state": "ACTIVE"})
+            await runtime.install_all()
+            assert runtime.activate.await_count == expected
+
+    asyncio.run(scenario())
+
+
 def test_generic_provider_worker_round_trips_typed_output_and_evidence():
     async def scenario():
         output = {"schema_id": "knowledge.results.v1", "results": [{"source_id": "knowledge.policy"}]}

@@ -997,7 +997,9 @@ class Store:
                 "artifact_ref,artifact_digest,manifest,lifecycle_state,health,observed_at,diagnostic) "
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,clock_timestamp(),%s) "
                 "ON CONFLICT(module_id,module_version) DO UPDATE SET "
-                "health=EXCLUDED.health,observed_at=clock_timestamp(),diagnostic=EXCLUDED.diagnostic",
+                "health=EXCLUDED.health,observed_at=clock_timestamp(),"
+                "diagnostic=CASE WHEN EXCLUDED.diagnostic='{}'::jsonb "
+                "THEN r3a.module_registry.diagnostic ELSE EXCLUDED.diagnostic END",
                 (manifest["module_id"], manifest["module_version"], manifest["contract_id"],
                  manifest["protocol_major"], manifest["protocol_minor"], manifest["artifact_ref"],
                  manifest["artifact_digest"], json.dumps(manifest), lifecycle, health, json.dumps(diagnostic or {})),

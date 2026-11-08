@@ -261,7 +261,7 @@ class InstitutionalDirectoryProvider:
                         f'SELECT b.office_id,r.principal_id,b.binding_revision FROM "{schema}".office_bindings b '
                         f'JOIN "{schema}".resident_occupants r ON r.occupant_id=b.occupant_id '
                         'WHERE r.retired_at IS NULL AND b.office_id = ANY(%(office_ids)s) '
-                        'AND (%(resident_id)s IS NULL OR r.principal_id = %(resident_id)s) '
+                        'AND (%(resident_id)s::text IS NULL OR r.principal_id = %(resident_id)s::text) '
                         'ORDER BY b.office_id,r.principal_id LIMIT %(limit)s',
                         {"office_ids": office_ids, "resident_id": arguments.get("resident_id"),
                          "limit": limit}).fetchall()]

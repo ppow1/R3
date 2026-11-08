@@ -43,6 +43,11 @@
         "artifact_ref": {"type": "string", "minLength": 1, "maxLength": 2048},
         "artifact_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
       }
+    },
+    "environment": {
+      "type": "object", "required": ["allowlist"], "additionalProperties": false,
+      "properties": {"allowlist": {"type": "array", "maxItems": 64, "uniqueItems": true,
+        "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"}}}
     }
   }
 }

@@ -171,6 +171,7 @@ class InstitutionalDirectoryProviderTests(unittest.TestCase):
         query, parameters = next((query, params) for query, params in self.fixture.statements
                                  if "office_bindings" in query)
         self.assertIn("%(resident_id)s", query)
+        self.assertIn("%(resident_id)s::text IS NULL", query)
         self.assertEqual("resident:grace", parameters["resident_id"])
         self.assertEqual(1, parameters["limit"])
 
