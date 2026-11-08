@@ -59,7 +59,7 @@ class InstitutionalKnowledgeProviderTests(unittest.TestCase):
         registered = registry.resolve("institution.knowledge.read", "1.0.0")
         descriptor = registered.descriptor
         self.assertEqual("1.1.0", descriptor["operation_revision"])
-        self.assertEqual("1.1.0", descriptor["provider"]["provider_version"])
+        self.assertEqual("1.2.0", descriptor["provider"]["provider_version"])
         self.assertEqual("1.0.0", descriptor["contract_version"])
         self.assertEqual("read", descriptor["effect_class"])
         provider = registered.load_provider()

@@ -1,4 +1,21 @@
-"""Read-only retrieval from explicitly configured institutional documents.
+"""R3 CONTROLLED SOURCE
+File: r3a_plugins/institutional_knowledge/plugin.py
+Component: R3A-INSTITUTIONAL-KNOWLEDGE-PROVIDER
+File Revision: 1.2.0
+Created: 2026-11-07 UTC
+Created By: Codex GPT-6
+Purpose: Retrieve configured institutional documents and expose governed proposal listing/ingestion.
+Execution Model: Generic R3A provider process; CME owns authorization and dispatch.
+Observability: Source revision/digests, proposal and decision provenance, retrieval freshness, structured result/evidence.
+Dependencies: psycopg 3; r3a_runtime capability provider and knowledge retrieval contracts.
+Authority: R3A-019 Knowledge; governed ingestion directive, Issue #47.
+Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Add durable proposal review and approved-item retrieval to the existing provider.
+Supersedes: Provider 1.1.0 source adapter.
+Contracts: institution.knowledge.read@1.1.0; r3a.knowledge-review-api.v1@1.0.0; capability-operation/invocation v1.1.0 Steward effects.
+Tests: tests/test_r3a_institutional_knowledge.py; tests/test_governed_knowledge_contracts.py; scripts/knowledge_ingestion_acceptance.py.
+History/Predecessor: Provider 1.1.0 at commit b835ed4; source citations remain compatible.
+
+The provider reuses deterministic retrieval from explicitly configured institutional documents.
 
 This adapter delegates deterministic parsing and relevance matching to the
 existing R3A knowledge helper, then enriches each result with document-level
@@ -16,12 +33,14 @@ from typing import Any
 
 from r3a_runtime.capability_contracts import CapabilityProviderResult
 from r3a_runtime.knowledge import retrieve_bytes
+from .review_store import KnowledgeReviewStore
 
 
 class InstitutionalKnowledgeProvider:
     def __init__(self, configuration: dict[str, Any]):
-        if (not isinstance(configuration, dict) or set(configuration) !=
-                {"sources", "max_results", "max_document_bytes"}):
+        if (not isinstance(configuration, dict) or set(configuration) -
+                {"sources", "max_results", "max_document_bytes", "database_dsn_env"} or
+                not {"sources", "max_results", "max_document_bytes"}.issubset(configuration)):
             raise ValueError("knowledge provider configuration has an invalid shape")
         max_results = configuration["max_results"]
         max_document_bytes = configuration["max_document_bytes"]
@@ -52,8 +71,30 @@ class InstitutionalKnowledgeProvider:
         self.sources = tuple(configuration["sources"])
         self.max_results = max_results
         self.max_document_bytes = max_document_bytes
+        dsn_env = configuration.get("database_dsn_env")
+        if dsn_env and not os.environ.get(dsn_env):
+            raise ValueError(f"configured Knowledge database environment variable is unset: {dsn_env}")
+        self.review_store = KnowledgeReviewStore(os.environ[dsn_env]) if dsn_env else None
 
     def invoke(self, arguments: dict[str, Any], *, context: dict[str, Any]) -> Any:
+        operation_id = context.get("operation_id")
+        if operation_id == "institution.knowledge.proposals.list":
+            if self.review_store is None:
+                raise RuntimeError("durable Knowledge review store is not configured")
+            result = self.review_store.list_proposals(arguments.get("batch_id"), arguments.get("include_decided", True),
+                                                      arguments.get("limit", 50), arguments.get("cursor"))
+            evidence = [{"proposal_id": item["proposal_id"], "proposal_revision": item["proposal_revision"],
+                         "source_digest": item["source_digest"], "batch_id": item["batch_id"],
+                         "sources": item.get("sources", [])} for item in result["proposals"]]
+            evidence.extend({"batch_id": batch["batch_id"],"source_digest":batch["source_digest"],
+                             "entry_count":batch["entry_count"],"source_documents":batch.get("source_documents",[])}
+                            for batch in result["batches"])
+            return CapabilityProviderResult(result, evidence)
+        if operation_id == "institution.knowledge.proposals.decide":
+            if self.review_store is None:
+                raise RuntimeError("durable Knowledge review store is not configured")
+            result = self.review_store.decide(arguments, context)
+            return CapabilityProviderResult(result, result["decisions"])
         query = arguments["query"].strip()
         if not query or len(query) > 2000:
             raise ValueError("query must contain 1 to 2000 non-whitespace characters")
@@ -99,7 +140,9 @@ class InstitutionalKnowledgeProvider:
                 observations.append({"source_id": source["source_id"], "uri": path.as_uri(),
                                      "availability": "unavailable", "freshness": "unavailable",
                                      "error": type(exc).__name__})
-        results.sort(key=lambda item: (-len(item["matched_terms"]), item["source_id"], item["source_path"]))
+        if self.review_store is not None:
+            results.extend(self.review_store.retrieve_approved(query, limit))
+        results.sort(key=lambda item: (-len(item.get("matched_terms", [])), item["source_id"], item["source_path"]))
         results = results[:min(limit, self.max_results)]
         output = {"schema_id": "r3a.institutional-knowledge-results.v1", "schema_version": 1,
                   "query": query, "observed_at": observed_at, "sources": observations,

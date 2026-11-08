@@ -7,5 +7,6 @@
     }
   ],
   "max_results": 10,
-  "max_document_bytes": 1048576
+  "max_document_bytes": 1048576,
+  "database_dsn_env": "R3A_KNOWLEDGE_DATABASE_DSN"
 }

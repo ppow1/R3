@@ -1,0 +1,204 @@
+{
+  "schema_version": 1,
+  "plugin_id": "r3a.institutional-knowledge",
+  "plugin_version": "1.2.0",
+  "artifact_ref": "plugin.py",
+  "artifact_sha256": "7b38742249858740850a963c012f8773e66bb07a021744da0c07318ae4c770db",
+  "supporting_artifacts": [
+    {
+      "artifact_ref": "review_store.py",
+      "artifact_sha256": "8ad32a66a136cc1ce3d63da5eec92e6cd3ae72dd2705cf86a63c3f124e54492a"
+    }
+  ],
+  "configuration_schema": {
+    "schema_id": "r3a.institutional-knowledge.config.v1",
+    "type": "object",
+    "required": [
+      "sources",
+      "max_results",
+      "max_document_bytes",
+      "database_dsn_env"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "sources": {
+        "type": "array"
+      },
+      "max_results": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100
+      },
+      "max_document_bytes": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10485760
+      },
+      "database_dsn_env": {
+        "type": "string",
+        "pattern": "[A-Z][A-Z0-9_]*"
+      }
+    }
+  },
+  "provider": {
+    "provider_id": "r3a.institutional-knowledge",
+    "provider_version": "1.2.0",
+    "entrypoint": "r3a_plugins.institutional_knowledge.plugin:create_provider",
+    "artifact_sha256": "7b38742249858740850a963c012f8773e66bb07a021744da0c07318ae4c770db"
+  },
+  "operation": {
+    "contract_id": "r3a.capability-operation.v1",
+    "contract_version": "1.0.0",
+    "operation_id": "institution.knowledge.read",
+    "operation_revision": "1.1.0",
+    "provider": {
+      "provider_id": "r3a.institutional-knowledge",
+      "provider_version": "1.2.0",
+      "entrypoint": "r3a_plugins.institutional_knowledge.plugin:create_provider",
+      "artifact_sha256": "7b38742249858740850a963c012f8773e66bb07a021744da0c07318ae4c770db"
+    },
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "required": [
+        "schema_id",
+        "schema_version",
+        "query",
+        "observed_at",
+        "sources",
+        "results"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "r3a.institutional-knowledge-results.v1"
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "query": {
+          "type": "string"
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "effect_class": "read",
+    "caller_constraints": {
+      "allowed_principals": [],
+      "allowed_residents": [
+        "resident.grace"
+      ],
+      "allowed_services": []
+    },
+    "target_scope_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "required_grants": [
+      "institution.knowledge.read"
+    ],
+    "evidence": {
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "verification_obligations": [
+        "preserve proposal source provenance and exact source digest",
+        "record authenticated Steward decision and authorization references",
+        "promote approved items only",
+        "keep rejected and deferred proposals outside retrieval results"
+      ]
+    },
+    "recovery": {
+      "idempotency_required": false,
+      "idempotency_scope": "invocation",
+      "replay_safe": true,
+      "reconciliation_operation_id": null
+    },
+    "execution": {
+      "timeout_seconds": 30,
+      "retry_disposition": "safe_retry"
+    },
+    "lifecycle": {
+      "desired_state": "enabled"
+    }
+  },
+  "module_manifest": {
+    "contract_id": "r3a.module-manifest.v1",
+    "contract_version": "1.0.0",
+    "module_id": "r3a.institutional-knowledge",
+    "module_version": "1.2.0",
+    "owner": "Institutional Knowledge",
+    "binding": {
+      "contract_id": "r3a.capability-provider.v1",
+      "protocol_major": 1,
+      "protocol_min_minor": 0,
+      "protocol_max_minor": 1,
+      "entrypoint": "r3a_plugins.institutional_knowledge.plugin:create_provider"
+    },
+    "dependencies": [],
+    "configuration": {
+      "schema_ref": "r3a.institutional-knowledge.config.v1",
+      "configuration_ref": "capability_operations[].configuration"
+    },
+    "capability_refs": [
+      "institution.knowledge.read",
+      "institution.knowledge.proposals.list",
+      "institution.knowledge.proposals.decide"
+    ],
+    "resource_refs": [],
+    "state_namespace": "r3a.institutional-knowledge",
+    "migration_contract": "r3a.governed-knowledge.v1",
+    "recovery_policy": "operation-contract.v1",
+    "artifact": {
+      "artifact_ref": "plugin.py",
+      "artifact_sha256": "7b38742249858740850a963c012f8773e66bb07a021744da0c07318ae4c770db"
+    },
+    "environment": {
+      "allowlist": [
+        "R3A_KNOWLEDGE_DATABASE_DSN"
+      ]
+    }
+  }
+}

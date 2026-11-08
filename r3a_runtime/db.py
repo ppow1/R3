@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.11.0
+File Revision: 1.12.0
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -28,6 +28,7 @@ Changed: 2026-11-07T05:28:24Z | AP2-IMPLEMENTATION | Codex GPT-6 | Allow generic
 Changed: 2026-11-07T05:45:10Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist authorized work orders and guard terminal order completion with independent verifier evidence.
 Changed: 2026-11-07T05:52:05Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist stable objective correlation and immutable Grace proposal revisions in existing activity checkpoints/events.
 Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist authorization decision and audit identities as separate provenance fields.
+Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Add grant validation for explicit-principal Steward access modes.
 Changed: 2026-11-07T13:20:00Z | R3A-AP2-CAPABILITY-INTEGRATION | Codex GPT-6 | Store canonical invocation authorization in a nonreserved evidence column and verify durable SQL recovery against isolated PostgreSQL.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Persist typed Engineering assignments in durable Grace inbox intake without relaxing AP1 acceptance criteria.
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Park objective dependencies durably, requeue after prerequisite completion, and expose bounded lineage evidence.
@@ -581,7 +582,7 @@ class Store:
     async def register_capability(self, capability_id: str, owner: str, access_mode: str,
                                   contract_version: str = "1.0.0", metadata: dict[str, Any] | None = None,
                                   health: str = "available") -> None:
-        if access_mode not in {"read_only", "read_write"}:
+        if access_mode not in {"read_only", "read_write", "steward_read", "steward_write"}:
             raise ValueError("Unsupported capability access mode")
         if health not in {"available", "not_probed", "degraded", "unavailable"}:
             raise ValueError("Unsupported capability provider availability")
@@ -598,11 +599,15 @@ class Store:
                                activity_id: str | None = None) -> uuid.UUID:
         async with self.pool.connection() as conn, conn.transaction():
             found = await (await conn.execute(
-                "SELECT access_mode FROM r3a.capability_registry WHERE capability_id=%s", (capability_id,)
+                "SELECT access_mode,metadata FROM r3a.capability_registry WHERE capability_id=%s", (capability_id,)
             )).fetchone()
             if found is None:
                 raise KeyError(f"Capability is not registered: {capability_id}")
-            if found["access_mode"] != "read_only" and activity_id is None:
+            if found["access_mode"] in {"steward_read", "steward_write"}:
+                principals = found["metadata"].get("allowed_steward_principals", [])
+                if activity_id is not None or module_id not in principals:
+                    raise PermissionError("Steward capability grants must name an explicitly allowed Steward principal")
+            elif found["access_mode"] != "read_only" and activity_id is None:
                 raise PermissionError("effectful capability grants must be scoped to one durable activity")
             scope = {"activity_id": str(uuid.UUID(activity_id))} if activity_id is not None else {}
             active = await (await conn.execute(
