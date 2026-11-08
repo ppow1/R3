@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_CHARACTER_WORKFLOW_DEVELOPMENT_STATUS.md
 Component: R3A-CHARACTER-WORKFLOW-STATUS
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: Unknown (legacy)
 Created By: Unknown (legacy)
 Purpose: Report implementation evidence, integration boundaries, and the owned Character Architecture backlog.
@@ -11,6 +11,7 @@ Observability: Git revision, isolated test output, managed runtime and Issue #56
 Dependencies: Character Architecture branch, R3 HR authority, Coordinator integration, Issue #56.
 Authority: Steward directives and Jessica's final architectural approval.
 Changed: 2026-11-08 UTC | CA-03 | Codex GPT-6 | Refresh Coordinator status, migration evidence, and ordered backlog.
+Changed: 2026-11-08 UTC | CA-03 | Codex GPT-6 | Add route and office-binding pin continuity evidence.
 Supersedes: None
 Contracts: approved-character-context@2.0.0; R3A roadmap and punch lists.
 Tests: Full repository unittest suite; isolated PostgreSQL migration/workflow.
@@ -79,7 +80,7 @@ Migration `009` is additive and does not alter existing HR records. The developm
 |---|---|---|---|---|
 | CA-01 | Provenance-bearing HR identity association | Adapter implemented; source integration BLOCKED | `HRPrincipalAssociationAdapter` fails closed when `associate_authority_principal_with_provenance` is absent. HR onboarding/source workstream is tracked by #33 and ownership is identified in #41. No identity was mutated. | Request the source owner to expose an authenticated, exact-grant, revision-checked atomic association-plus-provenance operation; integrate without a local identity map. |
 | CA-02 | Active Grace canon readiness | Context interface READY; real canon activation BLOCKED | No evidence of a genuinely approved and active Grace revision. Coordinator live objective at #6724942098 used no character context. | Prepare a source-indexed Grace canon review packet; do not approve or activate it here. |
-| CA-03 | Approved context v2, pin and privacy hardening | Implemented; isolated tests PASS | Migration `013_context_pin_authorization_scope.sql` stores the exact classification grant scope in each boundary pin; a scope change on a reused boundary fails closed. The full suite exercises scope-widening rejection. | Continue with stale route/profile and digest mismatch matrix, then hand v2 contract evidence to Coordinator/Autonomy. |
+| CA-03 | Approved context v2, pin and privacy hardening | Implemented; isolated tests PASS | Migration `013_context_pin_authorization_scope.sql` stores the exact classification grant scope in each boundary pin. Reused boundaries reject changed authorization scope, execution route, or directory binding; PostgreSQL lifecycle verifies scope/revision conflict and rollback. | Continue with stale profile/digest mismatch matrix, then hand v2 contract evidence to Coordinator/Autonomy. |
 | CA-04 | Migration and rollback verification | Implemented; isolated PostgreSQL verification PASS | Fresh disposable PostgreSQL 16 cluster applied migrations `001`–`013` through `Store.migrate()`; rerun returned `[]`. Full suite includes durable proposal, independent approval, activation, historical retrieval, pin conflict, and rollback. | Preserve the managed DB untouched; repeat under integration owner's authorized migration process after merge. |
 | CA-05 | Canon/state separation and confidentiality | Implemented; regression coverage expanding | Existing contracts separate approved canon, memory, protected relationships, and expiring emotion. New scope pin prevents same-boundary privilege expansion. | Add sink-specific leak checks and transient-to-durable promotion guards where gaps are found. |
 | CA-06 | Shared context interfaces | v2 provider implemented; managed consumer deployed, integration incomplete | Grace 1.2.11 consumes v2 and is healthy, but the live activity had no context. No managed HR association or active Grace dossier. | Hand exact v2 contract and activation assertions to Coordinator/Autonomy; do not claim fixture or live context acceptance. |

@@ -3,7 +3,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_r3a_resident_dossiers.py
 # Component: R3A-RESIDENT-DOSSIERS-TESTS
-# File Revision: 1.0.1
+# File Revision: 1.0.2
 # Created: 2026-11-08 UTC (exact creation time not captured)
 # Created By: Codex GPT-6
 # Purpose: Cover roster data shape, prompt/config composition, privacy, governance, memory and epistemics.
@@ -13,6 +13,7 @@
 # Authority: Steward directive; tests cannot certify live authoritative roster or operational readiness.
 # Changed: 2026-11-08 UTC | CHARACTER-ARCHITECTURE | Codex GPT-6 | Add dossier architecture regressions.
 # Changed: 2026-11-08 UTC | CA-03 | Codex GPT-6 | Assert authorization scope remains immutable within a context pin.
+# Changed: 2026-11-08 UTC | CA-03 | Codex GPT-6 | Assert route and directory binding continuity on resumed boundaries.
 # Supersedes: None
 # Contracts: r3a.resident.dossier.v1; r3a.resident.prompt-composition.v1; memory/relationship/epistemic v1
 # Tests: python3 -m unittest tests.test_r3a_resident_dossiers
@@ -557,25 +558,27 @@ class ResidentDossierTests(unittest.TestCase):
         repository = RepositoryStub()
         actor = GovernedActor("resident:grace", "r3-session:authenticated")
         authorization_scope = {"value": {"public"}}
+        identity_projection = {
+            "institutional_id": "r3:grace", "status": "authoritative",
+            "classification": "RESIDENT", "revision": 4,
+            "directory_resident_id": "resident:grace", "binding_revision": 9,
+            "authority_principal": "resident:grace",
+            "principal_association_ref": "hr://association/r3:grace@4",
+            "source_ref": "hr://record/r3:grace@4",
+            "directory_source_ref": "directory://snapshot/" + "c" * 64,
+            "directory_snapshot_sha256": "c" * 64,
+            "directory_snapshot_fresh": True,
+            "office_id": "office:grace", "office_role": "Director of Operations",
+            "execution_profile_id": "profile:grace",
+            "execution_profile_revision": "1.2.9",
+            "execution_profile_resident_id": "resident:grace",
+            "execution_route_id": "route:grace-primary",
+            "execution_profile_source_ref": "profile://grace@1.2.9",
+        }
         provider = ApprovedCharacterContextProvider(
             repository,
             resolve_hr_identity=lambda actor, resident_id: {
-                "institutional_id": resident_id, "status": "authoritative",
-                "classification": "RESIDENT", "revision": 4,
-                "directory_resident_id": "resident:grace", "binding_revision": 9,
-                "authority_principal": "resident:grace",
-                "principal_association_ref": "hr://association/r3:grace@4",
-                "source_ref": "hr://record/r3:grace@4",
-                "directory_source_ref": "directory://snapshot/" + "c" * 64,
-                "directory_snapshot_sha256": "c" * 64,
-                "directory_snapshot_fresh": True,
-                "office_id": "office:grace", "office_role": "Director of Operations",
-                "execution_profile_id": "profile:grace",
-                "execution_profile_revision": "1.2.9",
-                "execution_profile_resident_id": "resident:grace",
-                "execution_route_id": "route:grace-primary",
-                "execution_profile_source_ref": "profile://grace@1.2.9",
-            },
+                **identity_projection, "institutional_id": resident_id},
             authorize_context=lambda actor, action, scope: (
                 authorization_scope["value"] if action == "character.context.read" and scope == "r3:grace"
                 else False),
@@ -616,6 +619,18 @@ class ResidentDossierTests(unittest.TestCase):
             provider_id="model:grace")
         self.assertEqual(resumed["pin_ref"], context["pin_ref"])
         self.assertEqual(resumed["context_sha256"], context["context_sha256"])
+        identity_projection["execution_route_id"] = "route:grace-changed"
+        with self.assertRaisesRegex(PermissionError, "pinned character context"):
+            provider.retrieve(actor, resident_id="r3:grace",
+                execution_kind="conversation_boundary", execution_ref="conversation:turn:1",
+                provider_id="model:grace")
+        identity_projection["execution_route_id"] = "route:grace-primary"
+        identity_projection["binding_revision"] = 10
+        with self.assertRaisesRegex(PermissionError, "pinned character context"):
+            provider.retrieve(actor, resident_id="r3:grace",
+                execution_kind="conversation_boundary", execution_ref="conversation:turn:1",
+                provider_id="model:grace")
+        identity_projection["binding_revision"] = 9
         authorization_scope["value"] = {"public", "institutional"}
         with self.assertRaisesRegex(PermissionError, "pinned character context"):
             provider.retrieve(actor, resident_id="r3:grace",
