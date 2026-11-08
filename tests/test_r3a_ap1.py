@@ -38,6 +38,7 @@ Changed: 2026-11-07T23:53:20Z | R3A-AP2-DELEGATION-CONTINUATION | Codex GPT-6 | 
 Changed: 2026-11-08T00:04:44Z | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Verify generic institutional result validation, evidence delivery, corrective action selection, and rejection of false healthy completion claims.
 Changed: 2026-11-08T01:20:00Z | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Cover CME construction and delivery of generic independent-verifier results.
 Changed: 2026-11-08T01:35:00Z | R3A-MODULAR-RUNTIME | Codex GPT-6 | Verify CME-only continuation internals stay out of bounded resident protocol frames.
+Changed: 2026-11-08T01:40:00Z | R3A-MODULAR-RUNTIME | Codex GPT-6 | Verify Grace receives full evidence once and a compact durable capability receipt.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
@@ -611,7 +612,7 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
             checkpoint = store.checkpoint
             self.assertIsNotNone(checkpoint)
             self.assertEqual(len(checkpoint["reasoning_state"]["capability_invocations"]), 1)
-            self.assertIn("handoff-42", json.dumps(checkpoint["reasoning_state"]["conversation"]))
+            self.assertIn("handoff:42", json.dumps(checkpoint["reasoning_state"]["conversation"]))
 
             resumed = {**first, "attempt_id": "attempt-2", "attempt_count": 1,
                        "checkpoint": checkpoint}
@@ -620,7 +621,8 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
             self.assertEqual(store.blocked[0], "activity-42")
             restored = checkpoint["reasoning_state"]["conversation"]
             self.assertEqual(contexts[1]["conversation"][:len(restored)], restored)
-            self.assertIn("handoff-42", json.dumps(resumed_payloads[0]["conversation"]))
+            self.assertIn("handoff:42", json.dumps(resumed_payloads[0]["conversation"]))
+            self.assertIn("handoff-42", json.dumps(resumed_payloads[0]["evidence"]))
             self.assertEqual(contexts[0]["activity_id"], contexts[1]["activity_id"])
 
         asyncio.run(exercise())
@@ -1215,6 +1217,22 @@ class ResidentVerificationFeedbackIntegrationTests(unittest.TestCase):
         cme._authorize_capability.assert_not_awaited()
         self.assertEqual(result["invocation"]["invocation_id"], "invoke-1")
         self.assertEqual(result["authorization"]["audit_event_id"], "audit-1")
+
+    def test_capability_continuation_receipt_does_not_duplicate_evidence_content(self):
+        result = {"capability_id": "infrastructure.octominer.telemetry.read",
+                  "outcome": "succeeded", "invocation": {
+                      "invocation_id": "invoke-1", "operation_id": "infrastructure.octominer.telemetry.read",
+                      "provider": {"provider_id": "r3a.octominer-telemetry", "provider_version": "2.0.0"},
+                      "outcome": "SUCCEEDED"},
+                  "evidence": [{"source_id": "gpu.telemetry.octominer",
+                                "sha256": "a" * 64, "content": {"large": "evidence"}}]}
+
+        receipt = CME._resident_capability_summary(result)
+
+        self.assertEqual(receipt["capability_result"]["invocation"]["invocation_id"], "invoke-1")
+        self.assertEqual(receipt["capability_result"]["evidence"],
+                         [{"source_id": "gpu.telemetry.octominer", "sha256": "a" * 64}])
+        self.assertNotIn("content", json.dumps(receipt))
 
 if __name__ == "__main__":
     unittest.main()

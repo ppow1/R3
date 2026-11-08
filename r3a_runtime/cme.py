@@ -15,6 +15,7 @@ Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Reconcile orphaned mo
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Dispatch durable Grace objectives, authorize bounded evidence reads and renew long-running leases.
 Changed: 2026-11-08 | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Persist generic verifier results and ask Grace for a scoped corrective decision before blocking.
 Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Omit CME-only durable reasoning checkpoint internals from resident protocol frames.
+Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Keep full capability evidence once in context and compact its conversation receipt.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
 Changed: 2026-11-06T18:16:39Z | R3A-019 | Codex GPT-6 | Bound module-child termination when a model request does not drain.
@@ -1377,6 +1378,20 @@ class CME:
                 tools.append(operation.resident_tool_projection())
         return tuple(tools)
 
+    @staticmethod
+    def _resident_capability_summary(result: dict[str, Any]) -> dict[str, Any]:
+        """Give Grace a durable invocation receipt without duplicating evidence content."""
+        invocation = result.get("invocation") or {}
+        return {"capability_result": {
+            "capability_id": result.get("capability_id"),
+            "outcome": result.get("outcome"),
+            "invocation": {key: invocation[key] for key in
+                           ("invocation_id", "operation_id", "provider", "outcome")
+                           if key in invocation},
+            "evidence": [{"source_id": item.get("source_id"), "sha256": item.get("sha256")}
+                         for item in result.get("evidence", []) if isinstance(item, dict)],
+        }}
+
     async def _read_runtime_capability(self, capability_id: str) -> list[dict[str, Any]]:
         evidence: list[dict[str, Any]] = []
         if capability_id in {"host.process.read", "institution.diagnostics.read"}:
@@ -2050,7 +2065,8 @@ class CME:
                                                         {item["source_id"] for item in
                                                          capability_result["evidence"]})
                         conversation.append({"role": "user", "content": json.dumps(
-                            {"capability_result": capability_result}, separators=(",", ":"))})
+                            self._resident_capability_summary(capability_result),
+                            separators=(",", ":"))})
                         await self.store.record_progress(
                             activity,
                             {"phase": "resident.capability.completed", "at": utcnow().isoformat(),
