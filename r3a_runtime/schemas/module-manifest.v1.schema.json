@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.module-manifest.v1",
+  "title": "R3A Module Manifest v1",
+  "type": "object",
+  "required": ["contract_id", "contract_version", "module_id", "module_version", "owner", "binding", "dependencies", "configuration", "capability_refs", "resource_refs", "state_namespace", "migration_contract", "recovery_policy", "artifact"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_id": {"const": "r3a.module-manifest.v1"},
+    "contract_version": {"const": "1.0.0"},
+    "module_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{1,159}$"},
+    "module_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "owner": {"type": "string", "minLength": 1, "maxLength": 160},
+    "binding": {
+      "type": "object", "required": ["contract_id", "protocol_major", "protocol_min_minor", "protocol_max_minor", "entrypoint"], "additionalProperties": false,
+      "properties": {
+        "contract_id": {"const": "r3a.capability-provider.v1"},
+        "protocol_major": {"type": "integer", "minimum": 1},
+        "protocol_min_minor": {"type": "integer", "minimum": 0},
+        "protocol_max_minor": {"type": "integer", "minimum": 0},
+        "entrypoint": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*$"}
+      }
+    },
+    "dependencies": {"type": "array", "maxItems": 64, "items": {
+      "type": "object", "required": ["module_id", "version_range"], "additionalProperties": false,
+      "properties": {"module_id": {"type": "string", "minLength": 1}, "version_range": {"type": "string", "minLength": 1, "maxLength": 128}}
+    }},
+    "configuration": {
+      "type": "object", "required": ["schema_ref", "configuration_ref"], "additionalProperties": false,
+      "properties": {
+        "schema_ref": {"type": "string", "minLength": 1, "maxLength": 256},
+        "configuration_ref": {"type": "string", "minLength": 1, "maxLength": 2048}
+      }
+    },
+    "capability_refs": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "resource_refs": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "state_namespace": {"type": "string", "minLength": 1, "maxLength": 160},
+    "migration_contract": {"type": "string", "minLength": 1, "maxLength": 128},
+    "recovery_policy": {"type": "string", "minLength": 1, "maxLength": 128},
+    "artifact": {
+      "type": "object", "required": ["artifact_ref", "artifact_sha256"], "additionalProperties": false,
+      "properties": {
+        "artifact_ref": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "artifact_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    }
+  }
+}

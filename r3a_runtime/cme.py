@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.9.0
+File Revision: 1.12.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -13,6 +13,10 @@ Authority: AP1 / R3A-019 and AP1 Slices 1–2 authorized by Steward; isolated R3
 Changed: 2026-11-06T15:22:00Z | R3A-AP0-M1 | Codex GPT-6 | Implement CME process, scheduler, module worker and control plane.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Reconcile orphaned module processes, record live health and correct replacement status.
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Dispatch durable Grace objectives, authorize bounded evidence reads and renew long-running leases.
+Changed: 2026-11-08 | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Persist generic verifier results and ask Grace for a scoped corrective decision before blocking.
+Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Omit CME-only durable reasoning checkpoint internals from resident protocol frames.
+Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Keep full capability evidence once in context and compact its conversation receipt.
+Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Compact legacy durable capability receipts when resuming activities.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
 Changed: 2026-11-06T18:16:39Z | R3A-019 | Codex GPT-6 | Bound module-child termination when a model request does not drain.
@@ -38,8 +42,9 @@ Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Expose sepa
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Enforce Grace-requested reasoning escalation through existing authorization, readiness, durable checkpoint and per-activity token-budget paths.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Dispatch escalation inference through the unified capability invocation and durable budget-reservation path.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Resolve routes by configured task class and reject autonomic objective inference before model execution.
+Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Bind manifest-declared capability provider versions through the generic CME module lifecycle while preserving CME authorization and invocation persistence.
 Supersedes: None.
-Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
+Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; module.lifecycle v2; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py; tests/test_r3a_telemetry_providers.py; tests/test_r3a_capability_contracts.py; tests/test_r3a_engineering.py.
 History/Predecessor: Modular baseline ca2d29e47336dfb3d6a0e633c20bd31e1a200978; AP2 baseline b018578ea576813fed2c973236f35d82843daf14.
 """
@@ -80,6 +85,7 @@ from .acceptance import (AcceptanceCriteriaRequired, OBJECTIVE_ACCEPTANCE_CONTRA
                          OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, evidence_fingerprint,
                          validate_acceptance, validate_required_criteria)
 from .protocol import PROTOCOL_MAJOR, PROTOCOL_MINOR, request as module_request
+from .provider_runtime import ProviderProcessManager
 
 
 _RESIDENT_TOOLS = (
@@ -170,6 +176,7 @@ class CME:
         self.module_version = settings.module_version
         self.module_pid: int | None = None
         self.module_lock = asyncio.Lock()
+        self.provider_runtime = ProviderProcessManager(settings, self.store, settings.capability_registry)
         self.booted_at = utcnow()
 
     def manifest(self, version: str | None = None) -> dict[str, Any]:
@@ -234,6 +241,7 @@ class CME:
                           "evidence_contract": descriptor["evidence"],
                           "provider_availability": discovery["registry_observation"]["provider_availability"]},
                 health=discovery["registry_observation"]["provider_availability"])
+        await self.provider_runtime.install_all()
         escalation_policy = self.settings.reasoning_escalation
         if escalation_policy and escalation_policy.enabled:
             escalation_operation = self.settings.capability_registry.resolve(
@@ -285,6 +293,7 @@ class CME:
         if self.active_activities:
             await asyncio.gather(*self.active_activities.values(), return_exceptions=True)
         await self._stop_module()
+        await self.provider_runtime.close()
         if self.control:
             await self.control.close()
         if self.diagnostics:
@@ -338,6 +347,10 @@ class CME:
                            timeout: float = 5.0) -> dict[str, Any]:
         payload = dict(payload or {})
         if operation == "execute" and payload.get("activity_type") == "grace.objective":
+            # CME has already extracted these durable internals into its own state. The
+            # resident receives the conversation and evidence, not a duplicate copy of
+            # invocation history and retry bookkeeping that can exceed the module frame.
+            payload.pop("reasoning_state", None)
             payload["contract_envelope"] = ContractEnvelope(
                 "r3a.resident.execution", "1.0.0", str(uuid.uuid4()),
                 str(payload["activity_id"]), str(payload["attempt_id"]),
@@ -557,6 +570,76 @@ class CME:
             return await self._stop_module()
         if operation == "module.replace":
             return await self._replace_module(str(payload["version"]))
+        if operation in {"capability.module.install", "capability.module.activate",
+                         "capability.module.deactivate", "capability.module.status"}:
+            operation_id = payload.get("operation_id")
+            contract_version = payload.get("contract_version", "1.0.0")
+            if not isinstance(operation_id, str) or not operation_id:
+                raise ValueError(f"{operation} requires operation_id")
+            provider_version = payload.get("provider_version")
+            if provider_version is not None and not isinstance(provider_version, str):
+                raise ValueError("provider_version must be text")
+            registered = (self.settings.capability_registry.resolve_provider(operation_id, provider_version)
+                          if provider_version else self.settings.capability_registry.resolve(
+                              operation_id, contract_version, include_stopped=True))
+            provider = registered.descriptor["provider"]
+            if operation == "capability.module.status":
+                modules = await self.store.rows(
+                    "SELECT lifecycle_state,health,observed_at,diagnostic FROM r3a.module_registry "
+                    "WHERE module_id=%s AND module_version=%s", (provider["provider_id"], provider["provider_version"]))
+                return {"operation_id": operation_id, "provider_id": provider["provider_id"],
+                        "provider_version": provider["provider_version"],
+                        "module": modules[0] if modules else None}
+            if operation == "capability.module.install":
+                manifest = self.provider_runtime._manifest(registered)
+                installed = await self.store.rows(
+                    "SELECT artifact_digest,lifecycle_state FROM r3a.module_registry "
+                    "WHERE module_id=%s AND module_version=%s", (provider["provider_id"], provider["provider_version"]))
+                if installed:
+                    if installed[0]["artifact_digest"].strip() != manifest["artifact_digest"]:
+                        raise RuntimeError("installed provider version is immutable; use a new provider version")
+                    return {"installed": True, "already_registered": True,
+                            "module_id": provider["provider_id"], "version": provider["provider_version"],
+                            "lifecycle_state": installed[0]["lifecycle_state"]}
+                await self.store.register_module(manifest, "INSTALLED", "unknown")
+                await self.store.module_state(provider["provider_id"], provider["provider_version"],
+                                              "INSTALLED", "unknown", {"source": "control.install",
+                                                                        "idempotency_key": idempotency_key},
+                                              machine_version=2)
+                self.settings.capability_registry.set_provider_state(provider["provider_id"],
+                                                                     provider["provider_version"],
+                                                                     "INSTALLED", {})
+                return {"installed": True, "module_id": provider["provider_id"],
+                        "version": provider["provider_version"], "artifact_digest": provider["artifact_sha256"]}
+            if operation == "capability.module.activate":
+                result = await self.provider_runtime.activate(registered)
+                self.settings.capability_registry.activate_provider(operation_id, provider["provider_version"])
+                return result
+            stopped = await self.provider_runtime.stop(provider["provider_id"], provider["provider_version"])
+            return stopped
+        if operation == "capability.module.replace":
+            new_id = payload.get("operation_id")
+            old_module_id, old_version = payload.get("old_module_id"), payload.get("old_version")
+            new_version = payload.get("new_provider_version")
+            if not all(isinstance(x, str) and x for x in (new_id, old_module_id, old_version, new_version)):
+                raise ValueError("capability.module.replace requires operation_id, old_module_id, old_version, and new_provider_version")
+            old_operation = self.settings.capability_registry.resolve_provider(new_id, old_version)
+            new_operation = self.settings.capability_registry.resolve_provider(new_id, new_version)
+            if old_operation.descriptor["provider"]["provider_id"] != old_module_id:
+                raise ValueError("old_module_id does not match the registered prior provider version")
+            await self.provider_runtime.activate(old_operation)
+            await self.provider_runtime.begin_replacement(old_module_id, old_version)
+            try:
+                result = await self.provider_runtime.activate(new_operation)
+            except Exception:
+                await self.provider_runtime.cancel_replacement(old_module_id, old_version)
+                raise
+            self.settings.capability_registry.activate_provider(new_id, new_version)
+            await self.provider_runtime.stop(old_module_id, old_version)
+            await self.store.record_module_replacement(old_module_id, old_version, new_version,
+                                                      machine_version=2)
+            result.update({"replaced": True, "prior_version": old_version})
+            return result
         if operation == "capability.grant":
             module_id = str(payload["module_id"])
             capability_id = str(payload["capability_id"])
@@ -1070,17 +1153,15 @@ class CME:
                 raise PermissionError("effectful operation requires the canonical AP2 invocation dispatcher")
             from .capability_contracts import validate_json
             validate_json(arguments, registered_operation.descriptor["input_schema"], path="$.input")
-        authorization = await self._authorize_capability(
-            capability_id, activity_id=str(activity["activity_id"]),
-            attempt_id=str(activity["attempt_id"]),
-            context={"invocation_source": "resident_selected_action",
-                     "tool_contract_id": tool["contract_id"],
-                     "operation_contract_id": registered_operation.descriptor["contract_id"]
-                     if registered_operation is not None else tool["contract_id"],
-                     "effect_class": registered_operation.descriptor["effect_class"]
-                     if registered_operation is not None else "read",
-                     "query_sha256": hashlib.sha256(arguments.get("query", "").encode()).hexdigest()
-                     if capability_id == "institution.knowledge.read" else None})
+        authorization = None
+        if registered_operation is None:
+            authorization = await self._authorize_capability(
+                capability_id, activity_id=str(activity["activity_id"]),
+                attempt_id=str(activity["attempt_id"]),
+                context={"invocation_source": "resident_selected_action",
+                         "tool_contract_id": tool["contract_id"], "effect_class": "read",
+                         "query_sha256": hashlib.sha256(arguments.get("query", "").encode()).hexdigest()
+                         if capability_id == "institution.knowledge.read" else None})
         evidence = []
         capability_output: Any = None
         if capability_id == "institution.knowledge.read" and registered_operation is None:
@@ -1088,27 +1169,46 @@ class CME:
                 evidence.extend(retrieve(path, f"knowledge.{index+1}", query))
             capability_output = evidence
         elif registered_operation is not None:
-            provider = registered_operation.load_provider()
-            provided = await asyncio.to_thread(provider.invoke, arguments,
-                                                context={"activity_id": str(activity["activity_id"]),
-                                                         "attempt_id": str(activity["attempt_id"]),
-                                                         "correlation_id": str(activity.get("correlation_id")
-                                                                               or activity["activity_id"]),
-                                                         "operation_id": capability_id,
-                                                         "config_revision": self.settings.source_digest,
-                                                         "capability_catalog": list(registry.discover())})
-            capability_output, provider_evidence = normalize_provider_result(
-                provided, registered_operation.descriptor)
-            evidence.extend(provider_evidence if isinstance(provider_evidence, list)
-                            else [provider_evidence])
+            descriptor = registered_operation.descriptor
+            invocation_id = str(uuid.uuid4())
+            invocation = {
+                "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+                "invocation_id": invocation_id,
+                "operation_id": descriptor["operation_id"],
+                "operation_contract_version": descriptor["contract_version"],
+                "caller": {"principal_id": self.module_id, "resident_id": self.module_id,
+                           "service_id": None},
+                "target": {}, "input": arguments,
+                "activity_id": str(activity["activity_id"]),
+                "attempt_id": str(activity["attempt_id"]),
+                "correlation_id": str(activity.get("input", {}).get("correlation_id")
+                                       or activity.get("correlation_id") or activity["activity_id"]),
+                "work_order": None, "evidence_purpose": request.get("rationale"),
+                "idempotency_key": f"resident-capability:{invocation_id}",
+                "deadline": (datetime.now(timezone.utc)
+                             + timedelta(seconds=descriptor["execution"]["timeout_seconds"])).isoformat(),
+                "config_revision": self.settings.source_digest,
+            }
+            canonical_result = await self.invoke_capability(invocation)
+            if canonical_result["outcome"] != "SUCCEEDED":
+                raise RuntimeError("CME capability invocation did not succeed")
+            capability_output = canonical_result["output"]
+            evidence.extend(canonical_result["evidence"])
+            authorization = canonical_result["authorization"]
+            invocation_summary = {key: canonical_result[key] for key in
+                                  ("invocation_id", "operation_id", "operation_contract_version",
+                                   "provider", "outcome", "started_at", "finished_at")}
         else:
             evidence.extend(await self._read_runtime_capability(capability_id))
             capability_output = evidence
-        return {"contract_id": tool["contract_id"],
+        result = {"contract_id": tool["contract_id"],
                 "contract_version": tool["contract_version"],
                 "capability_id": capability_id, "outcome": "succeeded",
                 "arguments": arguments, "output": capability_output, "evidence": evidence,
                 "authorization": authorization, "observed_at": utcnow().isoformat()}
+        if registered_operation is not None:
+            result["invocation"] = invocation_summary
+        return result
 
     async def invoke_capability(self, request: dict[str, Any], *,
                                 work_order: EngineeringWorkOrder | None = None,
@@ -1193,16 +1293,21 @@ class CME:
             raise RuntimeError(f"invocation requires reconciliation from durable state {existing['state']}")
         if not existing.get("created", False) and not descriptor["recovery"]["replay_safe"]:
             raise RuntimeError("interrupted invocation is not replay safe; reconciliation is required")
-        provider = operation.load_provider()
         try:
-            output = await asyncio.to_thread(provider.invoke, checked["input"], context={
+            provider_context = {
                 "invocation_id": checked["invocation_id"], "idempotency_key": persistence_key,
                 "activity_id": checked["activity_id"], "attempt_id": checked["attempt_id"],
                 "correlation_id": checked["correlation_id"], "target": checked["target"],
                 "work_order": order, "effect_class": descriptor["effect_class"],
                 "config_revision": self.settings.source_digest,
                 **(_provider_context or {}),
-                "capability_catalog": list(self.settings.capability_registry.discover())})
+                "capability_catalog": list(self.settings.capability_registry.discover())}
+            runtime = getattr(self, "provider_runtime", None)
+            if runtime is None:  # Narrow compatibility for isolated CME contract fixtures.
+                provider = operation.load_provider()
+                output = await asyncio.to_thread(provider.invoke, checked["input"], context=provider_context)
+            else:
+                output = await runtime.invoke(operation, checked["input"], context=provider_context)
         except Exception as exc:
             finished = utcnow().isoformat()
             result = {"contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
@@ -1274,6 +1379,38 @@ class CME:
                 tools.append(operation.resident_tool_projection())
         return tuple(tools)
 
+    @staticmethod
+    def _resident_capability_summary(result: dict[str, Any]) -> dict[str, Any]:
+        """Give Grace a durable invocation receipt without duplicating evidence content."""
+        invocation = result.get("invocation") or {}
+        return {"capability_result": {
+            "capability_id": result.get("capability_id"),
+            "outcome": result.get("outcome"),
+            "invocation": {key: invocation[key] for key in
+                           ("invocation_id", "operation_id", "provider", "outcome")
+                           if key in invocation},
+            "evidence": [{"source_id": item.get("source_id"), "sha256": item.get("sha256")}
+                         for item in result.get("evidence", []) if isinstance(item, dict)],
+        }}
+
+    @classmethod
+    def _compact_resident_conversation(cls, conversation: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Normalize older checkpoints that embedded full provider evidence in the transcript."""
+        compacted = []
+        for message in conversation:
+            item = dict(message)
+            if item.get("role") == "user" and isinstance(item.get("content"), str):
+                try:
+                    value = json.loads(item["content"])
+                except (TypeError, json.JSONDecodeError):
+                    value = None
+                if isinstance(value, dict) and isinstance(value.get("capability_result"), dict):
+                    item["content"] = json.dumps(
+                        cls._resident_capability_summary(value["capability_result"]),
+                        separators=(",", ":"))
+            compacted.append(item)
+        return compacted
+
     async def _read_runtime_capability(self, capability_id: str) -> list[dict[str, Any]]:
         evidence: list[dict[str, Any]] = []
         if capability_id in {"host.process.read", "institution.diagnostics.read"}:
@@ -1313,6 +1450,59 @@ class CME:
         digest = hashlib.sha256(json.dumps(content, sort_keys=True, default=str).encode()).hexdigest()
         return {"source_id": source_id, "source_path": source_id, "content": content,
                 "sha256": digest}
+
+    def _resident_result_from_verification(self, activity: dict[str, Any],
+                                           verification: VerificationResult) -> dict[str, Any]:
+        verification_value = verification.to_dict()
+        evidence_ref = f"verification:{verification.verification_id}"
+        failure_reasons = [
+            {"code": "criterion_failed" if result.status == "FAIL" else "criterion_inconclusive",
+             "message": result.rationale,
+             "evidence_refs": list(result.evidence_refs) or [evidence_ref]}
+            for result in verification.results if result.status != "PASS"
+        ]
+        if verification.outcome != "PASS" and not failure_reasons:
+            failure_reasons = [{"code": "verification_non_pass",
+                                "message": "Independent verification did not pass.",
+                                "evidence_refs": [evidence_ref]}]
+        return {
+            "contract_id": "r3a.resident.result", "contract_version": "1.0.0",
+            "activity_id": str(activity["activity_id"]),
+            "attempt_id": str(activity["attempt_id"]),
+            "correlation_id": str(activity["input"]["correlation_id"]),
+            "resident_id": self.module_id,
+            "config_revision": self.settings.source_digest,
+            "issued_at": verification.verified_at,
+            "issuer": {"component_id": "independent-verifier", "decision_ref": evidence_ref},
+            "outcome": verification.outcome,
+            "evidence": [{"evidence_ref": evidence_ref,
+                          "kind": "independent_verification", "content": verification_value}],
+            "failure_reasons": failure_reasons,
+            "completion_authority": False,
+        }
+
+    async def _resident_verification_decision(self, activity: dict[str, Any],
+                                              context: dict[str, Any],
+                                              resident_result: dict[str, Any],
+                                              conversation: list[dict[str, Any]]) -> dict[str, Any]:
+        """Ask Grace to choose a scoped correction or blocked disposition from durable feedback."""
+        decision_context = dict(context)
+        decision_context["resident_result"] = resident_result
+        decision_context["available_tools"] = []
+        decision_context["reasoning_escalation"] = {"enabled": False, "available_roles": []}
+        decision_context["conversation"] = list(conversation) + [{
+            "role": "user",
+            "content": json.dumps({"instruction": (
+                "This is the post-verification continuation decision for the same Engineering activity. "
+                "Inspect the supplied resident_result and its failure evidence. If one currently listed "
+                "Engineering operation can correct the failed criteria within this assignment, propose "
+                "one bounded correction. Otherwise return an engineering_assess decision with status "
+                "blocked. Do not assert completion or verification; CME and the independent verifier "
+                "retain those authorities."), "resident_result": resident_result}, separators=(",", ":")),
+        }]
+        decision_context["request_ref"] = str(uuid.uuid4())
+        return (await self._module_call("execute", decision_context,
+                                        timeout=context["model_route"]["timeout_seconds"] + 15))["result"]
 
     async def _lease_heartbeat(self, activity: dict[str, Any]) -> None:
         interval = max(1.0, self.settings.lease_seconds / 3.0)
@@ -1396,10 +1586,11 @@ class CME:
         proposal = typed_proposal
         if proposal is None:
             model_ref = state.get("proposal_model") or {}
+            proposal_revision = int(state.get("proposal_revision", 1))
             proposal = EngineeringProposal(
                 proposal_id=str(uuid.uuid5(uuid.UUID(str(activity["activity_id"])),
-                                           "grace-engineering-proposal-v1")),
-                proposal_revision=1, activity_id=str(activity["activity_id"]),
+                                           f"grace-engineering-proposal-v{proposal_revision}")),
+                proposal_revision=proposal_revision, activity_id=str(activity["activity_id"]),
                 attempt_id=str(activity["attempt_id"]),
                 correlation_id=str(activity["input"]["correlation_id"]),
                 resident_id=self.module_id, config_revision=self.settings.source_digest,
@@ -1564,13 +1755,107 @@ class CME:
                  "verification_outcome": verification.outcome,
                  "artifact_digests": list(verification.artifact_digests)})
         if verification.outcome != "PASS":
+            resident_result = self._resident_result_from_verification(activity, verification)
+            await checkpoint("engineering.verification_feedback.requested",
+                             resident_result=resident_result)
+            correction_count = int(state.get("verification_correction_count", 0))
+            if correction_count >= 1:
+                correction_response = {
+                    "action": "engineering_assess",
+                    "engineering_assessment": {
+                        "status": "blocked",
+                        "assessment": "The single bounded correction did not pass independent verification.",
+                        "evidence_refs": [resident_result["issuer"]["decision_ref"]]},
+                    "model": {},
+                    "model_content": "",
+                }
+            else:
+                correction_response = await self._resident_verification_decision(
+                    activity, context, resident_result, conversation)
+            correction_model = correction_response.get("model") or {}
+            model_turns.append({"action": correction_response.get("action"),
+                                "request_ref": correction_model.get("request_ref"),
+                                "result_ref": correction_model.get("result_ref"),
+                                "request_sha256": correction_model.get("request_sha256"),
+                                "result_sha256": correction_model.get("result_sha256"),
+                                "usage": correction_model.get("usage"),
+                                "content": correction_response.get("model_content"),
+                                "observed_at": utcnow().isoformat(),
+                                "resident_result_ref": resident_result["issuer"]["decision_ref"]})
+            correction_conversation = conversation + [
+                {"role": "user", "content": json.dumps({"resident_result": resident_result,
+                                                          "instruction": "Choose one scoped correction or block."},
+                                                         separators=(",", ":"))},
+                {"role": "assistant", "content": correction_response.get("model_content", "")},
+            ]
+            if correction_response.get("action") == "propose_engineering":
+                correction_proposal = correction_response.get("engineering_proposal")
+                if not isinstance(correction_proposal, dict):
+                    raise ValueError("Grace corrective action omitted its Engineering proposal")
+                descriptor = next((entry for entry in context["available_engineering_operations"]
+                                   if entry.get("operation_id") == correction_proposal.get("operation_id")
+                                   and entry.get("contract_version") == correction_proposal.get("contract_version")), None)
+                if descriptor is None or descriptor.get("effect_class") != "isolated_write":
+                    raise PermissionError("Grace corrective proposal is not a currently offered isolated_write operation")
+                operation = self.settings.capability_registry.resolve(
+                    descriptor["operation_id"], descriptor["contract_version"])
+                validate_json(correction_proposal["target"], descriptor["target_scope_schema"], path="$.target")
+                validate_json(correction_proposal["inputs"], descriptor["input_schema"], path="$.input")
+                if correction_proposal["target"].get("workspace_id") != assignment["workspace_id"]:
+                    raise PermissionError("Grace corrective target is outside the institution-assigned workspace")
+                correction_path = correction_proposal["inputs"].get("path")
+                if not isinstance(correction_path, str) or not any(
+                        correction_path == allowed or (allowed.endswith("**")
+                                                       and correction_path.startswith(allowed[:-2]))
+                        for allowed in assignment["allowed_paths"]):
+                    raise PermissionError("Grace corrective output is outside the institution-assigned allowlist")
+                proposal_revision = max(int(state.get("proposal_revision", 1)),
+                                        int((state.get("proposal") or {}).get("proposal_revision", 1))) + 1
+                state.update({"proposal": correction_proposal, "proposal_revision": proposal_revision,
+                              "proposal_rationale": correction_response.get("rationale"),
+                              "proposal_model": correction_model,
+                              "verification_correction_count": int(state.get("verification_correction_count", 0)) + 1,
+                              "resident_result": resident_result, "model_turns": model_turns,
+                              "conversation": correction_conversation})
+                for prior_key in ("grace_assessment", "execution_evidence", "verification_preview",
+                                  "verification_outcome", "invocation", "invocation_id"):
+                    state.pop(prior_key, None)
+                await checkpoint("engineering.corrective_proposal.selected",
+                                 resident_result=resident_result,
+                                 corrective_proposal=correction_proposal,
+                                 proposal_revision=proposal_revision,
+                                 model_turns=model_turns, conversation=correction_conversation,
+                                 correction_model=correction_model)
+                await self.store.transition_engineering_work_order(
+                    order_id, "BLOCKED", work_order.activity_id, str(activity["attempt_id"]),
+                    work_order.correlation_id, "Independent verification did not PASS; Grace proposed a new revision",
+                    {"verification_result": verification.to_dict(),
+                     "resident_result": resident_result,
+                     "corrective_proposal_revision": proposal_revision})
+                await self.store.fail_activity(
+                    activity, "Grace selected a scoped corrective proposal after failed verification", 0)
+                return
+            decision = correction_response.get("engineering_assessment")
+            if not isinstance(decision, dict) or decision.get("status") != "blocked":
+                decision = {"status": "blocked",
+                            "assessment": "Grace did not return a bounded corrective proposal; completion remains blocked.",
+                            "evidence_refs": [resident_result["issuer"]["decision_ref"]]}
+            await checkpoint("engineering.verification_feedback.decided",
+                             resident_result=resident_result,
+                             verification_feedback_decision=decision,
+                             model_turns=model_turns, conversation=correction_conversation,
+                             correction_model=correction_model)
             await self.store.transition_engineering_work_order(
                 order_id, "BLOCKED", work_order.activity_id, str(activity["attempt_id"]),
                 work_order.correlation_id, "Independent verification did not PASS",
-                {"verification_result": verification.to_dict()})
+                {"verification_result": verification.to_dict(),
+                 "resident_result": resident_result,
+                 "verification_feedback_decision": decision})
             await self.store.block_activity(activity, "Independent Engineering verification did not pass",
                                             {"work_order_id": order_id,
                                              "verification": verification.to_dict(),
+                                             "resident_result": resident_result,
+                                             "verification_feedback_decision": decision,
                                              "grace_assessment": assessment,
                                              "model_turns": model_turns, "invocation": invocation})
             return
@@ -1596,7 +1881,8 @@ class CME:
                     return
                 model_route = context["model_route"]
                 reasoning_state = dict(context.get("reasoning_state") or {})
-                conversation = list(context.get("conversation") or [])
+                conversation = self._compact_resident_conversation(
+                    list(context.get("conversation") or []))
                 turns = list(reasoning_state.get("model_turns") or [])
                 invocations = list(reasoning_state.get("capability_invocations") or [])
                 evidence = list(context.get("evidence") or [])
@@ -1799,7 +2085,8 @@ class CME:
                                                         {item["source_id"] for item in
                                                          capability_result["evidence"]})
                         conversation.append({"role": "user", "content": json.dumps(
-                            {"capability_result": capability_result}, separators=(",", ":"))})
+                            self._resident_capability_summary(capability_result),
+                            separators=(",", ":"))})
                         await self.store.record_progress(
                             activity,
                             {"phase": "resident.capability.completed", "at": utcnow().isoformat(),

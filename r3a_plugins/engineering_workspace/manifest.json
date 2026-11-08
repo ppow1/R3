@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "plugin_id": "r3a.engineering-workspace",
+  "plugin_version": "1.0.0",
+  "artifact_ref": "provider.py",
+  "artifact_sha256": "0b92d126ed33c972ddee65d67b94c57794bcf64122ebe304c8a0e1ffeb064126",
+  "configuration_schema": {
+    "schema_id": "r3a.engineering-workspace.config.v1",
+    "type": "object",
+    "required": ["workspace_root"],
+    "additionalProperties": false,
+    "properties": {
+      "workspace_root": {"type": "string", "minLength": 1}
+    }
+  },
+  "provider": {
+    "provider_id": "r3a.isolated_workspace",
+    "provider_version": "1.0.0",
+    "entrypoint": "r3a_plugins.engineering_workspace.provider:create_provider",
+    "artifact_sha256": "0b92d126ed33c972ddee65d67b94c57794bcf64122ebe304c8a0e1ffeb064126"
+  },
+  "module_manifest": {
+    "contract_id": "r3a.module-manifest.v1",
+    "contract_version": "1.0.0",
+    "module_id": "r3a.isolated_workspace",
+    "module_version": "1.0.0",
+    "owner": "Engineering",
+    "binding": {
+      "contract_id": "r3a.capability-provider.v1",
+      "protocol_major": 1,
+      "protocol_min_minor": 0,
+      "protocol_max_minor": 0,
+      "entrypoint": "r3a_plugins.engineering_workspace.provider:create_provider"
+    },
+    "dependencies": [],
+    "configuration": {
+      "schema_ref": "r3a.engineering-workspace.config.v1",
+      "configuration_ref": "capability_operations[].configuration"
+    },
+    "capability_refs": ["engineering.workspace.apply_patch"],
+    "resource_refs": [],
+    "state_namespace": "r3a.engineering.workspace",
+    "migration_contract": "r3a.stateless-provider.v1",
+    "recovery_policy": "operation-contract.v1",
+    "artifact": {
+      "artifact_ref": "provider.py",
+      "artifact_sha256": "0b92d126ed33c972ddee65d67b94c57794bcf64122ebe304c8a0e1ffeb064126"
+    }
+  },
+  "operation": {
+    "contract_id": "r3a.capability-operation.v1",
+    "contract_version": "1.0.0",
+    "operation_id": "engineering.workspace.apply_patch",
+    "operation_revision": "1.0.0",
+    "provider": {
+      "provider_id": "r3a.isolated_workspace",
+      "provider_version": "1.0.0",
+      "entrypoint": "r3a_plugins.engineering_workspace.provider:create_provider",
+      "artifact_sha256": "0b92d126ed33c972ddee65d67b94c57794bcf64122ebe304c8a0e1ffeb064126"
+    },
+    "input_schema": {
+      "type": "object",
+      "required": ["path", "content"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "content": {"type": "string"}
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "required": ["path", "sha256", "bytes_written", "replayed"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {"type": "string"},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "bytes_written": {"type": "integer", "minimum": 0},
+        "replayed": {"type": "boolean"}
+      }
+    },
+    "effect_class": "isolated_write",
+    "caller_constraints": {
+      "allowed_principals": ["resident.grace"],
+      "allowed_residents": ["resident.grace"],
+      "allowed_services": []
+    },
+    "target_scope_schema": {
+      "type": "object",
+      "required": ["workspace_id"],
+      "additionalProperties": false,
+      "properties": {"workspace_id": {"type": "string", "minLength": 1}}
+    },
+    "required_grants": ["engineering.workspace.apply_patch"],
+    "evidence": {
+      "schema": {"type": "object"},
+      "verification_obligations": ["independent_digest_check"]
+    },
+    "recovery": {
+      "idempotency_required": true,
+      "idempotency_scope": "work_order",
+      "replay_safe": true,
+      "reconciliation_operation_id": null
+    },
+    "execution": {"timeout_seconds": 30, "retry_disposition": "safe_retry"},
+    "lifecycle": {"desired_state": "enabled"},
+    "resident_tool": {
+      "name": "engineering_workspace_apply_patch",
+      "description": "Apply one work-order-bounded file to an isolated Engineering workspace."
+    }
+  }
+}

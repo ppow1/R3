@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "plugin_id": "r3a.institutional-knowledge",
-  "plugin_version": "1.0.1",
+  "plugin_version": "1.1.0",
   "artifact_ref": "plugin.py",
   "artifact_sha256": "1af091cd41ace4cc9fa94d4a8d8d378163a08ea794611975b36849b6f2394054",
   "configuration_schema": {
@@ -31,7 +31,7 @@
   },
   "provider": {
     "provider_id": "r3a.institutional-knowledge",
-    "provider_version": "1.0.1",
+    "provider_version": "1.1.0",
     "entrypoint": "r3a_plugins.institutional_knowledge.plugin:create_provider",
     "artifact_sha256": "1af091cd41ace4cc9fa94d4a8d8d378163a08ea794611975b36849b6f2394054"
   },
@@ -39,10 +39,10 @@
     "contract_id": "r3a.capability-operation.v1",
     "contract_version": "1.0.0",
     "operation_id": "institution.knowledge.read",
-    "operation_revision": "1.0.1",
+    "operation_revision": "1.1.0",
     "provider": {
       "provider_id": "r3a.institutional-knowledge",
-      "provider_version": "1.0.1",
+      "provider_version": "1.1.0",
       "entrypoint": "r3a_plugins.institutional_knowledge.plugin:create_provider",
       "artifact_sha256": "1af091cd41ace4cc9fa94d4a8d8d378163a08ea794611975b36849b6f2394054"
     },
