@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:r3a:contracts:knowledge-review-api:v1",
+  "title": "R3A Knowledge Review API v1",
+  "description": "Website-facing inner payloads for generic authenticated CME capability discovery/invocation. The browser never supplies reviewer identity or decides authority.",
+  "contract_id": "r3a.knowledge-review-api.v1",
+  "contract_version": "1.0.0",
+  "provider_id": "r3a.institutional-knowledge",
+  "provider_version": "1.2.0",
+  "operations": {
+    "list": {
+      "operation_id": "institution.knowledge.proposals.list",
+      "operation_revision": "1.0.0",
+      "capability_contract_version": "1.1.0",
+      "effect_class": "steward_read",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "batch_id": {"type": "string", "minLength": 1, "maxLength": 160},
+          "include_decided": {"type": "boolean", "default": true},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+          "cursor": {"type": "string", "minLength": 1}
+        }
+      },
+      "output_schema_id": "r3a.knowledge-review-proposals.v1",
+      "output": {"$ref": "#/$defs/proposalList"}
+    },
+    "decide": {
+      "operation_id": "institution.knowledge.proposals.decide",
+      "operation_revision": "1.0.0",
+      "capability_contract_version": "1.1.0",
+      "effect_class": "steward_write",
+      "input": {
+        "type": "object",
+        "required": ["decisions"],
+        "additionalProperties": false,
+        "properties": {
+          "decisions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {"$ref": "#/$defs/decision"}
+          }
+        }
+      },
+      "output_schema_id": "r3a.knowledge-review-decisions.v1",
+      "output": {"$ref": "#/$defs/decisionResult"}
+    }
+  },
+  "retrieval": {
+    "operation_id": "institution.knowledge.read",
+    "operation_revision": "1.1.0",
+    "capability_contract_version": "1.0.0",
+    "citation_required_fields": ["source_id", "uri", "sha256", "source_sha256", "source_references", "approval"]
+  },
+  "website_binding": {
+    "routes": "Use the AP3 authenticated session and existing generic /api/v1/steward/capabilities and /api/v1/steward/operations/invoke routes.",
+    "identity": "Derive the Steward principal server-side from the authenticated session; ignore caller-supplied principal fields.",
+    "authorization": "CME grant/effect/audit is authoritative. Listing and decisions are invoked through the generic CME capability path.",
+    "batch_review": "Expand batch selection into explicit per-proposal decisions. Conflicted or flagged entries require individual_review=true and rationale.",
+    "decision_values": ["approve", "reject", "defer"],
+    "promotion": "Only an authorized approve decision publishes; rejection and deferral remain outside retrieval.",
+    "managed_acceptance": "This document defines payload compatibility; it does not claim live AP3 or managed-service acceptance."
+  },
+  "$defs": {
+    "decision": {
+      "type": "object",
+      "required": ["proposal_id", "proposal_revision", "source_digest", "decision"],
+      "additionalProperties": false,
+      "properties": {
+        "proposal_id": {"type": "string", "minLength": 1},
+        "proposal_revision": {"type": "integer", "minimum": 1},
+        "source_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "decision": {"enum": ["approve", "reject", "defer"]},
+        "individual_review": {"type": "boolean"},
+        "rationale": {"type": "string", "maxLength": 4000},
+        "supersedes_knowledge_item_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "citation": {
+      "type": "object",
+      "required": ["source_id", "uri", "sha256", "source_sha256", "source_references", "approval"],
+      "properties": {
+        "source_id": {"type": "string"},
+        "uri": {"type": "string"},
+        "content": {"type": "string"},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "excerpt_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "source_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "document_revision": {"type": "string"},
+        "source_references": {"type": "array", "items": {"$ref": "#/$defs/sourceReference"}},
+        "approval": {"$ref": "#/$defs/approval"}
+      }
+    },
+    "sourceReference": {
+      "type": "object",
+      "required": ["repository", "path", "location"],
+      "properties": {
+        "repository": {"type": "string"}, "path": {"type": "string"},
+        "location": {"type": "string"}, "revision": {"type": ["string", "null"]},
+        "commit": {"type": ["string", "null"]}, "git_blob": {"type": ["string", "null"]},
+        "sha256": {"type": ["string", "null"]}, "url": {"type": ["string", "null"]}
+      }
+    },
+    "approval": {
+      "type": "object",
+      "required": ["decision_id", "decision", "reviewer_principal", "approved_at"],
+      "properties": {
+        "decision_id": {"type": "integer"}, "decision": {"const": "approve"},
+        "reviewer_principal": {"type": "string"}, "approved_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "batch": {
+      "type": "object",
+      "required": ["batch_id", "title", "description", "entry_count", "pending_count", "approved_count", "rejected_count", "deferred_count", "source_digest", "source_documents"],
+      "properties": {
+        "batch_id": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"},
+        "project": {"type": "string"}, "category": {"type": "string"}, "summary": {"type": "string"},
+        "conflicts_and_supersession": {"type": "string"}, "recommended_disposition": {"type": "string"},
+        "entry_count": {"type": "integer", "minimum": 0}, "pending_count": {"type": "integer", "minimum": 0},
+        "approved_count": {"type": "integer", "minimum": 0}, "rejected_count": {"type": "integer", "minimum": 0},
+        "deferred_count": {"type": "integer", "minimum": 0}, "source_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "source_documents": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "proposal": {
+      "type": "object",
+      "required": ["entry_id", "version", "title", "summary", "category", "proposed_canonical_knowledge", "sources", "proposal_revision", "source_digest", "batch_id", "state", "decisions"],
+      "properties": {
+        "entry_id": {"type": "string"}, "version": {"type": "integer"}, "title": {"type": "string"},
+        "summary": {"type": "string"}, "category": {"type": "string"}, "proposed_canonical_knowledge": {"type": "string"},
+        "sources": {"type": "array", "items": {"$ref": "#/$defs/sourceReference"}},
+        "conflicts": {"type": "array"}, "flags": {"type": "array"},
+        "proposal_revision": {"type": "integer"}, "source_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "batch_id": {"type": "string"}, "state": {"enum": ["pending", "approved", "rejected", "deferred"]},
+        "decisions": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "proposalList": {
+      "type": "object", "required": ["schema_id", "schema_version", "next_cursor", "batches", "proposals"],
+      "properties": {
+        "schema_id": {"const": "r3a.knowledge-review-proposals.v1"}, "schema_version": {"const": 1},
+        "next_cursor": {"type": ["string", "null"]}, "batches": {"type": "array", "items": {"$ref": "#/$defs/batch"}},
+        "proposals": {"type": "array", "items": {"$ref": "#/$defs/proposal"}}
+      }
+    },
+    "decisionResult": {
+      "type": "object", "required": ["schema_id", "schema_version", "decisions"],
+      "properties": {
+        "schema_id": {"const": "r3a.knowledge-review-decisions.v1"}, "schema_version": {"const": 1},
+        "decisions": {"type": "array", "items": {"type": "object", "required": ["proposal_id", "decision_id", "decision", "reviewer_principal", "decided_at", "source_digest", "authorization", "replayed"], "properties": {
+          "proposal_id": {"type": "string"}, "decision_id": {"type": "integer"}, "decision": {"enum": ["approve", "reject", "defer"]},
+          "reviewer_principal": {"type": "string"}, "decided_at": {"type": "string", "format": "date-time"},
+          "knowledge_item_id": {"type": ["string", "null"]}, "source_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "authorization": {"type": "object"}, "replayed": {"type": "boolean"}
+        }}}
+      }
+    }
+  }
+}
