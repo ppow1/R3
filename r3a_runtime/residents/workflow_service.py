@@ -158,6 +158,26 @@ class CharacterWorkflowService:
                                    actor_ref=actor.principal_id,
                                    owner_domain="engineering", reason=reason)
 
+    def retire(self, actor: GovernedActor, resident_id: str, revision: str, *,
+               reason: str, source_refs: tuple[str, ...] = ()) -> None:
+        """Deactivate an active character revision while retaining history and pins.
+
+        Retirement is an execution-lifecycle action, separate from editing canon or
+        changing HR identity. A previously pinned boundary remains resolvable; new
+        boundaries have no current character revision until a later activation.
+        """
+        self._identity(actor, resident_id)
+        current = self.repository.get(resident_id)
+        if current["revision"] != revision or current["governance"]["approval_status"] != "active":
+            raise PermissionError("only the current active character revision can be retired")
+        authorize_workflow_action(actor, self.policy, "character.retire")
+        self._authorize(actor, "character.retire", resident_id)
+        self.repository.transition(resident_id, revision, event_type="retired",
+                                   actor_ref=actor.principal_id,
+                                   owner_domain="engineering", reason=reason,
+                                   source_refs=source_refs,
+                                   evidence={"retirement_policy_ref": self.policy.policy_ref})
+
     def _identity(self, actor: GovernedActor, resident_id: str) -> dict[str, Any]:
         if not isinstance(actor, GovernedActor) or not actor.principal_id or not actor.authentication_ref:
             raise PermissionError("server-attested institutional actor required")

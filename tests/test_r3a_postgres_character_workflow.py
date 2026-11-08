@@ -9,7 +9,7 @@
 # Purpose: Validate durable character governance, immutable context pins, and rollback.
 # Execution Model: unittest against an explicitly isolated PostgreSQL database.
 # Observability: Named test cases and PostgreSQL state assertions.
-# Dependencies: psycopg; r3a_runtime.residents; migrations 001–013.
+# Dependencies: psycopg; r3a_runtime.residents; migrations 001–014.
 # Authority: Steward-approved Character Architecture; test data is not institutional data.
 # Changed: 2026-11-08 UTC | CA-03 | Codex GPT-6 | Assert pinned classification scopes cannot change.
 # Supersedes: None
@@ -209,6 +209,23 @@ class PostgresCharacterWorkflowTests(unittest.TestCase):
                     "WHERE resident_id=%s AND dossier_revision=%s",
                     ("0" * 64, self.resident_id, first),
                 )
+
+        with self.assertRaises(PermissionError):
+            self.service.retire(author, self.resident_id, second,
+                                reason="Character architect cannot directly alter runtime activation")
+        self.service.retire(activator, self.resident_id, second,
+                            reason="Retire the current test character revision",
+                            source_refs=("test://workflow-integration/retirement",))
+        with self.assertRaises(KeyError):
+            self.service.read(self.actor("reader"), self.resident_id)
+        retired = self.service.read(self.actor("reader"), self.resident_id, revision=second)
+        self.assertEqual(retired["governance"]["approval_status"], "retired")
+        self.assertEqual(self.repository.get_context_pin(
+            resident_id=self.resident_id, execution_kind="conversation_boundary",
+            execution_ref="conversation:test:turn:1")["pin_id"], pin["pin_id"])
+        self.service.rollback(activator, self.resident_id, second,
+                              reason="Restore retired revision through authorized rollback")
+        self.assertEqual(self.service.read(self.actor("reader"), self.resident_id)["revision"], second)
 
         with self.assertRaises(PermissionError):
             protected = copy.deepcopy(second_dossier)

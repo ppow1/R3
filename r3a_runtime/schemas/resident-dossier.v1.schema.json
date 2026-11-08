@@ -20,7 +20,7 @@
     "memory": {"type": "object", "required": ["categories", "source_reference_required", "corrections", "supersession", "retention_policy_ref", "entries"], "additionalProperties": true},
     "relationships": {"type": "array"},
     "implementation": {"type": "object", "required": ["provider_mode", "provider_id", "model_adaptations", "identity_binding_authority"], "additionalProperties": true},
-    "governance": {"type": "object", "required": ["approval_status", "revision_history", "rollback_supported", "owners"], "properties": {"approval_status": {"enum": ["proposed", "in_review", "approved", "published", "active", "superseded", "rejected"]}}, "additionalProperties": true},
+    "governance": {"type": "object", "required": ["approval_status", "revision_history", "rollback_supported", "owners"], "properties": {"approval_status": {"enum": ["proposed", "in_review", "approved", "published", "active", "superseded", "rejected", "retired"]}}, "additionalProperties": true},
     "sources": {"type": "array"},
     "open_questions": {"type": "array"}
   },

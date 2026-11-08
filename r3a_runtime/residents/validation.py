@@ -33,7 +33,7 @@ DIMENSIONS = {
     "spontaneity", "empathy", "expressiveness", "professional_directness",
 }
 EPISTEMIC_CLASSES = {"VERIFIED", "CANON", "REASONED", "GENERAL", "CREATIVE", "UNKNOWN"}
-APPROVAL_STATES = {"proposed", "in_review", "approved", "published", "active", "superseded", "rejected"}
+APPROVAL_STATES = {"proposed", "in_review", "approved", "published", "active", "superseded", "rejected", "retired"}
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9_.:-]{1,127}$")
 
 

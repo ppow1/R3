@@ -40,15 +40,16 @@ _TRANSITIONS = {
     "submitted_for_review": {"approved", "rejected"},
     "approved": {"published", "rejected"},
     "published": {"activated", "superseded"},
-    "active": {"superseded", "rollback"},
+    "active": {"superseded", "rollback", "retired"},
     "rejected": set(),
     "superseded": {"rollback"},
+    "retired": {"rollback"},
 }
 _EVENT_STATES = {
     "created": "proposed", "proposed": "proposed",
     "submitted_for_review": "submitted_for_review", "approved": "approved",
     "rejected": "rejected", "published": "published", "activated": "active",
-    "superseded": "superseded", "rollback": "active",
+    "superseded": "superseded", "rollback": "active", "retired": "retired",
 }
 
 
@@ -426,18 +427,30 @@ class PostgresDossierRepository:
                                        revision, actor_ref, owner_domain,
                                        "Superseded by activated revision " + revision,
                                        source_refs, {"replacement_revision": revision})
+            elif event_type == "retired":
+                current = connection.execute(
+                    "SELECT dossier_revision FROM r3a.resident_dossier_current "
+                    "WHERE resident_id=%s FOR UPDATE", (resident_id,),
+                ).fetchone()
+                if current is None or current[0] != revision:
+                    raise DossierError("only the currently active character revision can be retired")
+                prior_revision = current[0]
+                connection.execute(
+                    "DELETE FROM r3a.resident_dossier_current "
+                    "WHERE resident_id=%s AND dossier_revision=%s", (resident_id, revision),
+                )
             elif event_type == "rollback":
                 current = connection.execute(
                     "SELECT dossier_revision FROM r3a.resident_dossier_current "
                     "WHERE resident_id=%s FOR UPDATE", (resident_id,),
                 ).fetchone()
-                if current is None:
-                    raise DossierError("cannot roll back without an active dossier revision")
-                prior_revision = current[0]
+                prior_revision = current[0] if current else None
                 connection.execute(
-                    "UPDATE r3a.resident_dossier_current SET dossier_revision=%s,changed_by=%s,"
-                    "changed_at=clock_timestamp() WHERE resident_id=%s",
-                    (revision, actor_ref, resident_id),
+                    "INSERT INTO r3a.resident_dossier_current (resident_id,dossier_revision,changed_by) "
+                    "VALUES (%s,%s,%s) ON CONFLICT (resident_id) DO UPDATE "
+                    "SET dossier_revision=EXCLUDED.dossier_revision,changed_by=EXCLUDED.changed_by,"
+                    "changed_at=clock_timestamp()",
+                    (resident_id, revision, actor_ref),
                 )
                 if prior_revision and prior_revision != revision:
                     self._append_event(connection, resident_id, "superseded", prior_revision,

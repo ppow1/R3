@@ -91,4 +91,8 @@ def authorize_workflow_action(actor: GovernedActor, policy: GovernancePolicy, ac
         if principal not in policy.runtime_activators:
             raise PermissionError("runtime rollback authority denied")
         return
+    if action == "character.retire":
+        if principal not in policy.runtime_activators:
+            raise PermissionError("character runtime retirement authority denied")
+        return
     raise PermissionError("workflow action is not granted by institutional governance")

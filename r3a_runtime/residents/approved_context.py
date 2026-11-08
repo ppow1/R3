@@ -140,7 +140,10 @@ class ApprovedCharacterContextProvider:
             # establishes that eligibility after a later safe-boundary switch.
             dossier.setdefault("governance", {})["approval_status"] = "active"
         else:
-            dossier = self.repository.get(resident_id)
+            try:
+                dossier = self.repository.get(resident_id)
+            except KeyError:
+                raise PermissionError("no currently active character dossier exists") from None
             if dossier.get("governance", {}).get("approval_status") != "active":
                 raise PermissionError("no approved active character dossier exists")
             revision = dossier["revision"]
