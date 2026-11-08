@@ -8,8 +8,9 @@
 -- Execution Model: Transactional PostgreSQL migration; R3A database only.
 -- Observability: Revision and approval/rollback events persist with source/evidence references.
 -- Dependencies: AP0 migration 001; PostgreSQL JSONB; future approved least-privilege role grants.
--- Authority: Steward Character Architecture directive; no production migration authorized.
+-- Authority: Steward Character Architecture directive authorizes migration work; apply only after verified HR integration, isolated backup, and R3A deployment procedure.
 -- Changed: 2026-11-08 UTC | CHARACTER-ARCHITECTURE | Codex GPT-6 | Add additive dossier persistence schema.
+-- Changed: 2026-11-08 UTC | CHARACTER-ARCHITECTURE | Codex GPT-6 | Clarify current deployment prerequisites under amended Steward authority.
 -- Supersedes: None
 -- Contracts: r3a.resident.dossier.v1; r3a.resident.dossier-event.v1
 -- Tests: SQL static review; live migration not run.

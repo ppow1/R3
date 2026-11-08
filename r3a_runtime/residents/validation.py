@@ -103,7 +103,7 @@ def validate_dossier(dossier: dict[str, Any]) -> None:
              and all(isinstance(value, str) and value for value in dossier["authority_boundaries"]),
              "$.authority_boundaries", "must be nonempty text entries")
     implementation = dossier.get("implementation", {})
-    _require(implementation.get("identity_binding_authority") == "external_authoritative_directory",
+    _require(implementation.get("identity_binding_authority") == "authoritative_hr_system",
              "$.implementation.identity_binding_authority", "provider configuration cannot define identity")
 
 

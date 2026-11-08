@@ -165,9 +165,8 @@ class DossierRepository:
     def set_approval(self, resident_id: str, revision: str, *, expected_revision: str,
                      actor: str, owner: str, approved: bool, reason: str) -> None:
         """Record one domain owner's decision without implying the other domain approved."""
-        expected_owner = {"hr": "helen", "character_architecture": "jessica"}.get(owner)
-        if expected_owner is None or actor.casefold() != expected_owner:
-            raise DossierError("approval actor does not match declared workflow owner")
+        if owner not in {"hr", "character_architecture"} or not isinstance(actor, str) or not actor.strip():
+            raise DossierError("approval requires a declared workflow owner and actor reference")
         prior = self.get(resident_id, expected_revision)
         current = self._index()["residents"][resident_id]["current_revision"]
         if current != expected_revision:

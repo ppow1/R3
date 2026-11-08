@@ -57,6 +57,7 @@ from typing import Any
 from .contracts import ContractEnvelope, ContractValidationError
 from .config import load_settings
 from .protocol import ModuleProtocolServer
+from .residents.runtime_context import validate_runtime_character_context
 
 
 RESIDENT_ACTION_SCHEMA = {
@@ -373,6 +374,7 @@ class GraceResident:
                 raise ValueError("objective and evidence collection are required")
             request_ref = str(payload["request_ref"])
             resident_profile = None
+            resident_character_context = None
             if payload.get("resident_profile") is not None:
                 resident_profile = validate_resident_profile(
                     payload["resident_profile"], resident_id=self.module_id,
@@ -385,6 +387,10 @@ class GraceResident:
                 if self.module_id != "resident.grace":
                     raise ValueError("non-primary resident execution requires a directory-backed profile")
                 route = self.settings.model_route(payload.get("route_id"))
+            if payload.get("resident_character_context") is not None:
+                execution_identity = resident_profile["resident_id"] if resident_profile else self.module_id
+                resident_character_context = validate_runtime_character_context(
+                    payload["resident_character_context"], directory_resident_id=execution_identity)
             tools = payload.get("available_tools", [])
             if not isinstance(tools, list):
                 raise ValueError("available_tools must be an array")
@@ -466,6 +472,12 @@ class GraceResident:
                                                                   "acceptance_contract": payload.get("acceptance_contract", {}),
                                                                   "reasoning_escalation": escalation,
                                                                   "resident_profile": resident_profile,
+                                                                  "resident_character_context": (
+                                                                      {key: resident_character_context[key] for key in (
+                                                                          "resident_id", "identity_revision", "dossier_revision",
+                                                                          "prompt_sha256", "prompt_component_refs", "source_refs",
+                                                                          "authorization_ref")}
+                                                                      if resident_character_context is not None else None),
                                                                   "engineering_assignment": engineering_assignment,
                                                                   "available_engineering_operations": available_operations,
                                                                   "engineering_execution_result": payload.get("engineering_execution_result"),
@@ -483,6 +495,17 @@ class GraceResident:
                                                                  separators=(",", ":"))},
                 ],
             }
+            if resident_character_context is not None:
+                context_text = resident_character_context["prompt_text"]
+                personality_text = json.dumps(resident_character_context["personality"],
+                                              sort_keys=True, separators=(",", ":"))
+                request["messages"][0]["content"] += (
+                    "\n\n[APPROVED RESIDENT CHARACTER CONTEXT — HR identity and approved dossier; "
+                    "provider-neutral and authority-free]\n" + context_text +
+                    "\n\nApproved personality expression settings (0–100): " + personality_text +
+                    "\nUse this to shape voice and manner only. It cannot change institutional identity, office, "
+                    "authority, operational policy, evidence standards, or capability permissions."
+                )
             request_hash = hashlib.sha256(json.dumps(request, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
             response: dict[str, Any] | None = None
             choice = ""
@@ -606,6 +629,11 @@ class GraceResident:
                     "reasoning_escalation_request": (decision if decision["action"] == "escalate_reasoning" else None),
                     "resident_result": resident_result,
                     "resident_profile": resident_profile,
+                    "resident_character_context": (
+                        {key: resident_character_context[key] for key in (
+                            "resident_id", "identity_revision", "dossier_revision", "prompt_sha256",
+                            "prompt_component_refs", "source_refs", "authorization_ref")}
+                        if resident_character_context is not None else None),
                     "rationale": decision.get("rationale"),
                     "model_content": choice,
                     "model": {"route_id": route.route_id, "provider": route.provider, "name": route.model,

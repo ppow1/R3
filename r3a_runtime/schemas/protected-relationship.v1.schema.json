@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.resident.protected-relationship.v1",
+  "title": "Governed protected relationship record",
+  "type": "object",
+  "required": ["relationship_id", "parties", "classification", "authorized_readers", "authorized_editors", "provenance_refs", "revision", "disclosure_rules", "facts"],
+  "properties": {
+    "relationship_id": {"type": "string", "minLength": 1},
+    "parties": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "classification": {"const": "protected"},
+    "authorized_readers": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+    "authorized_editors": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+    "provenance_refs": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "revision": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "disclosure_rules": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}},
+    "facts": {"type": "array", "items": {"type": "object", "required": ["fact_id", "source_refs", "recorded_at", "disclosure_scope"], "properties": {"fact_id": {"type": "string"}, "source_refs": {"type": "array", "minItems": 1, "items": {"type": "string"}}, "recorded_at": {"type": "string", "format": "date-time"}, "disclosure_scope": {"type": "string"}, "content_ref": {"type": "string"}, "supersedes_fact_id": {"type": "string"}}, "additionalProperties": false}}
+  },
+  "additionalProperties": false
+}

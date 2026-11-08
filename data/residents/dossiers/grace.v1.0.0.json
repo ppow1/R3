@@ -16,6 +16,11 @@
         "source_id": "r3a.execution-profile",
         "value": "resident.grace",
         "link_status": "unconfirmed"
+      },
+      {
+        "source_id": "r3.legacy.hr-principal-map",
+        "value": "resident:Grace",
+        "link_status": "confirmed"
       }
     ]
   },
@@ -115,6 +120,14 @@
           "digest": null,
           "classification": "institutional",
           "confidence": "high-for-contract; live snapshot unavailable"
+        },
+        {
+          "source_id": "r3.legacy.hr-principal-map",
+          "locator": "runtime/r3_steward_authority_api.py#HR_PRINCIPAL_MAP; historical HR credential-delivery commit 8a43f7f49c2d768d5909286e62c44c6cd90e2b8e",
+          "observed_at": "2026-11-08",
+          "digest": null,
+          "classification": "institutional",
+          "confidence": "high for historical one-to-one code mapping; live credential validity and R3A mapping unverified"
         }
       ]
     },
@@ -245,7 +258,7 @@
     "provider_mode": "local_runtime_observed_route_unverified_here",
     "provider_id": null,
     "model_adaptations": [],
-    "identity_binding_authority": "external_authoritative_directory",
+    "identity_binding_authority": "authoritative_hr_system",
     "continuity_state_ref": null
   },
   "governance": {
@@ -290,6 +303,14 @@
       "digest": null,
       "classification": "institutional",
       "confidence": "high-for-contract; live snapshot unavailable"
+    },
+    {
+      "source_id": "r3.legacy.hr-principal-map",
+      "locator": "runtime/r3_steward_authority_api.py#HR_PRINCIPAL_MAP; historical HR credential-delivery commit 8a43f7f49c2d768d5909286e62c44c6cd90e2b8e",
+      "observed_at": "2026-11-08",
+      "digest": null,
+      "classification": "institutional",
+      "confidence": "high for historical one-to-one code mapping; live credential validity and R3A mapping unverified"
     }
   ],
   "open_questions": [

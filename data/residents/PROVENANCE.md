@@ -18,11 +18,11 @@ History/Predecessor: New file.
 -->
 # Resident dossier data provenance manifest
 
-This sidecar applies to all JSON files in `data/residents/`. Every dossier listed below is a provisional recovery artifact. It does not assert current canonical occupant identity, approved character traits, qualifications, personnel-sensitive data, or runtime authority. Character backstories, private sources, and the two protected local HR records were not copied.
+This sidecar applies to all JSON files in `data/residents/`. Every dossier listed below is a provisional recovery artifact. It does not assert current HR snapshot currency, approved character traits, qualifications, personnel-sensitive data, or runtime authority. Evelyn and GM have separate minimum identity shells; their confidential fields and protected relationship facts are not copied.
 
 | Artifact | Source / revision | Source facts included | Confidence/status |
 |---|---|---|---|
-| `index.json` | Current worktree seed; `resident-source-inventory.md` | Eleven non-protected charter/legacy HR record IDs; marks overall coverage `partial_unreconciled`. | Provisional index; not authoritative roster. |
+| `index.json` | Current worktree seed; `resident-source-inventory.md` | Thirteen observed legacy HR record IDs, including separate Evelyn and GM dossiers; marks overall coverage `partial_unreconciled`. | Provisional index; not authoritative roster. |
 | `global-config.v1.json` | Steward directive and schema design in this branch | Neutral 50 defaults for nine dimensions; precedence, legacy epistemic labels, prompt privacy filters. | Implementation defaults, not resident-specific personality approvals. |
 | `dossiers/grace.v1.0.0.json` | Approved charter sections 2–6; local legacy HR row `r3:grace`; R3A execution-profile source | Office and institutional responsibilities; `resident.grace` appears only as an unconfirmed cross-system source ID. | Provisional identity and office binding; Character Bible not recovered. |
 | `dossiers/chloe.v1.0.0.json` | Approved charter sections 2–4; local legacy HR row `r3:chloe` | Chief Architect role; hybrid capability is described as planned direction, not as deployed behavior. | Identity/assignment unconfirmed. |
@@ -35,5 +35,7 @@ This sidecar applies to all JSON files in `data/residents/`. Every dossier liste
 | `dossiers/marie.v1.0.0.json` | Approved charter sections 2 and 5; local legacy HR row `r3:marie` | Research/context mission; legacy office includes Independent Review. | Current appointment/scope unconfirmed. |
 | `dossiers/judy.v1.0.0.json` | Approved charter section 2; local legacy HR row `r3:judy` | General Counsel office only. | Detailed responsibilities and qualifications left empty. |
 | `dossiers/alyssa.v1.0.0.json` | Approved charter section 2; local legacy HR row `r3:alyssa` | Administration / Chief of Staff history. | Current title/appointment unconfirmed. |
+| `dossiers/evelyn.v1.0.0.json` | Local legacy HR row key/name metadata; Steward directive | Separate provisional institutional identity; private office/lifecycle fields withheld; no backstory or relationship events. | HR-to-runtime crosswalk and Character Bible not recovered. |
+| `dossiers/gm.v1.0.0.json` | Local legacy HR row key/name metadata; Steward directive | Separate provisional institutional identity; private identity/office fields withheld; no backstory or relationship events. | HR-to-runtime crosswalk and historical character material not recovered. |
 
-Source references deliberately identify the local legacy SQLite store without embedding personnel field values beyond publicly documented names/offices/status. No content from protected/private records or unmounted historical sources is stored in Git.
+Source references identify the local legacy SQLite store without embedding confidential field values. No protected relationship facts or private historical source content is stored in Git.

@@ -25,6 +25,13 @@ from .state_contracts import (validate_emotional_state, validate_memory_entry,
                               validate_relationship, append_memory_correction,
                               evolve_relationship, transition_emotional_state)
 from .legacy_import import extract_legacy_hr_candidates
+from .reconciliation import reconcile_records, ReconciliationItem
+from .institutional_records import (InstitutionalIdentity, ProtectedRelationship,
+                                    validate_steward_record)
+from .workflow import (CharacterRevision, CharacterGovernance, transition_revision)
+from .runtime_context import (RuntimePrincipal, load_runtime_context,
+                              validate_runtime_character_context)
+from .governance import (GovernedActor, GovernancePolicy, authorize_workflow_action)
 
 __all__ = [
     "DossierRepository", "DossierError", "RevisionConflict",
@@ -33,4 +40,10 @@ __all__ = [
     "validate_memory_entry", "validate_relationship", "validate_emotional_state",
     "append_memory_correction", "evolve_relationship", "transition_emotional_state",
     "extract_legacy_hr_candidates",
+    "reconcile_records", "ReconciliationItem", "InstitutionalIdentity",
+    "ProtectedRelationship", "validate_steward_record", "CharacterRevision",
+    "CharacterGovernance", "transition_revision", "RuntimePrincipal",
+    "load_runtime_context",
+    "validate_runtime_character_context",
+    "GovernedActor", "GovernancePolicy", "authorize_workflow_action",
 ]

@@ -12,8 +12,8 @@ Dependencies: Approved R3 Charter Revision 2; Steward resident architecture dire
 Authority: Schema membership does not establish data authority or runtime permissions.
 Changed: 2026-11-08 UTC | CHARACTER-ARCHITECTURE | Codex GPT-6 | Record schema provenance.
 Supersedes: None
-Contracts: JSON Schema Draft 2020-12; dossier and epistemic-span v1 contracts.
-Tests: Schema self-validation and dossier instance validation in 2026-11-08 test run.
+Contracts: JSON Schema Draft 2020-12; dossier, epistemic, institutional identity, protected relationship, and runtime character context v1 contracts.
+Tests: JSON parsing and dossier instance validation in 2026-11-08 test run; external JSON Schema validator is not installed.
 History/Predecessor: New file.
 -->
 # Resident schema provenance
@@ -22,5 +22,8 @@ History/Predecessor: New file.
 |---|---|---|
 | `resident-dossier.v1.schema.json` | Versioned provider-neutral dossier interchange schema derived from the Steward directive and approved role/authority boundaries in R3 Charter Revision 2. | Proposed R3A resident dossier contract v1; does not replace institutional directory or HR identity authority. |
 | `epistemic-span.v1.schema.json` | Passage-level legacy epistemic classes and provenance spans. Class names are supplied by the Steward directive; span/audit provenance requirements follow Charter Revision 2. | Proposed R3A epistemic span contract v1; a class label is not evidence. |
+| `institutional-identity.v1.schema.json` | Resident and special Steward identity classification fields. `STEWARD` is separate from ordinary resident lifecycle and requires Steward-governed identity writes. | Contract only; no canonical Steward ID or HR record was provisioned in this environment. |
+| `protected-relationship.v1.schema.json` | Separate relationship record with parties, classification, reader/editor ACL, disclosure scopes, provenance, revision and sourced facts. | Contract only; no Evelyn–GM relationship facts were recovered or stored in this Git repository. |
+| `runtime-character-context.v1.schema.json` | Approved, identity-bound, digest-checked provider-neutral character context passed to a resident inference module. | Optional inference input; an upstream governed HR service must authenticate and filter before issuing it. |
 
-Neither schema contains a resident roster, personal record, prompt, credential, or provider secret. The source inventory records gaps in historical classification material.
+Schemas contain no resident roster, personal history, credential, or provider secret. Dossier profiles live separately in `data/residents`; the source inventory records gaps in historical material.

@@ -1,12 +1,12 @@
 {
   "schema_id": "r3a.resident.dossier-index",
   "schema_version": 1,
-  "revision": "1.0.0",
+  "revision": "1.0.1",
   "authority_status": "partial_unreconciled",
-  "authority_source": "riverview_authority.directory",
+  "authority_source": "Riverview HR for institutional identity; R3A directory for office/runtime projection",
   "roster_snapshot": {
     "availability": "unavailable_in_this_worktree",
-    "note": "Dossiers below are discoverable recovered legacy HR records named by the approved charter; this index does not claim canonical roster completeness."
+    "note": "Thirteen observed legacy HR dossier identities are represented, including separate Evelyn and GM records without confidential office or relationship facts. HR snapshot currency and R3A office/runtime crosswalk remain unverified; this index does not claim current institutional roster completeness."
   },
   "residents": {
     "r3:grace": {
@@ -93,6 +93,22 @@
       "current_revision": "1.0.0",
       "revisions": {
         "1.0.0": "dossiers/alyssa.v1.0.0.json"
+      },
+      "identity_status": "provisional_legacy_record_id",
+      "approval_status": "in_review"
+    },
+    "r3:evelyn": {
+      "current_revision": "1.0.0",
+      "revisions": {
+        "1.0.0": "dossiers/evelyn.v1.0.0.json"
+      },
+      "identity_status": "provisional_legacy_record_id",
+      "approval_status": "in_review"
+    },
+    "r3:gm": {
+      "current_revision": "1.0.0",
+      "revisions": {
+        "1.0.0": "dossiers/gm.v1.0.0.json"
       },
       "identity_status": "provisional_legacy_record_id",
       "approval_status": "in_review"
