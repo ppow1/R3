@@ -3,6 +3,8 @@
   "observed_at": "2026-11-08T14:51:29Z",
   "execution_environment": {
     "managed_coordinator_modified": false,
+    "isolated_cme_shutdown_after_test": true,
+    "provider_state_after_shutdown": "STOPPED",
     "cme_instance": "r3a_eng_ready",
     "postgres_database": "r3a_eng_ready",
     "postgres_port": 55973,

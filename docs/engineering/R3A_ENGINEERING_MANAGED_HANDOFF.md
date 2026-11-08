@@ -82,6 +82,7 @@ On 2026-11-08, an isolated CME was started against private PostgreSQL database `
 - The authorization, invocation, work order, activity result, and verifier result are durably stored in the isolated PostgreSQL database. A concise evidence export is committed alongside this handoff.
 
 This run uses live Grace model inference, not synthetic/scripted resident reasoning. It does not establish managed Coordinator activation or live Grace selection in the managed runtime.
+The isolated CME was shut down cleanly after lifecycle verification; the provider is currently `STOPPED` in that private test instance. Its PostgreSQL activity and invocation records remain available for inspection. The managed runtime has not been activated.
 
 ## Managed dependencies remaining
 
