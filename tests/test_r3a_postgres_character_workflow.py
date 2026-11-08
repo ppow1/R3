@@ -28,6 +28,7 @@ from pathlib import Path
 import psycopg
 
 from r3a_runtime.residents.governance import GovernedActor, GovernancePolicy
+from r3a_runtime.residents.approved_context import ApprovedCharacterContextProvider
 from r3a_runtime.residents.postgres_repository import PostgresDossierRepository
 from r3a_runtime.residents.repository import RevisionConflict
 from r3a_runtime.residents.workflow_service import CharacterWorkflowService
@@ -210,6 +211,35 @@ class PostgresCharacterWorkflowTests(unittest.TestCase):
                     ("0" * 64, self.resident_id, first),
                 )
 
+        identity_projection = {
+            "institutional_id": self.resident_id, "status": "authoritative",
+            "classification": "RESIDENT", "revision": 1,
+            "directory_resident_id": "resident:test", "binding_revision": 1,
+            "authority_principal": "resident:test",
+            "principal_association_ref": "hr://association/test@1",
+            "source_ref": "hr://resident/test@1",
+            "directory_source_ref": "directory://snapshot/test/1",
+            "directory_snapshot_sha256": "b" * 64,
+            "directory_snapshot_fresh": True, "office_id": "office:test",
+            "office_role": "Test role", "execution_profile_id": "profile:test",
+            "execution_profile_revision": "1.0.0",
+            "execution_profile_resident_id": "resident:test",
+            "execution_route_id": "route:test",
+            "execution_profile_source_ref": "profile://test@1.0.0",
+        }
+        defaults = json_read(Path(__file__).parents[1] / "data/residents/global-config.v1.json")["personality_defaults"]
+        context_provider = ApprovedCharacterContextProvider(
+            self.repository,
+            resolve_hr_identity=lambda actor, resident_id: dict(identity_projection),
+            authorize_context=lambda actor, action, resident_id: {"public", "institutional"},
+            defaults=defaults,
+        )
+        reader = self.actor("reader")
+        prior_context = context_provider.retrieve(
+            reader, resident_id=self.resident_id, execution_kind="conversation_boundary",
+            execution_ref="conversation:test:turn:1", provider_id="model:test")
+        self.assertEqual(prior_context["dossier_revision"], first)
+
         with self.assertRaises(PermissionError):
             self.service.retire(author, self.resident_id, second,
                                 reason="Character architect cannot directly alter runtime activation")
@@ -223,6 +253,15 @@ class PostgresCharacterWorkflowTests(unittest.TestCase):
         self.assertEqual(self.repository.get_context_pin(
             resident_id=self.resident_id, execution_kind="conversation_boundary",
             execution_ref="conversation:test:turn:1")["pin_id"], pin["pin_id"])
+        continued = context_provider.retrieve(
+            reader, resident_id=self.resident_id, execution_kind="conversation_boundary",
+            execution_ref="conversation:test:turn:1", provider_id="model:test")
+        self.assertEqual(continued["pin_ref"], prior_context["pin_ref"])
+        self.assertEqual(continued["dossier_revision"], first)
+        with self.assertRaisesRegex(PermissionError, "no currently active character dossier"):
+            context_provider.retrieve(
+                reader, resident_id=self.resident_id, execution_kind="conversation_boundary",
+                execution_ref="conversation:test:turn:2", provider_id="model:test")
         self.service.rollback(activator, self.resident_id, second,
                               reason="Restore retired revision through authorized rollback")
         self.assertEqual(self.service.read(self.actor("reader"), self.resident_id)["revision"], second)
