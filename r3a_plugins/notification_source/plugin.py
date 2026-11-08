@@ -54,7 +54,9 @@ class InstitutionEventNotificationSource:
                 "SELECT e.event_id,e.event_type,e.schema_version,e.subject_type,e.subject_id,e.prior_state,e.next_state,"
                 "e.occurred_at,e.persisted_at,e.actor,e.correlation_id,e.reason,e.outcome,e.config_revision,"
                 "e.implementation_revision,e.evidence FROM r3a.institution_events e WHERE e.event_id=%s "
-                "AND NOT EXISTS (SELECT 1 FROM r3a.activities a WHERE a.activity_id::text=e.subject_id "
+                "AND NOT EXISTS (SELECT 1 FROM r3a.activities a WHERE a.activity_id=CASE "
+                "WHEN e.subject_type='activity' AND e.subject_id ~* '^[0-9a-f-]{36}$' "
+                "THEN e.subject_id::uuid ELSE NULL END "
                 "AND a.activity_type='foundation.observe')",
                 (event_uuid,),
             ).fetchone()
