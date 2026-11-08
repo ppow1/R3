@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_AP3_BITWARDEN_PROVIDER.md
 Component: R3A-AP3-BITWARDEN-PROVIDER
-File Revision: 1.0.7
+File Revision: 1.0.8
 Created: 2026-11-07T21:36:43Z
 Created By: Codex GPT-6
 Purpose: Specify the Bitwarden Secrets Manager provider and its shared AP3 identity boundary.
@@ -18,12 +18,15 @@ Changed: 2026-11-07T23:52:00Z | R3A-AP3-M2-INTEGRATION-REVIEW | Codex GPT-6 | Re
 Changed: 2026-11-08T14:15:00Z | R3A-AP3-M2-PROVIDER-ACTIVATION | Codex GPT-6 | Record provider 1.1.2 readiness, isolated module activation, and remaining runtime boundary.
 Changed: 2026-11-08T14:15:00Z | R3A-AP3-M2-PROVIDER-ACTIVATION | Codex GPT-6 | Refresh consumer alignment and activation checklist for provider release 1.1.2.
 Changed: 2026-11-08T15:20:00Z | R3A-AP3-M2-PROVIDER-PACKAGING | Codex GPT-6 | Document runtime b835ed4 typed-result integration, source packaging, activation, rollback, and isolated CME verification.
+Changed: 2026-11-08T18:12:00Z | R3A-AP3-M2-STEWARD-HANDOFF | Codex GPT-6 | Link the Steward setup/live acceptance checklist and define optional safe Website status integration.
 Supersedes: None.
 Contracts: r3a.secrets.provider.v1; r3a.machine-principal.v1; existing CME authorization/audit contracts.
 Tests: tests/test_r3a_bitwarden_secrets.py; tests/test_r3a_bitwarden_consumer_integration.py; live provider acceptance requires configured real Bitwarden access.
 History/Predecessor: Revision 1.0.0 at commit d07bade6dfa6e6ef498f454d82866aa592b899ba, blob 2caa7358ed0cce4d69e3e28b236935462d2c018a.
 -->
 # AP3 Bitwarden Secrets Provider
+
+The Steward/operator setup, credential handling, rotation/revocation, live acceptance, and optional Website status checklist is [R3A_BITWARDEN_STEWARD_SETUP.md](../runbooks/R3A_BITWARDEN_STEWARD_SETUP.md).
 
 ## Authority and scope
 
