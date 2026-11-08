@@ -55,7 +55,7 @@ from r3a_runtime.cme import CME
 from r3a_runtime.engineering import (CapabilityOperationRef, CriterionResult, EngineeringWorkOrder,
                                     VerificationResult, validate_completion)
 from r3a_runtime.db import utcnow
-from r3a_runtime.provider_runtime import ProviderProcessManager
+from r3a_runtime.provider_runtime import ProviderProcessManager, _module_environment
 
 
 ACTIVITY = "11111111-1111-4111-8111-111111111111"
@@ -236,6 +236,12 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 telemetry_operation["provider"]["artifact_sha256"]]
             telemetry_manifest["_pinned_artifact_paths"] = artifact_paths
             registry.register(telemetry_operation, telemetry_config, legacy_manifest=telemetry_manifest)
+            with patch.dict("os.environ", {"R3A_TELEMETRY_DATABASE_DSN": "must-not-cross-module-boundary",
+                                            "R3A_OCTOMINER_SSH_HOST": "telemetry-host"}):
+                module_env = _module_environment(registry.resolve(
+                    "infrastructure.octominer.telemetry.read"))
+            self.assertNotIn("R3A_TELEMETRY_DATABASE_DSN", module_env)
+            self.assertEqual("telemetry-host", module_env["R3A_OCTOMINER_SSH_HOST"])
             store = ProviderLifecycleFixtureStore()
             settings = SimpleNamespace(data_dir=root / "data")
             runtime = ProviderProcessManager(settings, store, registry)
