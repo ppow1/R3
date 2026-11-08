@@ -215,6 +215,32 @@ def validate_operation(descriptor: Any) -> dict[str, Any]:
     return copy.deepcopy(descriptor)
 
 
+def validate_module_manifest(module_manifest: Any, operation: dict[str, Any],
+                             source_manifest: dict[str, Any]) -> dict[str, Any]:
+    """Validate optional module lifecycle metadata attached to an operation manifest."""
+    schema = _load_schema("module-manifest.v1.schema.json")
+    validate_json(module_manifest, schema)
+    provider = operation["provider"]
+    if (module_manifest["module_id"] != provider["provider_id"]
+            or module_manifest["module_version"] != provider["provider_version"]):
+        raise CapabilityContractError("module manifest identity/version does not match operation provider")
+    binding = module_manifest["binding"]
+    if (binding["entrypoint"] != provider["entrypoint"]
+            or binding["protocol_min_minor"] > binding["protocol_max_minor"]):
+        raise CapabilityContractError("module binding does not match provider or has an invalid protocol range")
+    artifact = module_manifest["artifact"]
+    if (artifact["artifact_sha256"] != provider["artifact_sha256"]
+            or artifact["artifact_sha256"] != source_manifest.get("artifact_sha256")):
+        raise CapabilityContractError("module artifact digest does not match the pinned provider artifact")
+    config_schema = source_manifest.get("configuration_schema", {})
+    config_schema_id = config_schema.get("schema_id") if isinstance(config_schema, dict) else None
+    if module_manifest["configuration"]["schema_ref"] != config_schema_id:
+        raise CapabilityContractError("module configuration schema reference does not match the external schema")
+    if operation["operation_id"] not in module_manifest["capability_refs"]:
+        raise CapabilityContractError("module manifest does not reference its operation")
+    return copy.deepcopy(module_manifest)
+
+
 def validate_invocation_request(request: Any, descriptor: dict[str, Any]) -> dict[str, Any]:
     schema = _load_schema("capability-invocation.v1.schema.json")
     request_schema = schema["$defs"]["request"]
@@ -540,4 +566,6 @@ def operation_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         raise CapabilityContractError("legacy capability_id must match operation_id")
     if "read_only" in manifest and manifest["read_only"] is not (descriptor["effect_class"] == "read"):
         raise CapabilityContractError("legacy read_only projection conflicts with canonical effect_class")
+    if "module_manifest" in manifest:
+        validate_module_manifest(manifest["module_manifest"], descriptor, manifest)
     return descriptor

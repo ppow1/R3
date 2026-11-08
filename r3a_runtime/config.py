@@ -714,7 +714,8 @@ def load_settings(path: str | Path) -> Settings:
         if not isinstance(manifest, dict):
             raise ConfigurationError(f"{where}.manifest must contain an object")
         optional_manifest = {"supporting_artifacts", "operation", "provider", "contract_id",
-                             "contract_version", "capability_id", "tool", "entrypoint", "read_only"}
+                             "contract_version", "capability_id", "tool", "entrypoint", "read_only",
+                             "module_manifest"}
         _keys(manifest, required_manifest | (optional_manifest & manifest.keys()),
               f"{where}.manifest")
         if manifest["schema_version"] != 1:

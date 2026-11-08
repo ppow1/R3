@@ -86,11 +86,18 @@ def test_engineering_operation_is_defined_by_external_versioned_manifest():
     operation = operation_from_manifest(manifest)
     assert operation["operation_id"] == "engineering.workspace.apply_patch"
     assert operation["provider"]["provider_version"] == manifest["plugin_version"]
+    assert manifest["module_manifest"]["module_id"] == operation["provider"]["provider_id"]
+    assert manifest["module_manifest"]["configuration"]["schema_ref"] == \
+        manifest["configuration_schema"]["schema_id"]
     _validate_plugin_config({"workspace_root": "/tmp/r3a-engineering-workspace"},
                             manifest["configuration_schema"], "engineering configuration")
     with pytest.raises(ValueError, match="configuration"):
         _validate_plugin_config({"workspace_root": "/tmp/workspace", "secret": "forbidden"},
                                 manifest["configuration_schema"], "engineering configuration")
+    incompatible = copy.deepcopy(manifest)
+    incompatible["module_manifest"]["binding"]["protocol_min_minor"] = 1
+    with pytest.raises(ValueError, match="protocol range"):
+        operation_from_manifest(incompatible)
 
 
 def work_order() -> EngineeringWorkOrder:
@@ -264,6 +271,12 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             second_manifest["provider"].update(second["provider"])
             second_manifest["operation"]["operation_revision"] = "1.0.1"
             second_manifest["operation"]["provider"].update(second["provider"])
+            second_manifest["module_manifest"]["module_version"] = "1.0.1"
+            second_manifest["module_manifest"]["binding"]["entrypoint"] = second["provider"]["entrypoint"]
+            second_manifest["module_manifest"]["artifact"] = {
+                "artifact_ref": "replacement_test_fixture.py",
+                "artifact_sha256": second["provider"]["artifact_sha256"]}
+            second = operation_from_manifest(second_manifest)
             second_manifest["_provider_artifact_path"] = str(replacement_artifact)
             second_manifest["_pinned_artifact_paths"] = {
                 str(replacement_artifact): second["provider"]["artifact_sha256"],
