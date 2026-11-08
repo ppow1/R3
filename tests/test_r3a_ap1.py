@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.10.1
+File Revision: 1.10.2
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -39,6 +39,7 @@ Changed: 2026-11-08T00:04:44Z | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Ve
 Changed: 2026-11-08T01:07:51Z | R3A-MULTI-RESIDENT | Codex GPT-6 | Verify a directory-bound resident uses its independent configured model route and identity context with profile lineage enforcement.
 Changed: 2026-11-08T02:44:52Z | R3A-AP1-EVIDENCE-FEEDBACK | Codex GPT-6 | Verify complete evidence inventory delivery, mandatory citation guidance, and provenance retention.
 Changed: 2026-11-08T02:49:00Z | R3A-AP1-EVIDENCE-FEEDBACK | Codex GPT-6 | Verify evidence records retain provider and invocation provenance.
+Changed: 2026-11-08T13:21:02Z | R3A-AP1-EVIDENCE-REASONING | Codex GPT-6 | Cover distinction between claim support, evidence coverage, unavailable records, and bounded corrective decisions.
 Supersedes: None.
 Contracts: R3A-019; proposed r3a.resident.execution-profile@1.0.0; configured model routing and evidence provenance.
 Tests: This test module.
@@ -807,7 +808,12 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         self.assertEqual(inventory[1]["provider_provenance"][0]["provider_id"], "provider.gpu")
         self.assertEqual(inventory[1]["provider_provenance"][0]["invocation_id"], "invocation-gpu-1")
         self.assertIn("include every identifier", resident._model_request.await_args.args[2]["messages"][0]["content"])
+        prompt = resident._model_request.await_args.args[2]["messages"][0]["content"]
+        self.assertIn("Do not use an unrelated record to support a claim", prompt)
+        self.assertIn("coverage bookkeeping", prompt)
+        self.assertIn("Never infer content from an unavailable record", prompt)
         self.assertIn("Do not repeat an unchanged rejected final", resident._model_request.await_args.args[2]["messages"][0]["content"])
+        self.assertIn("materially different evidence-backed correction", prompt)
 
     def test_activity_result_retains_uncited_evidence_provenance(self):
         resident = self._resident(
@@ -1170,6 +1176,7 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
                     "required_evidence_refs": ["runtime.processes", "knowledge.1"],
                     "evidence": initial_evidence, "available_tools": [_RESIDENT_TOOLS[0]], "conversation": [],
                     "reasoning_state": {}, "pending_final": None, "config_revision": "config-1"})
+                initial_context = json.loads(json.dumps(cme._objective_context.return_value))
                 cme._authorize_capability = AsyncMock(return_value={"audit_event_id": "audit-1"})
                 next_action = {"action": "invoke_capability",
                                "contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
@@ -1222,6 +1229,25 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
                 self.assertIn("transitions.STOPPING",
                               [item["source_path"] for item in tool_checkpoint["evidence"]])
                 self.assertEqual(len(tool_checkpoint["reasoning_state"]["conversation"]), 4)
+
+                repeated_incomplete = {"result": {"action": "final", "decision": incomplete,
+                    "model_content": json.dumps({"action": "final", "decision": incomplete}),
+                    "model": {"request_ref": "repeat-1", "request_sha256": "1" * 64,
+                              "result_ref": "repeat-result-1", "result_sha256": "2" * 64}}}
+                repeated_final = {"result": {"action": "final", "decision": incomplete,
+                    "model_content": json.dumps({"action": "final", "decision": incomplete}),
+                    "model": {"request_ref": "repeat-2", "request_sha256": "3" * 64,
+                              "result_ref": "repeat-result-2", "result_sha256": "4" * 64}}}
+                responses.clear()
+                responses.extend([repeated_incomplete, repeated_final])
+                cme._objective_context.return_value = initial_context
+                cme.store = StoreFake()
+                continuation_contexts.clear()
+                await cme._run_activity({**activity, "checkpoint": {}})
+                self.assertIsNone(cme.store.completed)
+                self.assertEqual(cme.store.blocked[0],
+                                 "Grace repeated an unsupported completion without new evidence")
+                self.assertEqual(len(continuation_contexts), 2)
 
         asyncio.run(exercise())
 
