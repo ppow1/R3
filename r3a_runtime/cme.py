@@ -16,6 +16,7 @@ Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Dispatch durable Grace objectiv
 Changed: 2026-11-08 | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Persist generic verifier results and ask Grace for a scoped corrective decision before blocking.
 Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Omit CME-only durable reasoning checkpoint internals from resident protocol frames.
 Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Keep full capability evidence once in context and compact its conversation receipt.
+Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Compact legacy durable capability receipts when resuming activities.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
 Changed: 2026-11-06T18:16:39Z | R3A-019 | Codex GPT-6 | Bound module-child termination when a model request does not drain.
@@ -1392,6 +1393,24 @@ class CME:
                          for item in result.get("evidence", []) if isinstance(item, dict)],
         }}
 
+    @classmethod
+    def _compact_resident_conversation(cls, conversation: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Normalize older checkpoints that embedded full provider evidence in the transcript."""
+        compacted = []
+        for message in conversation:
+            item = dict(message)
+            if item.get("role") == "user" and isinstance(item.get("content"), str):
+                try:
+                    value = json.loads(item["content"])
+                except (TypeError, json.JSONDecodeError):
+                    value = None
+                if isinstance(value, dict) and isinstance(value.get("capability_result"), dict):
+                    item["content"] = json.dumps(
+                        cls._resident_capability_summary(value["capability_result"]),
+                        separators=(",", ":"))
+            compacted.append(item)
+        return compacted
+
     async def _read_runtime_capability(self, capability_id: str) -> list[dict[str, Any]]:
         evidence: list[dict[str, Any]] = []
         if capability_id in {"host.process.read", "institution.diagnostics.read"}:
@@ -1862,7 +1881,8 @@ class CME:
                     return
                 model_route = context["model_route"]
                 reasoning_state = dict(context.get("reasoning_state") or {})
-                conversation = list(context.get("conversation") or [])
+                conversation = self._compact_resident_conversation(
+                    list(context.get("conversation") or []))
                 turns = list(reasoning_state.get("model_turns") or [])
                 invocations = list(reasoning_state.get("capability_invocations") or [])
                 evidence = list(context.get("evidence") or [])

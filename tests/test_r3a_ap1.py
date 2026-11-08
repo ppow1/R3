@@ -39,6 +39,7 @@ Changed: 2026-11-08T00:04:44Z | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Ve
 Changed: 2026-11-08T01:20:00Z | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Cover CME construction and delivery of generic independent-verifier results.
 Changed: 2026-11-08T01:35:00Z | R3A-MODULAR-RUNTIME | Codex GPT-6 | Verify CME-only continuation internals stay out of bounded resident protocol frames.
 Changed: 2026-11-08T01:40:00Z | R3A-MODULAR-RUNTIME | Codex GPT-6 | Verify Grace receives full evidence once and a compact durable capability receipt.
+Changed: 2026-11-08T01:42:00Z | R3A-MODULAR-RUNTIME | Codex GPT-6 | Verify older continuation checkpoints are compacted during activity recovery.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
@@ -1233,6 +1234,19 @@ class ResidentVerificationFeedbackIntegrationTests(unittest.TestCase):
         self.assertEqual(receipt["capability_result"]["evidence"],
                          [{"source_id": "gpu.telemetry.octominer", "sha256": "a" * 64}])
         self.assertNotIn("content", json.dumps(receipt))
+
+    def test_activity_recovery_compacts_legacy_full_capability_receipt(self):
+        old_result = {"capability_id": "infrastructure.octominer.telemetry.read",
+                      "outcome": "succeeded", "output": [{"source_id": "gpu", "content": {"large": "x"}}],
+                      "evidence": [{"source_id": "gpu", "sha256": "b" * 64,
+                                    "content": {"large": "x"}}]}
+        conversation = [{"role": "user", "content": json.dumps({"capability_result": old_result})}]
+
+        compacted = CME._compact_resident_conversation(conversation)
+
+        self.assertIn("gpu", compacted[0]["content"])
+        self.assertNotIn('"content"', compacted[0]["content"])
+        self.assertIn("large", conversation[0]["content"])
 
 if __name__ == "__main__":
     unittest.main()
