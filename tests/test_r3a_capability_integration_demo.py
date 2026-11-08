@@ -1,4 +1,20 @@
 """End-to-end isolated demonstration of CME dispatch and independent verification."""
+# R3 CONTROLLED SOURCE
+# File: tests/test_r3a_capability_integration_demo.py
+# Component: R3A-AP2-ENGINEERING-INTEGRATION-TEST
+# File Revision: 1.0.1
+# Created: Unknown (legacy)
+# Created By: Unknown (legacy)
+# Purpose: Exercise canonical CME invocation, isolated Engineering file execution, recovery, and verification.
+# Execution Model: Python unittest with isolated temporary workspace and durable-store protocol fixture.
+# Observability: Test assertion results, invocation evidence, artifact digest, and verifier outcome.
+# Dependencies: Python standard library; r3a_runtime CME, capability, and Engineering contracts.
+# Authority: Steward directive — R3A Engineering Integration Live Execution, 2026-11-08.
+# Changed: 2026-11-08T14:00:30Z | R3A-ENGINEERING-INTEGRATION | Codex GPT-6 | Bound the isolated async scenario and report timeouts clearly.
+# Supersedes: None.
+# Contracts: r3a.capability-invocation.v1; r3a.engineering-work-order.v1; r3a.verification-result.v1.
+# Tests: This test module.
+# History/Predecessor: Git blob c22fd56ec8638d34ac6c37019914332f0a881faa.
 from __future__ import annotations
 
 import asyncio
@@ -207,7 +223,11 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             self.assertEqual("PASS", instance.store.order_transitions[-1][2].outcome)
 
         with tempfile.TemporaryDirectory(prefix="r3a-capability-demo-") as temporary:
-            asyncio.run(scenario(Path(temporary)))
+            try:
+                asyncio.run(asyncio.wait_for(scenario(Path(temporary)), timeout=15.0))
+            except asyncio.TimeoutError as exc:
+                self.fail("CME Engineering integration scenario exceeded 15 seconds; "
+                          "provider invocation, recovery, verification, or completion stalled")
 
 
 if __name__ == "__main__":
