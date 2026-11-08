@@ -37,6 +37,8 @@ from r3a_runtime.residents import (
     GovernedActor, GovernancePolicy, authorize_workflow_action,
     HRCapabilityIdentityResolver,
     R3CapabilityGrantAdapter, validate_identity_association,
+    ApprovedCharacterContextProvider, project_context_for_sink,
+    validate_approved_context, HRPrincipalAssociationAdapter,
 )
 from r3a_runtime.residents.validation import validate_epistemic_span
 from r3a_runtime.residents.legacy_import import extract_legacy_hr_candidates
@@ -73,12 +75,14 @@ class ResidentDossierTests(unittest.TestCase):
             "protected-relationship.v1.schema.json": "r3a.resident.protected-relationship.v1",
             "runtime-character-context.v1.schema.json": "r3a.resident.runtime-character-context.v1",
             "resident-identity-association.v1.schema.json": "r3a.resident.identity-association.v1",
+            "approved-character-context.v2.schema.json": "r3a.resident.approved-character-context.v2",
         }
         for filename, contract_id in expected.items():
             schema = json.loads((ROOT / "r3a_runtime/schemas" / filename).read_text())
             self.assertEqual(schema["$schema"], "https://json-schema.org/draft/2020-12/schema")
             self.assertEqual(schema["$id"], contract_id)
-            if filename == "resident-identity-association.v1.schema.json":
+            if filename in {"resident-identity-association.v1.schema.json",
+                            "approved-character-context.v2.schema.json"}:
                 validate_schema_definition(schema)
 
     def test_private_hr_office_and_protected_relationship_facts_are_not_in_git_dossiers(self):
@@ -502,7 +506,125 @@ class ResidentDossierTests(unittest.TestCase):
             load_runtime_context(institutional_id="missing", principal=RuntimePrincipal("p", "conversation", frozenset(), "hr-authz:2"),
                 resolve_identity=lambda value: {"status": "unavailable"}, load_dossier=lambda value: dossier,
                 defaults=DEFAULTS, overrides=[], provider_id="provider:test")
-            self.assertIn("revision_rollback", audit)
+
+    def test_approved_context_is_pinned_to_boundary_and_filtered_per_sink(self):
+        import copy
+
+        dossier = copy.deepcopy(self.repo.get("r3:grace"))
+        dossier["governance"]["approval_status"] = "active"
+
+        class RepositoryStub:
+            def __init__(self):
+                self.pin = None
+            def get_context_pin(self, **kwargs):
+                return self.pin
+            def get(self, resident_id, revision=None):
+                self.assert_identity(resident_id)
+                return copy.deepcopy(dossier)
+            def revision_digest(self, resident_id, revision):
+                return "a" * 64
+            def has_activation(self, resident_id, revision):
+                return True
+            def pin_context(self, **kwargs):
+                self.pin = {"pin_id": "context-pin:1", "resident_id": kwargs["resident_id"],
+                            "dossier_revision": kwargs["revision"],
+                            "dossier_sha256": kwargs["dossier_sha256"],
+                            "identity_revision": kwargs["identity_revision"],
+                            "directory_resident_id": kwargs["directory_resident_id"],
+                            "binding_revision": kwargs["binding_revision"],
+                            "provider_id": kwargs["provider_id"],
+                            "principal_ref": kwargs["principal_ref"]}
+                return self.pin
+            @staticmethod
+            def assert_identity(resident_id):
+                if resident_id != "r3:grace":
+                    raise KeyError(resident_id)
+
+        repository = RepositoryStub()
+        actor = GovernedActor("resident:grace", "r3-session:authenticated")
+        provider = ApprovedCharacterContextProvider(
+            repository,
+            resolve_hr_identity=lambda actor, resident_id: {
+                "institutional_id": resident_id, "status": "authoritative",
+                "classification": "RESIDENT", "revision": 4,
+                "directory_resident_id": "resident:grace", "binding_revision": 9,
+                "authority_principal": "resident:grace",
+                "principal_association_ref": "hr://association/r3:grace@4",
+                "source_ref": "hr://record/r3:grace@4",
+                "directory_source_ref": "directory://snapshot/" + "c" * 64,
+                "directory_snapshot_sha256": "c" * 64,
+                "directory_snapshot_fresh": True,
+                "office_id": "office:grace", "office_role": "Director of Operations",
+            },
+            authorize_context=lambda actor, action, scope: (
+                action == "character.context.read" and scope == "r3:grace"),
+            defaults=DEFAULTS,
+        )
+        context = provider.retrieve(actor, resident_id="r3:grace",
+            execution_kind="conversation_boundary", execution_ref="conversation:turn:1",
+            provider_id="model:grace")
+        self.assertEqual(context["contract_version"], "2.0.0")
+        self.assertEqual(context["pin_ref"], "context-pin:1")
+        self.assertEqual(context["classification_scope"], ["public"])
+        self.assertEqual(context["office_id"], "office:grace")
+        self.assertIs(validate_approved_context(context)["authority_granted"], False)
+        events = []
+        memory = project_context_for_sink(context, sink="memory",
+            authorized_classifications=frozenset({"public", "institutional"}),
+            principal_ref="memory:authorized", audit=events.append)
+        self.assertTrue(memory["context_reference_only"])
+        self.assertNotIn("prompt_text", memory)
+        diagnostics = project_context_for_sink(context, sink="diagnostics",
+            authorized_classifications=frozenset({"public", "institutional"}),
+            principal_ref="diagnostics:authorized", audit=events.append)
+        self.assertNotIn("prompt_text", diagnostics)
+        with self.assertRaises(PermissionError):
+            project_context_for_sink(context, sink="inference",
+                authorized_classifications=frozenset(), principal_ref="inference:denied",
+                audit=events.append)
+        self.assertEqual([event["outcome"] for event in events], ["allowed", "allowed", "denied"])
+
+    def test_hr_association_adapter_fails_closed_without_hr_provenance_operation(self):
+        from types import SimpleNamespace
+
+        class Authority:
+            def __init__(self):
+                self.audits = []
+            def authorize(self, **kwargs):
+                return {"grant_id": "grant:hr-write"}
+            def audit(self, event):
+                self.audits.append(event)
+
+        class HR:
+            def read(self, principal, resident_id):
+                return {"resident_id": resident_id, "revision": 4}
+            def associate_authority_principal(self, *args, **kwargs):
+                raise AssertionError("non-provenance mutation must never be called")
+
+        authority = Authority()
+        grants = R3CapabilityGrantAdapter(authority,
+            resolve_verified_principal=lambda actor: SimpleNamespace(
+                principal_id=actor.principal_id, role="helen"))
+        adapter = HRPrincipalAssociationAdapter(HR(), grants,
+            resolve_directory_evidence=lambda actor, evidence_ref: evidence)
+        evidence = {
+            "source_id": "riverview_authority.directory",
+            "source_contract": "riverview-authority.directory.v1",
+            "snapshot_sha256": "b" * 64,
+            "observed_at": "2026-11-08T14:01:26Z",
+            "principal_id": "resident:vicky",
+            "office_id": "office:engineering",
+            "office_role": "Engineering Manager",
+            "binding_revision": 2,
+            "evidence_refs": ["directory-snapshot://sha256/" + "b" * 64],
+            "verified_at": "2026-11-08T14:02:00Z",
+        }
+        with self.assertRaisesRegex(NotImplementedError, "lacks associate_authority_principal_with_provenance"):
+            adapter.associate(GovernedActor("human:helen", "session:server-verified"),
+                resident_id="r3:vicky", authority_principal="resident:vicky",
+                expected_hr_revision=4, evidence_ref=evidence["evidence_refs"][0])
+        self.assertEqual(authority.audits[-1]["outcome"], "allowed")
+        self.assertEqual(authority.audits[-1]["action"], "hr.write")
 
     def test_vicky_minimum_configuration_is_available_without_fabricated_biography(self):
         vicky = self.repo.get("r3:vicky")

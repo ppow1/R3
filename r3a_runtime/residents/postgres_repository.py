@@ -85,6 +85,27 @@ class PostgresDossierRepository:
         validate_dossier(dossier)
         return dossier
 
+    def revision_digest(self, resident_id: str, revision: str) -> str:
+        """Return the immutable persisted digest for a dossier revision."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT dossier_sha256 FROM r3a.resident_dossier_revisions "
+                "WHERE resident_id=%s AND dossier_revision=%s", (resident_id, revision),
+            ).fetchone()
+        if not row:
+            raise KeyError(f"{resident_id}@{revision}")
+        return row[0].strip()
+
+    def has_activation(self, resident_id: str, revision: str) -> bool:
+        """Whether an immutable activation event exists for this exact revision."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM r3a.resident_dossier_events WHERE resident_id=%s "
+                "AND dossier_revision=%s AND event_type='activated' LIMIT 1",
+                (resident_id, revision),
+            ).fetchone()
+        return row is not None
+
     def history(self, resident_id: str) -> tuple[dict[str, Any], ...]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -104,6 +125,131 @@ class PostgresDossierRepository:
                 "evidence": evidence,
             })
         return tuple(result)
+
+    def pin_context(self, *, resident_id: str, revision: str, dossier_sha256: str,
+                    execution_kind: str, execution_ref: str, identity_revision: str,
+                    directory_resident_id: str, binding_revision: int,
+                    directory_snapshot_sha256: str, directory_source_ref: str,
+                    hr_source_ref: str, hr_principal_association_ref: str,
+                    office_id: str, office_role: str,
+                    provider_id: str, principal_ref: str) -> dict[str, Any]:
+        """Pin one immutable approved revision to an inference/conversation boundary.
+
+        Repeated calls for the same boundary are idempotent only when every identity,
+        revision, provider, and digest value matches. A later activation cannot silently
+        move an existing execution boundary to a different character revision.
+        """
+        if execution_kind not in {"inference_activity", "conversation_boundary"}:
+            raise ValueError("unsupported character context execution boundary")
+        required = (resident_id, revision, dossier_sha256, execution_ref,
+                    identity_revision, directory_resident_id, directory_source_ref,
+                    hr_source_ref, hr_principal_association_ref, office_id, office_role,
+                    provider_id, principal_ref)
+        if any(not isinstance(value, str) or not value.strip() for value in required):
+            raise ValueError("character context pin requires identity and revision references")
+        if not re.fullmatch(r"[a-f0-9]{64}", dossier_sha256):
+            raise ValueError("character context dossier digest is invalid")
+        if not isinstance(directory_snapshot_sha256, str) or not re.fullmatch(
+                r"[a-f0-9]{64}", directory_snapshot_sha256):
+            raise ValueError("directory snapshot digest is required for an identity pin")
+        if type(binding_revision) is not int or binding_revision < 1:
+            raise ValueError("authoritative office binding revision is required")
+        with self._connect() as connection:
+            connection.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (resident_id,))
+            row = connection.execute(
+                "SELECT p.pin_id::text,p.dossier_revision,p.dossier_sha256,p.identity_revision,"
+                "p.directory_resident_id,p.binding_revision,p.provider_id,p.principal_ref,"
+                "p.directory_snapshot_sha256,p.directory_source_ref,p.hr_source_ref,"
+                "p.hr_principal_association_ref,p.office_id,p.office_role "
+                "FROM r3a.resident_character_context_pins p "
+                "WHERE p.resident_id=%s AND p.execution_kind=%s AND p.execution_ref=%s FOR UPDATE",
+                (resident_id, execution_kind, execution_ref),
+            ).fetchone()
+            if row:
+                existing = (row[1], row[2].strip(), row[3], row[4], row[5], row[6], row[7])
+                requested = (revision, dossier_sha256, identity_revision,
+                             directory_resident_id, binding_revision, provider_id, principal_ref)
+                existing_evidence = (row[8].strip() if row[8] else None, *row[9:14])
+                requested_evidence = (directory_snapshot_sha256, directory_source_ref,
+                                      hr_source_ref, hr_principal_association_ref, office_id, office_role)
+                if existing != requested or existing_evidence != requested_evidence:
+                    raise RevisionConflict("execution boundary is already pinned to another identity or character revision")
+                return {"pin_id": row[0], "resident_id": resident_id,
+                        "dossier_revision": row[1], "dossier_sha256": row[2].strip(),
+                        "identity_revision": row[3], "directory_resident_id": row[4],
+                        "binding_revision": row[5], "provider_id": row[6],
+                        "principal_ref": row[7], "execution_kind": execution_kind,
+                        "execution_ref": execution_ref, "created": False,
+                        "directory_snapshot_sha256": row[8].strip() if row[8] else None,
+                        "directory_source_ref": row[9], "hr_source_ref": row[10],
+                        "hr_principal_association_ref": row[11],
+                        "office_id": row[12], "office_role": row[13]}
+            active = connection.execute(
+                "SELECT r.dossier_sha256 FROM r3a.resident_dossier_current c "
+                "JOIN r3a.resident_dossier_revisions r USING (resident_id,dossier_revision) "
+                "WHERE c.resident_id=%s AND c.dossier_revision=%s FOR UPDATE OF c",
+                (resident_id, revision),
+            ).fetchone()
+            if not active or active[0].strip() != dossier_sha256:
+                raise RevisionConflict("only the currently activated, digest-matching dossier can start a new boundary")
+            latest = connection.execute(
+                "SELECT event_type FROM r3a.resident_dossier_events "
+                "WHERE resident_id=%s AND dossier_revision=%s ORDER BY event_sequence DESC LIMIT 1",
+                (resident_id, revision),
+            ).fetchone()
+            if not latest or latest[0] != "activated":
+                raise RevisionConflict("dossier revision is not approved and active")
+            pin_id = str(uuid.uuid4())
+            connection.execute(
+                "INSERT INTO r3a.resident_character_context_pins "
+                "(pin_id,resident_id,dossier_revision,dossier_sha256,execution_kind,execution_ref,"
+                "identity_revision,directory_resident_id,binding_revision,provider_id,principal_ref,"
+                "directory_snapshot_sha256,directory_source_ref,hr_source_ref,"
+                "hr_principal_association_ref,office_id,office_role) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (pin_id, resident_id, revision, dossier_sha256, execution_kind,
+                 execution_ref, identity_revision, directory_resident_id, binding_revision,
+                 provider_id, principal_ref, directory_snapshot_sha256, directory_source_ref,
+                 hr_source_ref, hr_principal_association_ref, office_id, office_role),
+            )
+        return {"pin_id": pin_id, "resident_id": resident_id,
+                "dossier_revision": revision, "dossier_sha256": dossier_sha256,
+                "identity_revision": identity_revision,
+                "directory_resident_id": directory_resident_id,
+                "binding_revision": binding_revision,
+                "directory_snapshot_sha256": directory_snapshot_sha256,
+                "directory_source_ref": directory_source_ref, "hr_source_ref": hr_source_ref,
+                "hr_principal_association_ref": hr_principal_association_ref,
+                "office_id": office_id, "office_role": office_role,
+                "provider_id": provider_id,
+                "principal_ref": principal_ref, "execution_kind": execution_kind,
+                "execution_ref": execution_ref, "created": True}
+
+    def get_context_pin(self, *, resident_id: str, execution_kind: str,
+                        execution_ref: str) -> dict[str, Any] | None:
+        """Retrieve the immutable revision pinned to an existing execution boundary."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT pin_id::text,dossier_revision,dossier_sha256,identity_revision,"
+                "directory_resident_id,binding_revision,provider_id,principal_ref,created_at,"
+                "directory_snapshot_sha256,directory_source_ref,hr_source_ref,"
+                "hr_principal_association_ref,office_id,office_role "
+                "FROM r3a.resident_character_context_pins "
+                "WHERE resident_id=%s AND execution_kind=%s AND execution_ref=%s",
+                (resident_id, execution_kind, execution_ref),
+            ).fetchone()
+        if not row:
+            return None
+        return {"pin_id": row[0], "resident_id": resident_id, "dossier_revision": row[1],
+                "dossier_sha256": row[2].strip(), "identity_revision": row[3],
+                "directory_resident_id": row[4], "binding_revision": row[5],
+                "provider_id": row[6], "principal_ref": row[7],
+                "created_at": row[8].isoformat(), "execution_kind": execution_kind,
+                "execution_ref": execution_ref, "created": False,
+                "directory_snapshot_sha256": row[9].strip() if row[9] else None,
+                "directory_source_ref": row[10], "hr_source_ref": row[11],
+                "hr_principal_association_ref": row[12],
+                "office_id": row[13], "office_role": row[14]}
 
     def revision_metadata(self, resident_id: str, revision: str) -> dict[str, Any]:
         with self._connect() as connection:

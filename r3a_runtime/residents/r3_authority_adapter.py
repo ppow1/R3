@@ -30,6 +30,7 @@ class R3CapabilityGrantAdapter:
     _CHARACTER_ACTIONS = {
         "character.dossier.read": ("character.dossier.read", "read"),
         "character.history.read": ("character.history.read", "read"),
+        "character.context.read": ("character.context.read", "read"),
         "character.propose": ("character.propose", "write"),
         "character.approve": ("character.approve", "write"),
         "character.publish": ("character.publish", "write"),

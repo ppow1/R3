@@ -12,8 +12,8 @@ Dependencies: Approved R3 Charter Revision 2; Steward resident architecture dire
 Authority: Schema membership does not establish data authority or runtime permissions.
 Changed: 2026-11-08 UTC | CHARACTER-ARCHITECTURE | Codex GPT-6 | Record schema provenance.
 Supersedes: None
-Contracts: JSON Schema Draft 2020-12; dossier, epistemic, institutional identity, protected relationship, identity association, and runtime character context v1 contracts.
-Tests: JSON parsing and identity-association schema structure validation in 2026-11-08 test run; external JSON Schema validator is not installed.
+Contracts: JSON Schema Draft 2020-12; dossier, epistemic, institutional identity, protected relationship, identity association, and approved runtime character context v2 contracts.
+Tests: JSON parsing and schema structure validation in 2026-11-08 test run; external JSON Schema validator is not installed.
 History/Predecessor: New file.
 -->
 # Resident schema provenance
@@ -25,6 +25,7 @@ History/Predecessor: New file.
 | `institutional-identity.v1.schema.json` | Resident and special Steward identity classification fields. `STEWARD` is separate from ordinary resident lifecycle and requires Steward-governed identity writes. | Contract only; no canonical Steward ID or HR record was provisioned in this environment. |
 | `protected-relationship.v1.schema.json` | Separate relationship record with parties, classification, reader/editor ACL, disclosure scopes, provenance, revision and sourced facts. | Contract only; no Evelyn–GM relationship facts were recovered or stored in this Git repository. |
 | `runtime-character-context.v1.schema.json` | Approved, identity-bound, digest-checked provider-neutral character context passed to a resident inference module. | Optional inference input; an upstream governed HR service must authenticate and filter before issuing it. |
+| `approved-character-context.v2.schema.json` | Approved active provider-neutral context pinned to an immutable inference-activity or conversation-boundary reference, with identity/binding and dossier digests. | Interface implementation; active lookup requires verified HR/directory authority and exact R3 grants. Migration 010 stores immutable context pins without prompt content. |
 | `resident-identity-association.v1.schema.json` | Evidence projection joining an existing HR ID/revision/principal association, active dossier revision, authoritative directory snapshot/office binding, credential reference, exact grants, and executable profile. | Projection only; cannot create identities, bindings, credentials, grants, or runtime authority. |
 
 Schemas contain no resident roster, personal history, credential, or provider secret. Dossier profiles live separately in `data/residents`; the source inventory records gaps in historical material.

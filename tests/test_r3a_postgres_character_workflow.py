@@ -12,6 +12,7 @@ import psycopg
 
 from r3a_runtime.residents.governance import GovernedActor, GovernancePolicy
 from r3a_runtime.residents.postgres_repository import PostgresDossierRepository
+from r3a_runtime.residents.repository import RevisionConflict
 from r3a_runtime.residents.workflow_service import CharacterWorkflowService
 
 
@@ -88,6 +89,21 @@ class PostgresCharacterWorkflowTests(unittest.TestCase):
         self.service.publish(publisher, self.resident_id, first, reason="Publish test revision")
         self.service.activate(activator, self.resident_id, first, reason="Activate test revision")
         self.assertEqual(self.service.read(self.actor("reader"), self.resident_id)["revision"], first)
+        first_digest = self.repository.revision_digest(self.resident_id, first)
+        pin = self.repository.pin_context(
+            resident_id=self.resident_id, revision=first, dossier_sha256=first_digest,
+            execution_kind="conversation_boundary", execution_ref="conversation:test:turn:1",
+            identity_revision="1", directory_resident_id="resident:test", binding_revision=1,
+            directory_snapshot_sha256="b" * 64,
+            directory_source_ref="directory://snapshot/test/1",
+            hr_source_ref="hr://resident/test@1",
+            hr_principal_association_ref="hr://association/test@1",
+            office_id="office:test", office_role="Test role",
+            provider_id="model:test", principal_ref=self.ids["reader"],
+        )
+        self.assertTrue(pin["created"])
+        self.assertEqual(pin["directory_snapshot_sha256"], "b" * 64)
+        self.assertEqual(pin["hr_principal_association_ref"], "hr://association/test@1")
 
         second_dossier = copy.deepcopy(self.dossier)
         second_dossier["revision"] = "1.0.1"
@@ -103,6 +119,34 @@ class PostgresCharacterWorkflowTests(unittest.TestCase):
                              reason="Independent reviewer approved successor")
         self.service.publish(publisher, self.resident_id, second, reason="Publish successor")
         self.service.activate(activator, self.resident_id, second, reason="Activate successor")
+
+        # Existing executions keep their exact pin across a later safe-boundary activation.
+        existing_pin = self.repository.pin_context(
+            resident_id=self.resident_id, revision=first, dossier_sha256=first_digest,
+            execution_kind="conversation_boundary", execution_ref="conversation:test:turn:1",
+            identity_revision="1", directory_resident_id="resident:test", binding_revision=1,
+            directory_snapshot_sha256="b" * 64,
+            directory_source_ref="directory://snapshot/test/1",
+            hr_source_ref="hr://resident/test@1",
+            hr_principal_association_ref="hr://association/test@1",
+            office_id="office:test", office_role="Test role",
+            provider_id="model:test", principal_ref=self.ids["reader"],
+        )
+        self.assertFalse(existing_pin["created"])
+        self.assertEqual(existing_pin["pin_id"], pin["pin_id"])
+        with self.assertRaises(RevisionConflict):
+            self.repository.pin_context(
+                resident_id=self.resident_id, revision=second,
+                dossier_sha256=self.repository.revision_digest(self.resident_id, second),
+                execution_kind="conversation_boundary", execution_ref="conversation:test:turn:1",
+                identity_revision="1", directory_resident_id="resident:test", binding_revision=1,
+                directory_snapshot_sha256="b" * 64,
+                directory_source_ref="directory://snapshot/test/1",
+                hr_source_ref="hr://resident/test@1",
+                hr_principal_association_ref="hr://association/test@1",
+                office_id="office:test", office_role="Test role",
+                provider_id="model:test", principal_ref=self.ids["reader"],
+            )
 
         current = self.service.read(self.actor("reader"), self.resident_id)
         prior = self.service.read(self.actor("reader"), self.resident_id, revision=first)
