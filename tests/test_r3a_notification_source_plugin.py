@@ -47,6 +47,10 @@ class ReadOnlyEventLedger:
         if self.failure:
             raise self.failure
         if "FROM r3a.institution_events" in query:
+            if ("a.activity_type='foundation.observe'" in query
+                    and isinstance(self.row, dict)
+                    and self.row.get("activity_type") == "foundation.observe"):
+                return FakeCursor(None)
             return FakeCursor(self.row)
         return FakeCursor(None)
 
@@ -132,6 +136,7 @@ class NotificationSourceAdapterTests(unittest.TestCase):
         sql = " ".join(statement.upper() for statement, _ in self.connection.statements)
         self.assertIn("READ ONLY", sql)
         self.assertIn("REPEATABLE READ", sql)
+        self.assertIn("A.ACTIVITY_TYPE='FOUNDATION.OBSERVE'", sql)
         self.assertNotRegex(sql, r"\b(INSERT|UPDATE|DELETE|ALTER|DROP|TRUNCATE)\b")
         self.assertTrue(self.connection.committed)
         self.assertFalse(self.connection.rolled_back)
@@ -173,6 +178,66 @@ class NotificationSourceAdapterTests(unittest.TestCase):
         self.assertNotIn("task_class", envelope)
         self.assertEqual("r3a.notification-intake", envelope["contract_id"])
         self.assertEqual("1.0.0", envelope["contract_version"])
+
+    def test_generic_activity_intake_projection_validates_and_preserves_n1_envelope(self):
+        with patch.dict(os.environ, {"R3A_NOTIFICATION_SOURCE_DSN": "fixture-secret"}):
+            provider_result = self.provider.invoke({"source_event_id": str(EVENT_ID)}, context={})
+        n1 = validate_notification_envelope(provider_result.output)
+        projection = plugin.to_activity_intake(
+            n1, provider_result.evidence,
+            provider={"provider_id": "r3a.notification-source", "provider_version": "1.0.0",
+                      "artifact_sha256": self.manifest["artifact_sha256"]},
+            configuration_revision="cfg-17",
+            lifecycle_projection={
+                "received": "grace.notification.received",
+                "actionable": "grace.notification.actionable",
+                "acknowledged": "grace.notification.acknowledged",
+                "resolved": "grace.notification.resolved",
+                "blocked": "grace.notification.blocked",
+            },
+        )
+        schema = json.loads((ROOT / "r3a_runtime/schemas/activity-intake.v1.schema.json").read_text())
+        from r3a_runtime.capability_contracts import validate_json
+        validate_json(projection, schema)
+        self.assertEqual("r3a.activity-intake.v1", projection["contract_id"])
+        self.assertEqual("notification:r3a.institution-events:" + str(EVENT_ID), projection["intake_id"])
+        self.assertEqual(projection["intake_id"], projection["source"]["idempotency_key"])
+        self.assertEqual(str(CORRELATION_ID), projection["correlation_id"])
+        self.assertEqual(n1["occurred_at"], projection["source"]["occurred_at"])
+        self.assertEqual(n1["received_at"], projection["source"]["received_at"])
+        self.assertEqual(n1, projection["activity"]["input"]["notification"])
+        self.assertEqual(provider_result.evidence["payload_sha256"], projection["source"]["payload_sha256"])
+        self.assertEqual("cfg-17", projection["provenance"]["configuration_revision"])
+        self.assertEqual("objective_reasoning", projection["activity"]["task_class"])
+        self.assertEqual("grace.notification.acknowledged",
+                         projection["lifecycle_projection"]["acknowledged"])
+
+    def test_generic_projection_rejects_mismatched_evidence_and_bad_lifecycle(self):
+        with patch.dict(os.environ, {"R3A_NOTIFICATION_SOURCE_DSN": "fixture-secret"}):
+            result = self.provider.invoke({"source_event_id": str(EVENT_ID)}, context={})
+        args = (result.output, result.evidence)
+        provider = {"provider_id": "r3a.notification-source", "provider_version": "1.0.0",
+                    "artifact_sha256": self.manifest["artifact_sha256"]}
+        lifecycle = {phase: f"grace.notification.{phase}" for phase in
+                     ("received", "actionable", "acknowledged", "resolved", "blocked")}
+        with self.assertRaisesRegex(ValueError, "same notification event"):
+            plugin.to_activity_intake(args[0], {**args[1], "source_event_id": str(uuid.uuid4())},
+                                      provider=provider, configuration_revision="cfg-17",
+                                      lifecycle_projection=lifecycle)
+        with self.assertRaises(Exception):
+            plugin.to_activity_intake(args[0], args[1], provider=provider,
+                                      configuration_revision="cfg-17",
+                                      lifecycle_projection={**lifecycle, "received": "activity.completed"})
+
+    def test_routine_foundation_observe_event_is_not_intake_eligible(self):
+        observer_event = sample_event()
+        observer_event.update(event_type="activity.completed", subject_type="activity",
+                              subject_id="observe-activity", activity_type="foundation.observe")
+        provider = plugin.InstitutionEventNotificationSource(
+            self.configuration, connect=lambda *a, **k: ReadOnlyEventLedger(observer_event))
+        with patch.dict(os.environ, {"R3A_NOTIFICATION_SOURCE_DSN": "fixture-secret"}):
+            with self.assertRaisesRegex(KeyError, "not found"):
+                provider.invoke({"source_event_id": str(EVENT_ID)}, context={})
 
     def test_rejects_invalid_id_unconfigured_source_missing_event_and_unallowlisted_type(self):
         with self.assertRaisesRegex(ValueError, "UUID"):

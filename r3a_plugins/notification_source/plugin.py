@@ -12,6 +12,11 @@ from r3a_runtime.capability_contracts import CapabilityProviderResult
 from r3a_runtime.notifications import institution_event_envelope
 
 
+_ACTIVITY_INTAKE_SCHEMA = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "r3a_runtime", "schemas", "activity-intake.v1.schema.json")
+
+
 class InstitutionEventNotificationSource:
     """Fetch one allowlisted immutable CME event and project the established N1 envelope."""
 
@@ -46,9 +51,11 @@ class InstitutionEventNotificationSource:
             connection.execute("SELECT set_config('statement_timeout', %s, true)",
                                (str(self.configuration["statement_timeout_ms"]),))
             row = connection.execute(
-                "SELECT event_id,event_type,schema_version,subject_type,subject_id,prior_state,next_state,"
-                "occurred_at,persisted_at,actor,correlation_id,reason,outcome,config_revision,"
-                "implementation_revision,evidence FROM r3a.institution_events WHERE event_id=%s",
+                "SELECT e.event_id,e.event_type,e.schema_version,e.subject_type,e.subject_id,e.prior_state,e.next_state,"
+                "e.occurred_at,e.persisted_at,e.actor,e.correlation_id,e.reason,e.outcome,e.config_revision,"
+                "e.implementation_revision,e.evidence FROM r3a.institution_events e WHERE e.event_id=%s "
+                "AND NOT EXISTS (SELECT 1 FROM r3a.activities a WHERE a.activity_id::text=e.subject_id "
+                "AND a.activity_type='foundation.observe')",
                 (event_uuid,),
             ).fetchone()
             connection.commit()
@@ -93,3 +100,87 @@ def _json_value(value: Any) -> Any:
 
 def create_provider(configuration: dict[str, Any]) -> InstitutionEventNotificationSource:
     return InstitutionEventNotificationSource(configuration)
+
+
+def to_activity_intake(notification: dict[str, Any], source_evidence: dict[str, Any], *,
+                       provider: dict[str, Any], configuration_revision: str,
+                       lifecycle_projection: dict[str, str], task_class: str = "objective_reasoning",
+                       parent_activity_id: str | None = None) -> dict[str, Any]:
+    """Project the established N1 result for CME's generic durable intake boundary.
+
+    This is a pure adapter projection. CME still validates authorization, task
+    class policy, replay identity, and lifecycle transitions before persistence.
+    """
+    from pathlib import Path
+
+    from r3a_runtime.capability_contracts import validate_json
+    from r3a_runtime.notifications import validate_notification_envelope
+
+    notification = validate_notification_envelope(notification)
+    if not isinstance(source_evidence, dict) or source_evidence.get("source_event_id") != notification["source_event_id"]:
+        raise ValueError("source evidence must identify the same notification event")
+    required_provider = {"provider_id", "provider_version", "artifact_sha256"}
+    if not isinstance(provider, dict) or set(provider) != required_provider:
+        raise ValueError("generic intake provider provenance is incomplete")
+    if (not isinstance(configuration_revision, str) or not configuration_revision.strip()
+            or not isinstance(lifecycle_projection, dict)):
+        raise ValueError("generic intake configuration provenance is incomplete")
+    required_phases = {"received", "actionable", "acknowledged", "resolved", "blocked"}
+    if (set(lifecycle_projection) != required_phases
+            or any(not isinstance(value, str) or not value.startswith("grace.notification.")
+                   for value in lifecycle_projection.values())):
+        raise ValueError("notification lifecycle projection must map all phases to grace.notification events")
+
+    event = notification["evidence"]
+    transition = f"{event.get('prior_state') or 'unknown'} → {event.get('next_state') or 'no state transition'}"
+    objective = (f"Review this {notification['severity']} institutional notification from "
+                 f"{notification['source_id']}. Source event {notification['source_event_id']} "
+                 f"reports {notification['event_type']} for {event.get('subject_type', 'unknown')} "
+                 f"{event.get('subject_id', 'unknown')} ({transition}): {event.get('reason', '')}. "
+                 "Decide whether follow-up is warranted. Cite the supplied notification evidence; "
+                 "do not claim external side effects.")
+    digest = source_evidence.get("payload_sha256")
+    if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+        raise ValueError("source evidence must carry a lowercase SHA-256 digest")
+    envelope = {
+        "contract_id": "r3a.activity-intake.v1",
+        "contract_version": "1.0.0",
+        "intake_id": f"notification:{notification['source_id']}:{notification['source_event_id']}",
+        "parent_activity_id": parent_activity_id,
+        "correlation_id": notification["correlation_id"],
+        "source": {
+            "source_id": notification["source_id"],
+            "event_id": notification["source_event_id"],
+            "revision": str(notification["provenance"].get("schema_version", "1")),
+            "idempotency_key": f"notification:{notification['source_id']}:{notification['source_event_id']}",
+            "occurred_at": notification["occurred_at"],
+            "received_at": notification["received_at"],
+            "payload_ref": notification["payload_ref"],
+            "payload_sha256": digest,
+            "causation_id": None,
+        },
+        "activity": {
+            "activity_type": "grace.objective",
+            "task_class": task_class,
+            "objective": objective,
+            "input": {"event_kind": "notification", "notification": notification},
+            "evidence": [{
+                "source_id": f"notification:{notification['source_id']}:{notification['source_event_id']}",
+                "source_ref": notification["payload_ref"],
+                "sha256": digest,
+                "provenance": (f"{notification['provenance'].get('store', 'unknown')}; "
+                               f"{notification['provenance'].get('implementation_revision', 'unknown')}; "
+                               f"{provider['provider_id']}@{provider['provider_version']}"),
+            }],
+        },
+        "provenance": {
+            "module_id": provider["provider_id"],
+            "module_version": provider["provider_version"],
+            "artifact_sha256": provider["artifact_sha256"],
+            "configuration_revision": configuration_revision,
+        },
+        "lifecycle_projection": lifecycle_projection,
+    }
+    schema = json.loads(Path(_ACTIVITY_INTAKE_SCHEMA).read_text(encoding="utf-8"))
+    validate_json(envelope, schema)
+    return envelope
