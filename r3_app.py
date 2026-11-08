@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.17
+# File Revision: 1.0.18
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Serve visual estate UI and authenticated, canonical R3A Steward API adapters
@@ -23,6 +23,7 @@
 # Changed: 2026-11-07T23:40:00Z | R3A-007/R3A-010 | Codex GPT-6 | Serve versioned Steward workspace browser client module.
 # Changed: 2026-11-07T23:55:00Z | R3A-010 | Codex GPT-6 | Replace temporary bearer checks with the shared AP3 opaque session and version the objective result.
 # Changed: 2026-11-08T13:30:00Z | R3A-WEB-IDENTITY | Codex GPT-6 | Expose startup-captured build/version/environment identity for the Steward website.
+# Changed: 2026-11-08T14:30:00Z | R3A-010/#49/#51 | Codex GPT-6 | Publish an externally configured, same-host existing portal login URL in website identity metadata.
 
 """R3 first vertical slice: shared read-only capabilities, not UI-owned logic.
 
@@ -43,6 +44,7 @@ import uuid
 import json
 import logging
 import re
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -81,7 +83,7 @@ WEBSITE_BUILD_VERSION = app.version or None
 def website_identity(request: Request):
     """Identify this running R3A website process without claiming service integrations."""
     server = request.scope.get("server") or (None, None)
-    return {
+    identity = {
         "contract": "r3a.website-identification.v1",
         "contract_version": "1.0.0",
         "application": "Riverview R3 Alpha",
@@ -90,6 +92,18 @@ def website_identity(request: Request):
         "environment": os.environ.get("R3_WEBSITE_ENVIRONMENT", "unknown"),
         "service_port": server[1] if len(server) > 1 and server[1] else "unknown",
     }
+    # The browser must visit the existing account portal on the same host so
+    # its HttpOnly rv_account_session cookie is shared with this Website. Keep
+    # the URL deployment-configured and reject cross-host/open-redirect values.
+    portal_url = os.environ.get("R3_STEWARD_PORTAL_LOGIN_URL", "").strip()
+    parsed_portal_url = urllib.parse.urlsplit(portal_url) if portal_url else None
+    if (parsed_portal_url and parsed_portal_url.scheme in {"http", "https"}
+            and parsed_portal_url.hostname == request.url.hostname
+            and parsed_portal_url.path and not parsed_portal_url.username
+            and not parsed_portal_url.password and not parsed_portal_url.query
+            and not parsed_portal_url.fragment):
+        identity["account_portal_login_url"] = portal_url
+    return identity
 
 
 @app.middleware("http")

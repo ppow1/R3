@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_website.py
 Component: R3A-WEBSITE-API-TESTS
-File Revision: 1.0.4
+File Revision: 1.0.5
 Created: 2026-11-07T21:59:13Z
 Created By: Codex GPT-6
 Purpose: Verify shared-session gating, versioned objective forwarding, and website client assets.
@@ -15,6 +15,7 @@ Changed: 2026-11-07T22:04:07Z | R3A-007/R3A-010 | Codex GPT-6 | Verify request c
 Changed: 2026-11-07T23:40:00Z | R3A-007/R3A-010 | Codex GPT-6 | Verify the versioned workspace client asset route.
 Changed: 2026-11-07T23:55:00Z | R3A-010 | Codex GPT-6 | Verify shared AP3 session gating and no browser bearer-token auth.
 Changed: 2026-11-08T13:30:00Z | R3A-WEB-IDENTITY | Verify running identity metadata and accessible rail identity markup.
+Changed: 2026-11-08T14:30:00Z | R3A-010/#49/#51 | Verify same-host configured R3 portal login discovery and reject cross-host links.
 Supersedes: None.
 Contracts: r3a.steward-session.v1; r3a.grace-objective-submission.v1; R3A AP0 diagnostic socket.
 Tests: python -m unittest tests.test_r3a_website.
@@ -65,6 +66,23 @@ class StewardWebsiteApiTests(unittest.TestCase):
         self.assertTrue(identity["build_commit"] == "unknown" or
                         (7 <= len(identity["build_commit"]) <= 40 and
                          all(char in "0123456789abcdef" for char in identity["build_commit"])))
+
+    def test_identity_exposes_only_configured_same_host_portal_login_url(self):
+        client = TestClient(app, base_url="http://testserver:8311")
+        with patch.dict(os.environ, {"R3_STEWARD_PORTAL_LOGIN_URL": "http://testserver:8303/login"}):
+            response = client.get("/api/v1/website/identity")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["account_portal_login_url"], "http://testserver:8303/login")
+        with patch.dict(os.environ, {"R3_STEWARD_PORTAL_LOGIN_URL": "https://attacker.invalid/login"}):
+            response = client.get("/api/v1/website/identity")
+        self.assertNotIn("account_portal_login_url", response.json())
+
+    def test_steward_login_ui_uses_existing_portal_without_collecting_credentials(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('id="steward-portal-login"', response.text)
+        self.assertIn("R3 portal in the new tab", response.text)
+        self.assertNotIn('type="password"', response.text)
 
     def test_estate_home_contains_keyboard_and_touch_identity_control(self):
         response = self.client.get("/")
