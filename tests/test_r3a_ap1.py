@@ -40,10 +40,11 @@ Changed: 2026-11-08T01:20:00Z | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Co
 Changed: 2026-11-08T01:35:00Z | R3A-MODULAR-RUNTIME | Codex GPT-6 | Verify CME-only continuation internals stay out of bounded resident protocol frames.
 Changed: 2026-11-08T01:40:00Z | R3A-MODULAR-RUNTIME | Codex GPT-6 | Verify Grace receives full evidence once and a compact durable capability receipt.
 Changed: 2026-11-08T01:42:00Z | R3A-MODULAR-RUNTIME | Codex GPT-6 | Verify older continuation checkpoints are compacted during activity recovery.
+Changed: 2026-11-08T01:07:51Z | R3A-MULTI-RESIDENT | Codex GPT-6 | Verify a directory-bound resident uses its independent configured model route and identity context with profile lineage enforcement.
 Supersedes: None.
-Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
+Contracts: R3A-019; proposed r3a.resident.execution-profile@1.0.0; configured model routing and evidence provenance.
 Tests: This test module.
-History/Predecessor: Prior revision preserved at commit 32d0b71016c77de82b1a1cc98a9cca4152b6a44b, blob 49127b8c0101d158abf81dbea6f38d27abff4178.
+History/Predecessor: Prior revision preserved at commit 147ea9d8dfcd8158d4bf094e6e24f4bef0572c99, blob 6e4588fb7664d82beab0ecbb54df9c0a6105fdb0.
 """
 from __future__ import annotations
 
@@ -775,6 +776,62 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "cannot report.*healthy"):
             asyncio.run(resident.handle("execute", payload))
+
+    def _profile(self, resident_id="resident.directory-bound-7"):
+        return {"contract_id": "r3a.resident.execution-profile", "contract_version": "1.0.0",
+                "resident_id": resident_id, "display_name": None,
+                "office_id": "office:directory-bound", "office_role": "role returned by directory",
+                "directory_evidence": {"source_id": "directory.snapshot.1", "snapshot_sha256": "a" * 64,
+                                        "observed_at": "2026-11-08T01:02:08Z"},
+                "model_route_id": "directory-resident-route", "config_revision": "config-1"}
+
+    def test_directory_bound_resident_uses_its_profile_route_and_identity_context(self):
+        resident = self._resident(
+            '{"action":"final","decision":{"assessment":"Evidence reviewed",'
+            '"status":"degraded","evidence_refs":[],"recommended_action":"none"}}')
+        resident.module_id = "resident.directory-bound-7"
+        profile_route = ModelRoute("directory-resident-route", "fixture", "http://127.0.0.1:2/chat",
+                                   "independent-resident-model", 2, 128)
+        resident.settings.model_route = lambda route_id=None: profile_route
+        payload = self._payload([])
+        payload.pop("route_id")
+        payload["resident_profile"] = self._profile()
+
+        result = asyncio.run(resident.handle("execute", payload))
+
+        request = resident._model_request.await_args.args[2]
+        self.assertEqual(request["model"], "independent-resident-model")
+        model_input = json.loads(request["messages"][-1]["content"])
+        self.assertEqual(model_input["resident_profile"]["resident_id"], "resident.directory-bound-7")
+        self.assertEqual(model_input["resident_profile"]["office_id"], "office:directory-bound")
+        self.assertEqual(result["resident_profile"]["directory_evidence"]["snapshot_sha256"], "a" * 64)
+
+    def test_directory_bound_resident_rejects_profile_for_another_identity(self):
+        resident = self._resident(
+            '{"action":"final","decision":{"assessment":"blocked","status":"blocked",'
+            '"evidence_refs":[],"recommended_action":"none"}}')
+        resident.module_id = "resident.directory-bound-7"
+        payload = self._payload([])
+        payload.pop("route_id")
+        payload["resident_profile"] = self._profile("resident.other")
+
+        with self.assertRaisesRegex(ValueError, "identity or configuration revision"):
+            asyncio.run(resident.handle("execute", payload))
+        resident._model_request.assert_not_awaited()
+
+    def test_resident_profile_cannot_self_assign_grants(self):
+        resident = self._resident(
+            '{"action":"final","decision":{"assessment":"blocked","status":"blocked",'
+            '"evidence_refs":[],"recommended_action":"none"}}')
+        resident.module_id = "resident.directory-bound-7"
+        payload = self._payload([])
+        payload.pop("route_id")
+        payload["resident_profile"] = self._profile()
+        payload["resident_profile"]["grants"] = ["capability.unrestricted"]
+
+        with self.assertRaisesRegex(ValueError, "profile fields are invalid"):
+            asyncio.run(resident.handle("execute", payload))
+        resident._model_request.assert_not_awaited()
 
     def test_model_selected_capability_call_is_returned_as_resident_action(self):
         tool = {"capability_id": "institution.knowledge.read"}
