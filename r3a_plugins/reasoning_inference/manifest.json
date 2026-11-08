@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "plugin_id": "r3a.reasoning-inference",
-  "plugin_version": "1.1.0",
+  "plugin_version": "1.1.1",
   "artifact_ref": "plugin.py",
-  "artifact_sha256": "0abfb538f0341ded0784e9914c590f6728c5afa3add6a4f6251465034bccab21",
+  "artifact_sha256": "6a2c412453b58ea4753dfa2f50fd2facaafceb4ea53e0bc6021bf3b199e4f4f5",
   "configuration_schema": {
     "schema_id": "r3a.reasoning-inference.config.v2",
     "type": "object",
@@ -45,12 +45,12 @@
     "contract_id": "r3a.capability-operation.v1",
     "contract_version": "1.0.0",
     "operation_id": "reasoning.model.invoke",
-    "operation_revision": "1.1.0",
+    "operation_revision": "1.1.1",
     "provider": {
       "provider_id": "r3a.reasoning-inference",
-      "provider_version": "1.1.0",
+      "provider_version": "1.1.1",
       "entrypoint": "r3a_plugins.reasoning_inference.plugin:create_provider",
-      "artifact_sha256": "0abfb538f0341ded0784e9914c590f6728c5afa3add6a4f6251465034bccab21"
+      "artifact_sha256": "6a2c412453b58ea4753dfa2f50fd2facaafceb4ea53e0bc6021bf3b199e4f4f5"
     },
     "input_schema": {
       "type": "object",
@@ -288,8 +288,8 @@
   },
   "provider": {
     "provider_id": "r3a.reasoning-inference",
-    "provider_version": "1.1.0",
+    "provider_version": "1.1.1",
     "entrypoint": "r3a_plugins.reasoning_inference.plugin:create_provider",
-    "artifact_sha256": "0f9e0eb7b2db46a6e389624e18ee9375732da82f0ede526e691dced9ccef1234"
+    "artifact_sha256": "6a2c412453b58ea4753dfa2f50fd2facaafceb4ea53e0bc6021bf3b199e4f4f5"
   }
 }

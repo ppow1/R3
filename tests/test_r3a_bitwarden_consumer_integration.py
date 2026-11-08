@@ -51,7 +51,7 @@ TOKEN = "synthetic-inference-credential-for-regression"
 SECRET_ID = "synthetic-bitwarden-secret-reference"
 REFERENCE_CONFIG = {
     "provider_id": "r3a.bitwarden-secrets",
-    "provider_version": "1.1.0",
+    "provider_version": "1.1.1",
     "secret_id": SECRET_ID,
     "manifest_path": "/external/r3a/bitwarden/manifest.json",
     "configuration_path": "/external/r3a/bitwarden/provider.json",

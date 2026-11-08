@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "provider_id": "r3a.bitwarden-secrets",
-  "provider_version": "1.1.0",
+  "provider_version": "1.1.1",
   "contract_id": "r3a.secrets.provider.v1",
   "contract_version": "1.1.0",
   "entrypoint": "r3a_plugins.bitwarden_secrets.provider:create_provider",
   "artifact_ref": "provider.py",
-  "artifact_sha256": "464b20a0b5fd3a371bd59627407a7efea4d0cf6f0d745d2ebeb1f25f33ca23d8",
+  "artifact_sha256": "bc589f5b08ce706fa22151b3116422fff93158f9e2571fe7701ce1a82dace6fb",
   "configuration_schema": {
     "schema_id": "r3a.bitwarden-secrets.config.v1",
     "type": "object",

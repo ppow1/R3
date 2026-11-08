@@ -1,6 +1,6 @@
 {
   "provider_id": "r3a.bitwarden-secrets",
-  "provider_version": "1.1.0",
+  "provider_version": "1.1.1",
   "executable": "bws",
   "access_token_env": "R3A_BITWARDEN_ACCESS_TOKEN",
   "machine_principal_id": "<externally-assigned-machine-account-id>",

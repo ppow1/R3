@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_plugins/bitwarden_secrets/provider.py
 Component: R3A-PLUG-BITWARDEN
-File Revision: 1.1.0
+File Revision: 1.1.1
 Created: 2026-11-07T21:36:43Z
 Created By: Codex GPT-6
 Purpose: Resolve versioned secret references through the Bitwarden Secrets Manager CLI.
@@ -12,6 +12,7 @@ Dependencies: r3a_runtime.secrets; externally installed/configured Bitwarden `bw
 Authority: AP3-M2 Issue #50; returned values are private adapter data, never CME capabilities or model context.
 Changed: 2026-11-07T21:36:43Z | R3A-AP3-M2-ISSUE-50 | Codex GPT-6 | Implement configurable Bitwarden machine-account secret resolution.
 Changed: 2026-11-07T22:09:29Z | R3A-AP3-M2-CONSUMER | Codex GPT-6 | Return distinct non-secret reason codes for credential, CLI, timeout, and provider failures.
+Changed: 2026-11-08T13:32:28Z | R3A-AP3-M2-BWS-AUTH-ENV | Codex GPT-6 | Map configured credential source into Bitwarden CLI BWS_ACCESS_TOKEN without argv exposure.
 Supersedes: None.
 Contracts: r3a.secrets.provider.v1; r3a.machine-principal.v1.
 Tests: tests/test_r3a_bitwarden_secrets.py.
@@ -85,7 +86,9 @@ class BitwardenSecretsProvider:
         if "profile" in self.configuration:
             command.extend(["--profile", self.configuration["profile"]])
         environment = dict(self._environment)
-        environment[token_variable] = token
+        if token_variable != "BWS_ACCESS_TOKEN":
+            environment.pop(token_variable, None)
+        environment["BWS_ACCESS_TOKEN"] = token
         try:
             result = self._run(command, check=False, capture_output=True, text=True,
                                timeout=float(self.configuration["timeout_seconds"]), env=environment)

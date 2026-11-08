@@ -1,7 +1,7 @@
 """R3 CONTROLLED SOURCE
 File: r3a_plugins/reasoning_inference/plugin.py
 Component: R3A-AP2-MODEL-INVOCATION-PROVIDER
-File Revision: 1.1.0
+File Revision: 1.1.1
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Execute a CME-authorized, configured model-role inference as a canonical capability provider.
@@ -11,6 +11,7 @@ Dependencies: Python standard library; r3a.capability-operation.v1; configured O
 Authority: R3 Alpha autonomy Task B, GitHub Issues #43 and #46.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Implement canonical model inference provider.
 Changed: 2026-11-07T21:59:02Z | R3A-AP3-M2-CONSUMER | Codex GPT-6 | Resolve configured secret references inside authorized inference calls and redact/close leases.
+Changed: 2026-11-08T13:32:28Z | R3A-AP3-M2-BWS-AUTH-ENV | Codex GPT-6 | Bind inference secret references to Bitwarden provider patch 1.1.1.
 Supersedes: None.
 Contracts: r3a.capability-operation.v1; r3a.capability-invocation.v1; r3a.secrets.provider.v1; r3a.machine-principal.v1.
 Tests: tests/test_r3a_reasoning_provider.py; tests/test_r3a_bitwarden_consumer_integration.py.
@@ -53,7 +54,7 @@ class ModelInferenceProvider:
         if (not isinstance(value, dict) or set(value) != required
                 or any(not isinstance(value[key], str) or not value[key].strip() for key in required)):
             raise ValueError("configured model secret reference is invalid")
-        if value["provider_id"] != "r3a.bitwarden-secrets" or value["provider_version"] != "1.1.0":
+        if value["provider_id"] != "r3a.bitwarden-secrets" or value["provider_version"] != "1.1.1":
             raise ValueError("configured model secret provider identity or version is unsupported")
         if not value["manifest_path"].startswith("/") or not value["configuration_path"].startswith("/"):
             raise ValueError("model secret provider files must use absolute external paths")

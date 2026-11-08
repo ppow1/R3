@@ -45,7 +45,7 @@ SECRET_ID = "fixture-secret-id"
 def configuration(**overrides):
     value = {
         "provider_id": "r3a.bitwarden-secrets",
-        "provider_version": "1.1.0",
+        "provider_version": "1.1.1",
         "executable": "bws",
         "access_token_env": "FIXTURE_BWS_TOKEN",
         "machine_principal_id": "fixture-machine-account",
@@ -56,7 +56,7 @@ def configuration(**overrides):
 
 
 def reference(**overrides):
-    value = {"provider_id": "r3a.bitwarden-secrets", "provider_version": "1.1.0",
+    value = {"provider_id": "r3a.bitwarden-secrets", "provider_version": "1.1.1",
              "secret_id": SECRET_ID}
     value.update(overrides)
     return SecretReference(**value)
@@ -81,7 +81,9 @@ class BitwardenSecretsProviderTests(unittest.TestCase):
             calls.append((command, kwargs))
             return completed(FIXTURE_VALUE_A)
 
-        provider = self.provider(run, environment={"FIXTURE_BWS_TOKEN": FIXTURE_TOKEN},
+        initial_environment = {"FIXTURE_BWS_TOKEN": FIXTURE_TOKEN,
+                               "BWS_ACCESS_TOKEN": "synthetic-stale-cli-token"}
+        provider = self.provider(run, environment=initial_environment,
                                  config_file="/etc/r3a/bws.json", profile="r3a")
         lease = provider.resolve(reference(), correlation_id="corr-50-1")
         self.assertEqual(SECRET_PROVIDER_CONTRACT_ID, reference().contract_id)
@@ -96,7 +98,10 @@ class BitwardenSecretsProviderTests(unittest.TestCase):
         self.assertEqual(["bws", "secret", "get", SECRET_ID, "--output", "json", "--color", "no",
                           "--config-file", "/etc/r3a/bws.json", "--profile", "r3a"], command)
         self.assertNotIn(FIXTURE_TOKEN, command)
-        self.assertEqual(FIXTURE_TOKEN, options["env"]["FIXTURE_BWS_TOKEN"])
+        self.assertEqual(FIXTURE_TOKEN, options["env"]["BWS_ACCESS_TOKEN"])
+        self.assertNotIn("FIXTURE_BWS_TOKEN", options["env"])
+        self.assertNotIn("synthetic-stale-cli-token", options["env"].values())
+        self.assertEqual(FIXTURE_TOKEN, initial_environment["FIXTURE_BWS_TOKEN"])
         self.assertNotIn(FIXTURE_VALUE_A, repr(lease))
         lease.close()
         self.assertTrue(lease.closed)
@@ -140,7 +145,7 @@ class BitwardenSecretsProviderTests(unittest.TestCase):
         observed_tokens = []
 
         def run(command, **kwargs):
-            observed_tokens.append(kwargs["env"]["FIXTURE_BWS_TOKEN"])
+            observed_tokens.append(kwargs["env"]["BWS_ACCESS_TOKEN"])
             return completed(FIXTURE_VALUE_A)
 
         provider = self.provider(run, environment=environment)
@@ -298,7 +303,7 @@ class BitwardenSecretsProviderTests(unittest.TestCase):
         provider = load_configured_provider(manifest_path, config_path)
         self.assertIsInstance(provider, BitwardenSecretsProvider)
         self.assertEqual("r3a.bitwarden-secrets", provider.provider_id)
-        self.assertEqual("1.1.0", provider.provider_version)
+        self.assertEqual("1.1.1", provider.provider_version)
 
 
 if __name__ == "__main__":
