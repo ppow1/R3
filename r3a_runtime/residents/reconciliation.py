@@ -48,22 +48,32 @@ def reconcile_records(directory: dict[str, Any], hr_ids: Iterable[str],
     bindings = set(office_binding_ids)
     credential_states = dict(credential_states or {})
     crosswalk = dict(confirmed_crosswalk or {})
-    if len(set(crosswalk.values())) != len(crosswalk):
+    if (any(not isinstance(directory_id, str) or not directory_id for directory_id in crosswalk)
+            or any(not isinstance(hr_id, str) or not hr_id for hr_id in crosswalk.values())
+            or len(set(crosswalk.values())) != len(crosswalk)):
         return (ReconciliationItem("*", "identity_crosswalk_conflict", (
-            "multiple directory identities map to one HR identity",
+            "crosswalk IDs must be nonempty and one-to-one",
         )),)
-    hr_to_directory = {hr_id: directory_id for directory_id, hr_id in crosswalk.items()}
     observed: dict[str, list[dict[str, Any]]] = {}
     for resident in residents:
         rid = resident.get("resident_id") if isinstance(resident, dict) else None
         if not isinstance(rid, str) or not rid:
             return (ReconciliationItem("*", "directory_projection_invalid", ("resident ID missing",)),)
         observed.setdefault(rid, []).append(resident)
-    ids = sorted((set(observed) - set(crosswalk)) | hr | dossiers | credentials | bindings)
+    directory_to_hr = crosswalk
+    hr_to_directory = {hr_id: directory_id for directory_id, hr_id in directory_to_hr.items()}
+    mapped_hr = set(hr_to_directory)
+    ids = sorted(hr | dossiers | credentials | bindings)
     result: list[ReconciliationItem] = []
     for rid in ids:
-        directory_id = hr_to_directory.get(rid, rid)
-        rows = observed.get(directory_id, [])
+        directory_id = hr_to_directory.get(rid)
+        rows = observed.get(directory_id, []) if directory_id is not None else []
+        if rid in hr and rid not in mapped_hr:
+            result.append(ReconciliationItem(rid, "hr_identity_crosswalk_missing", tuple(x for x, present in (
+                ("hr", True), ("dossier", rid in dossiers), ("credential", rid in credentials),
+                ("office_binding", rid in bindings),
+            ) if present)))
+            continue
         if len(rows) > 1:
             state = "directory_binding_ambiguous"
         elif rows and rid not in hr:
@@ -93,4 +103,10 @@ def reconcile_records(directory: dict[str, Any], hr_ids: Iterable[str],
             ("confirmed_crosswalk", rid in hr_to_directory),
         ) if present)
         result.append(ReconciliationItem(rid, state, evidence))
-    return tuple(result)
+    # Preserve directory-only occupants as unresolved evidence. A matching
+    # spelling or equal ID never establishes HR identity equivalence.
+    for directory_id in sorted(set(observed) - set(directory_to_hr)):
+        rows = observed[directory_id]
+        state = "directory_binding_ambiguous" if len(rows) > 1 else "directory_identity_crosswalk_missing"
+        result.append(ReconciliationItem(f"directory_id:{directory_id}", state, ("directory",)))
+    return tuple(sorted(result, key=lambda item: item.institutional_id))

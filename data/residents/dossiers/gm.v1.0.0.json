@@ -6,8 +6,7 @@
   ],
   "character": {
     "backstory": {
-      "status": "not_recovered",
-      "value": null
+      "status": "not_recovered"
     },
     "bible_status": "not_recovered",
     "contradictions": [],
@@ -20,18 +19,14 @@
       "Preserve provenance and separate durable canon from transient state."
     ],
     "fears": [],
-    "humor": null,
     "identity_anchors": [],
     "motivations": [],
     "preferences": [],
     "social_behaviors": [],
-    "stable_traits": [],
-    "temperament": null
+    "stable_traits": []
   },
   "emotion": {
-    "durable_traits_ref": "character@1.0.0",
-    "transient_state": null,
-    "transitions_ref": null
+    "durable_traits_ref": "character@1.0.0"
   },
   "governance": {
     "approval_status": "in_review",
@@ -60,19 +55,12 @@
         "link_status": "confirmed",
         "source_id": "r3.legacy.hr.sqlite3",
         "value": "r3:gm"
-      },
-      {
-        "link_status": "confirmed",
-        "source_id": "r3.legacy.hr-principal-map",
-        "value": "resident:GM"
       }
     ]
   },
   "implementation": {
-    "continuity_state_ref": null,
     "identity_binding_authority": "authoritative_hr_system",
     "model_adaptations": [],
-    "provider_id": null,
     "provider_mode": "unconfigured"
   },
   "memory": {
@@ -102,10 +90,8 @@
     "summary": "Not recovered; consult governed HR and approved institutional sources."
   },
   "office": {
-    "department": null,
     "history": [],
     "lifecycle_status": "withheld pending authorized HR projection",
-    "office_id": null,
     "organizational_relationships": [],
     "reporting_relationships": [],
     "title": "HR-controlled; withheld from this repository"
@@ -142,7 +128,6 @@
         {
           "classification": "personnel_sensitive",
           "confidence": "high for separate local HR record; current R3A directory crosswalk unverified",
-          "digest": null,
           "locator": "hr_records/r3:gm (revision 1; local private HR store observed 2026-11-08)",
           "observed_at": "2026-11-08",
           "source_id": "r3.legacy.hr.sqlite3"
@@ -150,18 +135,9 @@
         {
           "classification": "institutional",
           "confidence": "high for required individual registration; does not establish personal history",
-          "digest": null,
           "locator": "sections 1, 4, 5 and 6",
           "observed_at": "2026-11-08",
           "source_id": "steward.character-architecture-directive"
-        },
-        {
-          "classification": "institutional",
-          "confidence": "high for historical one-to-one code mapping; live credential validity and R3A mapping unverified",
-          "digest": null,
-          "locator": "runtime/r3_steward_authority_api.py#HR_PRINCIPAL_MAP; historical HR credential-delivery commit 8a43f7f49c2d768d5909286e62c44c6cd90e2b8e",
-          "observed_at": "2026-11-08",
-          "source_id": "r3.legacy.hr-principal-map"
         }
       ],
       "text": "This dossier is for GM, a separately registered institutional person. Its legacy HR key is not yet crosswalked to the R3A directory. Retrieve current office and authorized identity details from HR; do not infer personal history or relationship details.",
@@ -177,7 +153,6 @@
         {
           "classification": "personnel_sensitive",
           "confidence": "high for separate local HR record; current R3A directory crosswalk unverified",
-          "digest": null,
           "locator": "hr_records/r3:gm (revision 1; local private HR store observed 2026-11-08)",
           "observed_at": "2026-11-08",
           "source_id": "r3.legacy.hr.sqlite3"
@@ -196,7 +171,6 @@
         {
           "classification": "institutional",
           "confidence": "high for required individual registration; does not establish personal history",
-          "digest": null,
           "locator": "sections 1, 4, 5 and 6",
           "observed_at": "2026-11-08",
           "source_id": "steward.character-architecture-directive"
@@ -215,7 +189,6 @@
         {
           "classification": "institutional",
           "confidence": "high for required individual registration; does not establish personal history",
-          "digest": null,
           "locator": "sections 1, 4, 5 and 6",
           "observed_at": "2026-11-08",
           "source_id": "steward.character-architecture-directive"
@@ -234,7 +207,6 @@
         {
           "classification": "institutional",
           "confidence": "high for required individual registration; does not establish personal history",
-          "digest": null,
           "locator": "sections 1, 4, 5 and 6",
           "observed_at": "2026-11-08",
           "source_id": "steward.character-architecture-directive"
@@ -253,7 +225,6 @@
     {
       "classification": "personnel_sensitive",
       "confidence": "high for separate local HR record; current R3A directory crosswalk unverified",
-      "digest": null,
       "locator": "hr_records/r3:gm (revision 1; local private HR store observed 2026-11-08)",
       "observed_at": "2026-11-08",
       "source_id": "r3.legacy.hr.sqlite3"
@@ -261,18 +232,9 @@
     {
       "classification": "institutional",
       "confidence": "high for required individual registration; does not establish personal history",
-      "digest": null,
       "locator": "sections 1, 4, 5 and 6",
       "observed_at": "2026-11-08",
       "source_id": "steward.character-architecture-directive"
-    },
-    {
-      "classification": "institutional",
-      "confidence": "high for historical one-to-one code mapping; live credential validity and R3A mapping unverified",
-      "digest": null,
-      "locator": "runtime/r3_steward_authority_api.py#HR_PRINCIPAL_MAP; historical HR credential-delivery commit 8a43f7f49c2d768d5909286e62c44c6cd90e2b8e",
-      "observed_at": "2026-11-08",
-      "source_id": "r3.legacy.hr-principal-map"
     }
   ]
 }

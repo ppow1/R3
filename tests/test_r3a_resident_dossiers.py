@@ -158,11 +158,11 @@ class ResidentDossierTests(unittest.TestCase):
         self.assertEqual(self.repo.resolve_source_id("r3a.execution-profile", "resident.grace",
                                                      confirmed_only=False), "r3:grace")
 
-    def test_historical_hr_principal_crosswalk_keeps_evelyn_and_gm_distinct(self):
-        self.assertEqual(self.repo.resolve_source_id("r3.legacy.hr-principal-map", "resident:Evelyn"),
-                         "r3:evelyn")
-        self.assertEqual(self.repo.resolve_source_id("r3.legacy.hr-principal-map", "resident:GM"),
-                         "r3:gm")
+    def test_unverified_legacy_test_fixtures_are_not_treated_as_hr_crosswalk(self):
+        for value in ("resident:Grace", "resident:Vicky", "resident:Helen",
+                      "resident:Evelyn", "resident:GM"):
+            with self.assertRaises(KeyError):
+                self.repo.resolve_source_id("r3.legacy.hr-principal-map", value)
 
     def test_personnel_sensitive_and_protected_components_never_enter_prompt(self):
         dossier = self.repo.get("r3:grace")
@@ -261,6 +261,9 @@ class ResidentDossierTests(unittest.TestCase):
                          "directory_synchronization_unhealthy")
         snapshot = {"source": {"availability": "measured", "freshness": "fresh"},
                     "residents": [{"resident_id": "directory:grace"}]}
+        unresolved = reconcile_records(snapshot, ["r3:grace"], ["r3:grace"])
+        self.assertEqual({item.state for item in unresolved}, {
+            "hr_identity_crosswalk_missing", "directory_identity_crosswalk_missing"})
         result = reconcile_records(snapshot, ["r3:grace"], [],
                                    confirmed_crosswalk={"directory:grace": "r3:grace"})
         self.assertEqual([(item.institutional_id, item.state) for item in result],
@@ -274,11 +277,13 @@ class ResidentDossierTests(unittest.TestCase):
         self.assertEqual(result3[0].state, "matched_observed_records")
         duplicates = {"source": {"availability": "measured", "freshness": "fresh"},
                       "residents": [{"resident_id": "x"}, {"resident_id": "x"}]}
-        self.assertEqual(reconcile_records(duplicates, ["x"], ["x"])[0].state,
+        self.assertEqual(reconcile_records(duplicates, ["x"], ["x"],
+                                           confirmed_crosswalk={"x": "x"})[0].state,
                          "directory_binding_ambiguous")
         truncated = {"source": {"availability": "measured", "freshness": "fresh",
                                 "potentially_truncated": True}, "residents": []}
-        self.assertEqual(reconcile_records(truncated, ["r3:grace"], ["r3:grace"])[0].state,
+        self.assertEqual(reconcile_records(truncated, ["r3:grace"], ["r3:grace"],
+                                           confirmed_crosswalk={"directory:grace": "r3:grace"})[0].state,
                          "directory_projection_incomplete")
 
     def test_steward_classification_excludes_resident_lifecycle(self):
