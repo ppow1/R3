@@ -20,7 +20,7 @@ History/Predecessor: New file; initial publication recorded in Git.
 // Mock fetch never supplies live institutional data.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp} from '../web/steward-workspace-api.mjs';
+import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp, notificationPresentation} from '../web/steward-workspace-api.mjs';
 
 function response(status, payload, headers = {}) {
   return {
@@ -131,6 +131,25 @@ test('notification resolution submits disposition and evidence references', asyn
   await api.resolveNotification('delivery/2', {idempotencyKey: 'request-2', disposition: 'Reviewed', evidenceReferences: ['event:1']});
   assert.equal(call[0], '/api/v1/notifications/delivery%2F2/resolution');
   assert.deepEqual(JSON.parse(call[1].body), {idempotency_key: 'request-2', disposition: 'Reviewed', evidence_refs: ['event:1']});
+});
+
+test('notification history forwards the canonical pagination cursor', async () => {
+  let call;
+  const api = new StewardWorkspaceApi(async (...args) => { call = args; return response(200, {contract: 'r3a.notification-inbox.v1', contract_version: '1.0.0', freshness: 'current', presentation_timezone: 'America/New_York', deliveries: [], next_cursor: null}); });
+  const result = await api.notifications({cursor: 'opaque cursor'});
+  assert.equal(call[0], '/api/v1/notifications?cursor=opaque+cursor');
+  assert.equal(result.presentation_timezone, 'America/New_York');
+});
+
+test('notification presentation consumes canonical message, status, detail, and safe deep-link fields', () => {
+  const result = notificationPresentation({
+    delivery_id: 'delivery-1', status: 'queued', requires_action: true,
+    source_id: 'cme', source_event_id: 'event-1', correlation_id: 'correlation-1', created_at: '2026-11-08T12:00:00Z',
+    message: {title: 'Activity paused', summary: 'Grace requires review', details: 'Full source details', reason: 'Policy boundary', source: {source_id: 'cme', source_event_id: 'event-1', event_type: 'activity.paused'}, correlation_id: 'correlation-1', occurred_at: '2026-11-08T12:00:00Z', occurred_at_local: 'Nov 8 07:00 EST', evidence_refs: ['event:event-1'], detail_url: 'https://r3.example/events/event-1'},
+  });
+  assert.equal(result.title, 'Activity paused'); assert.equal(result.details, 'Full source details');
+  assert.equal(result.actionability, 'Actionable'); assert.equal(result.detailUrl, 'https://r3.example/events/event-1');
+  assert.equal(notificationPresentation({message: {detail_url: 'javascript:alert(1)'}}).detailUrl, null);
 });
 
 test('HTTP denials and contract mismatches remain explicit', async () => {

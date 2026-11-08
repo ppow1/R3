@@ -50,6 +50,27 @@ export function formatPresentationTimestamp(value, timezone = '') {
   }
 }
 
+export function notificationPresentation(notification, timezone = '') {
+  const message = notification?.message && typeof notification.message === 'object' ? notification.message : {};
+  const actionability = notification?.requires_action === true ? 'Actionable' : notification?.requires_action === false ? 'Informational' : 'Actionability unknown';
+  const detailUrl = typeof message.detail_url === 'string' && /^https?:\/\//i.test(message.detail_url) ? message.detail_url : null;
+  return {
+    title: message.title || notification?.title || notification?.delivery_id || 'Notification',
+    summary: message.summary || notification?.summary || '',
+    details: message.details || '',
+    reason: message.reason || '',
+    sourceId: message.source?.source_id || notification?.source_id || 'source unknown',
+    eventType: message.source?.event_type || notification?.event_type || 'event type unknown',
+    sourceEventId: message.source?.source_event_id || notification?.source_event_id || 'source event unknown',
+    correlationId: message.correlation_id || notification?.correlation_id || 'correlation unavailable',
+    occurredAt: message.occurred_at_local || formatPresentationTimestamp(message.occurred_at || notification?.created_at, timezone),
+    status: notification?.status || notification?.lifecycle_status || 'state unknown',
+    actionability,
+    evidenceRefs: message.evidence_refs || notification?.evidence_refs || [],
+    detailUrl,
+  };
+}
+
 export class StewardWorkspaceApi {
   constructor(fetchImpl = globalThis.fetch) {
     if (typeof fetchImpl !== 'function') throw new TypeError('A fetch implementation is required');
@@ -303,6 +324,7 @@ export function mountNotificationInbox({api = new StewardWorkspaceApi(), root = 
   const list = root.getElementById('notification-list');
   const status = root.getElementById('notification-service-status');
   const pendingActionKeys = new Map();
+  let nextCursor = null;
 
   function actionKey(deliveryId, actionName, payload) {
     const key = `${deliveryId}:${actionName}`;
@@ -312,21 +334,45 @@ export function mountNotificationInbox({api = new StewardWorkspaceApi(), root = 
     return pendingActionKeys.get(key).id;
   }
 
-  async function refresh() {
+  async function refresh({cursor = null, append = false} = {}) {
     setText(status, 'Loading recipient-specific notifications…');
     try {
-      const result = await api.notifications();
-      list.replaceChildren();
+      const result = await api.notifications({cursor});
+      if (!append) list.replaceChildren();
       for (const notification of result.deliveries || result.notifications || []) {
         const item = document.createElement('article');
         item.className = 'notification-item';
-        const lifecycle = notification.lifecycle_status || notification.status || 'unknown';
-        const heading = row('div', 'notification-heading', notification.title || notification.delivery_id || notification.notification_id, `${notification.severity || notification.urgency || 'severity unknown'} · ${formatPresentationTimestamp(notification.created_at || notification.received_at, root.documentElement?.dataset.presentationTimezone)} · ${notification.source_id || notification.source || 'source unknown'} · correlation ${notification.correlation_id || notification.source_correlation_id || 'not supplied'}`);
-        const body = document.createElement('p'); body.textContent = notification.summary || notification.message || '';
-        const requiresAction = notification.actionable === true || notification.action_required === true || notification.requires_action === true;
-        const state = document.createElement('p'); state.textContent = `Status: ${lifecycle} · ${requiresAction ? 'Actionable' : notification.actionable === false || notification.action_required === false || notification.requires_action === false ? 'Informational' : 'Actionability unknown'}`;
-        const evidence = document.createElement('p'); evidence.textContent = `Evidence: ${(notification.evidence_refs || notification.evidence_references || []).join(', ') || 'none provided'}`;
-        item.append(heading, body, state, evidence);
+        const presentation = notificationPresentation(notification, result.presentation_timezone || root.documentElement?.dataset.presentationTimezone || '');
+        const heading = row('div', 'notification-heading', presentation.title, `${notification.severity || notification.urgency || 'severity unknown'} · ${presentation.occurredAt} · ${presentation.sourceId} · ${presentation.eventType} · correlation ${presentation.correlationId}`);
+        const summary = document.createElement('p'); summary.textContent = presentation.summary;
+        const state = document.createElement('p'); state.textContent = `Status: ${presentation.status} · ${presentation.actionability}`;
+        const reason = document.createElement('p'); reason.textContent = `Reason: ${presentation.reason || 'not supplied'}`;
+        const source = document.createElement('p'); source.textContent = `Source event: ${presentation.sourceEventId}`;
+        const evidence = document.createElement('p'); evidence.textContent = `Evidence: ${presentation.evidenceRefs.join(', ') || 'none provided'}`;
+        item.append(heading, summary, state, reason, source, evidence);
+        if (presentation.details) {
+          const details = document.createElement('details');
+          const summaryLabel = document.createElement('summary'); summaryLabel.textContent = 'Full notification details';
+          const fullDetails = document.createElement('p'); fullDetails.textContent = presentation.details;
+          details.append(summaryLabel, fullDetails); item.appendChild(details);
+        }
+        if (notification.notification && typeof notification.notification === 'object') {
+          const payloadDetails = document.createElement('details');
+          const payloadSummary = document.createElement('summary'); payloadSummary.textContent = 'Original notification payload';
+          const payload = document.createElement('pre'); payload.textContent = JSON.stringify(notification.notification, null, 2);
+          payloadDetails.append(payloadSummary, payload); item.appendChild(payloadDetails);
+        }
+        if (presentation.detailUrl) {
+          const deepLink = document.createElement('a'); deepLink.href = presentation.detailUrl; deepLink.target = '_blank'; deepLink.rel = 'noopener noreferrer'; deepLink.textContent = 'Open associated event';
+          item.appendChild(deepLink);
+        }
+        const deliveryActions = notification.message?.actions || [];
+        for (const action of deliveryActions) {
+          if (action.action_id !== 'open' || typeof action.destination !== 'string' || !/^https?:\/\//i.test(action.destination)) continue;
+          const link = document.createElement('a'); link.href = action.destination; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = action.label || 'Open notification'; item.appendChild(link);
+        }
+        const requiresAction = notification.requires_action === true;
+        const lifecycle = notification.status || notification.lifecycle_status || 'unknown';
         if (requiresAction && lifecycle !== 'acknowledged' && lifecycle !== 'resolved') {
           const acknowledge = document.createElement('button');
           acknowledge.type = 'button'; acknowledge.textContent = 'Acknowledge';
@@ -366,8 +412,14 @@ export function mountNotificationInbox({api = new StewardWorkspaceApi(), root = 
         }
         list.appendChild(item);
       }
+      list.querySelector?.('.notification-load-older')?.remove();
+      nextCursor = result.next_cursor || null;
+      if (nextCursor) {
+        const older = document.createElement('button'); older.type = 'button'; older.className = 'notification-load-older'; older.textContent = 'Load older notifications';
+        older.addEventListener('click', () => refresh({cursor: nextCursor, append: true})); list.appendChild(older);
+      }
       if (!list.childNodes.length) setText(list, 'No notifications were returned for this Steward session.');
-      setText(status, `Notifications loaded from service · ${result.freshness || 'freshness unknown'}`);
+      setText(status, `Notifications loaded from recipient service · ${result.freshness || 'freshness unknown'} · ${result.presentation_timezone || 'presentation timezone unavailable'}`);
       status.dataset.state = result.freshness || 'unknown';
     } catch (error) {
       list.replaceChildren();
