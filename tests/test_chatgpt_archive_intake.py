@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from scripts.propose_chatgpt_archive import build_catalog, main
+from r3a_plugins.institutional_knowledge.review_store import validate_item_decision
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,6 +41,15 @@ class ChatGPTArchiveIntakeTests(unittest.TestCase):
         flagged = next(item for item in first["entries"] if item["title"].endswith("Contact details review"))
         self.assertIn("personal-data-review", flagged["flags"])
         self.assertIn("credential", flagged["flags"])
+
+    def test_charter_protected_relationship_content_cannot_be_promoted(self):
+        raw = json.dumps([{"id":"private","title":"Private notes","mapping":{"n":{
+            "message":{"id":"m","author":{"role":"user"},
+                       "content":{"parts":["Evelyn relationship history is confidential."]}}}}}]).encode()
+        entry = build_catalog(raw, source_label="archive-fixture", source_path="/tmp/source.json")["entries"][0]
+        self.assertIn("protected-relationship", entry["flags"])
+        with self.assertRaisesRegex(PermissionError, "cannot be promoted"):
+            validate_item_decision(entry, {"decision":"approve", "individual_review":True, "rationale":"reviewed"})
 
     def test_rejects_invalid_root_and_empty_provenance_label(self):
         with self.assertRaisesRegex(ValueError, "conversations array"):

@@ -49,6 +49,7 @@ def _sensitivity_flags(text: str) -> list[str]:
         "credential": r"(?i)\b(password|passwd|api[_ -]?key|access[_ -]?token|secret)\b\s*[:=]\s*\S+",
         "personal-data-review": r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b|\b\+?\d[\d(). -]{8,}\d\b",
         "private-hr": r"(?i)\b(social security|ssn|medical record|salary|disciplinary action)\b",
+        "protected-relationship": r"(?i)\b(evelyn|gray man|romantic relationship|intimate relationship|relationship history)\b",
     }
     for flag, pattern in patterns.items():
         if re.search(pattern, text):
