@@ -54,6 +54,10 @@ def _module_environment(operation: RegisteredOperation) -> dict[str, str]:
 
     visit(operation.configuration)
     for name in names:
+        # AP0-M1 modules never receive credentials for direct access to CME's
+        # institutional database. Database-backed observations cross via CME APIs.
+        if re.search(r"(?:^|_)(?:DB|DATABASE|POSTGRES|PSYCOPG|PG)(?:_|$)", name):
+            continue
         if name in os.environ:
             allowed[name] = os.environ[name]
     return allowed
