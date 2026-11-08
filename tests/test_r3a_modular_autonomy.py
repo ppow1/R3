@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_modular_autonomy.py
 Component: R3A-AP1-MODULAR-AUTONOMY-REGRESSION
-File Revision: 1.4.0
+File Revision: 1.4.1
 Created: 2026-11-06T23:19:46Z
 Created By: Codex GPT-6
 Purpose: Permanently verify versioned autonomy contracts, external model roles, readiness routing, deferral, and authorization-provider compatibility.
@@ -12,6 +12,7 @@ Dependencies: Python 3.12 standard library; r3a_runtime configuration/contracts/
 Authority: R3A AP0/AP1 Modular Autonomy Implementation Slices 1–2; isolated development branch only.
 Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Add focused permanent regression coverage for the first modular autonomy slice.
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Cover legacy configuration, durable deferral semantics, and stale readiness diagnostics.
+Changed: 2026-11-08T15:02:05Z | R3A-CONTEXT-RECOVERY | Codex GPT-6 | Validate externally configured model context windows and rejection of invalid bounds.
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Extend Slice 1 regressions for provider configuration, identity, stale state and recovery routing.
 Changed: 2026-11-07T05:45:10Z | AP2-IMPLEMENTATION | Codex GPT-6 | Give the model deferral compatibility fixture valid required acceptance criteria.
 Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Assert authorization decision identity remains distinct from its audit event.
@@ -204,6 +205,23 @@ class VersionedEnvelopeTests(unittest.TestCase):
 
 
 class ModelRoleConfigAndRoutingTests(unittest.TestCase):
+    def test_model_route_context_window_is_externally_configurable_and_bounded(self):
+        with TemporaryDirectory() as directory:
+            path = make_config(Path(directory))
+            value = json.loads(path.read_text(encoding="utf-8"))
+            route = value["grace"]["routes"][1]
+            route["context_window_tokens"] = 16384
+            path.write_text(json.dumps(value), encoding="utf-8")
+            settings = load_settings(path)
+            self.assertEqual(settings.model_route("primary-route").context_window_tokens, 16384)
+            self.assertEqual(sanitized_config(settings)["grace"]["routes"][1]["context_window_tokens"], 16384)
+
+            for invalid in (True, 1023, 1000001, route["max_tokens"]):
+                route["context_window_tokens"] = invalid
+                path.write_text(json.dumps(value), encoding="utf-8")
+                with self.assertRaises(ConfigurationError):
+                    load_settings(path)
+
     def test_roles_are_external_and_model_assignment_change_changes_revision(self):
         with TemporaryDirectory() as first_dir, TemporaryDirectory() as second_dir:
             first = load_settings(make_config(Path(first_dir)))

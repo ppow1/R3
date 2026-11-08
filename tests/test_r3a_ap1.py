@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.10.3
+File Revision: 1.10.4
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -41,6 +41,7 @@ Changed: 2026-11-08T02:44:52Z | R3A-AP1-EVIDENCE-FEEDBACK | Codex GPT-6 | Verify
 Changed: 2026-11-08T02:49:00Z | R3A-AP1-EVIDENCE-FEEDBACK | Codex GPT-6 | Verify evidence records retain provider and invocation provenance.
 Changed: 2026-11-08T13:21:02Z | R3A-AP1-EVIDENCE-REASONING | Codex GPT-6 | Cover distinction between claim support, evidence coverage, unavailable records, and bounded corrective decisions.
 Changed: 2026-11-08T13:50:35Z | R3A-AUTONOMY-RECOVERY | Codex GPT-6 | Test failed-capability reasoning guidance and bounded durable activity retry decisions.
+Changed: 2026-11-08T15:02:05Z | R3A-CONTEXT-RECOVERY | Codex GPT-6 | Verify bounded projection of evidence and actual prior tool messages plus single changed-request recovery after provider rejection.
 Supersedes: None.
 Contracts: R3A-019; proposed r3a.resident.execution-profile@1.0.0; configured model routing and evidence provenance.
 Tests: This test module.
@@ -55,8 +56,10 @@ import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 import hashlib
+import io
+import urllib.error
 from r3a_runtime.db import Store, _activity_failure_outcome
 
 from r3a_runtime.acceptance import (AcceptanceCriteriaRequired, validate_acceptance,
@@ -64,7 +67,9 @@ from r3a_runtime.acceptance import (AcceptanceCriteriaRequired, validate_accepta
 from r3a_runtime.cme import CME, _RESIDENT_TOOLS, _knowledge_answer_issues, _requires_runtime_evidence
 from r3a_runtime.config import (ConfigurationError, ModelReadinessPolicy, ModelRole,
                                 ModelRoute, resolve_model_route)
-from r3a_runtime.grace_module import GraceResident, resident_action_schema
+from r3a_runtime.grace_module import (GraceResident, ModelContextLimitError,
+                                      compact_evidence_for_context, estimate_prompt_tokens,
+                                      fit_model_request_context, resident_action_schema)
 from r3a_runtime.knowledge import retrieve
 from r3a_runtime.diagnostics import DiagnosticProjection
 
@@ -281,6 +286,157 @@ class DiagnosticSnapshotPerformanceTests(unittest.TestCase):
 
 
 class ResidentCapabilityReasoningTests(unittest.TestCase):
+    def test_context_projection_preserves_source_provenance_and_marks_omissions(self):
+        content = {"gpu": {"model": "Qwen3-Next-80B", "availability": "ready",
+                           "temperature_c": 44, "memory_used_gib": 91},
+                   "unrelated_history": [{"event": f"event-{index}", "message": "x" * 80}
+                                         for index in range(100)]}
+        evidence = [{"source_id": "telemetry:gpu", "sha256": "source-digest",
+                     "provider_id": "octominer.telemetry", "invocation_id": "invocation-1",
+                     "content": content}]
+        projected, omissions = compact_evidence_for_context(
+            evidence, "Report GPU model identity and availability")
+        self.assertEqual(projected[0]["source_id"], "telemetry:gpu")
+        self.assertEqual(projected[0]["sha256"], "source-digest")
+        self.assertEqual(projected[0]["provider_id"], "octominer.telemetry")
+        self.assertEqual(projected[0]["invocation_id"], "invocation-1")
+        self.assertEqual(projected[0]["content"]["gpu"]["model"], "Qwen3-Next-80B")
+        self.assertEqual(projected[0]["content"]["gpu"]["availability"], "ready")
+        self.assertFalse(projected[0]["context_projection"]["full_content_included"])
+        self.assertEqual(projected[0]["context_projection"]["original_content_sha256"], "source-digest")
+        self.assertEqual(omissions[0]["source_id"], "telemetry:gpu")
+        self.assertEqual(evidence[0]["content"], content, "durable source evidence must not be mutated")
+
+    def test_model_request_preflight_keeps_inventory_and_fits_bounded_context(self):
+        route = ModelRoute("primary", "openai-compatible", "http://model/v1/chat/completions",
+                           "reasoner", 60, 512, 16384)
+        evidence = [{"source_id": f"telemetry:{index}", "sha256": f"digest-{index}",
+                    "content": {"gpu": {"model": "Qwen3-Next-80B", "availability": "ready"},
+                                "history": [{"event": f"e-{n}", "message": "telemetry history " * 12}
+                                            for n in range(35)]}}
+                   for index in range(12)]
+        user = {"objective": "Report GPU model identity and availability", "evidence": evidence,
+                "evidence_inventory": [{"source_id": row["source_id"], "sha256": row["sha256"]}
+                                       for row in evidence],
+                "citation_requirements": {"required_source_ids": ["telemetry:0"]},
+                "resident_result": {"outcome": "FAIL", "failure_reasons": [
+                    {"code": "evidence_missing", "message": "cite telemetry:0"}]}}
+        request = {"model": "reasoner", "max_tokens": 512,
+                   "messages": [{"role": "system", "content": "Use cited evidence."},
+                                {"role": "user", "content": json.dumps(user)}]}
+        fitted, report = fit_model_request_context(request, evidence,
+                                                   "GPU model identity availability evidence_missing cite telemetry:0",
+                                                   route)
+        self.assertIsNotNone(fitted)
+        self.assertLessEqual(report["estimated_prompt_tokens"], report["prompt_budget_tokens"])
+        fitted_user = json.loads(fitted["messages"][-1]["content"])
+        self.assertEqual(len(fitted_user["evidence_inventory"]), len(evidence))
+        self.assertEqual(fitted_user["citation_requirements"]["required_source_ids"], ["telemetry:0"])
+        self.assertEqual(fitted_user["resident_result"]["failure_reasons"][0]["code"], "evidence_missing")
+        self.assertTrue(report["omitted_content"])
+        self.assertTrue(all(item.get("context_projection", {}).get("original_content_sha256")
+                            for item in fitted_user["evidence"] if "context_projection" in item))
+
+    def test_model_request_compacts_duplicated_prior_tool_result_but_keeps_outcome_and_evidence_refs(self):
+        route = ModelRoute("primary", "openai-compatible", "http://model/v1/chat/completions",
+                           "reasoner", 60, 512, 16384)
+        source_records = [{"source_id": f"telemetry:{index}", "sha256": f"digest-{index}",
+                           "provider_id": "telemetry-provider", "invocation_id": "invoke-1",
+                           "content": {"gpu_model": "Qwen3-Next-80B", "availability": "ready",
+                           "telemetry_history": "historic observation " * 1600}}
+                          for index in range(6)]
+        prior_result = {"contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
+                        "capability_id": "institution.telemetry.read", "outcome": "succeeded",
+                        "arguments": {}, "output": source_records, "evidence": source_records,
+                        "authorization": {"audit_event_id": "audit-17", "authorized": True},
+                        "observed_at": "2026-11-08T14:00:00Z"}
+        verifier = {"institutional_acceptance": "rejected", "gaps": [
+            {"criterion_id": "route", "code": "evidence_path_incomplete", "message": "cite transition evidence"}]}
+        conversation = [{"role": "assistant", "content": '{"action":"invoke_capability","capability_id":"institution.telemetry.read"}'},
+                        {"role": "user", "content": json.dumps({"capability_result": prior_result})},
+                        {"role": "user", "content": json.dumps(verifier)}]
+        inventory = [{"source_id": item["source_id"], "evidence_sha256": item["sha256"],
+                      "provider_id": item["provider_id"], "invocation_id": item["invocation_id"]}
+                     for item in source_records]
+        user = {"objective": "Identify the GPU model and availability; cite the transition route.",
+                "evidence": source_records, "evidence_inventory": inventory,
+                "resident_result": {"outcome": "FAIL"}}
+        request = {"model": "reasoner", "max_tokens": 512,
+                   "messages": [{"role": "system", "content": "Use cited evidence."},
+                                *conversation,
+                                {"role": "user", "content": json.dumps(user)}]}
+        fitted, report = fit_model_request_context(request, source_records,
+                                                   "GPU model availability transition evidence_path_incomplete", route)
+        self.assertIsNotNone(fitted)
+        projected_user = json.loads(fitted["messages"][-1]["content"])
+        projected_result = json.loads(fitted["messages"][2]["content"])["capability_result"]
+        projected_feedback = json.loads(fitted["messages"][3]["content"])
+        self.assertEqual(projected_result["outcome"], "succeeded")
+        self.assertEqual(projected_result["authorization"]["audit_event_id"], "audit-17")
+        self.assertEqual(len(projected_result["evidence_references"]), len(source_records))
+        self.assertEqual(projected_result["output"]["content_location"],
+                         "the current evidence field and evidence_inventory")
+        self.assertEqual(projected_feedback["gaps"][0]["code"], "evidence_path_incomplete")
+        self.assertEqual(len(projected_user["evidence_inventory"]), len(source_records))
+        self.assertTrue(report["omitted_conversation_content"])
+        self.assertEqual(request["messages"][2]["content"], json.dumps({"capability_result": prior_result}))
+
+    def test_context_limit_failure_causes_one_changed_compacted_request(self):
+        tool = {"capability_id": "institution.telemetry.read",
+                "arguments_schema": {"type": "object", "properties": {}, "required": []}}
+        action = ('{"action":"invoke_capability","contract_id":"r3a.resident-capability-tool",'
+                  '"contract_version":"1.0.0","capability_id":"institution.telemetry.read",'
+                  '"arguments":{},"rationale":"The retained summary identifies the route but lacks its current telemetry; retrieve that evidence."}')
+        resident = self._resident(action)
+        oversized_evidence = [{"source_id": "telemetry:history", "sha256": "history-digest",
+                               "provider_id": "telemetry-provider", "invocation_id": "invoke-1",
+                               "content": {"gpu": {"model": "Qwen3-Next-80B", "availability": "ready"},
+                                           "observations": [{"gpu_model": f"model-{i}",
+                                                             "availability": "ready",
+                                                             "observation": f"gpu observation {i} " + "x" * 500}
+                                                            for i in range(120)]}}]
+        resident._model_request = AsyncMock(side_effect=[
+            ModelContextLimitError(23154, 16384, "provider context limit"),
+            {"id": "retried", "usage": {"prompt_tokens": 5200, "completion_tokens": 45},
+             "choices": [{"finish_reason": "stop", "message": {"content": action}}]},
+        ])
+        payload = self._payload([tool])
+        payload["objective"] = "Inspect the GPU telemetry and report current model availability."
+        payload["evidence"] = oversized_evidence
+        result = asyncio.run(resident.handle("execute", payload))
+        self.assertEqual(result["action"], "invoke_capability")
+        self.assertEqual(result["capability_request"]["capability_id"], tool["capability_id"])
+        self.assertEqual(resident._model_request.await_count, 2)
+        first_request = resident._model_request.await_args_list[0].args[2]
+        second_request = resident._model_request.await_args_list[1].args[2]
+        first_user = json.loads(first_request["messages"][-1]["content"])
+        second_user = json.loads(second_request["messages"][-1]["content"])
+        self.assertNotEqual(first_request, second_request)
+        self.assertIn("context_recovery_feedback", second_user)
+        self.assertEqual(second_user["context_recovery_feedback"]["previous_prompt_tokens"], 23154)
+        self.assertEqual(result["evidence"][0]["evidence_sha256"], "history-digest")
+        self.assertEqual(result["context_compaction"]["provider_rejection"]["prompt_tokens"], 23154)
+        durable_context = result["model"]["usage"]["context_budget"]
+        self.assertEqual(durable_context["provider_rejection"]["prompt_tokens"], 23154)
+        self.assertTrue(durable_context["rejected_request_ref"])
+        self.assertEqual(durable_context["retry"]["request_ref"], result["model"]["request_ref"])
+        self.assertNotEqual(first_request, second_request)
+        self.assertNotEqual(first_user["evidence"], second_user["evidence"])
+
+    def test_provider_context_rejection_is_parsed_with_reported_prompt_and_window(self):
+        resident = self._resident('{"action":"final"}')
+        del resident._model_request
+        error_body = json.dumps({"error": {"type": "exceed_context_size_error",
+                                            "n_prompt_tokens": 23154, "n_ctx": 16384}}).encode()
+        error = urllib.error.HTTPError("http://model/v1/chat/completions", 400,
+                                       "Bad Request", {}, io.BytesIO(error_body))
+        with patch("r3a_runtime.grace_module.urllib.request.urlopen", side_effect=error):
+            with self.assertRaises(ModelContextLimitError) as raised:
+                asyncio.run(resident._model_request("http://model/v1/chat/completions", 1,
+                                                     {"messages": []}))
+        self.assertEqual(raised.exception.prompt_tokens, 23154)
+        self.assertEqual(raised.exception.context_tokens, 16384)
+
     def test_observer_context_does_not_pre_authorize_uninvoked_module_capabilities(self):
         class ObserverStore:
             async def rows(self, query, _params=()):

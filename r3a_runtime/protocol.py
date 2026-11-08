@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/protocol.py
 Component: R3A-LOCAL-PROTOCOL
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-06T15:12:00Z
 Created By: Codex GPT-6
 Purpose: Implement the bounded versioned JSON-lines contract over private Unix sockets.
@@ -11,6 +11,7 @@ Observability: Correlated protocol requests and structured errors.
 Dependencies: Python 3.12 standard library; AP0-M1 module/control contracts.
 Authority: AP0-M1 implementation authorized by Steward in GitHub Issue #42; local sockets only.
 Changed: 2026-11-06T15:12:00Z | R3A-AP0-M1 | Codex GPT-6 | Add local versioned protocol helpers.
+Changed: 2026-11-08T15:02:05Z | R3A-CONTEXT-RECOVERY | Codex GPT-6 | Raise the bounded local resident frame ceiling to carry durable context until Grace can compact its model view.
 Supersedes: None.
 Contracts: MOD-001–MOD-010; AP0-007; AP0-M1 D5/D8.
 Tests: tests/test_r3a_protocol.py.
@@ -28,7 +29,7 @@ from typing import Any, Awaitable, Callable
 
 PROTOCOL_MAJOR = 1
 PROTOCOL_MINOR = 0
-MAX_MESSAGE_BYTES = 65536
+MAX_MESSAGE_BYTES = 1_048_576
 
 
 def encode(message: dict[str, Any]) -> bytes:
