@@ -35,4 +35,5 @@ include = ["r3a_runtime*", "r3a_plugins*"]
 
 [tool.setuptools.package-data]
 r3a_runtime = ["migrations/*.sql", "state_machines/*.json", "schemas/*.json"]
-"r3a_plugins.notification_service" = ["manifest.json", "config.schema.json", "config.example.json", "README.md"]
+"r3a_plugins.notification_service" = ["manifest.json", "config.schema.json", "config.example.json", "notification-inbox.v1.schema.json", "README.md"]
+"r3a_plugins.notification_source" = ["manifest.json", "config.example.json"]

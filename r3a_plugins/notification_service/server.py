@@ -18,10 +18,11 @@ from r3a_runtime.notifications import validate_notification_envelope
 from r3a_runtime.notification_delivery import route_notification
 
 from .store import NotificationConflict, NotificationForbidden, NotificationStore
+from .ntfy import NtfyPublisher, render_notification_presentation
 
 
 MODULE_ID = "r3a.notifications"
-MODULE_VERSION = "1.1.0"
+MODULE_VERSION = "1.2.0"
 MAX_BODY_BYTES = 1_048_576
 
 
@@ -37,11 +38,14 @@ def load_config(path: str | Path) -> dict[str, Any]:
     schema=json.loads((Path(__file__).with_name("config.schema.json")).read_text(encoding="utf-8"))
     from r3a_runtime.capability_contracts import validate_json
     validate_json(value,schema)
-    if not isinstance(value, dict) or set(value) != {"contract_id", "contract_version", "dsn_env",
+    if not isinstance(value, dict) or not {"contract_id", "contract_version", "dsn_env",
             "source_token_env", "steward_token_env", "steward_principal_env", "presentation_timezone",
-            "source_ids", "subscriptions"}:
+            "source_ids", "subscriptions"} <= value.keys() or value.keys() - {
+            "contract_id", "contract_version", "dsn_env", "source_token_env", "steward_token_env",
+            "steward_principal_env", "presentation_timezone", "source_ids", "subscriptions", "ntfy",
+            "website_base_url_env"}:
         raise ConfigurationError("notification module config has an invalid field set")
-    if value["contract_id"] != "r3a.notification-module-config" or value["contract_version"] != "1.0.0":
+    if value["contract_id"] != "r3a.notification-module-config" or value["contract_version"] not in {"1.0.0", "1.1.0"}:
         raise ConfigurationError("unsupported notification module config contract")
     for name in ("dsn_env", "source_token_env", "steward_token_env", "steward_principal_env"):
         if not isinstance(value[name], str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*", value[name]):
@@ -79,11 +83,28 @@ def load_config(path: str | Path) -> dict[str, Any]:
                 or recipient["kind"] not in {"resident","office","steward"}
                 or not isinstance(recipient["office_role"],str) or not recipient["office_role"].strip()):
             raise ConfigurationError("subscription recipient must select an authoritative directory role")
+    ntfy = value.get("ntfy", {"enabled": False})
+    if not isinstance(ntfy, dict) or ntfy.get("enabled") not in {True, False}:
+        raise ConfigurationError("ntfy config must state whether phone delivery is enabled")
+    if ntfy["enabled"]:
+        if set(ntfy) != {"enabled", "base_url", "topic_env", "token_file_env", "timeout_seconds"}:
+            raise ConfigurationError("enabled ntfy config has an invalid field set")
+        for field in ("topic_env", "token_file_env"):
+            if not isinstance(ntfy[field], str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*", ntfy[field]):
+                raise ConfigurationError(f"ntfy {field} must name an environment variable")
+        if not isinstance(ntfy["base_url"], str) or not 1 <= ntfy["timeout_seconds"] <= 30:
+            raise ConfigurationError("ntfy endpoint or timeout is invalid")
+    elif set(ntfy) != {"enabled"}:
+        raise ConfigurationError("disabled ntfy config accepts only enabled=false")
+    if "website_base_url_env" in value and (not isinstance(value["website_base_url_env"], str)
+            or not re.fullmatch(r"[A-Z][A-Z0-9_]*",value["website_base_url_env"])):
+        raise ConfigurationError("website_base_url_env must name an environment variable")
     return value
 
 
 def create_server(config: dict[str, Any], *, host: str = "127.0.0.1", port: int = 0,
-                  store: NotificationStore | None = None) -> ThreadingHTTPServer:
+                  store: NotificationStore | None = None,
+                  phone_publisher: NtfyPublisher | None = None) -> ThreadingHTTPServer:
     if host not in {"127.0.0.1", "::1", "localhost"} and os.environ.get("R3A_NOTIFICATION_ALLOW_NONLOCAL") != "1":
         raise ConfigurationError("non-local bind requires an explicitly configured authenticated gateway")
     dsn = os.environ.get(config["dsn_env"], "")
@@ -92,6 +113,7 @@ def create_server(config: dict[str, Any], *, host: str = "127.0.0.1", port: int 
     steward_principal = os.environ.get(config["steward_principal_env"], "")
     if not dsn or not source_token or not steward_token or not steward_principal:
         raise ConfigurationError("notification service requires configured database, source, and Steward credentials")
+    phone_publisher = phone_publisher or _configured_ntfy_publisher(config)
     store = store or NotificationStore(dsn)
     store.initialize(MODULE_VERSION)
 
@@ -172,6 +194,7 @@ def create_server(config: dict[str, Any], *, host: str = "127.0.0.1", port: int 
                 result=store.inbox(steward_principal,cursor=cursor,limit=limit)
                 for delivery in result["deliveries"]:
                     _add_local_timestamps(delivery,config["presentation_timezone"])
+                    _add_presentation(delivery,config)
                 result["presentation_timezone"]=config["presentation_timezone"]
                 self._send(200,result)
                 self._log("notification.inbox.read",principal=steward_principal,delivery_count=len(result["deliveries"]))
@@ -213,12 +236,32 @@ def create_server(config: dict[str, Any], *, host: str = "127.0.0.1", port: int 
                     digest=body["directory_snapshot"]["source"]["snapshot_sha256"]
                     result=store.ingest(notification,recipients,
                                         directory_snapshot_sha256=digest,
-                                        subscription={"subscriptions":config["subscriptions"]})
-                    self._send(202,{"contract":"r3a.notification-source-result.v1","outcome":"persisted",
-                                    "deliveries":result})
+                                        subscription={"subscriptions":config["subscriptions"]},
+                                        phone_enabled=phone_publisher is not None)
+                    delivery_error = False
+                    for delivery in result:
+                        if phone_publisher is not None and delivery["phone_delivery"]["state"] != "sent":
+                            claimed = store.begin_phone_attempt(delivery["delivery_id"])
+                            if claimed is None:
+                                delivery_error = True
+                            else:
+                                try:
+                                    ntfy_id = phone_publisher.publish(claimed,
+                                        presentation_timezone=config["presentation_timezone"])
+                                    delivery.update(store.mark_phone_sent(delivery["delivery_id"],ntfy_id))
+                                except Exception as exc:
+                                    delivery.update(store.mark_phone_failed(delivery["delivery_id"],type(exc).__name__))
+                                    delivery_error = True
+                                    self._log("notification.phone.failed",delivery_id=delivery["delivery_id"],
+                                              error_type=type(exc).__name__)
+                        _add_presentation(delivery,config)
+                    response={"contract":"r3a.notification-source-result.v1","outcome":"persisted",
+                              "deliveries":result}
+                    self._send(503 if delivery_error else 202,response)
                     self._log("notification.intake.persisted",source_event_id=notification["source_event_id"],
                               source_event_type=notification["event_type"],delivery_ids=[item["delivery_id"] for item in result],
-                              duplicate_count=sum(bool(item.get("duplicate")) for item in result))
+                              duplicate_count=sum(bool(item.get("duplicate")) for item in result),
+                              phone_delivery_states=[item["phone_delivery"]["state"] for item in result])
                     return
                 match=re.fullmatch(r"/api/v1/notifications/([0-9a-fA-F-]{36})/(acknowledgment|resolution)",parsed.path)
                 if not match:
@@ -243,6 +286,7 @@ def create_server(config: dict[str, Any], *, host: str = "127.0.0.1", port: int 
                 result["contract"]="r3a.notification-inbox.v1"
                 result["presentation_timezone"]=config["presentation_timezone"]
                 _add_local_timestamps(result,config["presentation_timezone"])
+                _add_presentation(result,config)
                 self._send(200,result)
                 self._log(f"notification.{action}.completed",delivery_id=delivery_id,
                           principal=steward_principal,decision_id=authorization_ref["decision_id"],
@@ -282,6 +326,37 @@ def _add_local_timestamps(value: dict[str, Any], timezone_name: str) -> None:
     for key in ("created_at","acknowledged_at","resolved_at"):
         if value.get(key) is not None:
             value[f"{key}_local"]=format_timestamp(value[key],timezone_name)
+
+
+def _website_base_url(config: dict[str, Any]) -> str | None:
+    env_name = config.get("website_base_url_env")
+    return os.environ.get(env_name, "") or None if env_name else None
+
+
+def _add_presentation(value: dict[str, Any], config: dict[str, Any]) -> None:
+    value["message"] = render_notification_presentation(value,
+        website_base_url=_website_base_url(config),
+        presentation_timezone=config["presentation_timezone"])
+
+
+def _configured_ntfy_publisher(config: dict[str, Any]) -> NtfyPublisher | None:
+    ntfy = config.get("ntfy", {"enabled": False})
+    if not ntfy.get("enabled"):
+        return None
+    names = {key: os.environ.get(ntfy[field], "") for key, field in (
+        ("topic", "topic_env"), ("token_file", "token_file_env"))}
+    names["website_base_url"] = _website_base_url(config)
+    if any(not value for value in names.values()):
+        raise ConfigurationError("enabled ntfy delivery requires topic, token file, and Website URL configuration")
+    try:
+        token = Path(names["token_file"]).read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as exc:
+        raise ConfigurationError(f"ntfy credential file unavailable: {type(exc).__name__}") from None
+    try:
+        return NtfyPublisher(ntfy["base_url"],topic=names["topic"],token=token,
+            website_base_url=names["website_base_url"],timeout=float(ntfy["timeout_seconds"]))
+    except (TypeError, ValueError) as exc:
+        raise ConfigurationError(f"ntfy configuration invalid: {type(exc).__name__}") from None
 
 
 def main() -> None:

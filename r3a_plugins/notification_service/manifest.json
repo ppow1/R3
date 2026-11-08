@@ -2,26 +2,48 @@
   "contract_id": "r3a.notification-service-manifest.v1",
   "contract_version": "1.0.0",
   "module_id": "r3a.notifications",
-  "module_version": "1.1.0",
+  "module_version": "1.2.0",
   "module_type": "http_service",
   "entrypoint": "r3a_plugins.notification_service.server:main",
   "health_path": "/healthz",
   "api_contract": "r3a.notification-inbox.v1",
+  "api_schema_ref": "notification-inbox.v1.schema.json",
   "source_contract": "r3a.notification-intake@1.0.0",
   "persistence": "postgresql",
   "schema_namespace": "r3a_notification",
-  "state_schema_version": 1,
+  "state_schema_version": 3,
+  "optional_phone_transport": "ntfy-publish.v1",
   "lifecycle": [
     "activate",
     "deactivate",
     "upgrade"
   ],
   "artifact_ref": "server.py",
-  "artifact_sha256": "fde5e1340b7cd1aa7b45001c497d6da23a151d675cd36199839e4b9b0978ad02",
+  "artifact_sha256": "919e743eb5a80ca63a1013f0346ca10297d39cdd677aecabad40d9c8540aced8",
   "supporting_artifacts": [
     {
       "artifact_ref": "store.py",
-      "artifact_sha256": "f63abcaa282c00990c76e8d2e24fabe057c10cdac018d32834cdb7ca7aa07d0b"
+      "artifact_sha256": "059a1ef19c4f48e430b19a599062e5f91718fc27471af19680beeba9295c6992"
+    },
+    {
+      "artifact_ref": "ntfy.py",
+      "artifact_sha256": "f08df1a83d42a63d5f107f2786e079650bfb733157a4c1b00f6add05450310f3"
+    },
+    {
+      "artifact_ref": "notification-inbox.v1.schema.json",
+      "artifact_sha256": "f24a12c30262d78e6151b76e6cfc96a86800dcd7502fedc1ec20667c5fbbfcee"
+    },
+    {
+      "artifact_ref": "../notification_source/manifest.json",
+      "artifact_sha256": "8288542a21d1ca8d407d5af005b289a087db00a5827009ea45f6c719f7b90ca7"
+    },
+    {
+      "artifact_ref": "../notification_source/plugin.py",
+      "artifact_sha256": "19d080f806313c5cf33f48d34f19bef7a87ddcee71193f39a4ee98ad735f3239"
+    },
+    {
+      "artifact_ref": "../../r3a_runtime/schemas/activity-intake.v1.schema.json",
+      "artifact_sha256": "d98dcf249ebb61471ada6051bb9831bbedc1454e74e819e35a9755b18cc05b3c"
     },
     {
       "artifact_ref": "../../r3a_runtime/timestamp_presentation.py",
@@ -29,7 +51,7 @@
     },
     {
       "artifact_ref": "config.schema.json",
-      "artifact_sha256": "d5066d7583bacbc1bd00cff062632d7258c518f7d536c80c2d403610d528a1ed"
+      "artifact_sha256": "55e6ee7619b818864d2ecb310d4c6784687a019fc8f65eac84af99ae3cb09c92"
     },
     {
       "artifact_ref": "../../r3a_runtime/notifications.py",

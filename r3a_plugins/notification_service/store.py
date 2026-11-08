@@ -86,9 +86,31 @@ class NotificationStore:
                     resolution_authorization jsonb,
                     resolution_idempotency_key text UNIQUE,
                     disposition text,
-                    evidence_refs jsonb NOT NULL DEFAULT '[]'::jsonb
+                    evidence_refs jsonb NOT NULL DEFAULT '[]'::jsonb,
+                    phone_delivery_state text NOT NULL DEFAULT 'disabled'
+                        CHECK (phone_delivery_state IN ('disabled','pending','sending','failed','sent')),
+                    phone_delivery_attempts integer NOT NULL DEFAULT 0,
+                    phone_message_id text,
+                    phone_last_error_type text,
+                    phone_last_attempt_at timestamptz,
+                    phone_sent_at timestamptz
                 )
             """)
+            # v1.2.0 adds a durable optional ntfy outbox without changing delivery identity.
+            for name, definition in (
+                ("phone_delivery_state", "text NOT NULL DEFAULT 'disabled'"),
+                ("phone_delivery_attempts", "integer NOT NULL DEFAULT 0"),
+                ("phone_message_id", "text"),
+                ("phone_last_error_type", "text"),
+                ("phone_last_attempt_at", "timestamptz"),
+                ("phone_sent_at", "timestamptz"),
+            ):
+                conn.execute(f"ALTER TABLE r3a_notification.deliveries ADD COLUMN IF NOT EXISTS {name} {definition}")
+            conn.execute("""DO $$ BEGIN
+                ALTER TABLE r3a_notification.deliveries ADD CONSTRAINT notification_phone_state_check
+                  CHECK (phone_delivery_state IN ('disabled','pending','sending','failed','sent'));
+                EXCEPTION WHEN duplicate_object THEN NULL;
+                END $$""")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS r3a_notification.delivery_events (
                     event_id uuid PRIMARY KEY,
@@ -103,7 +125,7 @@ class NotificationStore:
                          "ON r3a_notification.deliveries(recipient_id, created_at DESC, delivery_id)")
             conn.execute("""
                 INSERT INTO r3a_notification.module_state(singleton,module_id,module_version,lifecycle_state,schema_version)
-                VALUES (true,'r3a.notifications',%s,'ACTIVE',2)
+                VALUES (true,'r3a.notifications',%s,'ACTIVE',3)
                 ON CONFLICT (singleton) DO UPDATE SET module_version=excluded.module_version,
                     lifecycle_state='ACTIVE',activated_at=clock_timestamp(),updated_at=clock_timestamp(),
                     schema_version=excluded.schema_version
@@ -118,7 +140,7 @@ class NotificationStore:
 
     def ingest(self, notification: dict[str, Any], recipients: list[dict[str, str]], *,
                subscription: dict[str, Any], directory_snapshot_sha256: str,
-               received_at: datetime | None = None) -> list[dict[str, Any]]:
+               received_at: datetime | None = None, phone_enabled: bool = False) -> list[dict[str, Any]]:
         notification = validate_notification_envelope(notification)
         if notification["event_type"].startswith("foundation.observe"):
             return []
@@ -160,19 +182,25 @@ class NotificationStore:
                 if row:
                     if row["content_sha256"] != digest:
                         raise NotificationConflict("source event replay changed immutable notification or recipient data")
+                    if phone_enabled and row["phone_delivery_state"] == "disabled":
+                        conn.execute("UPDATE r3a_notification.deliveries SET phone_delivery_state='pending' "
+                                     "WHERE delivery_id=%s", (row["delivery_id"],))
+                        row = conn.execute("SELECT * FROM r3a_notification.deliveries WHERE delivery_id=%s",
+                                           (row["delivery_id"],)).fetchone()
                     result = self._as_delivery(row, duplicate=True)
                 else:
                     conn.execute("""
                         INSERT INTO r3a_notification.deliveries
                         (delivery_id,idempotency_key,source_id,source_event_id,event_type,correlation_id,
                          recipient_kind,recipient_id,severity,urgency,requires_action,status,notification,
-                         content_sha256,created_at,evidence_refs,directory_snapshot_sha256)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'queued',%s,%s,%s,%s,%s)
+                         content_sha256,created_at,evidence_refs,directory_snapshot_sha256,phone_delivery_state)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'queued',%s,%s,%s,%s,%s,%s)
                     """, (delivery_id,key,notification["source_id"],uuid.UUID(notification["source_event_id"]),
                           notification["event_type"],uuid.UUID(notification["correlation_id"]),recipient["kind"],
                           recipient_id,notification["severity"],subscription["urgency"],
                           subscription["requires_action"],json.dumps(notification),digest,received_at,
-                          json.dumps([notification["payload_ref"]]),directory_snapshot_sha256))
+                          json.dumps([notification["payload_ref"]]),directory_snapshot_sha256,
+                          "pending" if phone_enabled else "disabled"))
                     event_id = uuid.uuid5(uuid.NAMESPACE_URL, f"r3a.notification.event:{key}:queued")
                     conn.execute("""
                         INSERT INTO r3a_notification.delivery_events
@@ -185,6 +213,75 @@ class NotificationStore:
                     result = self._as_delivery(row, duplicate=False)
             delivered.append(result)
         return delivered
+
+    def begin_phone_attempt(self, delivery_id: str, *, stale_after_seconds: int = 60) -> dict[str, Any] | None:
+        """Claim one ntfy attempt; stale in-flight claims are replayable after restart."""
+        parsed_id = uuid.UUID(delivery_id)
+        with self.connect(self.dsn, row_factory=dict_row) as conn, conn.transaction():
+            row = conn.execute("SELECT * FROM r3a_notification.deliveries WHERE delivery_id=%s FOR UPDATE",
+                               (parsed_id,)).fetchone()
+            if row is None:
+                raise KeyError("notification delivery not found")
+            state = row["phone_delivery_state"]
+            if state in {"disabled", "sent"}:
+                return None
+            if state == "sending":
+                fresh = conn.execute("SELECT phone_last_attempt_at > clock_timestamp() - (%s * interval '1 second') AS fresh",
+                                     (stale_after_seconds,)).fetchone()["fresh"]
+                if fresh:
+                    return None
+            conn.execute("UPDATE r3a_notification.deliveries SET phone_delivery_state='sending',"
+                         "phone_delivery_attempts=phone_delivery_attempts+1,phone_last_attempt_at=clock_timestamp(),"
+                         "phone_last_error_type=NULL WHERE delivery_id=%s", (parsed_id,))
+            return self._as_delivery(conn.execute("SELECT * FROM r3a_notification.deliveries WHERE delivery_id=%s",
+                                                  (parsed_id,)).fetchone())
+
+    def mark_phone_sent(self, delivery_id: str, message_id: str) -> dict[str, Any]:
+        parsed_id = uuid.UUID(delivery_id)
+        if not isinstance(message_id, str) or not message_id or len(message_id) > 128:
+            raise ValueError("ntfy message ID is invalid")
+        with self.connect(self.dsn, row_factory=dict_row) as conn, conn.transaction():
+            row = conn.execute("SELECT * FROM r3a_notification.deliveries WHERE delivery_id=%s FOR UPDATE",
+                               (parsed_id,)).fetchone()
+            if row is None:
+                raise KeyError("notification delivery not found")
+            if row["phone_delivery_state"] != "sent":
+                now = datetime.now(timezone.utc)
+                conn.execute("UPDATE r3a_notification.deliveries SET phone_delivery_state='sent',"
+                    "phone_message_id=%s,phone_sent_at=%s,phone_last_error_type=NULL WHERE delivery_id=%s",
+                    (message_id, now, parsed_id))
+                event_id = uuid.uuid5(uuid.NAMESPACE_URL,
+                    f"r3a.notification.event:{delivery_id}:phone_sent:{row['phone_delivery_attempts']}")
+                conn.execute("""INSERT INTO r3a_notification.delivery_events
+                    (event_id,event_type,delivery_id,actor_id,occurred_at,evidence)
+                    VALUES (%s,'notification.delivery.phone_sent',%s,'r3a.notifications.ntfy',%s,%s)
+                    ON CONFLICT(event_id) DO NOTHING""",
+                    (event_id, parsed_id, now, json.dumps({"ntfy_message_id": message_id,
+                        "attempt": row["phone_delivery_attempts"], "provider": "ntfy"})))
+            return self._as_delivery(conn.execute("SELECT * FROM r3a_notification.deliveries WHERE delivery_id=%s",
+                                                  (parsed_id,)).fetchone())
+
+    def mark_phone_failed(self, delivery_id: str, error_type: str) -> dict[str, Any]:
+        parsed_id = uuid.UUID(delivery_id)
+        if not isinstance(error_type, str) or not error_type or len(error_type) > 100:
+            error_type = "NtfyPublishError"
+        with self.connect(self.dsn, row_factory=dict_row) as conn, conn.transaction():
+            row = conn.execute("SELECT * FROM r3a_notification.deliveries WHERE delivery_id=%s FOR UPDATE",
+                               (parsed_id,)).fetchone()
+            if row is None:
+                raise KeyError("notification delivery not found")
+            conn.execute("UPDATE r3a_notification.deliveries SET phone_delivery_state='failed',"
+                         "phone_last_error_type=%s WHERE delivery_id=%s", (error_type, parsed_id))
+            event_id = uuid.uuid5(uuid.NAMESPACE_URL,
+                f"r3a.notification.event:{delivery_id}:phone_failed:{row['phone_delivery_attempts']}")
+            conn.execute("""INSERT INTO r3a_notification.delivery_events
+                (event_id,event_type,delivery_id,actor_id,occurred_at,evidence)
+                VALUES (%s,'notification.delivery.phone_failed',%s,'r3a.notifications.ntfy',%s,%s)
+                ON CONFLICT(event_id) DO NOTHING""",
+                (event_id, parsed_id, datetime.now(timezone.utc), json.dumps({
+                    "error_type": error_type, "attempt": row["phone_delivery_attempts"], "provider": "ntfy"})))
+            return self._as_delivery(conn.execute("SELECT * FROM r3a_notification.deliveries WHERE delivery_id=%s",
+                                                  (parsed_id,)).fetchone())
 
     def inbox(self, recipient_id: str, *, cursor: str | None = None, limit: int = 50) -> dict[str, Any]:
         limit = max(1, min(int(limit), 100))
@@ -280,6 +377,12 @@ class NotificationStore:
                  "acknowledged_by":row["acknowledged_by"],"resolved_at":_utc(row["resolved_at"]) if row["resolved_at"] else None,
                  "acknowledgment_authorization":row["acknowledgment_authorization"],
                  "resolved_by":row["resolved_by"],"resolution_authorization":row["resolution_authorization"],
+                 "resolution_disposition":row["disposition"],
+                 "phone_delivery":{"state":row["phone_delivery_state"],
+                    "attempts":row["phone_delivery_attempts"],"message_id":row["phone_message_id"],
+                    "last_error_type":row["phone_last_error_type"],
+                    "last_attempt_at":_utc(row["phone_last_attempt_at"]) if row["phone_last_attempt_at"] else None,
+                    "sent_at":_utc(row["phone_sent_at"]) if row["phone_sent_at"] else None},
                  "evidence_refs":list(row["evidence_refs"] or []),
                  "notification":raw}
         if duplicate is not None: value["duplicate"]=duplicate

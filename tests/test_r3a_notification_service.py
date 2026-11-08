@@ -11,6 +11,8 @@ import threading
 import unittest
 import uuid
 
+from psycopg.rows import dict_row
+
 from r3a_plugins.notification_service.server import create_server, load_config
 from r3a_plugins.notification_service.store import NotificationStore
 from r3a_runtime.timestamp_presentation import format_timestamp
@@ -62,7 +64,8 @@ class NotificationServiceHttpIntegrationTests(unittest.TestCase):
         os.environ.update({"R3A_NOTIFICATION_MODULE_DSN":dsn,
                            "R3A_NOTIFICATION_SOURCE_TOKEN":"isolated-source-token",
                            "R3A_NOTIFICATION_STEWARD_TOKEN":"isolated-steward-token",
-                           "R3A_NOTIFICATION_STEWARD_PRINCIPAL":PRINCIPAL})
+                           "R3A_NOTIFICATION_STEWARD_PRINCIPAL":PRINCIPAL,
+                           "R3A_NOTIFICATION_WEBSITE_BASE_URL":"https://steward.test"})
         cls.config=load_config(cls.config_path)
         cls.store=NotificationStore(dsn)
         cls.store.initialize("1.0.0")
@@ -128,6 +131,13 @@ class NotificationServiceHttpIntegrationTests(unittest.TestCase):
         self.assertEqual(1,len(inbox["deliveries"]))
         self.assertEqual(delivery_id,inbox["deliveries"][0]["delivery_id"])
         self.assertIn("EST",inbox["deliveries"][0]["created_at_local"])
+        self.assertIn("isolated source event",inbox["deliveries"][0]["message"]["reason"])
+        self.assertEqual("https://steward.test/?view=notifications&notification_id="+delivery_id,
+                         inbox["deliveries"][0]["message"]["detail_url"])
+        self.assertEqual("disabled",inbox["deliveries"][0]["phone_delivery"]["state"])
+        inbox_schema=json.loads((ROOT/"r3a_plugins/notification_service/notification-inbox.v1.schema.json").read_text())
+        from r3a_runtime.capability_contracts import validate_json
+        validate_json(inbox,inbox_schema)
 
         ack_path=f"/api/v1/notifications/{delivery_id}/acknowledgment"
         ack_body={"idempotency_key":"ack:isolated-001","note":"Reviewed in isolated test"}
@@ -157,9 +167,61 @@ class NotificationServiceHttpIntegrationTests(unittest.TestCase):
             "disposition":"reviewed","evidence_refs":["r3a.institution_events/"+EVENT_ID]})
         self.assertEqual(status,200)
         self.assertEqual("resolved",resolved["status"])
+
+    def test_durable_phone_outbox_retries_failure_once_and_suppresses_successful_replay(self):
+        event=notification()
+        args={"subscription":{"subscriptions":self.config["subscriptions"]},
+              "directory_snapshot_sha256":test_directory_snapshot()["source"]["snapshot_sha256"],
+              "phone_enabled":True}
+        created=self.store.ingest(event,[{"kind":"steward","recipient_id":PRINCIPAL}],**args)[0]
+        self.assertEqual("pending",created["phone_delivery"]["state"])
+        first=self.store.begin_phone_attempt(created["delivery_id"])
+        self.assertEqual(1,first["phone_delivery"]["attempts"])
+        failed=self.store.mark_phone_failed(created["delivery_id"],"NtfyPublishError")
+        self.assertEqual("failed",failed["phone_delivery"]["state"])
+        replay=self.store.ingest(event,[{"kind":"steward","recipient_id":PRINCIPAL}],**args)[0]
+        self.assertTrue(replay["duplicate"])
+        second=self.store.begin_phone_attempt(created["delivery_id"])
+        self.assertEqual(2,second["phone_delivery"]["attempts"])
+        sent=self.store.mark_phone_sent(created["delivery_id"],"ntfy-message-test-002")
+        self.assertEqual("sent",sent["phone_delivery"]["state"])
+        self.assertEqual("ntfy-message-test-002",sent["phone_delivery"]["message_id"])
+        self.assertIsNone(self.store.begin_phone_attempt(created["delivery_id"]))
+        with self.store.connect(self.store.dsn,row_factory=dict_row) as conn:
+            events=conn.execute("SELECT event_type FROM r3a_notification.delivery_events "
+                "WHERE delivery_id=%s ORDER BY occurred_at",(created["delivery_id"],)).fetchall()
+        self.assertEqual(["notification.delivery.queued","notification.delivery.phone_failed",
+                          "notification.delivery.phone_sent"],[row["event_type"] for row in events])
+
+    def test_http_phone_failure_is_truthful_and_source_retry_reuses_delivery(self):
+        class RetryPublisher:
+            def __init__(self): self.calls=0
+            def publish(self,delivery,*,presentation_timezone):
+                self.calls+=1
+                if self.calls==1: raise RuntimeError("private transport unavailable")
+                return "ntfy-isolated-retry-001"
+        self.server.shutdown();self.server.server_close();self.thread.join(timeout=2)
+        publisher=RetryPublisher()
+        self.server=create_server(self.config,host="127.0.0.1",port=0,store=self.store,
+                                  phone_publisher=publisher)
+        self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
+        self.port=self.server.server_address[1]
+        status,failed=self.intake()
+        self.assertEqual(503,status)
+        original=failed["deliveries"][0]
+        self.assertEqual("failed",original["phone_delivery"]["state"])
+        self.assertEqual("queued",original["status"])
+        status,retried=self.intake()
+        self.assertEqual(202,status)
+        duplicate=retried["deliveries"][0]
+        self.assertEqual(original["delivery_id"],duplicate["delivery_id"])
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual("sent",duplicate["phone_delivery"]["state"])
+        self.assertEqual(2,duplicate["phone_delivery"]["attempts"])
+        self.assertEqual(2,publisher.calls)
         with self.store.connect(self.store.dsn) as conn:
             module=conn.execute("SELECT module_version,lifecycle_state,schema_version FROM r3a_notification.module_state WHERE singleton=true").fetchone()
-        self.assertEqual(("1.1.0","ACTIVE",2),tuple(module))
+        self.assertEqual(("1.2.0","ACTIVE",3),tuple(module))
 
     def test_observer_suppression_and_subscription_filtering(self):
         observe=notification("activity.completed",evidence={"activity_type":"foundation.observe"})
@@ -210,7 +272,10 @@ class NotificationServicePresentationTests(unittest.TestCase):
     def test_versioned_service_manifest_pins_runtime_artifacts_and_categories(self):
         manifest=json.loads((ROOT/"r3a_plugins/notification_service/manifest.json").read_text())
         self.assertEqual("r3a.notifications",manifest["module_id"])
-        self.assertEqual("1.1.0",manifest["module_version"])
+        self.assertEqual("1.2.0",manifest["module_version"])
+        references={item["artifact_ref"] for item in manifest["supporting_artifacts"]}
+        self.assertTrue({"../notification_source/manifest.json","../notification_source/plugin.py",
+            "../../r3a_runtime/schemas/activity-intake.v1.schema.json"} <= references)
         for item in [{"artifact_ref":manifest["artifact_ref"],"artifact_sha256":manifest["artifact_sha256"]},
                      *manifest["supporting_artifacts"]]:
             artifact=(ROOT/"r3a_plugins/notification_service"/item["artifact_ref"]).resolve()
