@@ -224,6 +224,12 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             first = descriptor()
             second = copy.deepcopy(first)
             second["provider"]["provider_version"] = "1.0.1"
+            replacement_artifact = (Path(__file__).parents[1] /
+                                    "r3a_runtime/providers/isolated_workspace_replacement_fixture.py")
+            second["provider"]["entrypoint"] = (
+                "r3a_runtime.providers.isolated_workspace_replacement_fixture:create_provider")
+            second["provider"]["artifact_sha256"] = hashlib.sha256(
+                replacement_artifact.read_bytes()).hexdigest()
             registry = CapabilityRegistry()
             registry.register(first, {"workspace_root": str(root)})
             registry.register(second, {"workspace_root": str(root)})
@@ -267,9 +273,20 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             await store.record_module_replacement("r3a.isolated_workspace", "1.0.0", "1.0.1")
             active = registry.resolve("engineering.workspace.apply_patch")
             self.assertEqual("1.0.1", active.descriptor["provider"]["provider_version"])
+            self.assertNotEqual(first["provider"]["artifact_sha256"],
+                                active.descriptor["provider"]["artifact_sha256"])
             self.assertEqual("infrastructure.octominer.telemetry.read",
                              registry.resolve("infrastructure.octominer.telemetry.read").descriptor["operation_id"])
-            replay = await runtime.invoke(active, {"path": "artifacts/result.txt", "content": "R3A module lifecycle\n"}, context)
+            replacement_context = {**context, "invocation_id": "replacement-implementation"}
+            replacement_result = await runtime.invoke(
+                active, {"path": "artifacts/replacement.txt", "content": "new implementation\n"},
+                replacement_context)
+            replacement_bytes = b"replacement-provider: new implementation\n"
+            self.assertEqual(hashlib.sha256(replacement_bytes).hexdigest(), replacement_result["sha256"])
+            self.assertEqual(replacement_bytes, (root / "artifacts/replacement.txt").read_bytes())
+            replay = await runtime.invoke(
+                active, {"path": "artifacts/replacement.txt", "content": "new implementation\n"},
+                replacement_context)
             self.assertTrue(replay["replayed"])
             stopped = await store.rows("lifecycle_state", ("r3a.isolated_workspace", "1.0.0"))
             self.assertEqual("STOPPED", stopped[0]["lifecycle_state"])
