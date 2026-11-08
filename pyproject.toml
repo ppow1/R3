@@ -33,4 +33,4 @@ r3a = "r3a_runtime.cli:main"
 include = ["r3a_runtime*", "r3a_plugins*"]
 
 [tool.setuptools.package-data]
-r3a_runtime = ["migrations/*.sql", "state_machines/*.json", "schemas/*.json"]
+r3a_runtime = ["migrations/*.sql", "state_machines/*.json", "schemas/*.json", "residents/*.json"]

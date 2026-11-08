@@ -46,6 +46,10 @@ from r3a_runtime.residents import (
 from r3a_runtime.residents.validation import validate_epistemic_span
 from r3a_runtime.residents.legacy_import import extract_legacy_hr_candidates
 from r3a_runtime.capability_contracts import validate_schema_definition
+from r3a_runtime.residents.coordinator_integration import (
+    CoordinatorCharacterContextHook, CoordinatorExecutionBoundary,
+    load_coordinator_package_manifest,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -87,6 +91,24 @@ class ResidentDossierTests(unittest.TestCase):
             if filename in {"resident-identity-association.v1.schema.json",
                             "approved-character-context.v2.schema.json"}:
                 validate_schema_definition(schema)
+
+    def test_coordinator_package_manifest_is_valid_and_keeps_context_out_of_cme_outputs(self):
+        manifest = load_coordinator_package_manifest()
+        self.assertEqual(manifest["integration_kind"], "coordinator-inference-context-hook")
+        self.assertEqual(manifest["context_contract"]["version"], "2.0.0")
+        self.assertEqual(manifest["sink_policy"]["generic_capability_output"],
+                         "forbidden-for-character-text")
+        self.assertIn("source-verified-hr-association", manifest["activation_gates"])
+        with tempfile.TemporaryDirectory() as directory:
+            invalid_manifest = Path(directory) / "package.json"
+            invalid_manifest.write_text("{}", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_coordinator_package_manifest(invalid_manifest)
+            tampered = dict(manifest)
+            tampered["artifacts"] = [dict(manifest["artifacts"][0], sha256="0" * 64)]
+            invalid_manifest.write_text(json.dumps(tampered), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "artifact digest mismatch"):
+                load_coordinator_package_manifest(invalid_manifest)
 
     def test_private_hr_office_and_protected_relationship_facts_are_not_in_git_dossiers(self):
         for resident_id in ("r3:evelyn", "r3:gm"):
@@ -588,6 +610,37 @@ class ResidentDossierTests(unittest.TestCase):
         context = provider.retrieve(actor, resident_id="r3:grace",
             execution_kind="conversation_boundary", execution_ref="conversation:turn:1",
             provider_id="model:grace")
+        # Coordinator acceptance: inject only authenticated boundary facts, then
+        # assert each sink receives its allowed projection (never generic CME output).
+        sink_audits = []
+        hook = CoordinatorCharacterContextHook(
+            provider, authorize_sink=lambda boundary, sink, resident_id: {"public"},
+            audit=sink_audits.append)
+        boundary = CoordinatorExecutionBoundary(
+            actor=actor, resident_id="r3:grace", execution_kind="conversation_boundary",
+            execution_ref="conversation:turn:hook-test", provider_id="model:grace",
+            sink_principal_ref="coordinator:inference:authenticated",
+        )
+        inference_projection = hook.project(boundary, sink="inference")
+        self.assertIn("prompt_text", inference_projection)
+        memory_projection = hook.project(boundary, sink="memory")
+        communications_projection = hook.project(boundary, sink="communications")
+        diagnostics_projection = hook.project(boundary, sink="diagnostics")
+        for projection in (memory_projection, communications_projection, diagnostics_projection):
+            self.assertNotIn("prompt_text", projection)
+        denied_hook = CoordinatorCharacterContextHook(
+            provider, authorize_sink=lambda boundary, sink, resident_id: set(),
+            audit=sink_audits.append)
+        with self.assertRaises(PermissionError):
+            denied_hook.project(boundary, sink="inference")
+        self.assertEqual([entry["outcome"] for entry in sink_audits],
+                         ["allowed"] * 4 + ["denied"])
+        self.assertNotIn("prompt_text", json.dumps(sink_audits))
+        with self.assertRaises(TypeError):
+            CoordinatorExecutionBoundary(
+                actor={"principal_id": "user-controlled"}, resident_id="r3:grace",
+                execution_kind="conversation_boundary", execution_ref="request:ref",
+                provider_id="model:grace", sink_principal_ref="coordinator:inference")
         self.assertEqual(context["contract_version"], "2.0.0")
         self.assertEqual(context["pin_ref"], "context-pin:1")
         self.assertEqual(context["classification_scope"], ["public"])
@@ -646,6 +699,25 @@ class ResidentDossierTests(unittest.TestCase):
                 execution_kind="conversation_boundary", execution_ref="conversation:turn:1",
                 provider_id="model:grace")
         authorization_scope["value"] = {"public"}
+        for field, changed_value in (
+            ("revision", 5),
+            ("directory_snapshot_sha256", "d" * 64),
+            ("office_id", "office:changed"),
+            ("execution_profile_revision", "1.2.10"),
+            ("execution_profile_source_ref", "profile://grace@1.2.10"),
+            ("source_ref", "hr://record/r3:grace@5"),
+        ):
+            original_value = identity_projection[field]
+            identity_projection[field] = changed_value
+            with self.assertRaisesRegex(PermissionError, "pinned character context"):
+                provider.retrieve(actor, resident_id="r3:grace",
+                    execution_kind="conversation_boundary", execution_ref="conversation:turn:1",
+                    provider_id="model:grace")
+            identity_projection[field] = original_value
+        with self.assertRaisesRegex(PermissionError, "pinned character context"):
+            provider.retrieve(actor, resident_id="r3:grace",
+                execution_kind="conversation_boundary", execution_ref="conversation:turn:1",
+                provider_id="model:grace-replacement")
         events = []
         memory = project_context_for_sink(context, sink="memory",
             authorized_classifications=frozenset({"public", "institutional"}),
