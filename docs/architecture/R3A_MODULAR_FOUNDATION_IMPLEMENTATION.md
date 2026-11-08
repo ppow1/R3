@@ -52,6 +52,21 @@ The first implementation milestone is a functioning generic binding/lifecycle co
 | MOD-009 | Stop/replace preserves work and checkpoints or reports blockage | Resident stop exists; provider drain/checkpoint semantics require generic protocol calls. |
 | MOD-010 | Health/version reflect observed process handshake | Resident health is probed; provider module health must be observed through the generic supervisor. |
 
+## Current MOD status on the integration candidate
+
+| MOD | Status | Evidence and remaining gap |
+|---|---|---|
+| MOD-001 | Partial | Provider identity/version and artifact digest are independently registered; dependency, owner, state namespace, and migration declarations are still synthesized defaults rather than fully validated external manifest fields. |
+| MOD-002 | Partial | Configured manifests discover without editing the CME roster. Loading an unlisted manifest into an already-running CME is not supported. |
+| MOD-003 | Implemented; fixture-tested | Provider lifecycle rows and state events use the existing durable module registry/state machine path; tests use a Store-compatible fixture, not PostgreSQL. |
+| MOD-004 | Implemented in control surface; live proof pending | A registered module can install, activate, deactivate, or replace without restarting Ring 0. Managed Ring 0 process identity/health has not been observed during those operations. |
+| MOD-005 | Partial | The worker checks protocol major/minor compatibility and pinned artifacts before activation. An incompatible live or database-backed module fixture has not been tested. |
+| MOD-006 | Verified in focused tests | Discovery does not grant access; the CME invocation path authorizes and durably records a request before starting/executing the provider. |
+| MOD-007 | Partial | Provider config remains external and is validated at bootstrap; DB credential environment variables are withheld from child modules. Generic secret-reference schema validation and live config revision/reload evidence remain incomplete. |
+| MOD-008 | Incomplete | Versions and artifact lineage are durable, but generic module-owned state namespaces and declared upgrade/migration/recovery contracts are not implemented. Current provider binding assumes stateless modules. |
+| MOD-009 | Partial | Stop closes admission, drains in-flight invocation requests, checkpoints, then stops. A process interruption during active side effects and durable recovery were not exercised in the new module lifecycle tests. |
+| MOD-010 | Partial | Activation uses a real worker handshake/readiness/health response and diagnostics expose persisted lifecycle. There is no periodic per-provider health monitor or live managed-service freshness evidence. |
+
 This record authorizes ordinary in-scope engineering toward these requirements. It does not authorize production changes or managed-runtime activation.
 
 ## Implementation slice on `engineering/r3a-modularity-lifecycle-20261107`
@@ -62,4 +77,4 @@ New provider modules use lifecycle state machine v2; v1 remains immutable. V2 ad
 
 The local CME control operations are `capability.module.install`, `capability.module.activate`, `capability.module.deactivate`, `capability.module.replace`, and `capability.module.status`. Requests identify an operation and, where needed, its provider version. They operate only on manifests already loaded from `capability_operations`; activation remains separate from `capability.grant` and every invocation still requires the existing grant provider. Manifest/config validation and operation discovery happen at CME configuration load.
 
-This is not full MOD acceptance. The current manifest catalog is loaded from configured `capability_operations` at CME startup; an unlisted manifest cannot yet be installed into a running CME through the control API. Child processes are separate and socket-restricted but still run under the CME service UID, so OS-level unprivileged isolation is not established. Lifecycle persistence is covered with a Store-compatible test fixture, not a live PostgreSQL/managed-service run. The generic activity-intake, activity-handler, and evidence-obligation contracts remain future slices; notification, Engineering workflow, and knowledge behavior have not been moved in this branch. The branch must be reconciled with the AP1 integration candidate before cross-capability claims or runtime activation.
+This is not full MOD acceptance. The current manifest catalog is loaded from configured `capability_operations` at CME startup; an unlisted manifest cannot yet be installed into a running CME through the control API. Child processes are separate and socket-restricted but still run under the CME service UID, so OS-level unprivileged isolation is not established. Lifecycle persistence is covered with a Store-compatible test fixture, not a live PostgreSQL/managed-service run. The generic activity-intake contract and schema are now published in `R3A_ACTIVITY_INTAKE_CONTRACT_V1.md`; they define a module-configured lifecycle projection and preserve the current N1 equivalence requirements, but CME binding and notification behavior migration are not implemented. The generic activity-handler and evidence-obligation contracts also remain future slices. Notification, Engineering workflow, and knowledge behavior have not been moved in this branch. The branch must be reconciled with the AP1 integration candidate before cross-capability claims or runtime activation.
