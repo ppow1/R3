@@ -14,7 +14,7 @@ from r3a_runtime.capability_contracts import (
     validate_invocation_result, validate_operation, operation_from_manifest, validate_json,
     normalize_provider_result,
 )
-from r3a_runtime.config import load_settings
+from r3a_runtime.config import ConfigurationError, _satisfies_version_range, load_settings
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -196,6 +196,26 @@ class CapabilityContractTests(unittest.TestCase):
         canonical["provider"] = write_op["provider"]
         self.assertEqual("isolated_write", operation_from_manifest(canonical)["effect_class"])
 
+    def test_versioned_module_manifest_matches_provider_artifact_and_capability(self):
+        manifest_path = ROOT / "r3a_runtime/providers/isolated_workspace.manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        operation = operation_from_manifest(manifest)
+        module = manifest["module_manifest"]
+        self.assertEqual(operation["provider"]["provider_id"], module["module_id"])
+        invalid = json.loads(json.dumps(manifest))
+        invalid["module_manifest"]["capability_refs"] = ["unregistered.operation"]
+        with self.assertRaisesRegex(CapabilityContractError, "does not reference its operation"):
+            operation_from_manifest(invalid)
+
+    def test_module_dependency_semver_ranges_fail_closed(self):
+        self.assertTrue(_satisfies_version_range("1.4.0", "^1.0.0"))
+        self.assertFalse(_satisfies_version_range("2.0.0", "^1.0.0"))
+        self.assertTrue(_satisfies_version_range("1.2.9", "~1.2.3"))
+        self.assertFalse(_satisfies_version_range("1.3.0", "~1.2.3"))
+        self.assertTrue(_satisfies_version_range("1.5.0", ">=1.2.0,<2.0.0"))
+        with self.assertRaisesRegex(ValueError, "unsupported module dependency"):
+            _satisfies_version_range("1.0.0", "latest")
+
     def test_legacy_manifest_adapter_rejects_missing_or_false_read_only(self):
         legacy = {"contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
                   "capability_id": self.descriptor["operation_id"], "plugin_id": "legacy.telemetry",
@@ -260,6 +280,25 @@ class CapabilityContractTests(unittest.TestCase):
             self.assertEqual((operation_id,), tuple(item["descriptor"]["operation_id"]
                                                      for item in settings.capability_registry.discover()))
             self.assertEqual("read", settings.capability_registry.resolve(operation_id).descriptor["effect_class"])
+            manifest["module_manifest"] = {
+                "contract_id": "r3a.module-manifest.v1", "contract_version": "1.0.0",
+                "module_id": manifest["provider"]["provider_id"],
+                "module_version": manifest["provider"]["provider_version"],
+                "owner": "fixture", "binding": {"contract_id": "r3a.capability-provider.v1",
+                    "protocol_major": 1, "protocol_min_minor": 0, "protocol_max_minor": 0,
+                    "entrypoint": manifest["provider"]["entrypoint"]},
+                "dependencies": [{"module_id": "r3a.missing.acceptance-dependency",
+                                  "version_range": "^1.0.0"}],
+                "configuration": {"schema_ref": manifest["configuration_schema"]["schema_id"],
+                                   "configuration_ref": "configuration.json"},
+                "capability_refs": [operation_id], "resource_refs": [],
+                "state_namespace": manifest["provider"]["provider_id"],
+                "migration_contract": "none.v1", "recovery_policy": "idempotent.v1",
+                "artifact": {"artifact_ref": manifest["artifact_ref"],
+                             "artifact_sha256": manifest["artifact_sha256"]}}
+            manifest_path.write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ConfigurationError, "has no configured module provider"):
+                load_settings(bootstrap)
 
 
 if __name__ == "__main__":

@@ -175,6 +175,40 @@ def _positive(value: Any, where: str, *, minimum: float = 0.01) -> float:
     return float(value)
 
 
+def _satisfies_version_range(version: str, expression: str) -> bool:
+    """Evaluate the module manifest's bounded comma-separated semantic range."""
+    found = re.fullmatch(r"([0-9]+)\.([0-9]+)\.([0-9]+)", version)
+    if found is None:
+        raise ConfigurationError(f"module version is not semantic major.minor.patch: {version}")
+    candidate = tuple(map(int, found.groups()))
+    for clause in expression.split(","):
+        clause = clause.strip()
+        range_match = re.fullmatch(r"([~^])([0-9]+)\.([0-9]+)\.([0-9]+)", clause)
+        if range_match:
+            kind, major, minor, patch = range_match.groups()
+            lower = (int(major), int(minor), int(patch))
+            if kind == "~":
+                upper = (lower[0], lower[1] + 1, 0)
+            elif lower[0] > 0:
+                upper = (lower[0] + 1, 0, 0)
+            elif lower[1] > 0:
+                upper = (0, lower[1] + 1, 0)
+            else:
+                upper = (0, 0, lower[2] + 1)
+            if candidate < lower or candidate >= upper:
+                return False
+            continue
+        match = re.fullmatch(r"(>=|<=|>|<|==)?([0-9]+)\.([0-9]+)\.([0-9]+)", clause)
+        if match is None:
+            raise ConfigurationError(f"unsupported module dependency version range: {expression}")
+        operator = match.group(1) or "=="
+        bound = tuple(map(int, match.groups()[1:]))
+        if not {">=": candidate >= bound, "<=": candidate <= bound, ">": candidate > bound,
+                "<": candidate < bound, "==": candidate == bound}[operator]:
+            return False
+    return True
+
+
 def _absolute_path(value: Any, where: str) -> Path:
     raw = Path(_text(value, where)).expanduser()
     if not raw.is_absolute():
@@ -563,6 +597,8 @@ def load_settings(path: str | Path) -> Settings:
                                        operation_from_manifest)
     capability_registry = CapabilityRegistry()
     plugin_ids: set[tuple[str, str, str]] = set()
+    configured_module_versions: dict[str, set[str]] = {}
+    declared_module_dependencies: list[tuple[str, dict[str, Any]]] = []
     if "capability_plugins" in value and "capability_operations" in value:
         raise ConfigurationError("use one capability_operations registry input; capability_plugins is a compatibility alias")
     raw_plugins = value.get("capability_operations", value.get("capability_plugins", []))
@@ -585,7 +621,8 @@ def load_settings(path: str | Path) -> Settings:
         if not isinstance(manifest, dict):
             raise ConfigurationError(f"{where}.manifest must contain an object")
         optional_manifest = {"supporting_artifacts", "operation", "provider", "contract_id",
-                             "contract_version", "capability_id", "tool", "entrypoint", "read_only"}
+                             "contract_version", "capability_id", "tool", "entrypoint", "read_only",
+                             "module_manifest"}
         _keys(manifest, required_manifest | (optional_manifest & manifest.keys()),
               f"{where}.manifest")
         if manifest["schema_version"] != 1:
@@ -647,6 +684,13 @@ def load_settings(path: str | Path) -> Settings:
                 raise CapabilityContractError("operation_id is invalid")
             if operation["provider"]["artifact_sha256"] not in pinned_digests:
                 raise CapabilityContractError("operation provider digest must pin a declared artifact")
+            configured_module_versions.setdefault(provider["provider_id"], set()).add(
+                provider["provider_version"])
+            if "module_manifest" in manifest:
+                declared_refs = set(manifest["module_manifest"]["capability_refs"])
+                if declared_refs - set(capabilities):
+                    raise CapabilityContractError("module manifest declares a capability outside module.capabilities")
+                declared_module_dependencies.append((where, manifest["module_manifest"]))
             # Internal resolved path is carried only to the CME binding layer; it is not
             # an external manifest field and never becomes an authorization decision.
             manifest["_provider_artifact_path"] = str(artifact_paths[operation["provider"]["artifact_sha256"]])
@@ -655,6 +699,37 @@ def load_settings(path: str | Path) -> Settings:
         except (CapabilityContractError, KeyError, TypeError) as exc:
             raise ConfigurationError(f"{where}.manifest operation contract is invalid: {exc}") from exc
         plugin_ids.add(plugin_identity)
+
+    dependency_graph: dict[tuple[str, str], set[tuple[str, str]]] = {}
+    for where, module_manifest in declared_module_dependencies:
+        module_key = (module_manifest["module_id"], module_manifest["module_version"])
+        dependency_graph.setdefault(module_key, set())
+        for dependency in module_manifest["dependencies"]:
+            available = configured_module_versions.get(dependency["module_id"], set())
+            matches = {version for version in available
+                       if _satisfies_version_range(version, dependency["version_range"])}
+            if not matches:
+                raise ConfigurationError(
+                    f"{where} dependency {dependency['module_id']}@{dependency['version_range']} "
+                    "has no configured module provider")
+            dependency_graph[module_key].update((dependency["module_id"], version) for version in matches)
+
+    visiting: set[tuple[str, str]] = set()
+    visited: set[tuple[str, str]] = set()
+
+    def visit_module(node: tuple[str, str]) -> None:
+        if node in visiting:
+            raise ConfigurationError(f"module dependency cycle includes {node[0]}@{node[1]}")
+        if node in visited:
+            return
+        visiting.add(node)
+        for dependency in dependency_graph.get(node, ()):
+            visit_module(dependency)
+        visiting.remove(node)
+        visited.add(node)
+
+    for module_key in dependency_graph:
+        visit_module(module_key)
 
     timing = value["timing"]
     if not isinstance(timing, dict):

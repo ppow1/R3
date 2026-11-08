@@ -130,5 +130,35 @@
       "name": "Engineering Workspace Apply Patch",
       "description": "Apply one work-order-authorized file within the configured isolated workspace. CME authorization and independent verification are required."
     }
+  },
+  "module_manifest": {
+    "contract_id": "r3a.module-manifest.v1",
+    "contract_version": "1.0.0",
+    "module_id": "r3a.isolated-workspace",
+    "module_version": "1.0.0",
+    "owner": "R3A Engineering Workspace module",
+    "binding": {
+      "contract_id": "r3a.capability-provider.v1",
+      "protocol_major": 1,
+      "protocol_min_minor": 0,
+      "protocol_max_minor": 0,
+      "entrypoint": "r3a_runtime.providers.isolated_workspace:create_provider"
+    },
+    "dependencies": [],
+    "configuration": {
+      "schema_ref": "r3a.isolated-workspace.config.v1",
+      "configuration_ref": "isolated_workspace.config.example.json"
+    },
+    "capability_refs": [
+      "engineering.workspace.apply_patch"
+    ],
+    "resource_refs": [],
+    "state_namespace": "r3a.isolated-workspace",
+    "migration_contract": "none.v1",
+    "recovery_policy": "idempotent.v1",
+    "artifact": {
+      "artifact_ref": "isolated_workspace.py",
+      "artifact_sha256": "f7f095583882c89b9cbb39c3fe7f5408ce0b2a5b9f6a168464db4ba3b989ccaf"
+    }
   }
 }

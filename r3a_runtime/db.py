@@ -951,12 +951,14 @@ class Store:
             )).fetchone()
             if existing and existing["artifact_digest"].strip() != manifest["artifact_digest"]:
                 raise RuntimeError("An installed module version is immutable; use a new version for a different artifact")
+            if existing:
+                # Re-reading a manifest must not erase an ACTIVE module's health or PID
+                # evidence with the installation defaults supplied by the loader.
+                return
             await conn.execute(
                 "INSERT INTO r3a.module_registry(module_id,module_version,contract_id,protocol_major,protocol_minor,"
                 "artifact_ref,artifact_digest,manifest,lifecycle_state,health,observed_at,diagnostic) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,clock_timestamp(),%s) "
-                "ON CONFLICT(module_id,module_version) DO UPDATE SET "
-                "health=EXCLUDED.health,observed_at=clock_timestamp(),diagnostic=EXCLUDED.diagnostic",
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,clock_timestamp(),%s)",
                 (manifest["module_id"], manifest["module_version"], manifest["contract_id"],
                  manifest["protocol_major"], manifest["protocol_minor"], manifest["artifact_ref"],
                  manifest["artifact_digest"], json.dumps(manifest), lifecycle, health, json.dumps(diagnostic or {})),

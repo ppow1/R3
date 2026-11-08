@@ -33,8 +33,9 @@ if importlib.util.find_spec("psycopg_pool") is None:
     sys.modules["psycopg_pool"] = pool_module
 
 from r3a_runtime.capability_contracts import (CapabilityRegistry, operation_from_manifest,
-                                              validate_invocation_request)
+                                              CapabilityProviderResult, validate_invocation_request)
 from r3a_runtime.cme import CME
+from r3a_runtime.capability_worker import CapabilityWorker
 from r3a_runtime.engineering import (CapabilityOperationRef, CriterionResult, EngineeringWorkOrder,
                                     VerificationResult, validate_completion)
 from r3a_runtime.db import utcnow
@@ -161,6 +162,7 @@ class ProviderLifecycleFixtureStore:
         self.modules = {}
         self.transitions = []
         self.replacements = []
+        self.health_observations = []
 
     async def rows(self, query, params=()):
         row = self.modules.get(tuple(params))
@@ -198,27 +200,75 @@ class ProviderLifecycleFixtureStore:
     async def record_module_replacement(self, module_id, old_version, new_version, *, machine_version=1):
         self.replacements.append((module_id, old_version, new_version))
 
+    async def observe_module(self, module_id, version, health, diagnostic=None):
+        self.health_observations.append(((module_id, version), health, diagnostic or {}))
+
 
 class IsolatedCapabilityIntegrationTests(unittest.TestCase):
+    def test_generic_provider_worker_round_trips_typed_output_and_evidence(self):
+        async def scenario():
+            output = {"schema_id": "knowledge.results.v1", "results": [{"source_id": "knowledge.policy"}]}
+            evidence = [{"evidence_id": "knowledge.policy", "document_sha256": "a" * 64}]
+            worker = CapabilityWorker("r3a.knowledge", "1.1.0", "fixture:create_provider",
+                                      Path("/unused"), "a" * 64)
+            worker.state = "ACTIVE"
+            worker.provider = SimpleNamespace(invoke=lambda _arguments, *, context:
+                                               CapabilityProviderResult(output, evidence))
+            wire = await worker.handle("execute", {"arguments": {"query": "policy"}, "context": {}})
+            self.assertEqual({"contract_id": "r3a.capability-provider-result.v1",
+                              "contract_version": "1.0.0", "output": output, "evidence": evidence},
+                             wire["provider_result"])
+            json.dumps(wire)
+
+            manager = ProviderProcessManager.__new__(ProviderProcessManager)
+            manager._lock = asyncio.Lock()
+            manager.processes = {}
+            manager._draining = set()
+            binding = SimpleNamespace(module_id="r3a.knowledge", version="1.1.0",
+                                      socket=Path("/unused"), inflight=0,
+                                      drained=asyncio.Event(), process=SimpleNamespace(returncode=None))
+            binding.drained.set()
+            manager.processes[(binding.module_id, binding.version)] = binding
+            manager._ensure_active = AsyncMock(return_value=binding)
+            operation = SimpleNamespace(descriptor={"execution": {"timeout_seconds": 2}})
+            with patch("r3a_runtime.provider_runtime.request",
+                       new=AsyncMock(return_value={"result": wire})):
+                restored = await manager.invoke(operation, {"query": "policy"}, context={})
+            self.assertIsInstance(restored, CapabilityProviderResult)
+            self.assertEqual(output, restored.output)
+            self.assertEqual(evidence, restored.evidence)
+
+        asyncio.run(scenario())
+
     def test_registered_engineering_provider_process_can_be_replaced_and_stopped(self):
         async def scenario(root: Path):
             first = descriptor()
             second = copy.deepcopy(first)
             second["provider"]["provider_version"] = "1.0.1"
+            replacement_artifact = Path(__file__).parent / "fixtures/providers/replacement_workspace.py"
+            second["provider"]["entrypoint"] = "tests.fixtures.providers.replacement_workspace:create_provider"
+            second["provider"]["artifact_sha256"] = hashlib.sha256(replacement_artifact.read_bytes()).hexdigest()
+            bad_upgrade = copy.deepcopy(second)
+            bad_upgrade["provider"]["provider_version"] = "1.0.2"
+            bad_upgrade["provider"]["artifact_sha256"] = "0" * 64
             registry = CapabilityRegistry()
             registry.register(first, {"workspace_root": str(root)})
             registry.register(second, {"workspace_root": str(root)})
+            registry.register(bad_upgrade, {"workspace_root": str(root)})
             telemetry_root = Path(__file__).parents[1] / "r3a_plugins/octominer_telemetry"
             telemetry_manifest = json.loads((telemetry_root / "manifest.json").read_text())
             telemetry_config = json.loads((telemetry_root / "config.example.json").read_text())
-            artifact_paths = {telemetry_manifest["artifact_sha256"]: str(telemetry_root / telemetry_manifest["artifact_ref"])}
+            artifact_paths = {str(telemetry_root / telemetry_manifest["artifact_ref"]): telemetry_manifest["artifact_sha256"]}
             for supporting in telemetry_manifest["supporting_artifacts"]:
-                artifact_paths[supporting["artifact_sha256"]] = str(telemetry_root / supporting["artifact_ref"])
+                artifact_paths[str(telemetry_root / supporting["artifact_ref"])] = supporting["artifact_sha256"]
             telemetry_operation = operation_from_manifest(telemetry_manifest)
-            telemetry_manifest["_provider_artifact_path"] = artifact_paths[
-                telemetry_operation["provider"]["artifact_sha256"]]
+            telemetry_manifest["_provider_artifact_path"] = next(
+                path for path, digest in artifact_paths.items()
+                if digest == telemetry_operation["provider"]["artifact_sha256"])
             telemetry_manifest["_pinned_artifact_paths"] = artifact_paths
             registry.register(telemetry_operation, telemetry_config, legacy_manifest=telemetry_manifest)
+            telemetry_registered = registry.resolve_provider(
+                telemetry_operation["operation_id"], telemetry_operation["provider"]["provider_version"])
             store = ProviderLifecycleFixtureStore()
             settings = SimpleNamespace(data_dir=root / "data")
             runtime = ProviderProcessManager(settings, store, registry)
@@ -228,6 +278,15 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
 
             old = registry.resolve_provider("engineering.workspace.apply_patch", "1.0.0")
             await runtime.activate(old)
+            await runtime.activate(telemetry_registered)
+            telemetry_provider = telemetry_registered.descriptor["provider"]
+            telemetry_binding = runtime.processes[(telemetry_provider["provider_id"],
+                                                   telemetry_provider["provider_version"])]
+            telemetry_pid = telemetry_binding.process.pid
+            await runtime.check_health()
+            self.assertTrue(any(item[0] == (telemetry_provider["provider_id"],
+                                            telemetry_provider["provider_version"])
+                                and item[1] == "healthy" for item in store.health_observations))
             context = {"invocation_id": "lifecycle-fixture", "effect_class": "isolated_write",
                        "target": {"workspace_id": "candidate-1"},
                        "work_order": {"workspace_id": "candidate-1", "allowed_paths": ["artifacts/**"]}}
@@ -235,6 +294,14 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             self.assertFalse(result["replayed"])
 
             new = registry.resolve_provider("engineering.workspace.apply_patch", "1.0.1")
+            await runtime.begin_replacement("r3a.isolated_workspace", "1.0.0")
+            with self.assertRaisesRegex(RuntimeError, "artifact digest mismatch"):
+                await runtime.activate(registry.resolve_provider("engineering.workspace.apply_patch", "1.0.2"))
+            await runtime.cancel_replacement("r3a.isolated_workspace", "1.0.0")
+            self.assertIsNone(runtime.processes[("r3a.isolated_workspace", "1.0.0")].process.returncode,
+                             "failed upgrade leaves the prior module process operational")
+            self.assertEqual("1.0.0", registry.resolve("engineering.workspace.apply_patch").descriptor[
+                "provider"]["provider_version"])
             await runtime.begin_replacement("r3a.isolated_workspace", "1.0.0")
             await runtime.activate(new)
             registry.activate_provider("engineering.workspace.apply_patch", "1.0.1")
@@ -249,7 +316,26 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             stopped = await store.rows("lifecycle_state", ("r3a.isolated_workspace", "1.0.0"))
             self.assertEqual("STOPPED", stopped[0]["lifecycle_state"])
             self.assertEqual([("r3a.isolated_workspace", "1.0.0", "1.0.1")], store.replacements)
-            await runtime.stop("r3a.isolated_workspace", "1.0.1")
+            self.assertEqual(telemetry_pid, telemetry_binding.process.pid)
+            self.assertIsNone(telemetry_binding.process.returncode,
+                             "unrelated telemetry module remains active during Engineering replacement")
+
+            # Simulate CME process loss without writing a false STOPPED state. The
+            # next manager must restore the durable ACTIVE modules from their manifests.
+            for binding in list(runtime.processes.values()):
+                binding.process.terminate()
+                await binding.process.wait()
+            runtime.processes.clear()
+            restored = ProviderProcessManager(settings, store, registry)
+            await restored.install_all()
+            self.assertEqual("ACTIVE", (await store.rows(
+                "lifecycle_state", ("r3a.isolated_workspace", "1.0.1")))[0]["lifecycle_state"])
+            self.assertEqual("ACTIVE", (await store.rows(
+                "lifecycle_state", (telemetry_provider["provider_id"],
+                                    telemetry_provider["provider_version"])))[0]["lifecycle_state"])
+            self.assertEqual("1.0.1", registry.resolve("engineering.workspace.apply_patch").descriptor[
+                "provider"]["provider_version"])
+            await restored.close()
 
         with tempfile.TemporaryDirectory(prefix="r3a-provider-lifecycle-") as temporary:
             asyncio.run(scenario(Path(temporary)))

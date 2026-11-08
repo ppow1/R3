@@ -27,6 +27,7 @@ import signal
 from pathlib import Path
 from typing import Any
 
+from .capability_contracts import CapabilityProviderResult
 from .protocol import ModuleProtocolServer
 
 
@@ -88,6 +89,10 @@ class CapabilityWorker:
                 result = self.provider.invoke(arguments, context=context)
             except Exception as exc:
                 raise RuntimeError(f"provider execution failed ({type(exc).__name__})") from None
+            if isinstance(result, CapabilityProviderResult):
+                result = {"contract_id": "r3a.capability-provider-result.v1",
+                          "contract_version": "1.0.0",
+                          "output": result.output, "evidence": result.evidence}
             try:
                 json.dumps(result)
             except (TypeError, ValueError):

@@ -709,9 +709,35 @@ class CME:
                        self.settings.module_socket)
             if immutable != current:
                 raise RuntimeError("Bootstrap identity/socket/database changes require process restart")
+            next_versions = {
+                (item["descriptor"]["provider"]["provider_id"],
+                 item["descriptor"]["provider"]["provider_version"])
+                for item in new_settings.capability_registry.discover(
+                    include_disabled=True, include_versions=True)
+                if item["descriptor"]["lifecycle"]["desired_state"] == "enabled"
+            }
+            retained_processes = {
+                key for key, binding in self.provider_runtime.processes.items()
+                if binding.process.returncode is None
+            }
+            removed_active = retained_processes - next_versions
+            if removed_active:
+                raise RuntimeError(
+                    "config reload cannot remove active modules; deactivate them through CME first: "
+                    + ", ".join(f"{module}@{version}" for module, version in sorted(removed_active)))
             new_provider = create_authorization_provider(
                 new_settings.authorization_provider.provider_id,
                 new_settings.authorization_provider.options, new_settings.source_digest, self.store)
+            prior_runtime_settings = self.provider_runtime.settings
+            prior_runtime_registry = self.provider_runtime.registry
+            self.provider_runtime.settings = new_settings
+            self.provider_runtime.registry = new_settings.capability_registry
+            try:
+                await self.provider_runtime.install_all()
+            except Exception:
+                self.provider_runtime.settings = prior_runtime_settings
+                self.provider_runtime.registry = prior_runtime_registry
+                raise
             self.settings = new_settings
             self.store.settings = new_settings
             self.authorization_provider = new_provider
@@ -1128,8 +1154,13 @@ class CME:
                 "work_order": order, "effect_class": descriptor["effect_class"],
                 "config_revision": self.settings.source_digest,
                 "capability_catalog": list(self.settings.capability_registry.discover())}
-            output = await self.provider_runtime.invoke(
-                operation, checked["input"], context=provider_context)
+            runtime = getattr(self, "provider_runtime", None)
+            if runtime is None:  # Compatibility for isolated dispatcher contract fixtures.
+                provider = operation.load_provider()
+                output = await asyncio.to_thread(provider.invoke, checked["input"],
+                                                 context=provider_context)
+            else:
+                output = await runtime.invoke(operation, checked["input"], context=provider_context)
         except Exception as exc:
             finished = utcnow().isoformat()
             result = {"contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
@@ -1811,6 +1842,11 @@ class CME:
 
     async def _heartbeat_loop(self) -> None:
         while not self.shutdown.is_set():
+            try:
+                await self.provider_runtime.check_health()
+            except Exception:
+                # A provider diagnostic failure must remain local to that module.
+                pass
             module_health = "degraded"
             if self.module_process and self.module_process.returncode is None:
                 try:

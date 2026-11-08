@@ -1,0 +1,164 @@
+{
+  "schema_version": 1,
+  "plugin_id": "r3a.isolated-workspace",
+  "plugin_version": "1.0.2",
+  "artifact_ref": "replacement_workspace.py",
+  "artifact_sha256": "2de6eaeaaf41ce278803426202b95505915555383dbdb44261048e45d65fcbf6",
+  "configuration_schema": {
+    "schema_id": "r3a.isolated-workspace.config.v1",
+    "type": "object",
+    "required": [
+      "workspace_root"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "workspace_root": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "provider": {
+    "provider_id": "r3a.isolated-workspace",
+    "provider_version": "1.0.2",
+    "entrypoint": "tests.fixtures.providers.replacement_workspace:create_provider",
+    "artifact_sha256": "2de6eaeaaf41ce278803426202b95505915555383dbdb44261048e45d65fcbf6"
+  },
+  "operation": {
+    "contract_id": "r3a.capability-operation.v1",
+    "contract_version": "1.0.0",
+    "operation_id": "engineering.workspace.apply_patch",
+    "operation_revision": "1.0.2",
+    "provider": {
+      "provider_id": "r3a.isolated-workspace",
+      "provider_version": "1.0.2",
+      "entrypoint": "tests.fixtures.providers.replacement_workspace:create_provider",
+      "artifact_sha256": "2de6eaeaaf41ce278803426202b95505915555383dbdb44261048e45d65fcbf6"
+    },
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "path",
+        "content"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content": {
+          "type": "string"
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "required": [
+        "path",
+        "sha256",
+        "bytes_written",
+        "replayed"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "bytes_written": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "replayed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "effect_class": "isolated_write",
+    "caller_constraints": {
+      "allowed_principals": [
+        "resident.grace"
+      ],
+      "allowed_residents": [
+        "resident.grace"
+      ],
+      "allowed_services": []
+    },
+    "target_scope_schema": {
+      "type": "object",
+      "required": [
+        "workspace_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "workspace_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "required_grants": [
+      "engineering.workspace.apply_patch"
+    ],
+    "evidence": {
+      "schema": {
+        "type": "object"
+      },
+      "verification_obligations": [
+        "independent_digest_check",
+        "work_order_scope_match"
+      ]
+    },
+    "recovery": {
+      "idempotency_required": true,
+      "idempotency_scope": "work_order",
+      "replay_safe": true,
+      "reconciliation_operation_id": null
+    },
+    "execution": {
+      "timeout_seconds": 30,
+      "retry_disposition": "safe_retry"
+    },
+    "lifecycle": {
+      "desired_state": "enabled"
+    },
+    "resident_tool": {
+      "name": "Engineering Workspace Apply Patch",
+      "description": "Apply one work-order-authorized file within the configured isolated workspace. CME authorization and independent verification are required."
+    }
+  },
+  "module_manifest": {
+    "contract_id": "r3a.module-manifest.v1",
+    "contract_version": "1.0.0",
+    "module_id": "r3a.isolated-workspace",
+    "module_version": "1.0.2",
+    "owner": "R3A Engineering Workspace module",
+    "binding": {
+      "contract_id": "r3a.capability-provider.v1",
+      "protocol_major": 1,
+      "protocol_min_minor": 0,
+      "protocol_max_minor": 0,
+      "entrypoint": "tests.fixtures.providers.replacement_workspace:create_provider"
+    },
+    "dependencies": [],
+    "configuration": {
+      "schema_ref": "r3a.isolated-workspace.config.v1",
+      "configuration_ref": "isolated_workspace.config.example.json"
+    },
+    "capability_refs": [
+      "engineering.workspace.apply_patch"
+    ],
+    "resource_refs": [],
+    "state_namespace": "r3a.isolated-workspace",
+    "migration_contract": "none.v1",
+    "recovery_policy": "idempotent.v1",
+    "artifact": {
+      "artifact_ref": "replacement_workspace.py",
+      "artifact_sha256": "2de6eaeaaf41ce278803426202b95505915555383dbdb44261048e45d65fcbf6"
+    }
+  }
+}
