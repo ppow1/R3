@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/config.py
 Component: R3A-BOOTSTRAP-CONFIG
-File Revision: 1.7.0
+File Revision: 1.8.0
 Created: 2026-11-06T15:04:00Z
 Created By: Codex GPT-6
 Purpose: Strictly validate external R3A AP0-M1 bootstrap and operating settings.
@@ -23,6 +23,7 @@ Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Add externally
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Bind configured model roles to task classes and reject cross-class fallback.
 Changed: 2026-11-07 | R3A-AP1-N1 | Codex GPT-6 | Add externally configured versioned service-event notification sources.
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Preserve immutable provider-version registrations and pass resolved pinned artifact paths to the generic CME binding.
+Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | R3A Coordinator | Resolve module dependency ranges and reject missing providers or cycles.
 Supersedes: None.
 Contracts: AP0-001/008/009; R3A-019; Issue #46; AP0-M1 D7; r3a_runtime.contracts; hints/file-provenance.md.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py.
@@ -40,6 +41,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+
+from .module_contracts import validate_dependency_graph
 
 
 class ConfigurationError(ValueError):
@@ -744,6 +747,8 @@ def load_settings(path: str | Path) -> Settings:
                                        operation_from_manifest)
     capability_registry = CapabilityRegistry()
     plugin_ids: set[tuple[str, str, str]] = set()
+    configured_provider_versions: dict[str, set[str]] = {}
+    declared_module_dependencies: list[tuple[str, dict[str, Any]]] = []
     if "capability_plugins" in value and "capability_operations" in value:
         raise ConfigurationError("use one capability_operations registry input; capability_plugins is a compatibility alias")
     raw_plugins = value.get("capability_operations", value.get("capability_plugins", []))
@@ -822,6 +827,14 @@ def load_settings(path: str | Path) -> Settings:
             operation_id = operation["operation_id"]
             capability_id = manifest.get("capability_id", operation_id)
             provider = operation["provider"]
+            configured_provider_versions.setdefault(provider["provider_id"], set()).add(
+                provider["provider_version"])
+            module_manifest = manifest.get("module_manifest")
+            if module_manifest is not None:
+                if set(module_manifest["capability_refs"]) - set(capabilities):
+                    raise CapabilityContractError(
+                        "module manifest declares a capability outside module.capabilities")
+                declared_module_dependencies.append((where, module_manifest))
             plugin_identity = (capability_id, provider["provider_id"], provider["provider_version"])
             if plugin_identity in plugin_ids or capability_id not in capabilities:
                 raise CapabilityContractError("operation provider version must be unique and operation_id declared in module.capabilities")
@@ -840,6 +853,13 @@ def load_settings(path: str | Path) -> Settings:
         except (CapabilityContractError, KeyError, TypeError) as exc:
             raise ConfigurationError(f"{where}.manifest operation contract is invalid: {exc}") from exc
         plugin_ids.add(plugin_identity)
+
+    try:
+        validate_dependency_graph(
+            configured_provider_versions,
+            [manifest for _where, manifest in declared_module_dependencies])
+    except ValueError as exc:
+        raise ConfigurationError(f"Module dependency contract is invalid: {exc}") from exc
 
     timing = value["timing"]
     if not isinstance(timing, dict):

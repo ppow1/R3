@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.12.0
+File Revision: 1.13.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -43,6 +43,7 @@ Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Enforce Grace-
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Dispatch escalation inference through the unified capability invocation and durable budget-reservation path.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Resolve routes by configured task class and reject autonomic objective inference before model execution.
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Bind manifest-declared capability provider versions through the generic CME module lifecycle while preserving CME authorization and invocation persistence.
+Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | R3A Coordinator | Reload external module manifests through lifecycle manager and refresh provider health independently.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; module.lifecycle v2; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py; tests/test_r3a_telemetry_providers.py; tests/test_r3a_capability_contracts.py; tests/test_r3a_engineering.py.
@@ -1030,9 +1031,35 @@ class CME:
                        self.settings.module_socket)
             if immutable != current:
                 raise RuntimeError("Bootstrap identity/socket/database changes require process restart")
+            next_versions = {
+                (item["descriptor"]["provider"]["provider_id"],
+                 item["descriptor"]["provider"]["provider_version"])
+                for item in new_settings.capability_registry.discover(
+                    include_disabled=True, include_versions=True)
+                if item["descriptor"]["lifecycle"]["desired_state"] == "enabled"
+            }
+            retained_processes = {
+                key for key, binding in self.provider_runtime.processes.items()
+                if binding.process.returncode is None
+            }
+            removed_active = retained_processes - next_versions
+            if removed_active:
+                raise RuntimeError(
+                    "config reload cannot remove active modules; deactivate them through CME first: "
+                    + ", ".join(f"{module}@{version}" for module, version in sorted(removed_active)))
             new_provider = create_authorization_provider(
                 new_settings.authorization_provider.provider_id,
                 new_settings.authorization_provider.options, new_settings.source_digest, self.store)
+            prior_runtime_settings = self.provider_runtime.settings
+            prior_runtime_registry = self.provider_runtime.registry
+            self.provider_runtime.settings = new_settings
+            self.provider_runtime.registry = new_settings.capability_registry
+            try:
+                await self.provider_runtime.install_all()
+            except Exception:
+                self.provider_runtime.settings = prior_runtime_settings
+                self.provider_runtime.registry = prior_runtime_registry
+                raise
             self.settings = new_settings
             self.store.settings = new_settings
             self.authorization_provider = new_provider
@@ -2942,6 +2969,11 @@ class CME:
 
     async def _heartbeat_loop(self) -> None:
         while not self.shutdown.is_set():
+            try:
+                await self.provider_runtime.check_health()
+            except Exception:
+                # Module diagnostics must not take down CME or unrelated providers.
+                pass
             module_health = "degraded"
             if self.module_process and self.module_process.returncode is None:
                 try:

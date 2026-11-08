@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/provider_runtime.py
 Component: R3A-CAPABILITY-MODULE-RUNTIME
-File Revision: 1.2.0
+File Revision: 1.3.0
 Created: 2026-11-07
 Created By: Codex GPT-6
 Purpose: Supervise generic manifest-declared capability provider processes.
@@ -13,6 +13,7 @@ Authority: Steward directive, "Implement the Approved Modular Foundation", 2026-
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Implement install, activation, invocation, deactivation, replacement, and failure handling for provider versions.
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-002 | Close admission and drain in-flight provider invocations before checkpoint and stop.
 Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Restore the versioned typed output/evidence provider result after JSON transport.
+Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | Reconcile live manifests, activate declared dependencies, and observe provider health.
 Supersedes: None.
 Contracts: MOD-001–MOD-010; module.lifecycle v2; r3a.capability-provider.v1.
 Tests: tests/test_r3a_capability_integration_demo.py.
@@ -28,10 +29,12 @@ import os
 import re
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .capability_contracts import CapabilityProviderResult, RegisteredOperation
+from .module_contracts import semantic_version, version_satisfies
 from .protocol import PROTOCOL_MAJOR, PROTOCOL_MINOR, request
 
 
@@ -134,6 +137,28 @@ class ProviderProcessManager:
                 "recovery_policy": "replay-per-operation-contract", "resource_refs": [],
                 "state_namespace": provider["provider_id"]}
 
+    async def _activate_dependencies(self, operation: RegisteredOperation,
+                                     ancestry: tuple[tuple[str, str], ...]) -> None:
+        key = self._provider(operation)
+        if key in ancestry:
+            raise RuntimeError("module dependency cycle reached during activation")
+        module_manifest = (operation.legacy_manifest or {}).get("module_manifest") or {}
+        configured = [item["descriptor"] for item in self.registry.discover(
+            include_disabled=True, include_versions=True)]
+        for dependency in module_manifest.get("dependencies", []):
+            candidates = [item for item in configured
+                          if item["lifecycle"]["desired_state"] == "enabled"
+                          and item["provider"]["provider_id"] == dependency["module_id"]
+                          and version_satisfies(item["provider"]["provider_version"],
+                                                dependency["version_range"])]
+            if not candidates:
+                raise RuntimeError(
+                    f"module dependency is not configured: {dependency['module_id']}@{dependency['version_range']}")
+            selected = max(candidates, key=lambda item: semantic_version(item["provider"]["provider_version"]))
+            required = self.registry.resolve_provider(selected["operation_id"],
+                                                      selected["provider"]["provider_version"])
+            await self._ensure_active(required, ancestry=(*ancestry, key))
+
     async def install_all(self) -> None:
         seen = set()
         restore: list[RegisteredOperation] = []
@@ -160,12 +185,30 @@ class ProviderProcessManager:
                 continue
             await self.store.register_module(manifest, "INSTALLED", "unknown")
             rows = await self.store.rows(
-                "SELECT lifecycle_state,diagnostic FROM r3a.module_registry WHERE module_id=%s AND module_version=%s",
+                "SELECT lifecycle_state,diagnostic,manifest FROM r3a.module_registry "
+                "WHERE module_id=%s AND module_version=%s",
                 key)
+            if rows and rows[0].get("manifest") is not None and rows[0]["manifest"] != manifest:
+                raise RuntimeError(
+                    f"installed module {key[0]}@{key[1]} manifest is immutable; publish a new version")
             previous = rows[0]["lifecycle_state"] if rows else "INSTALLED"
             diagnostic = rows[0].get("diagnostic") if rows else {}
             if not isinstance(diagnostic, dict):
                 diagnostic = {}
+            process = self.processes.get(key)
+            if process is not None and process.process.returncode is None:
+                old_manifest = (process.operation.legacy_manifest or {}).get("module_manifest")
+                new_manifest = (operation.legacy_manifest or {}).get("module_manifest")
+                if (process.operation.configuration != operation.configuration
+                        or old_manifest != new_manifest
+                        or process.operation.descriptor["provider"]["artifact_sha256"]
+                        != operation.descriptor["provider"]["artifact_sha256"]):
+                    raise RuntimeError(
+                        f"active module {key[0]}@{key[1]} changed configuration or manifest; "
+                        "publish a new module version and replace through CME")
+                self.registry.set_provider_state(*key, "ACTIVE",
+                                                 {"pid": process.process.pid, "source": "retained process"})
+                continue
             restore_on_start = (previous in {"ACTIVE", "ACTIVATING", "STOPPING", "REPLACING"}
                                 or (previous == "STOPPED" and diagnostic.get("resume_on_start") is True))
             if previous == "INSTALLED":
@@ -190,8 +233,12 @@ class ProviderProcessManager:
                 # from starting; its lifecycle/diagnostic record carries the failure.
                 continue
 
-    async def _ensure_active(self, operation: RegisteredOperation) -> ProviderProcess:
+    async def _ensure_active(self, operation: RegisteredOperation, *,
+                             ancestry: tuple[tuple[str, str], ...] = ()) -> ProviderProcess:
         key = self._provider(operation)
+        if key in ancestry:
+            raise RuntimeError("module dependency cycle reached during activation")
+        await self._activate_dependencies(operation, ancestry)
         async with self._lock:
             existing = self.processes.get(key)
             if existing and existing.process.returncode is None:
@@ -200,7 +247,8 @@ class ProviderProcessManager:
                 return existing
             manifest = self._manifest(operation)
             rows = await self.store.rows(
-                "SELECT artifact_digest,lifecycle_state FROM r3a.module_registry WHERE module_id=%s AND module_version=%s",
+                "SELECT artifact_digest,lifecycle_state,manifest FROM r3a.module_registry "
+                "WHERE module_id=%s AND module_version=%s",
                 key)
             if (manifest["protocol_major"] != PROTOCOL_MAJOR
                     or not manifest["protocol_min_minor"] <= PROTOCOL_MINOR <= manifest["protocol_max_minor"]):
@@ -216,6 +264,8 @@ class ProviderProcessManager:
                 await self._state(*key, "INSTALLED", "unknown", {"source": "capability manifest"})
             elif rows[0]["artifact_digest"].strip() != manifest["artifact_digest"]:
                 raise RuntimeError("provider artifact changed under an installed version")
+            elif rows[0].get("manifest") is not None and rows[0]["manifest"] != manifest:
+                raise RuntimeError("provider module manifest changed under an installed version")
             state = rows[0]["lifecycle_state"] if rows else "INSTALLED"
             if state in {"ACTIVE", "ACTIVATING", "STOPPING", "REPLACING"}:
                 await self._state(*key, "FAILED", "stale",
@@ -333,6 +383,31 @@ class ProviderProcessManager:
         binding = await self._ensure_active(operation)
         return {"module_id": binding.module_id, "version": binding.version,
                 "state": "ACTIVE", "pid": binding.process.pid}
+
+    async def check_health(self) -> None:
+        """Refresh per-provider health without allowing one provider to stop CME."""
+        for key, binding in list(self.processes.items()):
+            if binding.process.returncode is not None:
+                await self._state(*key, "FAILED", "unavailable",
+                                  {"reason": "provider process exited",
+                                   "exit_code": binding.process.returncode})
+                self.registry.set_provider_state(*key, "FAILED",
+                                                 {"exit_code": binding.process.returncode})
+                continue
+            try:
+                response = await request(binding.socket, *key, "health", timeout=2.0)
+                health = response["result"]
+                healthy = health.get("state") == "ACTIVE" and health.get("health") == "healthy"
+                await self.store.observe_module(
+                    *key, "healthy" if healthy else "degraded",
+                    {"pid": binding.process.pid, "module_state": health.get("state"),
+                     "checked_at": datetime.now(timezone.utc).isoformat()})
+                if not healthy:
+                    self.registry.set_provider_state(*key, "degraded", {"health": health})
+            except Exception as exc:
+                await self.store.observe_module(*key, "unavailable",
+                                                {"pid": binding.process.pid,
+                                                 "health_error": type(exc).__name__})
 
     async def stop(self, module_id: str, version: str, *, restore_on_start: bool = False) -> dict[str, Any]:
         key = (module_id, version)
