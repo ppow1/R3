@@ -182,6 +182,9 @@ class ProviderLifecycleFixtureStore:
             return []
         if "artifact_digest" in query:
             return [{"artifact_digest": row["artifact_digest"], "lifecycle_state": row["lifecycle_state"]}]
+        if "health" in query:
+            return [{"lifecycle_state": row["lifecycle_state"], "health": row["health"],
+                     "observed_at": row["observed_at"], "diagnostic": copy.deepcopy(row["diagnostic"])}]
         return [{"lifecycle_state": row["lifecycle_state"]}]
 
     async def register_module(self, manifest, lifecycle="INSTALLED", health="unknown", diagnostic=None):
@@ -190,7 +193,10 @@ class ProviderLifecycleFixtureStore:
         if prior and prior["artifact_digest"] != manifest["artifact_digest"]:
             raise RuntimeError("module version is immutable")
         self.modules[key] = {"artifact_digest": manifest["artifact_digest"],
-                             "lifecycle_state": prior["lifecycle_state"] if prior else lifecycle}
+                             "lifecycle_state": prior["lifecycle_state"] if prior else lifecycle,
+                             "health": prior["health"] if prior else health,
+                             "observed_at": None,
+                             "diagnostic": prior["diagnostic"] if prior else copy.deepcopy(diagnostic or {})}
 
     async def module_state(self, module_id, version, lifecycle, health, diagnostic=None, *, machine_version=1):
         key = module_id, version
@@ -207,6 +213,9 @@ class ProviderLifecycleFixtureStore:
         if lifecycle != previous and lifecycle not in allowed[previous]:
             raise ValueError(f"invalid lifecycle transition: {previous} -> {lifecycle}")
         row["lifecycle_state"] = lifecycle
+        row["health"] = health
+        row["observed_at"] = "fixture-observation"
+        row["diagnostic"] = copy.deepcopy(diagnostic or {})
         self.transitions.append((key, previous, lifecycle, health, diagnostic or {}))
 
     async def record_module_replacement(self, module_id, old_version, new_version, *, machine_version=1):
@@ -343,12 +352,20 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 "status-engineering-v1.0.1")
             self.assertEqual("1.0.1", status["provider_version"])
             self.assertEqual("ACTIVE", status["module"]["lifecycle_state"])
+            self.assertEqual("healthy", status["module"]["health"])
+            self.assertEqual("fixture-observation", status["module"]["observed_at"])
+            self.assertEqual("r3a.capability-provider.v1",
+                             status["module"]["diagnostic"]["observed_contract"]["contract_id"])
             await cme._control_request(
                 "capability.module.deactivate",
                 {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.1"},
                 "deactivate-engineering-v1.0.1")
             stopped_new = await store.rows("lifecycle_state", ("r3a.isolated_workspace", "1.0.1"))
             self.assertEqual("STOPPED", stopped_new[0]["lifecycle_state"])
+            replacement_states = [state for key, _previous, state, _health, _diagnostic in store.transitions
+                                  if key[0] == "r3a.isolated_workspace"]
+            self.assertIn("REPLACING", replacement_states)
+            self.assertEqual("STOPPED", replacement_states[-1])
             with self.assertRaisesRegex(ValueError, "provider is stopped"):
                 registry.resolve("engineering.workspace.apply_patch")
             self.assertEqual("infrastructure.octominer.telemetry.read",
