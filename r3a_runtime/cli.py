@@ -32,17 +32,17 @@ from pathlib import Path
 from typing import Any
 
 from .backup import create_backup, restore_backup
-from .config import load_settings
+from .config import Settings, load_settings
 from .control import control_request
 from .diagnostics import status
+from .timestamp_presentation import human_report
 
 
-def _emit(value: Any) -> None:
-    print(json.dumps(value, indent=2, sort_keys=True, default=str))
+def _emit(value: Any, timezone_name: str) -> None:
+    print(json.dumps(human_report(value, timezone_name), indent=2, sort_keys=True, default=str))
 
 
-async def _run(args: argparse.Namespace) -> Any:
-    settings = load_settings(args.config)
+async def _run(args: argparse.Namespace, settings: Settings) -> Any:
     if args.command == "status":
         return await status(settings)
     if args.command in {"events", "definitions"}:
@@ -126,7 +126,8 @@ def main() -> None:
     restore.add_argument("--target-database", required=True)
     args = parser.parse_args()
     try:
-        _emit(asyncio.run(_run(args)))
+        settings = load_settings(args.config)
+        _emit(asyncio.run(_run(args, settings)), settings.presentation_timezone)
     except Exception as exc:
         print(f"r3a: {type(exc).__name__}: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
