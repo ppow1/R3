@@ -1,5 +1,22 @@
 """PostgreSQL-backed governed workflow integration test for an isolated dev DB."""
 
+# R3 CONTROLLED SOURCE
+# File: tests/test_r3a_postgres_character_workflow.py
+# Component: R3A-RESIDENT-DOSSIERS-POSTGRES-TESTS
+# File Revision: 1.0.0
+# Created: Unknown (legacy)
+# Created By: Unknown (legacy)
+# Purpose: Validate durable character governance, immutable context pins, and rollback.
+# Execution Model: unittest against an explicitly isolated PostgreSQL database.
+# Observability: Named test cases and PostgreSQL state assertions.
+# Dependencies: psycopg; r3a_runtime.residents; migrations 001–013.
+# Authority: Steward-approved Character Architecture; test data is not institutional data.
+# Changed: 2026-11-08 UTC | CA-03 | Codex GPT-6 | Assert pinned classification scopes cannot change.
+# Supersedes: None
+# Contracts: r3a.resident.approved-character-context@2.0.0
+# Tests: python3 -m unittest tests.test_r3a_postgres_character_workflow
+# History/Predecessor: Git parent 6b4e8d1.
+
 from __future__ import annotations
 
 import copy
@@ -103,6 +120,7 @@ class PostgresCharacterWorkflowTests(unittest.TestCase):
             execution_profile_resident_id="resident:test", execution_route_id="route:test",
             execution_profile_source_ref="profile://test@1.0.0",
             provider_id="model:test", principal_ref=self.ids["reader"],
+            authorized_classifications=("public", "institutional"),
         )
         self.assertTrue(pin["created"])
         self.assertEqual(pin["directory_snapshot_sha256"], "b" * 64)
@@ -138,9 +156,26 @@ class PostgresCharacterWorkflowTests(unittest.TestCase):
             execution_profile_resident_id="resident:test", execution_route_id="route:test",
             execution_profile_source_ref="profile://test@1.0.0",
             provider_id="model:test", principal_ref=self.ids["reader"],
+            authorized_classifications=("public", "institutional"),
         )
         self.assertFalse(existing_pin["created"])
         self.assertEqual(existing_pin["pin_id"], pin["pin_id"])
+        with self.assertRaises(RevisionConflict):
+            self.repository.pin_context(
+                resident_id=self.resident_id, revision=first, dossier_sha256=first_digest,
+                execution_kind="conversation_boundary", execution_ref="conversation:test:turn:1",
+                identity_revision="1", directory_resident_id="resident:test", binding_revision=1,
+                directory_snapshot_sha256="b" * 64,
+                directory_source_ref="directory://snapshot/test/1",
+                hr_source_ref="hr://resident/test@1",
+                hr_principal_association_ref="hr://association/test@1",
+                office_id="office:test", office_role="Test role",
+                execution_profile_id="profile:test", execution_profile_revision="1.0.0",
+                execution_profile_resident_id="resident:test", execution_route_id="route:test",
+                execution_profile_source_ref="profile://test@1.0.0",
+                provider_id="model:test", principal_ref=self.ids["reader"],
+                authorized_classifications=("public",),
+            )
         with self.assertRaises(RevisionConflict):
             self.repository.pin_context(
                 resident_id=self.resident_id, revision=second,
@@ -156,6 +191,7 @@ class PostgresCharacterWorkflowTests(unittest.TestCase):
                 execution_profile_resident_id="resident:test", execution_route_id="route:test",
                 execution_profile_source_ref="profile://test@1.0.0",
                 provider_id="model:test", principal_ref=self.ids["reader"],
+                authorized_classifications=("public",),
             )
 
         current = self.service.read(self.actor("reader"), self.resident_id)

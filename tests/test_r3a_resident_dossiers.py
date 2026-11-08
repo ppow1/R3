@@ -3,7 +3,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_r3a_resident_dossiers.py
 # Component: R3A-RESIDENT-DOSSIERS-TESTS
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-08 UTC (exact creation time not captured)
 # Created By: Codex GPT-6
 # Purpose: Cover roster data shape, prompt/config composition, privacy, governance, memory and epistemics.
@@ -12,6 +12,7 @@
 # Dependencies: Python standard library; r3a_runtime.residents; data/residents.
 # Authority: Steward directive; tests cannot certify live authoritative roster or operational readiness.
 # Changed: 2026-11-08 UTC | CHARACTER-ARCHITECTURE | Codex GPT-6 | Add dossier architecture regressions.
+# Changed: 2026-11-08 UTC | CA-03 | Codex GPT-6 | Assert authorization scope remains immutable within a context pin.
 # Supersedes: None
 # Contracts: r3a.resident.dossier.v1; r3a.resident.prompt-composition.v1; memory/relationship/epistemic v1
 # Tests: python3 -m unittest tests.test_r3a_resident_dossiers
@@ -542,6 +543,7 @@ class ResidentDossierTests(unittest.TestCase):
                             "execution_profile_resident_id": kwargs["execution_profile_resident_id"],
                             "execution_route_id": kwargs["execution_route_id"],
                             "execution_profile_source_ref": kwargs["execution_profile_source_ref"],
+                            "authorized_classifications": list(kwargs["authorized_classifications"]),
                             "provider_id": kwargs["provider_id"],
                             "principal_ref": kwargs["principal_ref"],
                             "execution_kind": kwargs["execution_kind"],
@@ -554,6 +556,7 @@ class ResidentDossierTests(unittest.TestCase):
 
         repository = RepositoryStub()
         actor = GovernedActor("resident:grace", "r3-session:authenticated")
+        authorization_scope = {"value": {"public"}}
         provider = ApprovedCharacterContextProvider(
             repository,
             resolve_hr_identity=lambda actor, resident_id: {
@@ -574,7 +577,8 @@ class ResidentDossierTests(unittest.TestCase):
                 "execution_profile_source_ref": "profile://grace@1.2.9",
             },
             authorize_context=lambda actor, action, scope: (
-                action == "character.context.read" and scope == "r3:grace"),
+                authorization_scope["value"] if action == "character.context.read" and scope == "r3:grace"
+                else False),
             defaults=DEFAULTS,
         )
         context = provider.retrieve(actor, resident_id="r3:grace",
@@ -612,6 +616,12 @@ class ResidentDossierTests(unittest.TestCase):
             provider_id="model:grace")
         self.assertEqual(resumed["pin_ref"], context["pin_ref"])
         self.assertEqual(resumed["context_sha256"], context["context_sha256"])
+        authorization_scope["value"] = {"public", "institutional"}
+        with self.assertRaisesRegex(PermissionError, "pinned character context"):
+            provider.retrieve(actor, resident_id="r3:grace",
+                execution_kind="conversation_boundary", execution_ref="conversation:turn:1",
+                provider_id="model:grace")
+        authorization_scope["value"] = {"public"}
         events = []
         memory = project_context_for_sink(context, sink="memory",
             authorized_classifications=frozenset({"public", "institutional"}),

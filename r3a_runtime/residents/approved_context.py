@@ -1,5 +1,22 @@
 """Approved active character-context lookup and execution-boundary pinning."""
 
+# R3 CONTROLLED SOURCE
+# File: r3a_runtime/residents/approved_context.py
+# Component: R3A-RESIDENT-CONTEXT
+# File Revision: 1.0.0
+# Created: Unknown (legacy)
+# Created By: Unknown (legacy)
+# Purpose: Resolve authorized approved canon and pin it to an inference/conversation boundary.
+# Execution Model: Synchronous provider called by a trusted resident runtime host.
+# Observability: Context pins and content-free authorization/audit projections.
+# Dependencies: R3 HR identity authority, directory/profile evidence, dossier repository, grant adapter.
+# Authority: Steward-approved Character Architecture; no identity or execution authority is granted.
+# Changed: 2026-11-08 UTC | CA-03 | Codex GPT-6 | Pin classification authorization scope for boundary continuity.
+# Supersedes: None
+# Contracts: r3a.resident.approved-character-context@2.0.0
+# Tests: tests.test_r3a_resident_dossiers; tests.test_r3a_postgres_character_workflow
+# History/Predecessor: Git parent 6b4e8d1.
+
 from __future__ import annotations
 
 import hashlib
@@ -98,7 +115,8 @@ class ApprovedCharacterContextProvider:
                         pin["execution_profile_id"], pin["execution_profile_revision"],
                         pin["execution_profile_resident_id"], pin["execution_route_id"],
                         pin["execution_profile_source_ref"],
-                        pin["provider_id"], pin["principal_ref"])
+                        pin["provider_id"], pin["principal_ref"],
+                        tuple(pin["authorized_classifications"] or ()))
             current = (identity_revision, identity["directory_resident_id"],
                        identity["binding_revision"], identity["directory_snapshot_sha256"],
                        identity["directory_source_ref"], identity["source_ref"],
@@ -106,7 +124,8 @@ class ApprovedCharacterContextProvider:
                        identity["office_role"], identity["execution_profile_id"],
                        identity["execution_profile_revision"],
                        identity["execution_profile_resident_id"], identity["execution_route_id"],
-                       identity["execution_profile_source_ref"], provider_id, actor.principal_id)
+                       identity["execution_profile_source_ref"], provider_id, actor.principal_id,
+                       tuple(sorted(authorized_classifications)))
             if current != expected:
                 raise PermissionError("pinned character context identity, binding, or provider changed")
             revision = pin["dossier_revision"]
@@ -144,6 +163,7 @@ class ApprovedCharacterContextProvider:
                 execution_profile_source_ref=identity["execution_profile_source_ref"],
                 provider_id=provider_id,
                 principal_ref=actor.principal_id,
+                authorized_classifications=tuple(sorted(authorized_classifications)),
             )
 
         if dossier.get("revision") != revision:

@@ -5,6 +5,23 @@ create identities or authenticate actors; callers must pass through the
 institutional identity and authorization gateways before invoking mutations.
 """
 
+# R3 CONTROLLED SOURCE
+# File: r3a_runtime/residents/postgres_repository.py
+# Component: R3A-RESIDENT-DOSSIERS
+# File Revision: 1.0.0
+# Created: Unknown (legacy)
+# Created By: Unknown (legacy)
+# Purpose: Persist immutable resident character revisions, governance history, and context pins.
+# Execution Model: psycopg-compatible PostgreSQL repository adapter.
+# Observability: Append-only governance events, revision digests, and exact boundary pins.
+# Dependencies: PostgreSQL schema r3a; dossier validation contracts.
+# Authority: Canonical HR identities are foreign authority; this repository cannot create identities.
+# Changed: 2026-11-08 UTC | CA-03 | Codex GPT-6 | Persist pinned context classification scope.
+# Supersedes: None
+# Contracts: r3a.resident.dossier.v1; approved-character-context@2.0.0
+# Tests: tests.test_r3a_postgres_character_workflow
+# History/Predecessor: Git parent 6b4e8d1.
+
 from __future__ import annotations
 
 import hashlib
@@ -135,7 +152,8 @@ class PostgresDossierRepository:
                     execution_profile_id: str, execution_profile_revision: str,
                     execution_profile_resident_id: str, execution_route_id: str,
                     execution_profile_source_ref: str,
-                    provider_id: str, principal_ref: str) -> dict[str, Any]:
+                    provider_id: str, principal_ref: str,
+                    authorized_classifications: tuple[str, ...] | list[str]) -> dict[str, Any]:
         """Pin one immutable approved revision to an inference/conversation boundary.
 
         Repeated calls for the same boundary are idempotent only when every identity,
@@ -160,6 +178,11 @@ class PostgresDossierRepository:
             raise ValueError("directory snapshot digest is required for an identity pin")
         if type(binding_revision) is not int or binding_revision < 1:
             raise ValueError("authoritative office binding revision is required")
+        if (not authorized_classifications
+                or len(set(authorized_classifications)) != len(authorized_classifications)
+                or set(authorized_classifications) - {"public", "institutional"}):
+            raise ValueError("context pin requires a nonempty, unique authorized classification scope")
+        authorized_classifications = tuple(sorted(authorized_classifications))
         with self._connect() as connection:
             connection.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (resident_id,))
             row = connection.execute(
@@ -168,7 +191,7 @@ class PostgresDossierRepository:
                 "p.directory_snapshot_sha256,p.directory_source_ref,p.hr_source_ref,"
                 "p.hr_principal_association_ref,p.office_id,p.office_role,"
                 "p.execution_profile_id,p.execution_profile_revision,p.execution_profile_resident_id,"
-                "p.execution_route_id,p.execution_profile_source_ref "
+                "p.execution_route_id,p.execution_profile_source_ref,p.authorized_classifications "
                 "FROM r3a.resident_character_context_pins p "
                 "WHERE p.resident_id=%s AND p.execution_kind=%s AND p.execution_ref=%s FOR UPDATE",
                 (resident_id, execution_kind, execution_ref),
@@ -184,8 +207,10 @@ class PostgresDossierRepository:
                 requested_profile = (execution_profile_id, execution_profile_revision,
                                      execution_profile_resident_id, execution_route_id,
                                      execution_profile_source_ref)
+                existing_scope = tuple(sorted(row[19])) if row[19] is not None else None
                 if (existing != requested or existing_evidence != requested_evidence
-                        or existing_profile != requested_profile):
+                        or existing_profile != requested_profile
+                        or existing_scope != authorized_classifications):
                     raise RevisionConflict("execution boundary is already pinned to another identity or character revision")
                 return {"pin_id": row[0], "resident_id": resident_id,
                         "dossier_revision": row[1], "dossier_sha256": row[2].strip(),
@@ -201,7 +226,8 @@ class PostgresDossierRepository:
                         "execution_profile_revision": row[15],
                         "execution_profile_resident_id": row[16],
                         "execution_route_id": row[17],
-                        "execution_profile_source_ref": row[18]}
+                        "execution_profile_source_ref": row[18],
+                        "authorized_classifications": list(row[19]) if row[19] is not None else None}
             active = connection.execute(
                 "SELECT r.dossier_sha256 FROM r3a.resident_dossier_current c "
                 "JOIN r3a.resident_dossier_revisions r USING (resident_id,dossier_revision) "
@@ -225,15 +251,15 @@ class PostgresDossierRepository:
                 "directory_snapshot_sha256,directory_source_ref,hr_source_ref,"
                 "hr_principal_association_ref,office_id,office_role,execution_profile_id,"
                 "execution_profile_revision,execution_profile_resident_id,execution_route_id,"
-                "execution_profile_source_ref) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "execution_profile_source_ref,authorized_classifications) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (pin_id, resident_id, revision, dossier_sha256, execution_kind,
                  execution_ref, identity_revision, directory_resident_id, binding_revision,
                  provider_id, principal_ref, directory_snapshot_sha256, directory_source_ref,
                  hr_source_ref, hr_principal_association_ref, office_id, office_role,
                  execution_profile_id, execution_profile_revision,
                  execution_profile_resident_id, execution_route_id,
-                 execution_profile_source_ref),
+                 execution_profile_source_ref, list(authorized_classifications)),
             )
         return {"pin_id": pin_id, "resident_id": resident_id,
                 "dossier_revision": revision, "dossier_sha256": dossier_sha256,
@@ -249,6 +275,7 @@ class PostgresDossierRepository:
                 "execution_profile_resident_id": execution_profile_resident_id,
                 "execution_route_id": execution_route_id,
                 "execution_profile_source_ref": execution_profile_source_ref,
+                "authorized_classifications": list(authorized_classifications),
                 "provider_id": provider_id,
                 "principal_ref": principal_ref, "execution_kind": execution_kind,
                 "execution_ref": execution_ref, "created": True}
@@ -263,7 +290,7 @@ class PostgresDossierRepository:
                 "directory_snapshot_sha256,directory_source_ref,hr_source_ref,"
                 "hr_principal_association_ref,office_id,office_role,execution_profile_id,"
                 "execution_profile_revision,execution_profile_resident_id,execution_route_id,"
-                "execution_profile_source_ref "
+                "execution_profile_source_ref,authorized_classifications "
                 "FROM r3a.resident_character_context_pins "
                 "WHERE resident_id=%s AND execution_kind=%s AND execution_ref=%s",
                 (resident_id, execution_kind, execution_ref),
@@ -282,7 +309,8 @@ class PostgresDossierRepository:
                 "office_id": row[13], "office_role": row[14],
                 "execution_profile_id": row[15], "execution_profile_revision": row[16],
                 "execution_profile_resident_id": row[17], "execution_route_id": row[18],
-                "execution_profile_source_ref": row[19]}
+                "execution_profile_source_ref": row[19],
+                "authorized_classifications": list(row[20]) if row[20] is not None else None}
 
     def revision_metadata(self, resident_id: str, revision: str) -> dict[str, Any]:
         with self._connect() as connection:
