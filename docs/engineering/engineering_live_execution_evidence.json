@@ -1,0 +1,112 @@
+{
+  "evidence_contract": "r3a.engineering-live-readiness-evidence.v1",
+  "observed_at": "2026-11-08T14:51:29Z",
+  "execution_environment": {
+    "managed_coordinator_modified": false,
+    "cme_instance": "r3a_eng_ready",
+    "postgres_database": "r3a_eng_ready",
+    "postgres_port": 55973,
+    "workspace_root": "/tmp/r3a-eng-acceptance-final/workspace-grace",
+    "grace_inference": "live",
+    "model_provider": "openai-compatible",
+    "model_route": "primary-route",
+    "model": "/root/Qwen3-Next-80B-A3B-Instruct-Q4_K_M.gguf"
+  },
+  "module": {
+    "module_id": "r3a.isolated_workspace",
+    "provider_version": "1.0.0",
+    "operation_id": "engineering.workspace.apply_patch",
+    "operation_version": "1.0.0",
+    "provider_artifact_sha256": "0b92d126ed33c972ddee65d67b94c57794bcf64122ebe304c8a0e1ffeb064126",
+    "lifecycle": ["INSTALLED", "ACTIVE_HEALTHY", "STOPPED", "ACTIVE_HEALTHY"]
+  },
+  "activity": {
+    "activity_id": "14e12d61-05ac-432a-810b-5659852ed80c",
+    "activity_type": "grace.objective",
+    "attempt_id": "25e18acf-7ee8-49c2-a9bf-468af8ad2ce4",
+    "correlation_id": "7a4aeb9a-6de6-4ddc-b815-1a23b2ac39a7",
+    "final_state": "COMPLETED",
+    "attempt_count": 1
+  },
+  "resident_selection": {
+    "action": "propose_engineering",
+    "selected_operation_id": "engineering.workspace.apply_patch",
+    "decision_was_model_generated": true,
+    "proposal_request_ref": "5fffa7e4-5d45-4dfa-a2fb-45c6f1f0e813",
+    "proposal_result_ref": "chatcmpl-c922VVDmHZEYBXZIeeIDz8H0ormfbOgd",
+    "proposal_result_sha256": "adf3c886b3e58d5ea1e1eeee5b567dc353ef5349c280c889ba180a2fb3d4bb81",
+    "proposal_rationale": "The assignment requires creating an engineering result artifact at artifacts/engineering_result.json that specifies a canonical operation matching the bounded file-write profile. The only available operation with effect_class=isolated_write and suitable target scope is engineering.workspace.apply_patch, which is explicitly permitted by the assignment's policy and matches the required artifact bindings."
+  },
+  "authorization": {
+    "grant_id": "78511183-2221-430c-9481-db4492b606e4",
+    "scope_activity_id": "14e12d61-05ac-432a-810b-5659852ed80c",
+    "decision_id": "d5b0f497-b49c-57bd-8d28-37f7f171faa3",
+    "audit_event_id": "d9cf489f-0fae-47e7-811d-4850157939fd",
+    "allowed": true,
+    "provider_id": "capability_grants",
+    "scope_check": {
+      "assigned_activity_authorized": true,
+      "different_activity_authorized": false
+    }
+  },
+  "engineering_work_order": {
+    "work_order_id": "6973c722-bdfe-5a1b-b0e6-479f2b931db0",
+    "version": 1,
+    "state": "COMPLETED",
+    "workspace_id": "engineering-readiness-20261108",
+    "allowed_paths": ["artifacts/**"],
+    "modified_files": ["artifacts/engineering_result.json"]
+  },
+  "invocation": {
+    "invocation_id": "d5b0f497-b49c-57bd-8d28-37f7f171faa3",
+    "operation_id": "engineering.workspace.apply_patch",
+    "state": "SUCCEEDED",
+    "effect_disposition": "COMMITTED",
+    "provider_id": "r3a.isolated_workspace",
+    "provider_version": "1.0.0",
+    "provider_artifact_sha256": "0b92d126ed33c972ddee65d67b94c57794bcf64122ebe304c8a0e1ffeb064126",
+    "output": {
+      "path": "artifacts/engineering_result.json",
+      "bytes_written": 301,
+      "sha256": "7ab245366de8c977921f7af6dcec127659de8cbeb7439f4554a82c147d66e26a",
+      "replayed": false
+    }
+  },
+  "independent_verification": {
+    "verification_id": "680eadee-4052-4e6c-a088-4ebdbf253391",
+    "contract_id": "r3a.verification-result",
+    "contract_version": "1.0.0",
+    "work_order_id": "6973c722-bdfe-5a1b-b0e6-479f2b931db0",
+    "verifier_id": "engineering.independent-workspace-verifier",
+    "verifier_version": "1.0.0",
+    "outcome": "PASS",
+    "criterion_results": [
+      {
+        "criterion_id": "artifact-identifies-canonical-operation-and-scope",
+        "status": "PASS",
+        "rationale": "3 declared bindings match inspected artifact bytes",
+        "evidence_refs": ["workspace:artifacts/engineering_result.json"]
+      }
+    ],
+    "artifact_digests": ["sha256:7ab245366de8c977921f7af6dcec127659de8cbeb7439f4554a82c147d66e26a"]
+  },
+  "grace_feedback": {
+    "action": "engineering_assess",
+    "status": "ready_for_verification",
+    "request_ref": "11938fcd-6e43-417c-b208-74354e6feec6",
+    "result_ref": "chatcmpl-E1ENbySOi7abkt01O6UioEQvIyGRupRO",
+    "result_sha256": "fd6391222661bf15da42804bf421f84e3a485e0c88975d2fb68e5adbfc756c19",
+    "evidence_refs": [
+      "invocation:d5b0f497-b49c-57bd-8d28-37f7f171faa3",
+      "workspace:artifacts/engineering_result.json",
+      "680eadee-4052-4e6c-a088-4ebdbf253391"
+    ],
+    "notes": "Grace assessed before the verifier gate; this assessment did not replace independent verification or advance the work-order state. CME recorded COMPLETED only after verifier PASS."
+  },
+  "durable_records": [
+    "r3a.activities activity result and engineering_state checkpoint",
+    "r3a.capability_invocations invocation request, authorization evidence, result, provider evidence",
+    "r3a.runtime_entities Engineering proposal, work order, verification result, and lifecycle events",
+    "r3a.institution_events activity, authorization, invocation, and work-order audit events"
+  ]
+}

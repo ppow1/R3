@@ -33,6 +33,7 @@ Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Persist typed Engineering
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Park objective dependencies durably, requeue after prerequisite completion, and expose bounded lineage evidence.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Snapshot the configured escalation policy on each durable objective so continuation uses its original budget and allowed routes.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Persist activity-scoped capability grants and atomically reserve per-activity external invocation budgets.
+Changed: 2026-11-08 | R3A-ENG-MANAGED-INTEGRATION | Codex GPT-6 | Add the generic activity scope to capability grant persistence and evaluation.
 Changed: 2026-11-07 | R3A-AP1-N1 | Codex GPT-6 | Import identified institution events as correlated Grace notifications with durable lifecycle events.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Persist objective task class and selected role with durable intake for route-safe recovery.
 Changed: 2026-11-07 | R3A-AP1-CME-OBSERVER-QUEUE | Codex GPT-6 | Keep one pending durable observer activity instead of replenishing an existing backlog.
@@ -581,36 +582,43 @@ class Store:
                 (capability_id, contract_version, owner, access_mode, health, json.dumps(metadata or {})),
             )
 
-    async def grant_capability(self, module_id: str, capability_id: str, reason: str) -> uuid.UUID:
+    async def grant_capability(self, module_id: str, capability_id: str, reason: str,
+                               activity_id: str | None = None) -> uuid.UUID:
         async with self.pool.connection() as conn, conn.transaction():
             found = await (await conn.execute(
                 "SELECT access_mode FROM r3a.capability_registry WHERE capability_id=%s", (capability_id,)
             )).fetchone()
             if found is None:
                 raise KeyError(f"Capability is not registered: {capability_id}")
-            if found["access_mode"] != "read_only":
-                raise PermissionError("AP0-M1 operator grants are restricted to read-only capabilities")
+            if found["access_mode"] != "read_only" and activity_id is None:
+                raise PermissionError("effectful capability grants must be scoped to one durable activity")
+            scope = {"activity_id": str(uuid.UUID(activity_id))} if activity_id is not None else {}
             active = await (await conn.execute(
                 "SELECT grant_id FROM r3a.capability_grants WHERE module_id=%s AND capability_id=%s "
-                "AND revoked_at IS NULL FOR UPDATE", (module_id, capability_id)
+                "AND scope=%s::jsonb AND revoked_at IS NULL FOR UPDATE",
+                (module_id, capability_id, json.dumps(scope))
             )).fetchone()
             if active:
                 return active["grant_id"]
             grant_id = uuid.uuid4()
             await conn.execute(
-                "INSERT INTO r3a.capability_grants(grant_id,module_id,capability_id,granted_by,reason) VALUES (%s,%s,%s,%s,%s)",
-                (grant_id, module_id, capability_id, f"uid:{os.getuid()}", reason),
+                "INSERT INTO r3a.capability_grants(grant_id,module_id,capability_id,granted_by,reason,scope) "
+                "VALUES (%s,%s,%s,%s,%s,%s)",
+                (grant_id, module_id, capability_id, f"uid:{os.getuid()}", reason, json.dumps(scope)),
             )
             await self._event(conn, "capability.granted", "capability", capability_id,
                               None, None, None, "ACTIVE", reason,
-                              {"module_id": module_id, "grant_id": str(grant_id)})
+                              {"module_id": module_id, "grant_id": str(grant_id), "scope": scope})
             return grant_id
 
-    async def require_capability(self, module_id: str, capability_id: str) -> None:
+    async def require_capability(self, module_id: str, capability_id: str,
+                                 activity_id: str | None = None) -> None:
         async with self.pool.connection() as conn:
             row = await (await conn.execute(
-                "SELECT 1 FROM r3a.capability_grants WHERE module_id=%s AND capability_id=%s AND revoked_at IS NULL LIMIT 1",
-                (module_id, capability_id),
+                "SELECT 1 FROM r3a.capability_grants WHERE module_id=%s AND capability_id=%s "
+                "AND revoked_at IS NULL AND (scope='{}'::jsonb OR "
+                "(scope ? 'activity_id' AND scope->>'activity_id'=%s)) LIMIT 1",
+                (module_id, capability_id, str(activity_id) if activity_id else None),
             )).fetchone()
         if row is None:
             raise PermissionError(f"No active grant for {module_id} to invoke {capability_id}")

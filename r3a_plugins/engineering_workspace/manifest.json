@@ -93,7 +93,7 @@
     "required_grants": ["engineering.workspace.apply_patch"],
     "evidence": {
       "schema": {"type": "object"},
-      "verification_obligations": ["independent_digest_check"]
+      "verification_obligations": ["r3a.engineering-work-order-verification.v1"]
     },
     "recovery": {
       "idempotency_required": true,

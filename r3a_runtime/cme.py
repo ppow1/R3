@@ -33,6 +33,7 @@ Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Execute model-authored En
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Return verifier identities explicitly to Grace so assessment citations match independently verified execution evidence.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Resume typed proposals from checkpoints, provide inspected artifact evidence to Grace, and advance the live work-order projection before gated completion.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Use the validated operation reference's target after proposal normalization during work-order authorization.
+Changed: 2026-11-08 | R3A-ENG-MANAGED-INTEGRATION | Codex GPT-6 | Carry activity scope through generic grants and caller-selected Grace activity intake.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Accept only invocation, workspace, or actual authorization-audit references in Grace's execution assessment.
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Expose separate capability presentation metadata and drive durable dependency resumption from the CME scheduler.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Enforce Grace-requested reasoning escalation through existing authorization, readiness, durable checkpoint and per-activity token-budget paths.
@@ -630,10 +631,12 @@ class CME:
             module_id = str(payload["module_id"])
             capability_id = str(payload["capability_id"])
             reason = str(payload["reason"])
-            grant_id = await self.store.grant_capability(module_id, capability_id, reason)
+            activity_id = payload.get("activity_id")
+            grant_id = await self.store.grant_capability(module_id, capability_id, reason, activity_id)
             await self.store.requeue_blocked_activities()
             return {"grant_id": str(grant_id), "module_id": module_id,
-                    "capability_id": capability_id, "granted_by": f"uid:{os.getuid()}"}
+                    "capability_id": capability_id, "activity_id": activity_id,
+                    "granted_by": f"uid:{os.getuid()}"}
         if operation == "capability.check":
             module_id, capability_id = str(payload["module_id"]), str(payload["capability_id"])
             try:
@@ -679,7 +682,8 @@ class CME:
                 tuple(payload.get("required_capabilities", ())),
                 tuple(payload.get("required_modalities", ())),
                 payload.get("acceptance_criteria", []), payload.get("engineering_assignment"),
-                payload.get("depends_on_activity_ids"), payload.get("activity_id"))
+                payload.get("depends_on_activity_ids"),
+                payload.get("requested_activity_id", payload.get("activity_id")))
         if operation == "config.reload":
             if any(not task.done() for task in self.active_activities.values()):
                 raise RuntimeError("Config reload waits for in-flight activity to reach a safe boundary")

@@ -13,6 +13,7 @@ Authority: R3A AP0/AP1 Modular Autonomy Implementation Slice 1; existing capabil
 Changed: 2026-11-06T23:19:46Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Introduce pluggable authorization provider protocol and grant-backed implementation.
 Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Validate authorization envelopes and preserve scope/policy/audit provenance across providers.
 Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Expose decision identity separately from its durable audit event reference.
+Changed: 2026-11-08 | R3A-ENG-MANAGED-INTEGRATION | Codex GPT-6 | Evaluate existing activity-scoped grants using the durable request activity identity.
 Supersedes: None.
 Contracts: AP0-008/010; MOD-006; R3A-019; r3a.capability-invocation.v1 authorization result projection.
 Tests: tests/test_r3a_modular_autonomy.py.
@@ -130,7 +131,8 @@ class CapabilityGrantAuthorizationProvider:
         try:
             if unsupported_scope:
                 raise PermissionError("configured capability-grant provider cannot evaluate scoped or delegated authority")
-            await self.store.require_capability(request.resident_id, request.capability_id)
+            await self.store.require_capability(request.resident_id, request.capability_id,
+                                                request.activity_id)
             allowed = True
         except PermissionError as exc:
             allowed = False

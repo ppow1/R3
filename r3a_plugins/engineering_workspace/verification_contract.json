@@ -1,0 +1,24 @@
+{
+  "contract_id": "r3a.engineering-work-order-verification",
+  "contract_version": "1.0.0",
+  "operation_id": "engineering.workspace.apply_patch",
+  "result_contract": {
+    "contract_id": "r3a.verification-result",
+    "contract_version": "1.0.0"
+  },
+  "verifier": {
+    "verifier_id": "engineering.independent-workspace-verifier",
+    "implementation": "r3a_runtime.engineering_verifier.verify_workspace_artifact",
+    "execution_boundary": "CME work-order workflow, separate from the provider worker process",
+    "inputs": ["immutable Engineering work order", "registered operation descriptor", "workspace bytes"]
+  },
+  "completion_gate": {
+    "required_outcome": "PASS",
+    "all_declared_criteria_must_pass": true,
+    "work_order_identity_and_version_must_match": true,
+    "artifact_sha256_digests_required": true
+  },
+  "provenance": ["activity_id", "attempt_id", "correlation_id", "work_order_id",
+                 "work_order_version", "authorization_decision_id", "authorization_audit_event_id",
+                 "provider_id", "provider_version", "artifact_sha256"]
+}

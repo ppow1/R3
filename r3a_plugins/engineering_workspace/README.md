@@ -22,6 +22,14 @@ production repository or the R3 source checkout. The manifest pins the provider
 artifact and validates configuration. CME's existing `engineering.workspace.apply_patch`
 grant plus a validated Engineering work order remain necessary for invocation.
 
+The manifest's `r3a.engineering-work-order-verification.v1` obligation is defined in
+[`verification_contract.json`](verification_contract.json). The verifier runs in the
+CME work-order path, outside the provider worker. Its PASS/FAIL result, criterion
+evidence, verifier identity, and artifact digests are persisted with the durable
+work-order transition; only PASS for every declared criterion can complete an order.
+The work order carries authorization decision/audit references and the exact provider
+artifact digest.
+
 After the operation is loaded into CME's registry, use the generic
 `capability.module.install`, `.activate`, `.status`, `.deactivate`, and
 `.replace` controls. A new implementation must use a new immutable provider

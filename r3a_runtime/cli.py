@@ -21,6 +21,7 @@ Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Support explicit a
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Permit configured objective-reasoning or vision task class on durable objective intake.
 Changed: 2026-11-07 | R3A-AP1-N1 | Codex GPT-6 | Add idempotent, source-bound institution-event notification intake.
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Expose generic registered provider install, activation, deactivation, replacement and status operations through CME control.
+Changed: 2026-11-08 | R3A-ENG-MANAGED-INTEGRATION | Codex GPT-6 | Expose activity-scoped grants and caller-assigned Engineering objective identity.
 Supersedes: None.
 Contracts: AP0-007/008/010/013; R3A-019; AP0-M1 D8/D9; r3a.model-route-decision.v1; r3a.model-readiness.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; no model inference in this slice.
@@ -77,11 +78,17 @@ async def _run(args: argparse.Namespace) -> Any:
     elif args.command == "capability-grant":
         payload = {"module_id": args.module_id, "capability_id": args.capability_id,
                    "reason": args.reason}
+        if args.activity_id:
+            payload["activity_id"] = args.activity_id
     elif args.command == "grace-objective-submit":
         payload = {"objective": args.objective, "event_kind": args.event_kind,
                    "required_capabilities": args.required_capability,
                    "required_modalities": args.required_modality,
                    "acceptance_criteria": json.loads(args.acceptance_criteria_json)}
+        if args.requested_activity_id:
+            payload["requested_activity_id"] = args.requested_activity_id
+        if args.engineering_assignment_json:
+            payload["engineering_assignment"] = json.loads(args.engineering_assignment_json)
         if args.route_id:
             payload["route_id"] = args.route_id
         if args.role_id:
@@ -113,6 +120,9 @@ def main() -> None:
                            help="Required input modality for role selection; may be repeated")
     objective.add_argument("--acceptance-criteria-json", default="[]",
                            help="Versioned, machine-checkable completion criteria as a JSON array")
+    objective.add_argument("--requested-activity-id", help="Optional UUID for pre-scoping an activity grant")
+    objective.add_argument("--engineering-assignment-json",
+                           help="Typed Engineering assignment with repository, workspace, path scope, and criteria")
     objective.add_argument("--idempotency-key", required=True)
     readiness = commands.add_parser("model-readiness-refresh",
                                     help="Ask CME to perform a configured model-provider readiness check")
@@ -140,6 +150,7 @@ def main() -> None:
         cmd.add_argument("--capability-id", required=True)
         if name == "capability-grant":
             cmd.add_argument("--reason", required=True)
+            cmd.add_argument("--activity-id", help="Scope an effectful grant to one durable activity UUID")
     for name in ("module-install", "module-activate", "module-stop", "module-replace",
                  "capability-check", "capability-grant", "capability-module-install",
                  "capability-module-activate", "capability-module-deactivate",

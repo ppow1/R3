@@ -12,6 +12,7 @@ Dependencies: r3a_runtime.capability_contracts; r3a_runtime.cme.
 Authority: R3 Alpha AP2 capability integration and escalation continuity.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Distinguish first invocation creation from ambiguous recovery in the non-replayable path.
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Exercise AP0-M1 provider process installation, activation, immutable version replacement, replay, and deactivation.
+Changed: 2026-11-08 | R3A-ENG-MANAGED-INTEGRATION | Codex GPT-6 | Bind the module manifest's verifier obligation to its versioned independent-verification contract.
 Supersedes: None.
 Contracts: r3a.capability-invocation.v1; r3a.engineering-work-order.v1; r3a.verification-result.v1; module.lifecycle v2.
 Tests: This test module.
@@ -86,6 +87,13 @@ def test_engineering_operation_is_defined_by_external_versioned_manifest():
     operation = operation_from_manifest(manifest)
     assert operation["operation_id"] == "engineering.workspace.apply_patch"
     assert operation["provider"]["provider_version"] == manifest["plugin_version"]
+    assert operation["required_grants"] == ["engineering.workspace.apply_patch"]
+    assert operation["execution"]["timeout_seconds"] == 30
+    verification = json.loads((Path(__file__).parents[1] /
+                               "r3a_plugins/engineering_workspace/verification_contract.json").read_text())
+    assert operation["evidence"]["verification_obligations"] == [
+        f"{verification['contract_id']}.v{verification['contract_version'].split('.')[0]}"]
+    assert verification["completion_gate"]["required_outcome"] == "PASS"
     assert manifest["module_manifest"]["module_id"] == operation["provider"]["provider_id"]
     assert manifest["module_manifest"]["configuration"]["schema_ref"] == \
         manifest["configuration_schema"]["schema_id"]

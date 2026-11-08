@@ -15,6 +15,7 @@ Changed: 2026-11-06T23:43:25Z | R3A-AP1-SLICE-1 | Codex GPT-6 | Cover legacy con
 Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Extend Slice 1 regressions for provider configuration, identity, stale state and recovery routing.
 Changed: 2026-11-07T05:45:10Z | AP2-IMPLEMENTATION | Codex GPT-6 | Give the model deferral compatibility fixture valid required acceptance criteria.
 Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Assert authorization decision identity remains distinct from its audit event.
+Changed: 2026-11-08 | R3A-ENG-MANAGED-INTEGRATION | Codex GPT-6 | Verify activity scope reaches the existing generic grant provider.
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Verify versioned activity dependency identity and validation.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Verify external escalation policy version, registered routes, authorization identity and per-activity token limits.
 Supersedes: None.
@@ -348,8 +349,9 @@ class GrantAuthorizationCompatibilityTests(unittest.TestCase):
             self.allowed = allowed
             self.calls = []
 
-        async def require_capability(self, resident_id: str, capability_id: str):
-            self.calls.append(("require", resident_id, capability_id))
+        async def require_capability(self, resident_id: str, capability_id: str,
+                                     activity_id: str | None = None):
+            self.calls.append(("require", resident_id, capability_id, activity_id))
             if not self.allowed:
                 raise PermissionError("no active grant")
 
@@ -368,7 +370,8 @@ class GrantAuthorizationCompatibilityTests(unittest.TestCase):
             provider = CapabilityGrantAuthorizationProvider(store, "config-1")
             decision = asyncio.run(provider.authorize(self.make_request()))
             self.assertEqual(decision.allowed, allowed)
-            self.assertEqual(store.calls[0], ("require", "resident.grace", "institution.knowledge.read"))
+            self.assertEqual(store.calls[0], ("require", "resident.grace", "institution.knowledge.read",
+                                              "activity-1"))
             self.assertEqual(store.calls[1][0:4],
                              ("audit", "resident.grace", "institution.knowledge.read",
                               "allowed" if allowed else "denied"))
@@ -377,6 +380,13 @@ class GrantAuthorizationCompatibilityTests(unittest.TestCase):
             self.assertIsNone(decision.policy_revision)
             self.assertEqual(decision.decision_id, "request-1")
             self.assertNotEqual(decision.decision_id, decision.audit_event_id)
+
+    def test_grant_provider_passes_activity_identity_for_scoped_grant_evaluation(self):
+        store = self.StoreFake(True)
+        decision = asyncio.run(CapabilityGrantAuthorizationProvider(store, "config-1").authorize(
+            self.make_request()))
+        self.assertTrue(decision.allowed)
+        self.assertEqual("activity-1", store.calls[0][3])
 
     def test_grant_provider_does_not_treat_scope_or_delegation_as_an_existing_grant(self):
         store = self.StoreFake(True)
