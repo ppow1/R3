@@ -364,6 +364,17 @@ class StewardAccess:
     async def _store_call(method, *args, **kwargs):
         return await run_in_threadpool(method, *args, **kwargs)
 
+    async def _audit(self, **event):
+        try:
+            return await self._store_call(self.store.audit, **event)
+        except AccessUnavailable as exc:
+            logger.error("steward_audit_unavailable", extra={
+                "correlation_id": event.get("correlation_id"),
+                "event_type": event.get("event_type"),
+                "reason_code": exc.reason_code or exc.code,
+            })
+            raise HTTPException(503, "Steward audit state unavailable") from exc
+
     @staticmethod
     def _digest(token: str) -> str:
         return hashlib.sha256(token.encode()).hexdigest()
@@ -393,8 +404,7 @@ class StewardAccess:
             record = await self._session(request.cookies.get(self.config["session"]["cookie_name"]))
         except PermissionError as exc:
             try:
-                await self._store_call(
-                    self.store.audit, event_type="steward.website.access_denied", principal_id=None,
+                await self._audit(event_type="steward.website.access_denied", principal_id=None,
                     outcome="denied", correlation_id=correlation,
                     details={"route": request.scope.get("route").path
                              if request.scope.get("route") else "unknown",
@@ -429,8 +439,7 @@ class StewardAccess:
         except HTTPException:
             correlation = self._correlation(request)
             try:
-                await self._store_call(
-                    self.store.audit, event_type="steward.request.denied", principal_id=None,
+                await self._audit(event_type="steward.request.denied", principal_id=None,
                     outcome="denied", correlation_id=correlation,
                     details={"action": action, "reason": "origin_not_allowed"})
             except AccessUnavailable as exc:
@@ -475,13 +484,12 @@ class StewardAccess:
                         "expires_at": expires.isoformat(), "freshness": "current",
                         "correlation_id": correlation}
             except PermissionError as exc:
-                await self._store_call(self.store.audit, event_type="steward.authentication.denied",
+                await self._audit(event_type="steward.authentication.denied",
                                        principal_id=None, outcome="denied", correlation_id=correlation,
                                        details={"reason": str(exc)})
                 raise HTTPException(401, "Steward authentication denied") from exc
             except AccessUnavailable as exc:
-                await self._store_call(
-                    self.store.audit, event_type="steward.authentication.unavailable",
+                await self._audit(event_type="steward.authentication.unavailable",
                     principal_id=None, outcome="unavailable", correlation_id=correlation,
                     details={"reason_code": exc.reason_code or exc.code,
                              "provider_outcome": exc.outcome})
@@ -504,7 +512,7 @@ class StewardAccess:
                         "expires_at": record["expires_at"].isoformat(), "freshness": "current",
                         "correlation_id": correlation}
             except PermissionError as exc:
-                await self._store_call(self.store.audit, event_type="steward.session.access_denied",
+                await self._audit(event_type="steward.session.access_denied",
                                        principal_id=None, outcome="denied", correlation_id=correlation,
                                        details={"action": "session.read", "reason": str(exc)})
                 raise HTTPException(401, "Steward session unavailable") from exc
@@ -527,7 +535,7 @@ class StewardAccess:
                         "principal_id": record["principal_id"],
                         "correlation_id": correlation}
             except PermissionError as exc:
-                await self._store_call(self.store.audit, event_type="steward.session.revocation_denied",
+                await self._audit(event_type="steward.session.revocation_denied",
                                        principal_id=None, outcome="denied", correlation_id=correlation,
                                        details={"action": "session.revoke", "reason": str(exc)})
                 raise HTTPException(401, "Steward session unavailable") from exc
@@ -546,8 +554,7 @@ class StewardAccess:
                     self.config["cme"]["control_socket"], "capability.discover", {},
                     timeout=self.config["cme"]["request_timeout_seconds"])
                 operations = result.get("operations", []) if isinstance(result, dict) else []
-                audit_id = await self._store_call(
-                    self.store.audit, event_type="steward.capability_discovery",
+                audit_id = await self._audit(event_type="steward.capability_discovery",
                     principal_id=identity["principal_id"], outcome="accepted",
                     correlation_id=correlation,
                     details={"operation_count": len(operations) if isinstance(operations, list) else None})
@@ -558,16 +565,14 @@ class StewardAccess:
                         "audit_event_id": audit_id, "correlation_id": correlation,
                         "freshness": "current", "observed_at": datetime.now(timezone.utc).isoformat()}
             except PermissionError as exc:
-                await self._store_call(
-                    self.store.audit, event_type="steward.capability_discovery_denied",
+                await self._audit(event_type="steward.capability_discovery_denied",
                     principal_id=None, outcome="denied", correlation_id=correlation,
                     details={"reason": str(exc)})
                 raise HTTPException(401, "Steward session unavailable") from exc
             except AccessUnavailable as exc:
                 raise HTTPException(503, "Session state unavailable") from exc
             except Exception as exc:
-                await self._store_call(
-                    self.store.audit, event_type="steward.capability_discovery_unavailable",
+                await self._audit(event_type="steward.capability_discovery_unavailable",
                     principal_id=None, outcome="unavailable", correlation_id=correlation,
                     details={"error_type": type(exc).__name__})
                 raise HTTPException(503, "CME capability registry unavailable") from exc
@@ -594,8 +599,7 @@ class StewardAccess:
                                                {"request": invocation},
                                                idempotency_key=invocation.get("idempotency_key"),
                                                timeout=self.config["cme"]["request_timeout_seconds"])
-                audit_id = await self._store_call(
-                    self.store.audit, event_type="steward.operation.completed",
+                audit_id = await self._audit(event_type="steward.operation.completed",
                     principal_id=identity["principal_id"], outcome="accepted", correlation_id=correlation,
                     details={"operation_id": invocation.get("operation_id"),
                              "invocation_id": invocation.get("invocation_id"),
@@ -604,8 +608,7 @@ class StewardAccess:
                         "audit_event_id": audit_id, "correlation_id": correlation,
                         "freshness": "current"}
             except PermissionError as exc:
-                audit_id = await self._store_call(
-                    self.store.audit, event_type="steward.operation.denied", principal_id=None,
+                audit_id = await self._audit(event_type="steward.operation.denied", principal_id=None,
                     outcome="denied", correlation_id=correlation, details={"reason": str(exc)})
                 raise HTTPException(401, "Steward operation denied", headers={"X-Audit-Event-ID": audit_id}) from exc
             except AccessUnavailable as exc:
@@ -614,21 +617,18 @@ class StewardAccess:
                 raise
             except RuntimeError as exc:
                 if str(exc).startswith("PermissionError:"):
-                    audit_id = await self._store_call(
-                        self.store.audit, event_type="steward.operation.denied", principal_id=identity["principal_id"],
+                    audit_id = await self._audit(event_type="steward.operation.denied", principal_id=identity["principal_id"],
                         outcome="denied", correlation_id=correlation,
                         details={"operation_id": (locals().get("invocation") or {}).get("operation_id"),
                                  "reason": "authoritative_grant_denied"})
                     raise HTTPException(403, "Steward operation denied", headers={"X-Audit-Event-ID": audit_id}) from exc
-                audit_id = await self._store_call(
-                    self.store.audit, event_type="steward.operation.unavailable", principal_id=identity["principal_id"],
+                audit_id = await self._audit(event_type="steward.operation.unavailable", principal_id=identity["principal_id"],
                     outcome="unavailable", correlation_id=correlation,
                     details={"error_type": type(exc).__name__})
                 raise HTTPException(503, "Authoritative capability service unavailable") from exc
             except Exception as exc:
                 # CME denial is audited there; the portal records only the correlated unavailable outcome.
-                audit_id = await self._store_call(
-                    self.store.audit, event_type="steward.operation.unavailable",
+                audit_id = await self._audit(event_type="steward.operation.unavailable",
                     principal_id=identity["principal_id"] if identity else None,
                     outcome="unavailable", correlation_id=correlation,
                     details={"error_type": type(exc).__name__})
@@ -655,8 +655,7 @@ class StewardAccess:
                     freshness = "stale"
                 else:
                     freshness = "current"
-                audit_id = await self._store_call(
-                    self.store.audit, event_type="steward.state.read", principal_id=identity["principal_id"],
+                audit_id = await self._audit(event_type="steward.state.read", principal_id=identity["principal_id"],
                     outcome={"current": "accepted", "stale": "stale", "unavailable": "unavailable"}[freshness],
                     correlation_id=correlation,
                     details={"source": "cme.health", "freshness": freshness})
@@ -670,7 +669,7 @@ class StewardAccess:
                         "audit_event_id": audit_id, "correlation_id": correlation,
                         "observed_at": datetime.now(timezone.utc).isoformat()}
             except PermissionError as exc:
-                await self._store_call(self.store.audit, event_type="steward.state.read_denied",
+                await self._audit(event_type="steward.state.read_denied",
                                        principal_id=None, outcome="denied", correlation_id=correlation,
                                        details={"reason": str(exc)})
                 raise HTTPException(401, "Steward session unavailable") from exc

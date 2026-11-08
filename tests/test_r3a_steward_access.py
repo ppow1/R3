@@ -343,6 +343,24 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(401, (await self.client.get("/api/v1/steward/status")).status_code)
         self.assertEqual("steward.state.read_denied", self.store.events[-1]["event_type"])
 
+    async def test_expired_durable_session_is_denied_and_audited(self):
+        response = await self.client.post("/api/v1/steward/session", headers=assertion_headers())
+        self.assertEqual(200, response.status_code)
+        token = self.client.cookies.get("r3_steward_session")
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        self.store.sessions[digest]["expires_at"] = datetime.now(timezone.utc) - timedelta(seconds=1)
+
+        status = await self.client.get("/api/v1/steward/session")
+        operation = await self.client.post("/api/v1/steward/operations/invoke",
+                                           headers={"Origin": "http://testserver"},
+                                           json={"request": {"contract_id": "r3a.capability-invocation.v1"}})
+
+        self.assertEqual(401, status.status_code)
+        self.assertEqual(401, operation.status_code)
+        event_types = [event["event_type"] for event in self.store.events]
+        self.assertIn("steward.session.access_denied", event_types)
+        self.assertIn("steward.operation.denied", event_types)
+
     async def test_session_assertion_replay_is_denied(self):
         headers = assertion_headers(assertion_id="same-ingress-assertion")
         first = await self.client.post("/api/v1/steward/session", headers=headers)
@@ -498,6 +516,30 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
                                                       "Cookie": "rv_account_session=opaque"})
             self.assertEqual(503, response.status_code)
             self.assertEqual({}, self.store.sessions)
+
+    async def test_authentication_unavailable_with_audit_store_outage_returns_503(self):
+        class UnavailableProvider:
+            contract_id = "r3a.identity-provider.v1"
+            contract_version = "1.0.0"
+
+            def authenticate(self, request, *, correlation_id):
+                raise AccessUnavailable("identity_provider_unavailable")
+
+        def unavailable_audit(**_event):
+            raise AccessUnavailable("session_store_unavailable")
+
+        self.store.audit = unavailable_audit
+        access = StewardAccess(config(), self.store, UnavailableProvider())
+        app = FastAPI()
+        app.include_router(access.router())
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://testserver") as client:
+            response = await client.post("/api/v1/steward/session",
+                                         headers={"Origin": "http://testserver"})
+
+        self.assertEqual(503, response.status_code)
+        self.assertEqual("Steward audit state unavailable", response.json()["detail"])
+        self.assertEqual({}, self.store.sessions)
 
     async def test_account_portal_config_is_loopback_only_and_does_not_require_bitwarden(self):
         import json
