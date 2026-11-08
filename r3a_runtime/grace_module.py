@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.9.0
+File Revision: 1.10.0
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
 Purpose: Execute Grace objectives through configured inference and resident-selected capabilities in the authorized canonical runtime.
@@ -34,7 +34,8 @@ Changed: 2026-11-07T23:41:45Z | R3A-AP2-DELEGATION | Codex GPT-6 | Guide residen
 Changed: 2026-11-07T23:50:40Z | R3A-AP2-DELEGATION-CONTINUATION | Codex GPT-6 | Direct Grace to interpret handoff and verification outcomes truthfully and continue only through currently offered actions.
 Changed: 2026-11-08T00:04:44Z | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Validate and deliver generic versioned institutional results to Grace while rejecting claims that override failed verification.
 Changed: 2026-11-08T01:06:38Z | R3A-MULTI-RESIDENT | Codex GPT-6 | Accept directory-proven resident execution profiles and select their externally configured inference route without embedding resident identities.
-History/Predecessor: Prior revision preserved at commit 147ea9d8dfcd8158d4bf094e6e24f4bef0572c99, blob 4f1fa38cafc71943c065d00d8415065850bd4e6e.
+Changed: 2026-11-08T02:44:52Z | R3A-AP1-EVIDENCE-FEEDBACK | Codex GPT-6 | Expose complete evidence provenance and require all institutional citation refs in final responses.
+History/Predecessor: Prior revision preserved at commit 0d24f9433a670598499c55ca9071acda79e080b3, blob ca79f168f5a1d86bb1bc22c6d694e3247eb37853.
 """
 from __future__ import annotations
 
@@ -232,6 +233,33 @@ def provider_usage_record(provider_usage: Any, *, request_ref: str, route_id: st
     return usage
 
 
+def resident_evidence_inventory(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Expose one stable, provenance-bearing reference for each returned evidence record."""
+    inventory = []
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        source_id = item.get("source_id")
+        digest = item.get("excerpt_sha256") or item.get("sha256")
+        evidence_ref = (f"{source_id}#sha256:{digest}"
+                        if isinstance(source_id, str) and isinstance(digest, str) else None)
+        inventory.append({
+            "evidence_ref": evidence_ref,
+            "source_id": source_id,
+            "evidence_id": item.get("evidence_id"),
+            "source_path": item.get("source_path"),
+            "source_uri": item.get("uri"),
+            "source": item.get("source"),
+            "evidence_sha256": digest,
+            "source_sha256": item.get("source_sha256"),
+            "observed_at": item.get("observed_at") or item.get("retrieved_at"),
+            "freshness": item.get("freshness"),
+            "provider_id": item.get("provider_id"),
+            "invocation_id": item.get("invocation_id"),
+        })
+    return inventory
+
+
 class GraceResident:
     def __init__(self, module_id: str, module_version: str, config_path: str):
         self.module_id = module_id
@@ -340,6 +368,11 @@ class GraceResident:
                     not isinstance(message, dict) or message.get("role") not in {"assistant", "user"}
                     or not isinstance(message.get("content"), str) for message in conversation):
                 raise ValueError("conversation must contain assistant/user text messages")
+            required_evidence_refs = payload.get("required_evidence_refs", [])
+            if (not isinstance(required_evidence_refs, list)
+                    or any(not isinstance(ref, str) or not ref for ref in required_evidence_refs)):
+                raise ValueError("required_evidence_refs must be an array of source identifiers")
+            evidence_inventory = resident_evidence_inventory(evidence)
             resident_result_value = payload.get("resident_result")
             resident_result = None
             if resident_result_value is not None:
@@ -375,10 +408,12 @@ class GraceResident:
                         "For a continuation that lists dependency_context, treat those durable prerequisite outcomes as prior institutional evidence, "
                         "and continue the current objective without claiming the prerequisite's work as your own. "
                         "If a reasoning_escalation policy is supplied and your current reasoning route is insufficient, you may request one of its listed roles. This is your reasoning choice, not an automatic fallback; explain what uncertainty requires stronger reasoning. The runtime checks authorization, readiness, and the activity token budget, then returns its result or refusal in the same activity. Never claim an escalation succeeded unless the runtime reports its result. "
+                        "The evidence_inventory lists every returned evidence record with a stable evidence_ref, its source_id, digest, source location, observation time, and freshness. The evidence field contains the full returned record content; the inventory is not a selection or summary. For every final status other than blocked, include every identifier in citation_requirements.required_source_ids in decision.evidence_refs exactly as supplied. This is a CME citation requirement, not a claim that every source supports every sentence. Ground each factual claim in the relevant evidence records, and do not present unavailable evidence as a fact. If a required source is unavailable or irrelevant to the requested claim, cite its source_id to acknowledge the returned record and state its limitation without inferring content. Keep prose constraints in the objective while retaining all citations in the structured evidence_refs field. "
                         "For institutional delegation, first use an available directory capability when office responsibility or resident binding is needed. Evaluate the returned authoritative office, resident, and capability records against the objective. A directory listing or office binding does not establish recipient readiness, execution registration, or authorization. If the current available_tools list contains a registered handoff operation whose advertised contract fits the work, you may select it and provide only target identifiers and evidence actually returned by the directory, plus arguments required by that operation's schema. The institutional runtime still enforces grants and records the result. Do not hardcode an office, resident, or operation identity; do not pretend to delegate if no suitable handoff operation is registered. Continue from returned capability results in this same activity, or return a justified blocked decision when the required handoff is unavailable. "
                         "Interpret each returned capability result by its explicit outcome and explanation. A rejected, returned, denied, or unavailable handoff is not an accepted delegation; consider another currently offered capability only when its contract and the evidence support that choice, otherwise report blocked truthfully. Never claim that a recipient accepted work unless the returned result says so. On recovery, continue from the conversation and evidence supplied for the same objective; do not repeat a completed side effect just to recreate its result. "
                         "If independent-verification evidence is supplied, inspect its outcome and criterion findings. A failed or inconclusive verification is not completion. You may propose a corrective operation only when a currently listed operation and the supplied assignment scope permit it; otherwise return a blocked assessment that identifies the failed criteria. CME and the verifier retain completion authority. Do not claim a correction or verification that has not occurred. "
                         "A supplied resident_result is versioned institutional feedback tied to this activity and attempt. Treat its issuer, outcome, failure reasons, and evidence as the runtime's recorded result; do not discard or rewrite it. A non-passing result cannot be turned into acceptance by your assertion. You may choose an offered corrective action or report blocked; CME independently enforces completion. "
+                        "When verifier feedback identifies incomplete citations, compare its missing source identifiers with citation_requirements and evidence_inventory. Correct the references from already returned evidence when it is sufficient; request another authorized capability only when necessary evidence is actually absent; revise unsupported claims or report blocked when the evidence cannot support them. Do not repeat an unchanged rejected final. "
                         "When more information is needed, return {\"action\":\"invoke_capability\","
                         "\"contract_id\":\"r3a.resident-capability-tool\",\"contract_version\":\"1.0.0\","
                         "\"capability_id\":\"exact capability_id\",\"arguments\":{...},"
@@ -401,7 +436,13 @@ class GraceResident:
                                                                   "resident_result": resident_result,
                                                                   "dependency_context": payload.get("dependency_context", []),
                                                                   "available_tools": tools,
-                                                                  "required_evidence_refs": payload.get("required_evidence_refs", []),
+                                                                  "citation_requirements": {
+                                                                      "required_source_ids": required_evidence_refs,
+                                                                      "returned_source_ids": list(dict.fromkeys(
+                                                                          item.get("source_id") for item in evidence_inventory
+                                                                          if isinstance(item.get("source_id"), str))),
+                                                                  },
+                                                                  "evidence_inventory": evidence_inventory,
                                                                   "evidence": evidence},
                                                                  separators=(",", ":"))},
                 ],
@@ -536,8 +577,7 @@ class GraceResident:
                               "request_ref": request_ref, "request_sha256": request_hash,
                               "result_ref": result_ref, "result_sha256": result_hash,
                               "usage": usage_record, "finish_reason": finish_reason},
-                    "evidence": [{"source_id": item["source_id"], "sha256": item["sha256"]} for item in evidence
-                                 if item.get("source_id") in (final_decision or {}).get("evidence_refs", [])],
+                    "evidence": evidence_inventory,
                     "completed_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
                 }
                 return self.last_activity

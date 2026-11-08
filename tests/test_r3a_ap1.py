@@ -41,10 +41,11 @@ Changed: 2026-11-08T01:35:00Z | R3A-MODULAR-RUNTIME | Codex GPT-6 | Verify CME-o
 Changed: 2026-11-08T01:40:00Z | R3A-MODULAR-RUNTIME | Codex GPT-6 | Verify Grace receives full evidence once and a compact durable capability receipt.
 Changed: 2026-11-08T01:42:00Z | R3A-MODULAR-RUNTIME | Codex GPT-6 | Verify older continuation checkpoints are compacted during activity recovery.
 Changed: 2026-11-08T01:07:51Z | R3A-MULTI-RESIDENT | Codex GPT-6 | Verify a directory-bound resident uses its independent configured model route and identity context with profile lineage enforcement.
+Changed: 2026-11-08T02:44:52Z | R3A-AP1-EVIDENCE-FEEDBACK | Codex GPT-6 | Verify complete evidence inventory delivery, mandatory citation guidance, and provenance retention.
 Supersedes: None.
 Contracts: R3A-019; proposed r3a.resident.execution-profile@1.0.0; configured model routing and evidence provenance.
 Tests: This test module.
-History/Predecessor: Prior revision preserved at commit 147ea9d8dfcd8158d4bf094e6e24f4bef0572c99, blob 6e4588fb7664d82beab0ecbb54df9c0a6105fdb0.
+History/Predecessor: Prior revision preserved at commit 0d24f9433a670598499c55ca9071acda79e080b3, blob e46522742dbd84fbcbe941a19f8a7f63134f4a14.
 """
 from __future__ import annotations
 
@@ -753,6 +754,79 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         model_input = json.loads(request["messages"][-1]["content"])
         self.assertEqual(model_input["resident_result"]["failure_reasons"][0]["code"], "criterion_mismatch")
         self.assertEqual(model_input["resident_result"]["evidence"][0]["content"]["observed"], "wrong value")
+
+    def test_verifier_citation_feedback_and_full_inventory_reach_grace(self):
+        tool = {"capability_id": "institution.knowledge.read", "arguments_schema": {
+            "type": "object", "properties": {"query": {"type": "string"}},
+            "required": ["query"], "additionalProperties": False}}
+        response = ('{"action":"invoke_capability","contract_id":"r3a.resident-capability-tool",'
+                    '"contract_version":"1.0.0","capability_id":"institution.knowledge.read",'
+                    '"arguments":{"query":"targeted source for missing claim"},'
+                    '"rationale":"Verifier feedback identifies a claim whose source is absent from the returned evidence."}')
+        resident = self._resident(response)
+        payload = self._payload([tool])
+        payload["correlation_id"] = "correlation-1"
+        payload["required_evidence_refs"] = ["knowledge.process", "telemetry.gpu", "telemetry.history"]
+        payload["evidence"] = [
+            {"source_id": "knowledge.process", "evidence_id": "knowledge.process",
+             "source_path": "transitions.STARTING", "source": "process.json",
+             "content": "Transitions from STARTING: RUNNING", "sha256": "a" * 64,
+             "excerpt_sha256": "a" * 64, "source_sha256": "b" * 64,
+             "uri": "file:///state-machines/process.json", "retrieved_at": "2026-11-08T02:00:00Z",
+             "freshness": "fresh"},
+            {"source_id": "telemetry.gpu", "source_path": "provider://gpu/0",
+             "content": {"name": "GPU-X", "utilization": 12}, "sha256": "c" * 64,
+             "source_sha256": "d" * 64, "observed_at": "2026-11-08T02:00:01Z",
+             "freshness": {"state": "fresh", "age_seconds": 1}},
+            {"source_id": "telemetry.history", "source_path": "provider://history",
+             "content": {"available": False}, "sha256": "e" * 64,
+             "observed_at": "2026-11-08T02:00:02Z", "freshness": {"state": "unavailable"}},
+        ]
+        feedback = self._resident_result()
+        feedback["outcome"] = "REJECTED"
+        feedback["failure_reasons"] = [{"code": "evidence_citations_incomplete",
+                                        "message": "Required returned sources were not cited.",
+                                        "evidence_refs": ["knowledge.process", "telemetry.gpu",
+                                                          "telemetry.history"]}]
+        payload["resident_result"] = feedback
+
+        result = asyncio.run(resident.handle("execute", payload))
+
+        model_input = json.loads(resident._model_request.await_args.args[2]["messages"][-1]["content"])
+        self.assertEqual(result["action"], "invoke_capability")
+        self.assertEqual(model_input["citation_requirements"]["required_source_ids"],
+                         payload["required_evidence_refs"])
+        self.assertEqual(model_input["citation_requirements"]["returned_source_ids"],
+                         payload["required_evidence_refs"])
+        inventory = model_input["evidence_inventory"]
+        self.assertEqual([item["source_id"] for item in inventory], payload["required_evidence_refs"])
+        self.assertEqual(inventory[0]["evidence_ref"], "knowledge.process#sha256:" + "a" * 64)
+        self.assertEqual(inventory[1]["source_sha256"], "d" * 64)
+        self.assertEqual(inventory[2]["freshness"]["state"], "unavailable")
+        self.assertIn("include every identifier", resident._model_request.await_args.args[2]["messages"][0]["content"])
+        self.assertIn("Do not repeat an unchanged rejected final", resident._model_request.await_args.args[2]["messages"][0]["content"])
+
+    def test_activity_result_retains_uncited_evidence_provenance(self):
+        resident = self._resident(
+            '{"action":"final","decision":{"assessment":"The documented source supports the answer.",'
+            '"status":"degraded","evidence_refs":["knowledge.process"],"recommended_action":"none"}}')
+        payload = self._payload([])
+        payload["evidence"] = [
+            {"source_id": "knowledge.process", "source_path": "transitions.STARTING",
+             "content": "Transitions from STARTING: RUNNING", "sha256": "a" * 64,
+             "source_sha256": "b" * 64},
+            {"source_id": "telemetry.gpu", "source_path": "provider://gpu/0",
+             "content": {"name": "GPU-X"}, "sha256": "c" * 64,
+             "source_sha256": "d" * 64},
+        ]
+
+        result = asyncio.run(resident.handle("execute", payload))
+
+        self.assertEqual([item["source_id"] for item in result["evidence"]],
+                         ["knowledge.process", "telemetry.gpu"])
+        self.assertEqual(result["evidence"][1]["source_sha256"], "d" * 64)
+        self.assertEqual(result["evidence"][1]["evidence_ref"],
+                         "telemetry.gpu#sha256:" + "c" * 64)
 
     def test_generic_result_with_mismatched_lineage_is_rejected_before_inference(self):
         resident = self._resident(
