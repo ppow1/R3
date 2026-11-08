@@ -76,13 +76,15 @@ class R3CapabilityGrantAdapter:
                            operation, scope, capability=action)
 
     def authorize_hr(self, principal: Any, action: str, scope: str) -> bool:
-        """Authorization callback for existing HRCapability read operations."""
+        """Authorization callback for existing HRCapability read/write operations."""
         if (not getattr(principal, "principal_id", None)
                 or not getattr(principal, "role", None)
-                or action not in {"hr.read", "hr.field.read"}):
+                or action not in {"hr.read", "hr.field.read", "hr.write"}):
             return False
-        return self._check(principal, self.HR_RESOURCE, action, "read", scope,
-                           capability="hr.identity.resolve")
+        operation = "write" if action == "hr.write" else "read"
+        return self._check(principal, self.HR_RESOURCE, action, operation, scope,
+                           capability=("hr.identity.association" if action == "hr.write"
+                                       else "hr.identity.resolve"))
 
     def _check(self, principal: Any, resource_id: str, action: str,
                operation: str, scope: str, *, capability: str) -> bool:

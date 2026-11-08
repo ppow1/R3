@@ -441,12 +441,19 @@ class ResidentDossierTests(unittest.TestCase):
         self.assertTrue(adapter.authorize_hr(
             SimpleNamespace(principal_id="human:steward:test", role="steward"),
             "hr.read", "r3:vicky"))
+        self.assertTrue(adapter.authorize_hr(
+            SimpleNamespace(principal_id="human:helen:test", role="helen"),
+            "hr.write", "r3:vicky"))
         self.assertEqual(authority.checks[0], {
             "principal": "human:steward:test", "resource_id": "r3:character-dossiers",
             "action": "character.propose", "operation": "write", "scope_ref": "r3:vicky",
         })
+        self.assertEqual(authority.checks[3], {
+            "principal": "human:helen:test", "resource_id": "r3:hr",
+            "action": "hr.write", "operation": "write", "scope_ref": "r3:vicky",
+        })
         self.assertEqual([entry["outcome"] for entry in authority.audits],
-                         ["allowed", "denied", "allowed"])
+                         ["allowed", "denied", "allowed", "allowed"])
         self.assertTrue(all(entry["correlation_id"] and entry["scope_ref"]
                             for entry in authority.audits))
 
