@@ -1,0 +1,101 @@
+{
+  "schema_id": "r3a.resident.dossier-index",
+  "schema_version": 1,
+  "revision": "1.0.0",
+  "authority_status": "partial_unreconciled",
+  "authority_source": "riverview_authority.directory",
+  "roster_snapshot": {
+    "availability": "unavailable_in_this_worktree",
+    "note": "Dossiers below are discoverable recovered legacy HR records named by the approved charter; this index does not claim canonical roster completeness."
+  },
+  "residents": {
+    "r3:grace": {
+      "current_revision": "1.0.0",
+      "revisions": {
+        "1.0.0": "dossiers/grace.v1.0.0.json"
+      },
+      "identity_status": "provisional_legacy_record_id",
+      "approval_status": "in_review"
+    },
+    "r3:chloe": {
+      "current_revision": "1.0.0",
+      "revisions": {
+        "1.0.0": "dossiers/chloe.v1.0.0.json"
+      },
+      "identity_status": "provisional_legacy_record_id",
+      "approval_status": "in_review"
+    },
+    "r3:jessica": {
+      "current_revision": "1.0.0",
+      "revisions": {
+        "1.0.0": "dossiers/jessica.v1.0.0.json"
+      },
+      "identity_status": "provisional_legacy_record_id",
+      "approval_status": "in_review"
+    },
+    "r3:vicky": {
+      "current_revision": "1.0.0",
+      "revisions": {
+        "1.0.0": "dossiers/vicky.v1.0.0.json"
+      },
+      "identity_status": "provisional_legacy_record_id",
+      "approval_status": "in_review"
+    },
+    "r3:helen": {
+      "current_revision": "1.0.0",
+      "revisions": {
+        "1.0.0": "dossiers/helen.v1.0.0.json"
+      },
+      "identity_status": "provisional_legacy_record_id",
+      "approval_status": "in_review"
+    },
+    "r3:ingrid": {
+      "current_revision": "1.0.0",
+      "revisions": {
+        "1.0.0": "dossiers/ingrid.v1.0.0.json"
+      },
+      "identity_status": "provisional_legacy_record_id",
+      "approval_status": "in_review"
+    },
+    "r3:cheryl": {
+      "current_revision": "1.0.0",
+      "revisions": {
+        "1.0.0": "dossiers/cheryl.v1.0.0.json"
+      },
+      "identity_status": "provisional_legacy_record_id",
+      "approval_status": "in_review"
+    },
+    "r3:eleanor": {
+      "current_revision": "1.0.0",
+      "revisions": {
+        "1.0.0": "dossiers/eleanor.v1.0.0.json"
+      },
+      "identity_status": "provisional_legacy_record_id",
+      "approval_status": "in_review"
+    },
+    "r3:marie": {
+      "current_revision": "1.0.0",
+      "revisions": {
+        "1.0.0": "dossiers/marie.v1.0.0.json"
+      },
+      "identity_status": "provisional_legacy_record_id",
+      "approval_status": "in_review"
+    },
+    "r3:judy": {
+      "current_revision": "1.0.0",
+      "revisions": {
+        "1.0.0": "dossiers/judy.v1.0.0.json"
+      },
+      "identity_status": "provisional_legacy_record_id",
+      "approval_status": "in_review"
+    },
+    "r3:alyssa": {
+      "current_revision": "1.0.0",
+      "revisions": {
+        "1.0.0": "dossiers/alyssa.v1.0.0.json"
+      },
+      "identity_status": "provisional_legacy_record_id",
+      "approval_status": "in_review"
+    }
+  }
+}

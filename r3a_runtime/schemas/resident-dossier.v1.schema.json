@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://riverview.invalid/schemas/r3a.resident.dossier.v1.schema.json",
+  "title": "R3A Resident Dossier",
+  "description": "Provider-neutral resident identity, character, memory, relationship, and implementation record. Schema validation grants no institutional authority.",
+  "type": "object",
+  "required": ["schema_id", "schema_version", "revision", "identity", "office", "mission", "qualifications", "authority_boundaries", "character", "personality", "prompt_components", "memory", "relationships", "implementation", "governance", "sources", "open_questions"],
+  "properties": {
+    "schema_id": {"const": "r3a.resident.dossier"},
+    "schema_version": {"const": 1},
+    "revision": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "identity": {"type": "object", "required": ["resident_id", "display_name", "identity_status", "source_ids"], "properties": {"resident_id": {"type": "string", "pattern": "^[a-z][a-z0-9_.:-]{1,127}$"}, "display_name": {"type": "string", "minLength": 1}, "identity_status": {"enum": ["authoritative", "provisional_legacy_record_id", "provisional_unconfirmed"]}, "source_ids": {"type": "array", "items": {"type": "object", "required": ["source_id", "value", "link_status"], "properties": {"source_id": {"type": "string"}, "value": {"type": "string"}, "link_status": {"enum": ["confirmed", "unconfirmed", "rejected"]}}, "additionalProperties": true}}}, "additionalProperties": true},
+    "office": {"type": "object", "required": ["office_id", "title", "department", "lifecycle_status", "reporting_relationships", "history"], "properties": {"office_id": {"type": ["string", "null"]}, "title": {"type": "string"}, "department": {"type": ["string", "null"]}, "lifecycle_status": {"type": "string"}, "reporting_relationships": {"type": "array"}, "history": {"type": "array"}}, "additionalProperties": true},
+    "mission": {"type": "object", "required": ["summary", "responsibilities"], "properties": {"summary": {"type": "string"}, "responsibilities": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": true},
+    "qualifications": {"type": "array"},
+    "authority_boundaries": {"type": "array", "items": {"type": "string"}},
+    "character": {"type": "object", "required": ["bible_status", "backstory", "identity_anchors", "stable_traits", "temperament", "contradictions", "fears", "motivations", "humor", "conversational_style", "preferences", "social_behaviors", "development_goals"], "additionalProperties": true},
+    "personality": {"type": "object", "required": ["settings_version", "settings", "overrides"], "properties": {"settings_version": {"type": "string"}, "settings": {"type": "object", "required": ["warmth", "humor", "formality", "assertiveness", "curiosity", "spontaneity", "empathy", "expressiveness", "professional_directness"], "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 100}}, "overrides": {"type": "array"}}, "additionalProperties": true},
+    "prompt_components": {"type": "array", "items": {"type": "object", "required": ["component_id", "version", "kind", "owner", "classification", "approval_status", "text", "sources"], "properties": {"component_id": {"type": "string"}, "version": {"type": "string"}, "kind": {"type": "string"}, "owner": {"type": "string"}, "classification": {"enum": ["public", "institutional", "personnel_sensitive", "protected"]}, "approval_status": {"enum": ["proposed", "in_review", "approved", "superseded", "rejected"]}, "text": {"type": "string"}, "sources": {"type": "array"}}, "additionalProperties": true}},
+    "memory": {"type": "object", "required": ["categories", "source_reference_required", "corrections", "supersession", "retention_policy_ref", "entries"], "additionalProperties": true},
+    "relationships": {"type": "array"},
+    "implementation": {"type": "object", "required": ["provider_mode", "provider_id", "model_adaptations", "identity_binding_authority"], "additionalProperties": true},
+    "governance": {"type": "object", "required": ["approval_status", "revision_history", "rollback_supported", "owners"], "additionalProperties": true},
+    "sources": {"type": "array"},
+    "open_questions": {"type": "array"}
+  },
+  "additionalProperties": true
+}

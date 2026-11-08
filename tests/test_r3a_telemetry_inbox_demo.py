@@ -1,4 +1,21 @@
-"""Isolated simulated autonomous-inbox demonstration; no DB/model/runtime is started."""
+"""
+R3 CONTROLLED SOURCE
+File: tests/test_r3a_telemetry_inbox_demo.py
+Component: R3A-TELEMETRY-INBOX-DEMO-TESTS
+File Revision: 1.0.1
+Created: Unknown (legacy; history begins 2026-11-07)
+Created By: R3 Integration (historical commit; original actor not independently verified)
+Purpose: Exercise the isolated simulated telemetry inbox path through CME and Grace.
+Execution Model: unittest fixture; no DB/model/runtime is started.
+Observability: Assertions cover fake dispatch and evidence only.
+Dependencies: R3A telemetry and resident capability contracts.
+Authority: Test-only compatibility fixture; no external authority or deployment.
+Changed: 2026-11-08 UTC | CHARACTER-ARCHITECTURE | Codex GPT-6 | Align Grace fixture ID with canonical resident identity used by current runtime.
+Supersedes: tests/test_r3a_telemetry_inbox_demo.py revision 1.0.0, blob a8874e3c5ebfabf439551d5ea1d86496941d26ca
+Contracts: r3a.resident.execution.v1; resident_id resident.grace.
+Tests: tests/test_r3a_telemetry_inbox_demo.py
+History/Predecessor: Commit a13512cb.
+"""
 from __future__ import annotations
 
 import importlib.util
@@ -66,7 +83,7 @@ class TelemetryInboxDemo(unittest.IsolatedAsyncioTestCase):
         route = SimpleNamespace(route_id="fixture-route", provider="fixture", model="fixture-model",
                                 endpoint="http://127.0.0.1/unused", timeout_seconds=1, max_tokens=64)
         grace = GraceResident.__new__(GraceResident)
-        grace.module_id = "Grace"
+        grace.module_id = "resident.grace"
         grace.state = "ACTIVE"
         grace.settings = SimpleNamespace(model_route=lambda _route_id: route)
         grace.last_activity = None
