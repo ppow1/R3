@@ -2,7 +2,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_r3a_bitwarden_secrets.py
 # Component: R3A-AP3-BITWARDEN-TESTS
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-07T21:36:43Z
 # Created By: Codex GPT-6
 # Purpose: Verify versioning, machine identity metadata, failure outcomes, rotation and secret redaction.
@@ -11,6 +11,7 @@
 # Dependencies: r3a_runtime.secrets; r3a_plugins.bitwarden_secrets.provider.
 # Authority: R3A AP3-M2 Issue #50; isolated unit tests only.
 # Changed: 2026-11-07T21:36:43Z | R3A-AP3-M2-ISSUE-50 | Codex GPT-6 | Add independent provider contract tests.
+# Changed: 2026-11-08T13:35:27Z | R3A-AP3-M2-LIFECYCLE | Codex GPT-6 | Verify non-secret provider readiness checks.
 # Supersedes: None.
 # Contracts: r3a.secrets.provider.v1; r3a.machine-principal.v1.
 # Tests: python3 -m unittest tests.test_r3a_bitwarden_secrets.
@@ -45,7 +46,7 @@ SECRET_ID = "fixture-secret-id"
 def configuration(**overrides):
     value = {
         "provider_id": "r3a.bitwarden-secrets",
-        "provider_version": "1.1.1",
+        "provider_version": "1.1.2",
         "executable": "bws",
         "access_token_env": "FIXTURE_BWS_TOKEN",
         "machine_principal_id": "fixture-machine-account",
@@ -56,7 +57,7 @@ def configuration(**overrides):
 
 
 def reference(**overrides):
-    value = {"provider_id": "r3a.bitwarden-secrets", "provider_version": "1.1.1",
+    value = {"provider_id": "r3a.bitwarden-secrets", "provider_version": "1.1.2",
              "secret_id": SECRET_ID}
     value.update(overrides)
     return SecretReference(**value)
@@ -178,6 +179,9 @@ class BitwardenSecretsProviderTests(unittest.TestCase):
             provider.resolve(reference(), correlation_id="missing-token")
         self.assertEqual("UNAVAILABLE", caught.exception.outcome)
         self.assertEqual("credentials_unavailable", caught.exception.reason_code)
+        with self.assertRaises(SecretProviderError) as caught:
+            provider.assert_available()
+        self.assertEqual("credentials_unavailable", caught.exception.reason_code)
         self.assertEqual([], invoked)
 
         provider = self.provider(lambda *args, **kwargs: completed(FIXTURE_VALUE_A),
@@ -186,6 +190,9 @@ class BitwardenSecretsProviderTests(unittest.TestCase):
         with self.assertRaises(SecretProviderError) as caught:
             provider.resolve(reference(), correlation_id="missing-cli")
         self.assertEqual("UNAVAILABLE", caught.exception.outcome)
+        self.assertEqual("cli_unavailable", caught.exception.reason_code)
+        with self.assertRaises(SecretProviderError) as caught:
+            provider.assert_available()
         self.assertEqual("cli_unavailable", caught.exception.reason_code)
 
     def test_authorization_denial_is_explicit_and_cli_text_is_redacted(self):
@@ -303,7 +310,7 @@ class BitwardenSecretsProviderTests(unittest.TestCase):
         provider = load_configured_provider(manifest_path, config_path)
         self.assertIsInstance(provider, BitwardenSecretsProvider)
         self.assertEqual("r3a.bitwarden-secrets", provider.provider_id)
-        self.assertEqual("1.1.1", provider.provider_version)
+        self.assertEqual("1.1.2", provider.provider_version)
 
 
 if __name__ == "__main__":

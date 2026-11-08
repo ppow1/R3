@@ -51,10 +51,11 @@ TOKEN = "synthetic-inference-credential-for-regression"
 SECRET_ID = "synthetic-bitwarden-secret-reference"
 REFERENCE_CONFIG = {
     "provider_id": "r3a.bitwarden-secrets",
-    "provider_version": "1.1.1",
+    "provider_version": "1.1.2",
     "secret_id": SECRET_ID,
     "manifest_path": "/external/r3a/bitwarden/manifest.json",
     "configuration_path": "/external/r3a/bitwarden/provider.json",
+    "access_token_env": "R3A_BITWARDEN_ACCESS_TOKEN",
 }
 
 
@@ -62,6 +63,8 @@ class FakeSecretProvider:
     def __init__(self, *, failure: str | None = None, reason_code: str | None = None):
         self.failure = failure
         self.reason_code = reason_code
+        self.access_token_env = "R3A_BITWARDEN_ACCESS_TOKEN"
+        self.configuration = {"access_token_env": self.access_token_env}
         self.lease: SecretLease | None = None
         self.reference = None
         self.correlation_id = None
@@ -82,6 +85,9 @@ class FakeSecretProvider:
                 correlation_id=correlation_id),
             _value=bytearray(TOKEN.encode()))
         return self.lease
+
+    def assert_available(self):
+        return None
 
 
 class MemoryStore:

@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "plugin_id": "r3a.reasoning-inference",
-  "plugin_version": "1.1.1",
+  "plugin_version": "1.1.2",
   "artifact_ref": "plugin.py",
-  "artifact_sha256": "6a2c412453b58ea4753dfa2f50fd2facaafceb4ea53e0bc6021bf3b199e4f4f5",
+  "artifact_sha256": "cb4931e2e7b5c48cc764cecb2e4ff2096a47758cd55a3b516d07af97c237a0e4",
   "configuration_schema": {
-    "schema_id": "r3a.reasoning-inference.config.v2",
+    "schema_id": "r3a.reasoning-inference.config.v3",
     "type": "object",
     "required": [
       "temperature"
@@ -28,15 +28,35 @@
           "provider_version",
           "secret_id",
           "manifest_path",
-          "configuration_path"
+          "configuration_path",
+          "access_token_env"
         ],
         "additionalProperties": false,
         "properties": {
-          "provider_id": {"type": "string", "minLength": 1},
-          "provider_version": {"type": "string", "minLength": 1},
-          "secret_id": {"type": "string", "minLength": 1},
-          "manifest_path": {"type": "string", "minLength": 1},
-          "configuration_path": {"type": "string", "minLength": 1}
+          "provider_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "provider_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "secret_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "manifest_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "configuration_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "access_token_env": {
+            "type": "string",
+            "pattern": "[A-Z][A-Z0-9_]*"
+          }
         }
       }
     }
@@ -45,12 +65,12 @@
     "contract_id": "r3a.capability-operation.v1",
     "contract_version": "1.0.0",
     "operation_id": "reasoning.model.invoke",
-    "operation_revision": "1.1.1",
+    "operation_revision": "1.1.2",
     "provider": {
       "provider_id": "r3a.reasoning-inference",
-      "provider_version": "1.1.1",
+      "provider_version": "1.1.2",
       "entrypoint": "r3a_plugins.reasoning_inference.plugin:create_provider",
-      "artifact_sha256": "6a2c412453b58ea4753dfa2f50fd2facaafceb4ea53e0bc6021bf3b199e4f4f5"
+      "artifact_sha256": "cb4931e2e7b5c48cc764cecb2e4ff2096a47758cd55a3b516d07af97c237a0e4"
     },
     "input_schema": {
       "type": "object",
@@ -239,24 +259,66 @@
               ],
               "additionalProperties": false,
               "properties": {
-                "contract_id": {"type": "string", "const": "r3a.secrets.provider.v1"},
-                "contract_version": {"type": "string", "const": "1.1.0"},
-                "provider_id": {"type": "string"},
-                "provider_version": {"type": "string"},
-                "secret_id": {"type": "string"},
-                "remote_revision": {"type": ["string", "null"]},
-                "fetched_at": {"type": "string", "format": "date-time"},
+                "contract_id": {
+                  "type": "string",
+                  "const": "r3a.secrets.provider.v1"
+                },
+                "contract_version": {
+                  "type": "string",
+                  "const": "1.1.0"
+                },
+                "provider_id": {
+                  "type": "string"
+                },
+                "provider_version": {
+                  "type": "string"
+                },
+                "secret_id": {
+                  "type": "string"
+                },
+                "remote_revision": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "fetched_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
                 "machine_principal": {
                   "type": "object",
-                  "required": ["contract_id", "contract_version", "issuer", "principal_id", "authenticated_at", "correlation_id"],
+                  "required": [
+                    "contract_id",
+                    "contract_version",
+                    "issuer",
+                    "principal_id",
+                    "authenticated_at",
+                    "correlation_id"
+                  ],
                   "additionalProperties": false,
                   "properties": {
-                    "contract_id": {"type": "string", "const": "r3a.machine-principal.v1"},
-                    "contract_version": {"type": "string", "const": "1.0.0"},
-                    "issuer": {"type": "string"},
-                    "principal_id": {"type": "string"},
-                    "authenticated_at": {"type": "string", "format": "date-time"},
-                    "correlation_id": {"type": "string"}
+                    "contract_id": {
+                      "type": "string",
+                      "const": "r3a.machine-principal.v1"
+                    },
+                    "contract_version": {
+                      "type": "string",
+                      "const": "1.0.0"
+                    },
+                    "issuer": {
+                      "type": "string"
+                    },
+                    "principal_id": {
+                      "type": "string"
+                    },
+                    "authenticated_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
                   }
                 }
               }
@@ -288,8 +350,38 @@
   },
   "provider": {
     "provider_id": "r3a.reasoning-inference",
-    "provider_version": "1.1.1",
+    "provider_version": "1.1.2",
     "entrypoint": "r3a_plugins.reasoning_inference.plugin:create_provider",
-    "artifact_sha256": "6a2c412453b58ea4753dfa2f50fd2facaafceb4ea53e0bc6021bf3b199e4f4f5"
+    "artifact_sha256": "cb4931e2e7b5c48cc764cecb2e4ff2096a47758cd55a3b516d07af97c237a0e4"
+  },
+  "module_manifest": {
+    "contract_id": "r3a.module-manifest.v1",
+    "contract_version": "1.0.0",
+    "module_id": "r3a.reasoning-inference",
+    "module_version": "1.1.2",
+    "owner": "R3A AP3",
+    "binding": {
+      "contract_id": "r3a.capability-provider.v1",
+      "protocol_major": 1,
+      "protocol_min_minor": 0,
+      "protocol_max_minor": 0,
+      "entrypoint": "r3a_plugins.reasoning_inference.plugin:create_provider"
+    },
+    "dependencies": [],
+    "configuration": {
+      "schema_ref": "r3a.reasoning-inference.config.v3",
+      "configuration_ref": "capability_operations[].configuration"
+    },
+    "capability_refs": [
+      "reasoning.model.invoke"
+    ],
+    "resource_refs": [],
+    "state_namespace": "r3a.reasoning.inference",
+    "migration_contract": "r3a.stateless-provider.v1",
+    "recovery_policy": "operation-contract.v1",
+    "artifact": {
+      "artifact_ref": "plugin.py",
+      "artifact_sha256": "cb4931e2e7b5c48cc764cecb2e4ff2096a47758cd55a3b516d07af97c237a0e4"
+    }
   }
 }

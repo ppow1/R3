@@ -17,4 +17,5 @@ Supersedes: None.
 Contracts: r3a.secrets.provider.v1; r3a.capability-operation.v1.
 Tests: tests/test_r3a_bitwarden_consumer_integration.py; tests/test_r3a_reasoning_provider.py.
 History/Predecessor: reasoning_inference/manifest.json blob 973a25028371165d9ac86e58dfcbe967bf8e35df at commit d07bade6dfa6e6ef498f454d82866aa592b899ba.
+Changed: 2026-11-08T14:15:00Z | R3A-AP3-M2-PROVIDER-ACTIVATION | Codex GPT-6 | Publish reasoning consumer module manifest and artifact pin.
 -->

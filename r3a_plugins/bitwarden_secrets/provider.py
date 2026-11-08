@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_plugins/bitwarden_secrets/provider.py
 Component: R3A-PLUG-BITWARDEN
-File Revision: 1.1.1
+File Revision: 1.1.2
 Created: 2026-11-07T21:36:43Z
 Created By: Codex GPT-6
 Purpose: Resolve versioned secret references through the Bitwarden Secrets Manager CLI.
@@ -13,6 +13,8 @@ Authority: AP3-M2 Issue #50; returned values are private adapter data, never CME
 Changed: 2026-11-07T21:36:43Z | R3A-AP3-M2-ISSUE-50 | Codex GPT-6 | Implement configurable Bitwarden machine-account secret resolution.
 Changed: 2026-11-07T22:09:29Z | R3A-AP3-M2-CONSUMER | Codex GPT-6 | Return distinct non-secret reason codes for credential, CLI, timeout, and provider failures.
 Changed: 2026-11-08T13:32:28Z | R3A-AP3-M2-BWS-AUTH-ENV | Codex GPT-6 | Map configured credential source into Bitwarden CLI BWS_ACCESS_TOKEN without argv exposure.
+Changed: 2026-11-08T13:35:27Z | R3A-AP3-M2-LIFECYCLE | Codex GPT-6 | Expose non-secret runtime readiness for provider lifecycle activation.
+Changed: 2026-11-08T14:15:00Z | R3A-AP3-M2-PROVIDER-ACTIVATION | Codex GPT-6 | Publish readiness probe as provider patch 1.1.2.
 Supersedes: None.
 Contracts: r3a.secrets.provider.v1; r3a.machine-principal.v1.
 Tests: tests/test_r3a_bitwarden_secrets.py.
@@ -53,9 +55,20 @@ class BitwardenSecretsProvider:
         self.configuration = dict(configuration)
         self.provider_id = self.configuration["provider_id"]
         self.provider_version = self.configuration["provider_version"]
+        self.access_token_env = self.configuration["access_token_env"]
         self._run = run
         self._environment = environment
         self._executable_lookup = executable_lookup
+
+    def assert_available(self) -> None:
+        """Check activation prerequisites without resolving or returning a secret."""
+        token = self._environment.get(self.access_token_env)
+        if not isinstance(token, str) or not token:
+            raise SecretProviderError("UNAVAILABLE", "Bitwarden machine-account credential is unavailable",
+                                      reason_code="credentials_unavailable")
+        if not self._executable_lookup(self.configuration["executable"]):
+            raise SecretProviderError("UNAVAILABLE", "Bitwarden Secrets Manager CLI is unavailable",
+                                      reason_code="cli_unavailable")
 
     def resolve(self, reference: SecretReference, *, correlation_id: str) -> SecretLease:
         if (reference.contract_id != SECRET_PROVIDER_CONTRACT_ID
@@ -69,7 +82,7 @@ class BitwardenSecretsProvider:
             raise SecretProviderError("FAILED", "secret resolution requires a correlation identifier",
                                       reason_code="invalid_request")
 
-        token_variable = self.configuration["access_token_env"]
+        token_variable = self.access_token_env
         token = self._environment.get(token_variable)
         if not isinstance(token, str) or not token:
             raise SecretProviderError("UNAVAILABLE", "Bitwarden machine-account credential is unavailable",

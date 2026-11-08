@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/secrets.py
 Component: R3A-SECRETS-API
-File Revision: 1.1.1
+File Revision: 1.1.2
 Created: 2026-11-07T21:36:43Z
 Created By: Codex GPT-6
 Purpose: Define a versioned secret reference, provider, lease, and machine-principal boundary.
@@ -13,6 +13,8 @@ Authority: R3A AP3-M2; CME retains operation authorization and audit ownership.
 Changed: 2026-11-07T21:36:43Z | R3A-AP3-M2-ISSUE-50 | Codex GPT-6 | Define private, versioned secret resolution and machine identity contracts.
 Changed: 2026-11-07T22:09:29Z | R3A-AP3-M2-CONSUMER | Codex GPT-6 | Version sanitized reason codes for distinct provider availability/failure outcomes.
 Changed: 2026-11-08T13:32:28Z | R3A-AP3-M2-BWS-AUTH-ENV | Codex GPT-6 | Publish Bitwarden provider patch release 1.1.1 for CLI auth environment binding.
+Changed: 2026-11-08T13:35:27Z | R3A-AP3-M2-LIFECYCLE | Codex GPT-6 | Publish provider readiness contract for managed consumer activation.
+Changed: 2026-11-08T14:15:00Z | R3A-AP3-M2-PROVIDER-ACTIVATION | Codex GPT-6 | Release readiness contract in provider patch 1.1.2.
 Supersedes: None.
 Contracts: r3a.secrets.provider.v1; r3a.machine-principal.v1.
 Tests: tests/test_r3a_bitwarden_secrets.py.
@@ -32,7 +34,7 @@ MACHINE_PRINCIPAL_CONTRACT_ID = "r3a.machine-principal.v1"
 SECRET_PROVIDER_CONTRACT_VERSION = "1.1.0"
 MACHINE_PRINCIPAL_CONTRACT_VERSION = "1.0.0"
 BITWARDEN_PROVIDER_ID = "r3a.bitwarden-secrets"
-BITWARDEN_PROVIDER_VERSION = "1.1.1"
+BITWARDEN_PROVIDER_VERSION = "1.1.2"
 _ENVIRONMENT_VARIABLE = re.compile(r"[A-Z][A-Z0-9_]*")
 _SECRET_ERROR_REASONS = frozenset({
     "provider_unavailable", "credentials_unavailable", "cli_unavailable", "request_timeout",

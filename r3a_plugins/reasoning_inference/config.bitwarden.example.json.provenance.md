@@ -16,4 +16,5 @@ Supersedes: None.
 Contracts: r3a.secrets.provider.v1; r3a.capability-operation.v1.
 Tests: tests/test_r3a_bitwarden_consumer_integration.py.
 History/Predecessor: New sidecar; initial publication recorded in Git.
+Changed: 2026-11-08T14:15:00Z | R3A-AP3-M2-PROVIDER-ACTIVATION | Codex GPT-6 | Bind example reference to provider 1.1.2.
 -->

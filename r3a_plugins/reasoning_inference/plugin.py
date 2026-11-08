@@ -1,7 +1,7 @@
 """R3 CONTROLLED SOURCE
 File: r3a_plugins/reasoning_inference/plugin.py
 Component: R3A-AP2-MODEL-INVOCATION-PROVIDER
-File Revision: 1.1.1
+File Revision: 1.1.2
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Execute a CME-authorized, configured model-role inference as a canonical capability provider.
@@ -12,6 +12,8 @@ Authority: R3 Alpha autonomy Task B, GitHub Issues #43 and #46.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Implement canonical model inference provider.
 Changed: 2026-11-07T21:59:02Z | R3A-AP3-M2-CONSUMER | Codex GPT-6 | Resolve configured secret references inside authorized inference calls and redact/close leases.
 Changed: 2026-11-08T13:32:28Z | R3A-AP3-M2-BWS-AUTH-ENV | Codex GPT-6 | Bind inference secret references to Bitwarden provider patch 1.1.1.
+Changed: 2026-11-08T13:35:27Z | R3A-AP3-M2-LIFECYCLE | Codex GPT-6 | Bind credential environment references to the authorized consumer lifecycle.
+Changed: 2026-11-08T14:15:00Z | R3A-AP3-M2-PROVIDER-ACTIVATION | Codex GPT-6 | Defer provider load/readiness until after CME authorization.
 Supersedes: None.
 Contracts: r3a.capability-operation.v1; r3a.capability-invocation.v1; r3a.secrets.provider.v1; r3a.machine-principal.v1.
 Tests: tests/test_r3a_reasoning_provider.py; tests/test_r3a_bitwarden_consumer_integration.py.
@@ -22,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -45,38 +48,47 @@ class ModelInferenceProvider:
     def __init__(self, configuration: dict[str, Any]):
         self.configuration = dict(configuration)
         self.secret_reference_configuration = self.configuration.get("secret_reference")
-        self.secret_provider = None
+        if self.secret_reference_configuration is not None:
+            if self.configuration.get("api_key_env"):
+                raise ValueError("model inference must use either api_key_env or secret_reference, not both")
+            self._validate_secret_reference_configuration(self.secret_reference_configuration)
 
     @staticmethod
     def _validate_secret_reference_configuration(value: Any) -> None:
         required = {"provider_id", "provider_version", "secret_id", "manifest_path",
-                    "configuration_path"}
+                    "configuration_path", "access_token_env"}
         if (not isinstance(value, dict) or set(value) != required
                 or any(not isinstance(value[key], str) or not value[key].strip() for key in required)):
             raise ValueError("configured model secret reference is invalid")
-        if value["provider_id"] != "r3a.bitwarden-secrets" or value["provider_version"] != "1.1.1":
+        if value["provider_id"] != "r3a.bitwarden-secrets" or value["provider_version"] != "1.1.2":
             raise ValueError("configured model secret provider identity or version is unsupported")
+        if re.fullmatch(r"[A-Z][A-Z0-9_]*", value["access_token_env"]) is None:
+            raise ValueError("configured model secret environment reference is invalid")
         if not value["manifest_path"].startswith("/") or not value["configuration_path"].startswith("/"):
             raise ValueError("model secret provider files must use absolute external paths")
 
     def _resolve_api_key(self, correlation_id: str):
         """Return an env credential or a private lease for this authorized provider call."""
         if self.secret_reference_configuration is not None:
-            if self.secret_provider is None:
-                try:
-                    self.secret_provider = load_configured_provider(
-                        self.secret_reference_configuration["manifest_path"],
-                        self.secret_reference_configuration["configuration_path"])
-                except Exception:
-                    raise RuntimeError(
-                        "configured model secret provider outcome: FAILED (provider_configuration_invalid)") from None
             reference = self.secret_reference_configuration
+            try:
+                secret_provider = load_configured_provider(
+                    reference["manifest_path"], reference["configuration_path"])
+                if secret_provider.access_token_env != reference["access_token_env"]:
+                    raise ValueError("consumer and provider environment references do not match")
+                secret_provider.assert_available()
+            except SecretProviderError as exc:
+                raise RuntimeError(
+                    f"configured model secret provider outcome: {exc.outcome} ({exc.reason_code})") from None
+            except Exception:
+                raise RuntimeError(
+                    "configured model secret provider outcome: FAILED (provider_configuration_invalid)") from None
             secret_ref = SecretReference(
                 provider_id=reference["provider_id"], provider_version=reference["provider_version"],
                 secret_id=reference["secret_id"], contract_id=SECRET_PROVIDER_CONTRACT_ID,
                 contract_version=SECRET_PROVIDER_CONTRACT_VERSION)
             try:
-                return self.secret_provider.resolve(secret_ref, correlation_id=correlation_id)
+                return secret_provider.resolve(secret_ref, correlation_id=correlation_id)
             except SecretProviderError as exc:
                 raise RuntimeError(
                     f"configured model secret provider outcome: {exc.outcome} ({exc.reason_code})") from None
