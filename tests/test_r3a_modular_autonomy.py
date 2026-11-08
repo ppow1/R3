@@ -204,6 +204,23 @@ class VersionedEnvelopeTests(unittest.TestCase):
 
 
 class ModelRoleConfigAndRoutingTests(unittest.TestCase):
+    def test_unrelated_bootstrap_revision_preserves_only_identical_model_contracts(self):
+        async def scenario():
+            with TemporaryDirectory() as directory:
+                settings = load_settings(make_config(Path(directory)))
+                from r3a_runtime.config import sanitized_config
+                prior = sanitized_config(settings)
+                cme = CME.__new__(CME)
+                cme.settings = settings
+                cme.store = type("Store", (), {
+                    "config_revision_config": AsyncMock(return_value=prior)})()
+                self.assertTrue(await cme._model_contract_compatible("old-bootstrap-revision"))
+                changed = json.loads(json.dumps(prior))
+                changed["grace"]["routes"][0]["model"] = "different-model"
+                cme.store.config_revision_config = AsyncMock(return_value=changed)
+                self.assertFalse(await cme._model_contract_compatible("old-bootstrap-revision"))
+        asyncio.run(scenario())
+
     def test_action_schema_offers_only_explicitly_discovered_residents(self):
         from r3a_runtime.grace_module import resident_action_schema
         available = [{"resident_id": "r3:canonical-vicky"}]

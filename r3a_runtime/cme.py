@@ -200,6 +200,20 @@ class CME:
     def _primary_resident_id(self) -> str:
         return getattr(self, "module_id", getattr(self.settings, "module_id", "resident.grace"))
 
+    async def _model_contract_compatible(self, prior_revision: str | None) -> bool:
+        """Allow durable activities across unrelated bootstrap changes only if model routing is identical."""
+        if prior_revision == self.settings.source_digest:
+            return True
+        getter = getattr(self.store, "config_revision_config", None)
+        if not callable(getter) or not isinstance(prior_revision, str):
+            return False
+        previous = await getter(prior_revision)
+        if not isinstance(previous, dict):
+            return False
+        previous_grace = previous.get("grace")
+        current_grace = sanitized_config(self.settings).get("grace")
+        return isinstance(previous_grace, dict) and previous_grace == current_grace
+
     def manifest(self, version: str | None = None) -> dict[str, Any]:
         return {
             "module_id": self.module_id,
@@ -1049,7 +1063,7 @@ class CME:
             requested_role = event_input.get("role_id")
             if not requested_role:
                 continue
-            if event_input.get("role_config_revision") != self.settings.source_digest:
+            if not await self._model_contract_compatible(event_input.get("role_config_revision")):
                 await self.store.block_waiting_model_activity(
                     activity["activity_id"], "role_configuration_revision_changed",
                     {"role_id": requested_role,
@@ -1225,7 +1239,7 @@ class CME:
                               resident_id=resident_id, evaluated_at=utcnow().isoformat()), 0)
         if selected_role_id:
             roles = self.settings.model_roles
-            if event_input.get("role_config_revision") != self.settings.source_digest:
+            if not await self._model_contract_compatible(event_input.get("role_config_revision")):
                 raise ModelRoleUnavailable(
                     RouteDecision("block", selected_role_id, None, None,
                                   "role_configuration_revision_changed", False,
@@ -1362,7 +1376,7 @@ class CME:
         if policy and policy.get("enabled") is True:
             if (policy.get("contract_id") != "r3a.reasoning-escalation-policy"
                     or not str(policy.get("contract_version", "")).startswith("1.")
-                    or policy.get("config_revision") != self.settings.source_digest):
+                    or not await self._model_contract_compatible(policy.get("config_revision"))):
                 raise RuntimeError("Persisted reasoning escalation policy is incompatible with this activity")
             observations = await self._model_readiness_observations()
             escalation_state = reasoning_state.get("escalation") or {"requests": []}

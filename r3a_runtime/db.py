@@ -199,6 +199,17 @@ class Store:
                               None, "ACTIVE", "configuration activated", {"digest": self.settings.source_digest})
         return revision_id
 
+    async def config_revision_config(self, revision_id: str) -> dict[str, Any] | None:
+        """Return a previously persisted sanitized bootstrap snapshot for compatibility checks."""
+        async with self.pool.connection() as conn:
+            row = await (await conn.execute(
+                "SELECT config FROM r3a.config_revisions WHERE revision_id=%s", (revision_id,)
+            )).fetchone()
+        if row is None:
+            return None
+        value = row["config"]
+        return json.loads(value) if isinstance(value, str) else value
+
     async def seed_machines(self) -> list[tuple[str, int, str]]:
         loaded = []
         for path in sorted(self.settings.machine_catalog_dir.glob("*.json")):
