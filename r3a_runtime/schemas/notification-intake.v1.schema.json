@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://r3a.local/schemas/notification-intake.v1.schema.json",
+  "title": "R3A notification intake envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_id", "contract_version", "source_id", "source_event_id", "event_type",
+    "event_id", "correlation_id", "occurred_at", "received_at", "severity", "payload_ref",
+    "provenance", "evidence"
+  ],
+  "properties": {
+    "contract_id": {"const": "r3a.notification-intake"},
+    "contract_version": {"const": "1.0.0"},
+    "source_id": {"type": "string", "minLength": 1},
+    "source_event_id": {"type": "string", "minLength": 1},
+    "event_type": {"type": "string", "minLength": 1},
+    "event_id": {"type": "string", "format": "uuid"},
+    "correlation_id": {"type": "string", "format": "uuid"},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "received_at": {"type": "string", "format": "date-time"},
+    "severity": {"enum": ["info", "warning", "error"]},
+    "payload_ref": {"type": "string", "minLength": 1},
+    "provenance": {"type": "object"},
+    "evidence": {"type": "object"}
+  }
+}

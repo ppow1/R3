@@ -204,6 +204,65 @@ class VersionedEnvelopeTests(unittest.TestCase):
 
 
 class ModelRoleConfigAndRoutingTests(unittest.TestCase):
+    def test_unrelated_bootstrap_revision_preserves_only_identical_model_contracts(self):
+        async def scenario():
+            with TemporaryDirectory() as directory:
+                settings = load_settings(make_config(Path(directory)))
+                from r3a_runtime.config import sanitized_config
+                prior = sanitized_config(settings)
+                cme = CME.__new__(CME)
+                cme.settings = settings
+                cme.store = type("Store", (), {
+                    "config_revision_config": AsyncMock(return_value=prior)})()
+                self.assertTrue(await cme._model_contract_compatible("old-bootstrap-revision"))
+                changed = json.loads(json.dumps(prior))
+                changed["grace"]["routes"][0]["model"] = "different-model"
+                cme.store.config_revision_config = AsyncMock(return_value=changed)
+                self.assertFalse(await cme._model_contract_compatible("old-bootstrap-revision"))
+        asyncio.run(scenario())
+
+    def test_action_schema_offers_only_explicitly_discovered_residents(self):
+        from r3a_runtime.grace_module import resident_action_schema
+        available = [{"resident_id": "r3:canonical-vicky"}]
+        schema = resident_action_schema([], available_residents=available)
+        self.assertIn("delegate_to_resident", schema["properties"]["action"]["enum"])
+        self.assertEqual(schema["properties"]["delegation"]["properties"]["target_resident_id"]["enum"],
+                         ["r3:canonical-vicky"])
+        absent = resident_action_schema([], available_residents=[])
+        self.assertNotIn("delegate_to_resident", absent["properties"]["action"]["enum"])
+
+    def test_resident_execution_routes_are_role_based_and_not_resident_roster_data(self):
+        with TemporaryDirectory() as directory:
+            path = make_config(Path(directory))
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["resident_execution"] = {
+                "contract_id": "r3a.resident.execution-routing", "contract_version": "1.0.0",
+                "office_role_routes": [
+                    {"office_role": "Engineering Manager", "model_role_id": "resident.primary"},
+                    {"office_role": "Manager of Human Resources", "model_role_id": "resident.primary"},
+                ]}
+            path.write_text(json.dumps(value), encoding="utf-8")
+            settings = load_settings(path)
+            self.assertEqual(settings.model_role_for_office("Engineering Manager").route_id,
+                             "primary-route")
+            self.assertEqual(settings.model_role_for_office("Manager of Human Resources").route_id,
+                             "primary-route")
+            self.assertEqual(sanitized_config(settings)["resident_execution"]["office_role_routes"],
+                             value["resident_execution"]["office_role_routes"])
+
+    def test_resident_execution_routes_reject_unknown_or_non_reasoning_roles(self):
+        for role_id in ("resident.missing", "resident.autonomic"):
+            with self.subTest(role_id=role_id), TemporaryDirectory() as directory:
+                path = make_config(Path(directory))
+                value = json.loads(path.read_text(encoding="utf-8"))
+                value["resident_execution"] = {
+                    "contract_id": "r3a.resident.execution-routing", "contract_version": "1.0.0",
+                    "office_role_routes": [{"office_role": "Engineering Manager",
+                                             "model_role_id": role_id}]}
+                path.write_text(json.dumps(value), encoding="utf-8")
+                with self.assertRaises(ConfigurationError):
+                    load_settings(path)
+
     def test_roles_are_external_and_model_assignment_change_changes_revision(self):
         with TemporaryDirectory() as first_dir, TemporaryDirectory() as second_dir:
             first = load_settings(make_config(Path(first_dir)))

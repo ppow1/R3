@@ -50,6 +50,7 @@ class TelemetryInboxDemo(unittest.IsolatedAsyncioTestCase):
             module_capabilities=(capability_id,),
             capability_registry=registry, lease_seconds=30, source_digest="fixture-config",
             restart_initial_seconds=1, restart_max_seconds=4)
+        cme.module_id = "resident.grace"
         cme.store = FakeStore()
         cme.module_process = SimpleNamespace(returncode=None)
         cme.active_activities = {}
@@ -62,6 +63,17 @@ class TelemetryInboxDemo(unittest.IsolatedAsyncioTestCase):
         capability_id = tool["capability_id"]
         evidence = {"source_id": "fixture.telemetry", "source_path": "fixture://source",
                     "content": {"measured": 1}, "sha256": "f" * 64}
+        descriptor = registry.resolve(capability_id).descriptor
+        cme.invoke_capability = AsyncMock(return_value={
+            "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+            "invocation_id": "fixture-invocation", "operation_id": capability_id,
+            "operation_contract_version": descriptor["contract_version"],
+            "provider": descriptor["provider"], "outcome": "SUCCEEDED",
+            "started_at": "2026-11-08T01:00:00Z", "finished_at": "2026-11-08T01:00:01Z",
+            "output": [evidence], "evidence": [evidence],
+            "authorization": {"provider_id": "capability_grants", "allowed": True,
+                               "decision_id": "fixture-decision", "audit_event_id": "fixture-grant",
+                               "policy_revision": None, "config_revision": "fixture-config"}})
         action_count = 0
         route = SimpleNamespace(route_id="fixture-route", provider="fixture", model="fixture-model",
                                 endpoint="http://127.0.0.1/unused", timeout_seconds=1, max_tokens=64)
@@ -113,7 +125,6 @@ class TelemetryInboxDemo(unittest.IsolatedAsyncioTestCase):
 
         cme._objective_context = objective_context
         cme._module_call = model_action
-        cme._authorize_capability = AsyncMock(return_value={"audit_event_id": "fixture-grant"})
         cme._final_evidence_issues = lambda *_args: []
         activity = {"activity_id": "queued-activity", "attempt_id": "attempt-1",
                     "attempt_count": 1, "activity_type": "grace.objective",
@@ -123,7 +134,9 @@ class TelemetryInboxDemo(unittest.IsolatedAsyncioTestCase):
             await cme._run_activity(activity)
 
         self.assertEqual(2, action_count)
-        cme._authorize_capability.assert_awaited_once()
+        cme.invoke_capability.assert_awaited_once()
+        self.assertEqual("r3a.capability-invocation.v1",
+                         cme.invoke_capability.await_args.args[0]["contract_id"])
         self.assertIsNotNone(cme.store.result)
         self.assertIsNone(cme.store.blocked)
         trace = cme.store.result["reasoning_trace"]
