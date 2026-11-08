@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.11.0
+File Revision: 1.12.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -14,6 +14,7 @@ Changed: 2026-11-06T15:22:00Z | R3A-AP0-M1 | Codex GPT-6 | Implement CME process
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Reconcile orphaned module processes, record live health and correct replacement status.
 Changed: 2026-11-06 | R3A-AP1-M1 | Codex GPT-6 | Dispatch durable Grace objectives, authorize bounded evidence reads and renew long-running leases.
 Changed: 2026-11-08 | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Persist generic verifier results and ask Grace for a scoped corrective decision before blocking.
+Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Omit CME-only durable reasoning checkpoint internals from resident protocol frames.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
 Changed: 2026-11-06T18:16:39Z | R3A-019 | Codex GPT-6 | Bound module-child termination when a model request does not drain.
@@ -344,6 +345,10 @@ class CME:
                            timeout: float = 5.0) -> dict[str, Any]:
         payload = dict(payload or {})
         if operation == "execute" and payload.get("activity_type") == "grace.objective":
+            # CME has already extracted these durable internals into its own state. The
+            # resident receives the conversation and evidence, not a duplicate copy of
+            # invocation history and retry bookkeeping that can exceed the module frame.
+            payload.pop("reasoning_state", None)
             payload["contract_envelope"] = ContractEnvelope(
                 "r3a.resident.execution", "1.0.0", str(uuid.uuid4()),
                 str(payload["activity_id"]), str(payload["attempt_id"]),
@@ -1146,17 +1151,15 @@ class CME:
                 raise PermissionError("effectful operation requires the canonical AP2 invocation dispatcher")
             from .capability_contracts import validate_json
             validate_json(arguments, registered_operation.descriptor["input_schema"], path="$.input")
-        authorization = await self._authorize_capability(
-            capability_id, activity_id=str(activity["activity_id"]),
-            attempt_id=str(activity["attempt_id"]),
-            context={"invocation_source": "resident_selected_action",
-                     "tool_contract_id": tool["contract_id"],
-                     "operation_contract_id": registered_operation.descriptor["contract_id"]
-                     if registered_operation is not None else tool["contract_id"],
-                     "effect_class": registered_operation.descriptor["effect_class"]
-                     if registered_operation is not None else "read",
-                     "query_sha256": hashlib.sha256(arguments.get("query", "").encode()).hexdigest()
-                     if capability_id == "institution.knowledge.read" else None})
+        authorization = None
+        if registered_operation is None:
+            authorization = await self._authorize_capability(
+                capability_id, activity_id=str(activity["activity_id"]),
+                attempt_id=str(activity["attempt_id"]),
+                context={"invocation_source": "resident_selected_action",
+                         "tool_contract_id": tool["contract_id"], "effect_class": "read",
+                         "query_sha256": hashlib.sha256(arguments.get("query", "").encode()).hexdigest()
+                         if capability_id == "institution.knowledge.read" else None})
         evidence = []
         capability_output: Any = None
         if capability_id == "institution.knowledge.read" and registered_operation is None:
@@ -1164,31 +1167,46 @@ class CME:
                 evidence.extend(retrieve(path, f"knowledge.{index+1}", query))
             capability_output = evidence
         elif registered_operation is not None:
-            provider_context = {"activity_id": str(activity["activity_id"]),
-                                                         "attempt_id": str(activity["attempt_id"]),
-                                                         "correlation_id": str(activity.get("correlation_id")
-                                                                               or activity["activity_id"]),
-                                                         "operation_id": capability_id,
-                                                         "config_revision": self.settings.source_digest,
-                                                         "capability_catalog": list(registry.discover())}
-            runtime = getattr(self, "provider_runtime", None)
-            if runtime is None:  # Narrow compatibility for isolated CME contract fixtures.
-                provider = registered_operation.load_provider()
-                provided = await asyncio.to_thread(provider.invoke, arguments, context=provider_context)
-            else:
-                provided = await runtime.invoke(registered_operation, arguments, context=provider_context)
-            capability_output, provider_evidence = normalize_provider_result(
-                provided, registered_operation.descriptor)
-            evidence.extend(provider_evidence if isinstance(provider_evidence, list)
-                            else [provider_evidence])
+            descriptor = registered_operation.descriptor
+            invocation_id = str(uuid.uuid4())
+            invocation = {
+                "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+                "invocation_id": invocation_id,
+                "operation_id": descriptor["operation_id"],
+                "operation_contract_version": descriptor["contract_version"],
+                "caller": {"principal_id": self.module_id, "resident_id": self.module_id,
+                           "service_id": None},
+                "target": {}, "input": arguments,
+                "activity_id": str(activity["activity_id"]),
+                "attempt_id": str(activity["attempt_id"]),
+                "correlation_id": str(activity.get("input", {}).get("correlation_id")
+                                       or activity.get("correlation_id") or activity["activity_id"]),
+                "work_order": None, "evidence_purpose": request.get("rationale"),
+                "idempotency_key": f"resident-capability:{invocation_id}",
+                "deadline": (datetime.now(timezone.utc)
+                             + timedelta(seconds=descriptor["execution"]["timeout_seconds"])).isoformat(),
+                "config_revision": self.settings.source_digest,
+            }
+            canonical_result = await self.invoke_capability(invocation)
+            if canonical_result["outcome"] != "SUCCEEDED":
+                raise RuntimeError("CME capability invocation did not succeed")
+            capability_output = canonical_result["output"]
+            evidence.extend(canonical_result["evidence"])
+            authorization = canonical_result["authorization"]
+            invocation_summary = {key: canonical_result[key] for key in
+                                  ("invocation_id", "operation_id", "operation_contract_version",
+                                   "provider", "outcome", "started_at", "finished_at")}
         else:
             evidence.extend(await self._read_runtime_capability(capability_id))
             capability_output = evidence
-        return {"contract_id": tool["contract_id"],
+        result = {"contract_id": tool["contract_id"],
                 "contract_version": tool["contract_version"],
                 "capability_id": capability_id, "outcome": "succeeded",
                 "arguments": arguments, "output": capability_output, "evidence": evidence,
                 "authorization": authorization, "observed_at": utcnow().isoformat()}
+        if registered_operation is not None:
+            result["invocation"] = invocation_summary
+        return result
 
     async def invoke_capability(self, request: dict[str, Any], *,
                                 work_order: EngineeringWorkOrder | None = None,

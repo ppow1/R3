@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.10.0
+File Revision: 1.11.0
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -37,6 +37,7 @@ Changed: 2026-11-07T23:41:45Z | R3A-AP2-DELEGATION | Codex GPT-6 | Cover Grace's
 Changed: 2026-11-07T23:53:20Z | R3A-AP2-DELEGATION-CONTINUATION | Codex GPT-6 | Cover multi-route selection, handoff outcome handling, resumed context, and failed-verification corrective reasoning.
 Changed: 2026-11-08T00:04:44Z | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Verify generic institutional result validation, evidence delivery, corrective action selection, and rejection of false healthy completion claims.
 Changed: 2026-11-08T01:20:00Z | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Cover CME construction and delivery of generic independent-verifier results.
+Changed: 2026-11-08T01:35:00Z | R3A-MODULAR-RUNTIME | Codex GPT-6 | Verify CME-only continuation internals stay out of bounded resident protocol frames.
 Supersedes: None.
 Contracts: R3A-019 configured model routing and knowledge grounding/retrieval.
 Tests: This test module.
@@ -51,7 +52,7 @@ import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 import hashlib
 from r3a_runtime.db import Store
 
@@ -1147,6 +1148,73 @@ class ResidentVerificationFeedbackIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["available_tools"], [])
         self.assertEqual(payload["reasoning_escalation"], {"enabled": False, "available_roles": []})
         self.assertIn(result["issuer"]["decision_ref"], payload["conversation"][-1]["content"])
+
+    def test_cme_keeps_durable_reasoning_bookkeeping_out_of_resident_wire_frame(self):
+        cme = CME.__new__(CME)
+        cme.module_id = "resident.grace"
+        cme.module_version = "1.2.8"
+        cme.settings = SimpleNamespace(module_socket="/unused")
+        payload = {"activity_type": "grace.objective", "activity_id": "activity-1",
+                   "attempt_id": "attempt-1", "config_revision": "config-r1",
+                   "conversation": [{"role": "user", "content": "continue"}],
+                   "reasoning_state": {"capability_invocations": [{"result": "durable only"}]}}
+
+        async def exercise():
+            with patch("r3a_runtime.cme.module_request", new=AsyncMock(return_value={"ok": True})) as request:
+                await cme._module_call("execute", payload)
+            wire_payload = request.await_args.args[4]
+            self.assertNotIn("reasoning_state", wire_payload)
+            self.assertEqual(wire_payload["conversation"], payload["conversation"])
+            self.assertEqual(payload["reasoning_state"]["capability_invocations"][0]["result"],
+                             "durable only")
+
+        asyncio.run(exercise())
+
+    def test_registered_resident_capability_uses_canonical_durable_dispatcher(self):
+        operation_id = "infrastructure.octominer.telemetry.read"
+        output = [{"source_id": "gpu.telemetry.octominer", "content": {"available": True}}]
+        canonical = {"invocation_id": "invoke-1", "operation_id": operation_id,
+                     "operation_contract_version": "1.0.0",
+                     "provider": {"provider_id": "r3a.octominer-telemetry",
+                                  "provider_version": "2.0.0", "artifact_sha256": "a" * 64},
+                     "outcome": "SUCCEEDED", "started_at": "2026-11-08T01:35:00Z",
+                     "finished_at": "2026-11-08T01:35:01Z", "output": output,
+                     "evidence": output,
+                     "authorization": {"provider_id": "capability_grants", "allowed": True,
+                                       "decision_id": "decision-1", "audit_event_id": "audit-1",
+                                       "policy_revision": None, "config_revision": "config-r1"}}
+        descriptor = {"operation_id": operation_id, "contract_version": "1.0.0",
+                      "effect_class": "read", "input_schema": {"type": "object",
+                      "properties": {}, "additionalProperties": False},
+                      "provider": canonical["provider"],
+                      "execution": {"timeout_seconds": 20}}
+        registered = SimpleNamespace(descriptor=descriptor)
+        registry = SimpleNamespace(resolve=Mock(return_value=registered))
+        cme = CME.__new__(CME)
+        cme.module_id = "resident.grace"
+        cme.settings = SimpleNamespace(module_capabilities=(operation_id,),
+                                       capability_registry=registry, source_digest="config-r1")
+        cme._resident_tools = Mock(return_value=[{"contract_id": "r3a.resident-capability-tool",
+                                                  "contract_version": "1.0.0",
+                                                  "capability_id": operation_id}])
+        cme.invoke_capability = AsyncMock(return_value=canonical)
+        cme._authorize_capability = AsyncMock()
+        activity = {"activity_id": "activity-1", "attempt_id": "attempt-1",
+                    "input": {"correlation_id": "correlation-1"}}
+        request = {"contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
+                   "capability_id": operation_id, "arguments": {}, "rationale": "Read GPU state"}
+
+        result = asyncio.run(cme._invoke_resident_capability(activity, request))
+
+        cme.invoke_capability.assert_awaited_once()
+        invocation = cme.invoke_capability.await_args.args[0]
+        self.assertEqual(invocation["contract_id"], "r3a.capability-invocation.v1")
+        self.assertEqual(invocation["operation_id"], operation_id)
+        self.assertEqual(invocation["caller"]["resident_id"], "resident.grace")
+        self.assertEqual(invocation["activity_id"], "activity-1")
+        cme._authorize_capability.assert_not_awaited()
+        self.assertEqual(result["invocation"]["invocation_id"], "invoke-1")
+        self.assertEqual(result["authorization"]["audit_event_id"], "audit-1")
 
 if __name__ == "__main__":
     unittest.main()
