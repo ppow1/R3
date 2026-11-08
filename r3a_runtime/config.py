@@ -702,7 +702,10 @@ def load_settings(path: str | Path) -> Settings:
             # Internal resolved path is carried only to the CME binding layer; it is not
             # an external manifest field and never becomes an authorization decision.
             manifest["_provider_artifact_path"] = str(artifact_paths[operation["provider"]["artifact_sha256"]])
-            manifest["_pinned_artifact_paths"] = {digest: str(path) for digest, path in artifact_paths.items()}
+            # The worker protocol accepts {artifact_path: expected_digest}; keep
+            # this map distinct from the digest->Path lookup used during loading.
+            manifest["_pinned_artifact_paths"] = {str(path): digest
+                                                  for digest, path in artifact_paths.items()}
             capability_registry.register(operation, plugin_config, legacy_manifest=manifest)
         except (CapabilityContractError, KeyError, TypeError) as exc:
             raise ConfigurationError(f"{where}.manifest operation contract is invalid: {exc}") from exc
