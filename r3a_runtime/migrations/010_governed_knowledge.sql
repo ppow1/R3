@@ -1,7 +1,7 @@
 -- R3 CONTROLLED SOURCE
--- File: r3a_runtime/migrations/009_governed_knowledge.sql
+-- File: r3a_runtime/migrations/010_governed_knowledge.sql
 -- Component: R3A-GOVERNED-KNOWLEDGE
--- File Revision: 1.0.0
+-- File Revision: 1.0.1
 -- Created: 2026-11-08 UTC
 -- Created By: Codex GPT-6
 -- Purpose: Persist source-grounded proposals, individual Steward decisions, and approved knowledge in the existing institutional store.
@@ -9,11 +9,11 @@
 -- Observability: Durable per-item review, provenance, and supersession records plus existing institution event ledger.
 -- Dependencies: PostgreSQL; r3a.capability-invocation.v1; institutional knowledge provider.
 -- Authority: R3A Knowledge governed ingestion directive, GitHub Issue #47; capability effects coordinated via #43/#46.
--- Changed: 2026-11-08 | AP1-K1 | Initial schema for pending proposals and authorized ingestion.
+-- Changed: 2026-11-08 | AP1-K2 | Correct migration filename provenance; schema unchanged.
 -- Supersedes: None.
 -- Contracts: r3a.knowledge-review-api.v1@1.0.0; r3a.capability-operation.v1@1.1.0.
 -- Tests: tests/test_governed_knowledge.py and isolated PostgreSQL acceptance.
--- History/Predecessor: New migration.
+-- History/Predecessor: Original migration at 8944f4f0a20f966256813bd1c126ead57174ded4, Git blob 0328893928d9014f978988b9c852ea009c5b4b8e.
 
 ALTER TABLE r3a.capability_registry DROP CONSTRAINT IF EXISTS capability_registry_access_mode_check;
 ALTER TABLE r3a.capability_registry ADD CONSTRAINT capability_registry_access_mode_check
