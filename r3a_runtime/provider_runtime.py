@@ -112,7 +112,8 @@ class ProviderProcessManager:
         if declared is not None:
             binding = declared["binding"]
             artifact = declared["artifact"]
-            return {"module_id": declared["module_id"], "module_version": declared["module_version"],
+            return {"manifest_contract": "r3a.module-manifest.v1@1.0.0",
+                    "module_id": declared["module_id"], "module_version": declared["module_version"],
                     "contract_id": binding["contract_id"], "protocol_major": binding["protocol_major"],
                     "protocol_minor": PROTOCOL_MINOR, "protocol_min_minor": binding["protocol_min_minor"],
                     "protocol_max_minor": binding["protocol_max_minor"], "owner": declared["owner"],

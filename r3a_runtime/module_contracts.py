@@ -100,3 +100,19 @@ def validate_dependency_graph(configured_versions: dict[str, set[str]],
     for module_key in graph:
         visit(module_key)
     return graph
+
+
+def is_legacy_manifest_promotion(previous: dict, current: dict) -> bool:
+    """Permit only synthesized-default metadata to become an explicit v1 manifest."""
+    if (previous.get("manifest_contract") is not None
+            or current.get("manifest_contract") != "r3a.module-manifest.v1@1.0.0"
+            or previous.get("owner") != "manifest"
+            or previous.get("configuration_ref") != "external-config"
+            or previous.get("migration_contract") != "provider-stateless.v1"
+            or previous.get("recovery_policy") != "replay-per-operation-contract"):
+        return False
+    stable_fields = ("module_id", "module_version", "contract_id", "protocol_major", "protocol_minor",
+                     "protocol_min_minor", "protocol_max_minor", "entrypoint", "artifact_ref",
+                     "artifact_digest", "dependencies", "configuration_schema", "capability_refs",
+                     "resource_refs", "state_namespace")
+    return all(previous.get(field) == current.get(field) for field in stable_fields)

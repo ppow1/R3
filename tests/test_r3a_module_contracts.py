@@ -18,7 +18,8 @@ History/Predecessor: New file.
 """
 import pytest
 
-from r3a_runtime.module_contracts import validate_dependency_graph, version_satisfies
+from r3a_runtime.module_contracts import (is_legacy_manifest_promotion,
+                                         validate_dependency_graph, version_satisfies)
 
 
 @pytest.mark.parametrize(("version", "expression", "expected"), [
@@ -61,3 +62,20 @@ def test_dependency_graph_rejects_cycles():
     ]
     with pytest.raises(ValueError, match="dependency cycle"):
         validate_dependency_graph({"a": {"1.0.0"}, "b": {"1.2.0"}}, declarations)
+
+
+def test_legacy_manifest_promotion_requires_same_identity_artifact_and_bindings():
+    old = {"module_id": "provider", "module_version": "1.0.0", "contract_id": "r3a.capability-provider.v1",
+           "protocol_major": 1, "protocol_minor": 0, "protocol_min_minor": 0, "protocol_max_minor": 0,
+           "owner": "manifest", "entrypoint": "pkg:factory", "dependencies": [],
+           "configuration_schema": {}, "configuration_ref": "external-config", "capability_refs": ["op"],
+           "migration_contract": "provider-stateless.v1", "artifact_ref": "provider.py",
+           "artifact_digest": "a" * 64, "recovery_policy": "replay-per-operation-contract",
+           "resource_refs": [], "state_namespace": "provider"}
+    new = {**old, "manifest_contract": "r3a.module-manifest.v1@1.0.0", "owner": "owner",
+           "configuration_ref": "capability_operations[].configuration",
+           "migration_contract": "r3a.stateless-provider.v1", "recovery_policy": "operation-contract.v1"}
+    assert is_legacy_manifest_promotion(old, new)
+    assert not is_legacy_manifest_promotion(old, {**new, "artifact_digest": "b" * 64})
+    assert not is_legacy_manifest_promotion(old, {**new, "dependencies": [{"module_id": "other",
+                                                                           "version_range": "^1.0.0"}]})
