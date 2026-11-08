@@ -914,6 +914,50 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
                                         "observed_at": "2026-11-08T01:02:08Z"},
                 "model_route_id": "directory-resident-route", "config_revision": "config-1"}
 
+    def _character_context(self, *, classification_scope=None):
+        prompt_text = "Grace greets people warmly and keeps casual conversation natural."
+        return {"contract_id": "r3a.resident.runtime-character-context", "contract_version": "1.0.0",
+                "resident_id": "r3:grace", "directory_resident_id": "resident.grace",
+                "identity_binding_status": "authoritative", "identity_revision": "7",
+                "dossier_revision": "1.0.1", "approval_status": "active",
+                "classification_scope": classification_scope or ["public", "institutional"],
+                "authorization_ref": "hr.audit:context-read-1", "prompt_text": prompt_text,
+                "prompt_sha256": hashlib.sha256(prompt_text.encode()).hexdigest(),
+                "prompt_component_refs": [["conversation", "1.0.0"]],
+                "source_refs": ["character-bible:approved#conversation"],
+                "personality": {"warmth": 80, "humor": 55, "formality": 45, "assertiveness": 50,
+                                "curiosity": 65, "spontaneity": 60, "empathy": 70,
+                                "expressiveness": 65, "professional_directness": 50},
+                "personality_sources": {"warmth": "resident"}, "provider_id": "provider:local",
+                "authority_granted": False}
+
+    def test_approved_hr_character_context_is_applied_to_actual_inference(self):
+        resident = self._resident(
+            '{"action":"final","decision":{"assessment":"context was loaded",'
+            '"status":"degraded","evidence_refs":[],"recommended_action":"none"}}')
+        payload = self._payload([])
+        payload["resident_character_context"] = self._character_context()
+
+        result = asyncio.run(resident.handle("execute", payload))
+
+        request = resident._model_request.await_args.args[2]
+        system_prompt = request["messages"][0]["content"]
+        self.assertIn("Grace greets people warmly", system_prompt)
+        self.assertIn('"warmth":80', system_prompt)
+        self.assertEqual(result["resident_character_context"]["dossier_revision"], "1.0.1")
+        self.assertEqual(result["resident_character_context"]["authorization_ref"], "hr.audit:context-read-1")
+
+    def test_character_context_with_protected_classification_is_rejected_before_inference(self):
+        resident = self._resident(
+            '{"action":"final","decision":{"assessment":"blocked","status":"blocked",'
+            '"evidence_refs":[],"recommended_action":"none"}}')
+        payload = self._payload([])
+        payload["resident_character_context"] = self._character_context(
+            classification_scope=["public", "protected"])
+        with self.assertRaisesRegex(ValueError, "disallowed classifications"):
+            asyncio.run(resident.handle("execute", payload))
+        resident._model_request.assert_not_awaited()
+
     def test_directory_bound_resident_uses_its_profile_route_and_identity_context(self):
         resident = self._resident(
             '{"action":"final","decision":{"assessment":"Evidence reviewed",'
