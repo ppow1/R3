@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_website.py
 Component: R3A-WEBSITE-API-TESTS
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-07T21:59:13Z
 Created By: Codex GPT-6
 Purpose: Verify shared-session gating, versioned objective forwarding, and website client assets.
@@ -14,6 +14,7 @@ Changed: 2026-11-07T21:59:13Z | R3A-007/R3A-010/R3A-013/R3A-019 | Codex GPT-6 | 
 Changed: 2026-11-07T22:04:07Z | R3A-007/R3A-010 | Codex GPT-6 | Verify request correlation header and preservation of CME correlation IDs.
 Changed: 2026-11-07T23:40:00Z | R3A-007/R3A-010 | Codex GPT-6 | Verify the versioned workspace client asset route.
 Changed: 2026-11-07T23:55:00Z | R3A-010 | Codex GPT-6 | Verify shared AP3 session gating and no browser bearer-token auth.
+Changed: 2026-11-08T13:30:00Z | R3A-WEB-IDENTITY | Verify running identity metadata and accessible rail identity markup.
 Supersedes: None.
 Contracts: r3a.steward-session.v1; r3a.grace-objective-submission.v1; R3A AP0 diagnostic socket.
 Tests: python -m unittest tests.test_r3a_website.
@@ -49,6 +50,33 @@ class StewardWebsiteApiTests(unittest.TestCase):
         response = self.client.get("/web/steward-workspace-api.mjs")
         self.assertEqual(response.status_code, 200)
         self.assertIn("r3a.steward-workspace-web.v1", response.text)
+
+    def test_website_identity_reports_running_build_version_environment_and_port(self):
+        client = TestClient(app, base_url="http://testserver:8311")
+        with patch.dict(os.environ, {"R3_WEBSITE_ENVIRONMENT": "Development / Alpha"}):
+            response = client.get("/api/v1/website/identity")
+        self.assertEqual(response.status_code, 200)
+        identity = response.json()
+        self.assertEqual(identity["contract"], "r3a.website-identification.v1")
+        self.assertEqual(identity["application"], "Riverview R3 Alpha")
+        self.assertEqual(identity["website_version"], app.version)
+        self.assertEqual(identity["environment"], "Development / Alpha")
+        self.assertEqual(identity["service_port"], 8311)
+        self.assertTrue(identity["build_commit"] == "unknown" or
+                        (7 <= len(identity["build_commit"]) <= 40 and
+                         all(char in "0123456789abcdef" for char in identity["build_commit"])))
+
+    def test_estate_home_contains_keyboard_and_touch_identity_control(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('id="rail-brand" type="button"', response.text)
+        self.assertIn('aria-describedby="website-identity-tooltip"', response.text)
+        self.assertIn('id="website-identity-tooltip" role="tooltip" hidden', response.text)
+        self.assertIn("pointerenter", response.text)
+        self.assertIn("pointerdown", response.text)
+        favicon = self.client.get("/favicon.svg")
+        self.assertEqual(favicon.status_code, 200)
+        self.assertEqual(favicon.headers["content-type"], "image/svg+xml")
 
     def test_missing_external_auth_configuration_is_explicitly_unavailable(self):
         with patch.dict(os.environ, {}, clear=True):

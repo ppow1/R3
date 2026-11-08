@@ -1,0 +1,22 @@
+<!--
+R3 CONTROLLED SOURCE
+File: web/favicon.svg
+Component: R3-WEBSITE-IDENTITY
+File Revision: 1.0.0
+Created: 2026-11-08 UTC
+Created By: Codex GPT-6
+Purpose: Identify the Riverview R3 Alpha development website in browser tabs.
+Execution Model: Static same-origin SVG asset.
+Observability: Served by /favicon.svg.
+Dependencies: None.
+Authority: R3A Website Issue #51.
+Changed: 2026-11-08T13:30:00Z | R3A-WEB-IDENTITY | Add a matching R mark favicon to remove browser missing-icon requests.
+Supersedes: Browser default missing icon.
+Contracts: None.
+Tests: tests.test_r3a_website.
+History/Predecessor: New asset.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect x="2" y="2" width="60" height="60" rx="18" fill="#172b40" stroke="#9bb9d9" stroke-width="2"/>
+  <path d="M20 49V15h14c9 0 14 4 14 12 0 6-3 10-9 12l10 10H38l-9-10h-1v10zm8-18h6c4 0 6-1 6-4s-2-4-6-4h-6z" fill="#edf6ff"/>
+</svg>

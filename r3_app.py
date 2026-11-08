@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.16
+# File Revision: 1.0.17
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Serve visual estate UI and authenticated, canonical R3A Steward API adapters
@@ -22,6 +22,7 @@
 # Changed: 2026-11-07T22:04:07Z | R3A-007/R3A-010 | Codex GPT-6 | Add structured request correlation and preserve CME's actual objective correlation ID.
 # Changed: 2026-11-07T23:40:00Z | R3A-007/R3A-010 | Codex GPT-6 | Serve versioned Steward workspace browser client module.
 # Changed: 2026-11-07T23:55:00Z | R3A-010 | Codex GPT-6 | Replace temporary bearer checks with the shared AP3 opaque session and version the objective result.
+# Changed: 2026-11-08T13:30:00Z | R3A-WEB-IDENTITY | Codex GPT-6 | Expose startup-captured build/version/environment identity for the Steward website.
 
 """R3 first vertical slice: shared read-only capabilities, not UI-owned logic.
 
@@ -41,6 +42,7 @@ import asyncio
 import uuid
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -53,6 +55,41 @@ ART = (ROOT / "assets" / "artwork").resolve()
 EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 app = FastAPI(title="R3 Institutional Capabilities", version="0.1.0")
 website_logger = logging.getLogger("r3.website")
+
+
+def _running_build_commit() -> str | None:
+    """Capture deployed source revision once at process start; never report a later checkout head."""
+    candidate = os.environ.get("R3_WEBSITE_BUILD_COMMIT", "").strip()
+    if not candidate:
+        try:
+            candidate = subprocess.run(
+                ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True, timeout=2,
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return None
+    if not re.fullmatch(r"[0-9a-fA-F]{7,40}", candidate):
+        return None
+    return candidate.lower()
+
+
+WEBSITE_BUILD_COMMIT = _running_build_commit()
+WEBSITE_BUILD_VERSION = app.version or None
+
+
+@app.get("/api/v1/website/identity")
+def website_identity(request: Request):
+    """Identify this running R3A website process without claiming service integrations."""
+    server = request.scope.get("server") or (None, None)
+    return {
+        "contract": "r3a.website-identification.v1",
+        "contract_version": "1.0.0",
+        "application": "Riverview R3 Alpha",
+        "website_version": WEBSITE_BUILD_VERSION or "unknown",
+        "build_commit": WEBSITE_BUILD_COMMIT or "unknown",
+        "environment": os.environ.get("R3_WEBSITE_ENVIRONMENT", "unknown"),
+        "service_port": server[1] if len(server) > 1 and server[1] else "unknown",
+    }
 
 
 @app.middleware("http")
@@ -243,6 +280,14 @@ def visual_home():
     if not page.is_file():
         raise HTTPException(404, "Visual prototype not installed")
     return FileResponse(page, media_type="text/html")
+
+
+@app.get("/favicon.svg")
+def website_favicon():
+    icon = ROOT / "web" / "favicon.svg"
+    if not icon.is_file():
+        raise HTTPException(404, "Website icon unavailable")
+    return FileResponse(icon, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.get("/web/resident-avatar.js")
