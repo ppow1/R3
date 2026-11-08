@@ -62,13 +62,30 @@ from .protocol import ModuleProtocolServer
 RESIDENT_ACTION_SCHEMA = {
     "type": "object",
     "properties": {
-        "action": {"type": "string", "enum": ["invoke_capability", "propose_engineering", "engineering_assess", "escalate_reasoning", "final"]},
+        "action": {"type": "string", "enum": ["invoke_capability", "delegate_to_resident", "propose_engineering", "engineering_assess", "escalate_reasoning", "final"]},
         "contract_id": {"type": "string"},
         "contract_version": {"type": "string"},
         "capability_id": {"type": "string"},
         "arguments": {"type": "object"},
         "rationale": {"type": "string"},
         "target_role_id": {"type": "string"},
+        "delegation": {
+            "type": "object",
+            "properties": {
+                "target_resident_id": {"type": "string"},
+                "objective": {"type": "string", "minLength": 1, "maxLength": 4000},
+                "rationale": {"type": "string", "minLength": 1, "maxLength": 1000},
+                "acceptance_criteria": {"type": "array", "minItems": 1, "items": {
+                    "type": "object", "properties": {
+                        "criterion_id": {"type": "string"},
+                        "type": {"type": "string", "enum": ["transition_path"]},
+                        "from_state": {"type": "string"}, "to_state": {"type": "string"}},
+                    "required": ["criterion_id", "type", "from_state", "to_state"],
+                    "additionalProperties": False}},
+            },
+            "required": ["target_resident_id", "objective", "rationale", "acceptance_criteria"],
+            "additionalProperties": False,
+        },
         "proposal": {
             "type": "object",
             "properties": {
@@ -110,9 +127,17 @@ RESIDENT_ACTION_SCHEMA = {
 
 def resident_action_schema(available_tools: list[dict[str, Any]],
                            available_operations: list[dict[str, Any]] | None = None,
-                           escalation_role_ids: list[str] | None = None) -> dict[str, Any]:
+                           escalation_role_ids: list[str] | None = None,
+                           available_residents: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Constrain capability selection to exact identifiers in this execution's manifest."""
     schema = json.loads(json.dumps(RESIDENT_ACTION_SCHEMA))
+    resident_ids = [resident.get("resident_id") for resident in (available_residents or [])
+                    if isinstance(resident, dict) and isinstance(resident.get("resident_id"), str)]
+    if not resident_ids:
+        schema["properties"]["action"]["enum"].remove("delegate_to_resident")
+    else:
+        schema["properties"]["delegation"]["properties"]["target_resident_id"]["enum"] = list(
+            dict.fromkeys(resident_ids))
     escalation_role_ids = list(dict.fromkeys(escalation_role_ids or []))
     if not escalation_role_ids:
         schema["properties"]["action"]["enum"].remove("escalate_reasoning")
@@ -301,8 +326,9 @@ class GraceResident:
         self.module_id = module_id
         self.module_version = module_version
         self.settings = load_settings(config_path)
-        if self.settings.module_id != module_id or not self.settings.model_endpoint:
-            raise ValueError("Grace resident identity or model configuration does not match bootstrap")
+        if (self.settings.module_id != module_id and not self.settings.resident_office_routes) \
+                or not self.settings.model_endpoint:
+            raise ValueError("resident identity or model configuration does not match bootstrap")
         self.state = "INSTALLED"
         self.last_activity: dict[str, Any] | None = None
         self.stopping = asyncio.Event()
@@ -377,12 +403,19 @@ class GraceResident:
                 resident_profile = validate_resident_profile(
                     payload["resident_profile"], resident_id=self.module_id,
                     config_revision=str(payload.get("config_revision")))
+                role_resolver = getattr(self.settings, "model_role_for_office", None)
+                configured_role = role_resolver(resident_profile["office_role"]) if callable(role_resolver) else None
+                configured_route = (configured_role.route_id if configured_role is not None
+                                     else self.settings.model_route(resident_profile["model_route_id"]).route_id)
+                if configured_route != resident_profile["model_route_id"]:
+                    raise ValueError("resident profile route does not match its configured office role")
                 requested_route = payload.get("route_id")
                 if requested_route is not None and requested_route != resident_profile["model_route_id"]:
                     raise ValueError("resident route conflicts with its configured execution profile")
                 route = self.settings.model_route(resident_profile["model_route_id"])
             else:
-                if self.module_id != "resident.grace":
+                configured_primary_id = getattr(self.settings, "module_id", self.module_id)
+                if self.module_id != configured_primary_id:
                     raise ValueError("non-primary resident execution requires a directory-backed profile")
                 route = self.settings.model_route(payload.get("route_id"))
             tools = payload.get("available_tools", [])
@@ -390,8 +423,13 @@ class GraceResident:
                 raise ValueError("available_tools must be an array")
             available_operations = payload.get("available_engineering_operations", [])
             engineering_assignment = payload.get("engineering_assignment")
+            available_residents = payload.get("available_residents", [])
             if not isinstance(available_operations, list):
                 raise ValueError("available_engineering_operations must be an array")
+            if not isinstance(available_residents, list) or any(
+                    not isinstance(item, dict) or not isinstance(item.get("resident_id"), str)
+                    for item in available_residents):
+                raise ValueError("available_residents must contain directory-bound resident profiles")
             escalation = payload.get("reasoning_escalation") or {}
             escalation_roles = escalation.get("available_roles", []) if isinstance(escalation, dict) else []
             if not isinstance(escalation_roles, list) or any(
@@ -426,7 +464,7 @@ class GraceResident:
                 "temperature": 0,
                 "max_tokens": route.max_tokens,
                 "response_format": {"type": "json_object", "schema": resident_action_schema(
-                    tools, available_operations, escalation_role_ids)},
+                    tools, available_operations, escalation_role_ids, available_residents)},
                 "chat_template_kwargs": {"enable_thinking": False},
                 "messages": [
                     {"role": "system", "content": (
@@ -445,7 +483,7 @@ class GraceResident:
                         "and continue the current objective without claiming the prerequisite's work as your own. "
                         "If a reasoning_escalation policy is supplied and your current reasoning route is insufficient, you may request one of its listed roles. This is your reasoning choice, not an automatic fallback; explain what uncertainty requires stronger reasoning. The runtime checks authorization, readiness, and the activity token budget, then returns its result or refusal in the same activity. Never claim an escalation succeeded unless the runtime reports its result. "
                         "The evidence_inventory lists every returned evidence record with a stable evidence_ref, its source_id, digest, source location, observation time, and freshness. The evidence field contains the full returned record content; the inventory is not a selection or summary. For every final status other than blocked, include every identifier in citation_requirements.required_source_ids in decision.evidence_refs exactly as supplied. This is a CME citation requirement, not a claim that every source supports every sentence. Ground each factual claim in the relevant evidence records, and do not present unavailable evidence as a fact. If a required source is unavailable or irrelevant to the requested claim, cite its source_id to acknowledge the returned record and state its limitation without inferring content. Keep prose constraints in the objective while retaining all citations in the structured evidence_refs field. "
-                        "For institutional delegation, first use an available directory capability when office responsibility or resident binding is needed. Evaluate the returned authoritative office, resident, and capability records against the objective. A directory listing or office binding does not establish recipient readiness, execution registration, or authorization. If the current available_tools list contains a registered handoff operation whose advertised contract fits the work, you may select it and provide only target identifiers and evidence actually returned by the directory, plus arguments required by that operation's schema. The institutional runtime still enforces grants and records the result. Do not hardcode an office, resident, or operation identity; do not pretend to delegate if no suitable handoff operation is registered. Continue from returned capability results in this same activity, or return a justified blocked decision when the required handoff is unavailable. "
+                        "For delegation, choose delegate_to_resident only when the objective benefits from independent work by an entry in available_residents. Select its exact listed resident_id, state a bounded objective and rationale, and include measurable acceptance_criteria. Never infer residents from names or dossiers. CME resolves the current directory profile, checks grants, records the durable handoff, and returns the resident's result for your decision. If available_residents is empty, continue independently or return a justified blocked decision; do not claim that delegation occurred. For an institutional assignment expressed through a registered handoff operation in available_tools, you may invoke only that discovered operation using its exact machine identifier and required evidence-backed arguments. A directory listing or office binding alone does not establish recipient readiness, execution registration, or authorization. Continue only from returned capability results. "
                         "Interpret each returned capability result by its explicit outcome and explanation. A rejected, returned, denied, or unavailable handoff is not an accepted delegation; consider another currently offered capability only when its contract and the evidence support that choice, otherwise report blocked truthfully. Never claim that a recipient accepted work unless the returned result says so. On recovery, continue from the conversation and evidence supplied for the same objective; do not repeat a completed side effect just to recreate its result. "
                         "If independent-verification evidence is supplied, inspect its outcome and criterion findings. A failed or inconclusive verification is not completion. You may propose a corrective operation only when a currently listed operation and the supplied assignment scope permit it; otherwise return a blocked assessment that identifies the failed criteria. CME and the verifier retain completion authority. Do not claim a correction or verification that has not occurred. "
                         "A supplied resident_result is versioned institutional feedback tied to this activity and attempt. Treat its issuer, outcome, failure reasons, and evidence as the runtime's recorded result; do not discard or rewrite it. A non-passing result cannot be turned into acceptance by your assertion. You may choose an offered corrective action or report blocked; CME independently enforces completion. "
@@ -472,6 +510,7 @@ class GraceResident:
                                                                   "resident_result": resident_result,
                                                                   "dependency_context": payload.get("dependency_context", []),
                                                                   "available_tools": tools,
+                                                                  "available_residents": available_residents,
                                                                   "citation_requirements": {
                                                                       "required_source_ids": required_evidence_refs,
                                                                       "returned_source_ids": list(dict.fromkeys(
@@ -559,6 +598,25 @@ class GraceResident:
                             any(not isinstance(ref, str) for ref in assessment["evidence_refs"]):
                         raise ValueError("Engineering assessment payload is invalid")
                     final_decision = None
+                elif decision.get("action") == "delegate_to_resident":
+                    if set(decision) != {"action", "delegation"} or not isinstance(decision["delegation"], dict):
+                        raise ValueError("resident delegation action fields are invalid")
+                    delegation = decision["delegation"]
+                    if set(delegation) != {"target_resident_id", "objective", "rationale", "acceptance_criteria"}:
+                        raise ValueError("resident delegation payload fields are invalid")
+                    if delegation["target_resident_id"] not in {
+                            item["resident_id"] for item in available_residents}:
+                        raise ValueError("resident delegation target is not in the authorized directory offer")
+                    if (not isinstance(delegation["objective"], str) or not delegation["objective"].strip()
+                            or len(delegation["objective"]) > 4000
+                            or not isinstance(delegation["rationale"], str) or not delegation["rationale"].strip()
+                            or len(delegation["rationale"]) > 1000
+                            or not isinstance(delegation["acceptance_criteria"], list)):
+                        raise ValueError("resident delegation objective, rationale, or criteria are invalid")
+                    from .acceptance import validate_required_criteria
+                    delegation["acceptance_criteria"] = validate_required_criteria(
+                        delegation["acceptance_criteria"])
+                    final_decision = None
                 elif decision.get("action") == "escalate_reasoning":
                     if set(decision) != {"action", "target_role_id", "rationale"}:
                         raise ValueError("reasoning escalation request fields are invalid")
@@ -601,6 +659,8 @@ class GraceResident:
                     "objective": objective, "event_kind": payload.get("event_kind", "objective"),
                     "action": decision["action"], "decision": final_decision,
                     "capability_request": (decision if decision["action"] == "invoke_capability" else None),
+                    "delegation_request": (decision.get("delegation")
+                                           if decision["action"] == "delegate_to_resident" else None),
                     "engineering_proposal": decision.get("proposal") if decision["action"] == "propose_engineering" else None,
                     "engineering_assessment": decision.get("engineering_assessment") if decision["action"] == "engineering_assess" else None,
                     "reasoning_escalation_request": (decision if decision["action"] == "escalate_reasoning" else None),

@@ -59,11 +59,12 @@ import re
 import signal
 import sys
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .config import Settings, load_settings, sanitized_config
+from .config import ConfigurationError, Settings, load_settings, sanitized_config
 from .authorization import AuthorizationRequest, AuthorizationProvider, create_authorization_provider
 from .control import ControlServer, control_request, process_alive
 from .contracts import (ContractEnvelope, ContractOutcome, ReadinessObservation, RouteDecision,
@@ -86,6 +87,15 @@ from .acceptance import (AcceptanceCriteriaRequired, OBJECTIVE_ACCEPTANCE_CONTRA
                          validate_acceptance, validate_required_criteria)
 from .protocol import PROTOCOL_MAJOR, PROTOCOL_MINOR, request as module_request
 from .provider_runtime import ProviderProcessManager
+from .grace_module import validate_resident_profile
+
+
+@dataclass
+class ResidentProcessBinding:
+    resident_id: str
+    version: str
+    socket: Path
+    process: asyncio.subprocess.Process
 
 
 _RESIDENT_TOOLS = (
@@ -154,6 +164,13 @@ class ModelRoleUnavailable(RuntimeError):
 
 
 class CME:
+    def __getattr__(self, name: str):
+        # Keep lightweight test/diagnostic instances compatible with the configured
+        # primary identity when they are constructed without calling __init__.
+        if name == "module_id":
+            return getattr(self.settings, "module_id", "resident.grace")
+        raise AttributeError(name)
+
     def __init__(self, settings: Settings,
                  authorization_provider: AuthorizationProvider | None = None,
                  readiness_providers: dict[str, ModelReadinessProvider] | None = None):
@@ -176,12 +193,16 @@ class CME:
         self.module_version = settings.module_version
         self.module_pid: int | None = None
         self.module_lock = asyncio.Lock()
+        self.resident_processes: dict[str, ResidentProcessBinding] = {}
         self.provider_runtime = ProviderProcessManager(settings, self.store, settings.capability_registry)
         self.booted_at = utcnow()
 
+    def _primary_resident_id(self) -> str:
+        return getattr(self, "module_id", getattr(self.settings, "module_id", "resident.grace"))
+
     def manifest(self, version: str | None = None) -> dict[str, Any]:
         return {
-            "module_id": self.settings.module_id,
+            "module_id": self.module_id,
             "module_version": version or self.settings.module_version,
             "contract_id": self.settings.module_contract_id,
             "protocol_major": self.settings.module_protocol_major,
@@ -199,7 +220,7 @@ class CME:
             "artifact_digest": self.settings.module_digest,
             "recovery_policy": "idempotent",
             "resource_refs": ["foundation.observer", "institution.reasoning"],
-            "state_namespace": self.settings.module_id,
+            "state_namespace": self.module_id,
         }
 
     async def start(self) -> None:
@@ -250,12 +271,20 @@ class CME:
                 raise RuntimeError("reasoning escalation must resolve to a registered external_write operation")
         await self.store.register_capability("institution.diagnostics.read", "R3A-CME", "read_only",
                                              metadata={"description": "Read current durable process and database observations"})
+        await self.store.register_capability(
+            "resident.delegate", "R3A-CME", "read_only",
+            metadata={"contract_id": "r3a.resident.handoff", "contract_version": "1.0.0",
+                      "description": "Create one CME-authorized durable handoff to a directory-bound resident"})
+        await self.store.register_capability(
+            "resident.objective.execute", "R3A-CME", "read_only",
+            metadata={"contract_id": "r3a.resident.execution-profile", "contract_version": "1.0.0",
+                      "description": "Run one durable reasoning activity for the authorized target resident"})
         await self.store.register_resource("foundation.observer", self.settings.worker_concurrency,
                                            owner="R3A-CME")
         for role in self.settings.model_roles:
             configured_route = self.settings.model_route(role.route_id)
             await self.store.register_model_role(role, self.settings.source_digest,
-                                                 self.settings.module_id, configured_route.model)
+                                                 self.module_id, configured_route.model)
         await self._recover_startup()
         await self._ensure_registered_module()
         self.control = ControlServer(self.settings.control_socket, self._control_request, mode=0o600)
@@ -293,6 +322,7 @@ class CME:
         if self.active_activities:
             await asyncio.gather(*self.active_activities.values(), return_exceptions=True)
         await self._stop_module()
+        await self._stop_resident_modules()
         await self.provider_runtime.close()
         if self.control:
             await self.control.close()
@@ -321,15 +351,18 @@ class CME:
         await self.store.module_state(self.module_id, self.module_version, "INSTALLED", "unknown",
                                       {"artifact_digest": self.settings.module_digest})
 
-    async def _reap_orphan_module(self, pid: int, module_id: str, version: str) -> None:
+    async def _reap_orphan_module(self, pid: int, module_id: str, version: str,
+                                  entrypoint: str | None = None) -> None:
         """Stop only a same-user process whose argv proves it is this registered module."""
         proc = Path(f"/proc/{pid}")
         try:
             if proc.stat().st_uid != os.getuid():
                 return
             argv = (proc / "cmdline").read_bytes().split(b"\0")
-            entrypoint = b"r3a_runtime.grace_module" if module_id == "resident.grace" else b"r3a_runtime.observer_module"
-            expected = [b"-m", entrypoint, b"--module-id", module_id.encode(),
+            expected_entrypoint = (entrypoint or ("r3a_runtime.grace_module"
+                                                  if module_id == self.module_id
+                                                  else "r3a_runtime.observer_module")).encode()
+            expected = [b"-m", expected_entrypoint, b"--module-id", module_id.encode(),
                         b"--module-version", version.encode()]
             if any(item not in argv for item in expected) or not process_alive(pid):
                 return
@@ -346,6 +379,16 @@ class CME:
     async def _module_call(self, operation: str, payload: dict[str, Any] | None = None,
                            timeout: float = 5.0) -> dict[str, Any]:
         payload = dict(payload or {})
+        profile = payload.get("resident_profile")
+        resident_id = (profile.get("resident_id") if isinstance(profile, dict)
+                       else payload.get("resident_id")) or self.module_id
+        version = getattr(self.settings, "module_version", self.module_version)
+        socket = getattr(self.settings, "module_socket", None)
+        if resident_id != self.module_id:
+            if not isinstance(profile, dict):
+                raise PermissionError("non-primary resident execution requires a verified profile")
+            binding = await self._ensure_resident_module(profile)
+            version, socket = binding.version, binding.socket
         if operation == "execute" and payload.get("activity_type") == "grace.objective":
             # CME has already extracted these durable internals into its own state. The
             # resident receives the conversation and evidence, not a duplicate copy of
@@ -355,10 +398,105 @@ class CME:
                 "r3a.resident.execution", "1.0.0", str(uuid.uuid4()),
                 str(payload["activity_id"]), str(payload["attempt_id"]),
                 str(payload.get("correlation_id") or payload["activity_id"]),
-                self.module_id, str(payload["config_revision"]), utcnow().isoformat(),
+                resident_id, str(payload["config_revision"]), utcnow().isoformat(),
                 {"operation": "execute", "continuation_ref": payload.get("continuation_ref")}).to_dict()
-        return await module_request(self.settings.module_socket, self.module_id, self.module_version,
+        return await module_request(socket, resident_id, version,
                                     operation, payload, timeout=timeout)
+
+    async def _ensure_resident_module(self, value: dict[str, Any]) -> ResidentProcessBinding:
+        profile = validate_resident_profile(value, resident_id=str(value.get("resident_id", "")),
+                                            config_revision=self.settings.source_digest)
+        role = self.settings.model_role_for_office(profile["office_role"])
+        if self.settings.model_route(role.route_id).route_id != profile["model_route_id"]:
+            raise PermissionError("directory office role profile conflicts with configured model route")
+        resident_id = profile["resident_id"]
+        existing = self.resident_processes.get(resident_id)
+        if existing is not None and existing.process.returncode is None:
+            return existing
+        version = self.settings.module_version
+        socket_dir = self.settings.data_dir / "modules"
+        socket_dir.mkdir(parents=True, exist_ok=True)
+        socket = socket_dir / f"resident-{hashlib.sha256(resident_id.encode()).hexdigest()[:24]}.sock"
+        module = self.manifest(version)
+        module.update({"module_id": resident_id, "owner": profile["office_role"],
+                       "state_namespace": resident_id,
+                       "resident_execution_profile": profile})
+        await self.store.register_module(module, "INSTALLED", "unknown")
+        rows = await self.store.rows(
+            "SELECT lifecycle_state,diagnostic,manifest FROM r3a.module_registry "
+            "WHERE module_id=%s AND module_version=%s", (resident_id, version))
+        if rows and isinstance(rows[0].get("diagnostic"), dict):
+            pid = rows[0]["diagnostic"].get("pid")
+            if isinstance(pid, int):
+                await self._reap_orphan_module(pid, resident_id, version,
+                                               rows[0]["manifest"].get("entrypoint"))
+        await self.store.module_state(resident_id, version, "ACTIVATING", "starting",
+                                      {"resident_profile": profile})
+        socket.unlink(missing_ok=True)
+        command = [sys.executable, "-m", "r3a_runtime.grace_module", "--socket", str(socket),
+                   "--module-id", resident_id, "--module-version", version,
+                   "--config", str(self.settings.source_path)]
+        process = await asyncio.create_subprocess_exec(
+            *command, cwd=Path(__file__).resolve().parent.parent,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+            start_new_session=True)
+        try:
+            deadline = asyncio.get_running_loop().time() + 8.0
+            hello = None
+            while asyncio.get_running_loop().time() < deadline:
+                if process.returncode is not None:
+                    error = (await process.stderr.read()).decode("utf-8", "replace")[-1500:]
+                    raise RuntimeError(f"Resident process exited during startup: {error}")
+                try:
+                    hello = await module_request(socket, resident_id, version, "hello", timeout=1.0)
+                    break
+                except (OSError, ConnectionError, asyncio.TimeoutError, RuntimeError):
+                    await asyncio.sleep(0.1)
+            if hello is None:
+                raise TimeoutError("Resident did not expose its local socket before startup deadline")
+            protocol = hello["result"].get("supported_protocol", {})
+            if protocol.get("major") != module["protocol_major"] or not (
+                    protocol.get("min_minor", 999) <= PROTOCOL_MINOR <= protocol.get("max_minor", -1)):
+                raise RuntimeError("Resident handshake protocol is incompatible")
+            await module_request(socket, resident_id, version, "prepare")
+            await module_request(socket, resident_id, version, "activate")
+            health = await module_request(socket, resident_id, version, "health")
+            if health["result"].get("state") != "ACTIVE" or health["result"].get("health") != "healthy":
+                raise RuntimeError("Resident process did not report healthy/active")
+            await self.store.module_state(resident_id, version, "ACTIVE", "healthy",
+                                          {"pid": process.pid, "protocol": protocol,
+                                           "artifact_digest": module["artifact_digest"],
+                                           "resident_profile": profile})
+            binding = ResidentProcessBinding(resident_id, version, socket, process)
+            self.resident_processes[resident_id] = binding
+            return binding
+        except Exception as exc:
+            await self.store.module_state(resident_id, version, "FAILED", "unavailable",
+                                          {"reason": f"{type(exc).__name__}: {exc}",
+                                           "resident_profile": profile})
+            if process.returncode is None:
+                process.terminate()
+                await process.wait()
+            raise
+
+    async def _stop_resident_modules(self) -> None:
+        for resident_id, binding in list(self.resident_processes.items()):
+            if binding.process.returncode is None:
+                try:
+                    await self.store.module_state(resident_id, binding.version, "STOPPING", "stopping")
+                    await module_request(binding.socket, resident_id, binding.version, "stop")
+                except Exception:
+                    binding.process.terminate()
+                try:
+                    await asyncio.wait_for(binding.process.wait(),
+                                           timeout=self.settings.heartbeat_stale_after_seconds)
+                except asyncio.TimeoutError:
+                    binding.process.kill()
+                    await binding.process.wait()
+            await self.store.module_state(resident_id, binding.version, "STOPPED", "stopped",
+                                          {"exit_code": binding.process.returncode,
+                                           "resume_on_start": True})
+            self.resident_processes.pop(resident_id, None)
 
     async def _authorization_decision(self, capability_id: str, *, activity_id: str | None = None,
                                     attempt_id: str | None = None,
@@ -396,6 +534,62 @@ class CME:
                 "observed_at": decision.observed_at,
                 "audit_event_id": decision.audit_event_id}
 
+    async def _resolve_resident_execution_profile(self, resident_id: str, *,
+                                                  activity_id: str,
+                                                  idempotency_key: str) -> tuple[dict[str, Any], Any]:
+        """Resolve a target identity from a measured directory snapshot, then bind its configured role route."""
+        operation = self.settings.capability_registry.resolve("institutional.directory.discover")
+        invocation_id = str(uuid.uuid5(uuid.NAMESPACE_URL,
+                                       f"r3a.resident.directory-profile:{idempotency_key}"))
+        attempt_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{invocation_id}:directory-read"))
+        request = {
+            "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+            "invocation_id": invocation_id,
+            "operation_id": operation.descriptor["operation_id"],
+            "operation_contract_version": operation.descriptor["contract_version"],
+            "caller": {"principal_id": self.module_id,
+                       "resident_id": self.module_id, "service_id": None},
+            "target": {}, "input": {"resident_id": resident_id, "limit": 250},
+            "activity_id": activity_id, "attempt_id": attempt_id,
+            "correlation_id": activity_id, "work_order": None,
+            "evidence_purpose": "Resolve an explicitly requested resident execution target",
+            "idempotency_key": f"resident-directory:{invocation_id}",
+            "deadline": (datetime.now(timezone.utc)
+                         + timedelta(seconds=operation.descriptor["execution"]["timeout_seconds"])).isoformat(),
+            "config_revision": self.settings.source_digest,
+        }
+        validate_json(request["input"], operation.descriptor["input_schema"], path="$.input")
+        result = await self.invoke_capability(request)
+        if result["outcome"] != "SUCCEEDED":
+            raise RuntimeError("authoritative resident directory invocation did not succeed")
+        output = result.get("output")
+        if not isinstance(output, dict) or output.get("schema_id") != "r3a.institutional-directory.v1":
+            raise ValueError("authoritative resident directory returned an unsupported snapshot")
+        source = output.get("source")
+        if (not isinstance(source, dict) or source.get("freshness") != "fresh"
+                or source.get("availability") != "measured"
+                or not isinstance(source.get("snapshot_sha256"), str)
+                or re.fullmatch(r"[0-9a-f]{64}", source["snapshot_sha256"]) is None):
+            raise PermissionError("authoritative resident directory snapshot is not measured and fresh")
+        matches = [entry for entry in output.get("residents", [])
+                   if isinstance(entry, dict) and entry.get("resident_id") == resident_id]
+        if len(matches) != 1:
+            raise LookupError("target resident is absent or ambiguous in the authoritative directory")
+        resident = matches[0]
+        role = self.settings.model_role_for_office(str(resident.get("office_role", "")))
+        profile = {
+            "contract_id": "r3a.resident.execution-profile", "contract_version": "1.0.0",
+            "resident_id": resident_id, "display_name": resident.get("display_name"),
+            "office_id": resident["office_id"], "office_role": resident["office_role"],
+            "directory_evidence": {"source_id": source["source_id"],
+                                   "snapshot_sha256": source["snapshot_sha256"],
+                                   "observed_at": source["observed_at"]},
+            "model_route_id": role.route_id, "config_revision": self.settings.source_digest,
+        }
+        profile = validate_resident_profile(profile, resident_id=resident_id,
+                                            config_revision=self.settings.source_digest)
+        return profile, role
+
     async def _activate_configured_module(self) -> None:
         await self._activate_module(self.module_id, self.module_version)
 
@@ -422,7 +616,8 @@ class CME:
                 else:
                     await self._stop_module()
             elif isinstance(row[0].get("diagnostic"), dict) and isinstance(row[0]["diagnostic"].get("pid"), int):
-                await self._reap_orphan_module(row[0]["diagnostic"]["pid"], module_id, version)
+                await self._reap_orphan_module(row[0]["diagnostic"]["pid"], module_id, version,
+                                               manifest.get("entrypoint"))
             prior = await self.store.rows(
                 "SELECT state FROM r3a.runtime_entities WHERE entity_type='module' AND entity_id=%s",
                 (f"{module_id}@{version}",),
@@ -563,7 +758,7 @@ class CME:
             return {"installed": True, "module_id": self.module_id, "version": version,
                     "artifact_digest": self.settings.module_digest}
         if operation == "module.activate":
-            module_id = str(payload.get("module_id", self.settings.module_id))
+            module_id = str(payload.get("module_id", self.module_id))
             version = str(payload.get("version", self.settings.module_version))
             return await self._activate_module(module_id, version)
         if operation == "module.stop":
@@ -703,7 +898,7 @@ class CME:
             authorization = await self._authorize_capability(
                 "notification.source.read", request_id=idempotency_key,
                 context={"source_id": source_id, "source_event_id": source_event_id},
-                resident_id=self.settings.module_id)
+                resident_id=self.module_id)
             try:
                 result = await self.store.ingest_institution_event_notification(
                     source_id, source_event_id, idempotency_key)
@@ -736,7 +931,7 @@ class CME:
                                 "provider_id": observation.provider_id,
                                 "deferred_activities_requeued": queued}).to_dict()}
         if operation == "grace.objective.submit":
-            if self.settings.module_id != "resident.grace":
+            if self.module_id != "resident.grace":
                 raise RuntimeError("The configured module is not the AP1 Grace resident")
             modalities = tuple(payload.get("required_modalities", ()))
             task_class = payload.get("task_class")
@@ -746,8 +941,45 @@ class CME:
                 raise ValueError("Grace objective intake cannot use autonomic-only model roles")
             requested_role_id = payload.get("role_id")
             requested_route = payload.get("route_id")
+            target_resident_id = payload.get("target_resident_id")
+            resident_profile = None
+            requested_activity_id = payload.get("requested_activity_id", payload.get("activity_id"))
+            if target_resident_id is not None:
+                if (not isinstance(target_resident_id, str) or not target_resident_id.strip()
+                        or target_resident_id == self.module_id):
+                    raise ValueError("target_resident_id must be a distinct canonical resident identity")
+                activity_id = str(requested_activity_id or uuid.uuid5(
+                    uuid.NAMESPACE_URL, f"r3a.resident.objective:{idempotency_key}"))
+                delegation_auth = await self._authorize_capability(
+                    "resident.delegate", activity_id=activity_id,
+                    request_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"resident.delegate:{idempotency_key}")),
+                    context={"target_resident_id": target_resident_id,
+                             "intake": "grace.objective.submit"},
+                    resident_id=self.module_id)
+                resident_profile, selected_role = await self._resolve_resident_execution_profile(
+                    target_resident_id, activity_id=activity_id,
+                    idempotency_key=idempotency_key)
+                target_auth = await self._authorize_capability(
+                    "resident.objective.execute", activity_id=activity_id,
+                    request_id=str(uuid.uuid5(uuid.NAMESPACE_URL,
+                                              f"resident.execute:{idempotency_key}")),
+                    context={"resident_profile": resident_profile,
+                             "delegation_audit_event_id": delegation_auth["audit_event_id"]},
+                    resident_id=target_resident_id)
+                if target_auth.get("allowed") is False:
+                    raise PermissionError("target resident is not authorized for objective execution")
+                if requested_role_id is not None and requested_role_id != selected_role.role_id:
+                    raise PermissionError("requested model role conflicts with directory office route")
+                if requested_route is not None and requested_route != selected_role.route_id:
+                    raise PermissionError("requested model route conflicts with directory office route")
+                if payload.get("engineering_assignment") is not None:
+                    raise PermissionError("resident objective routing does not bypass CME Engineering work-order handlers")
+            else:
+                activity_id = requested_activity_id
             roles = self.settings.model_roles
-            if requested_role_id is not None:
+            if target_resident_id is not None:
+                pass
+            elif requested_role_id is not None:
                 selected_role = next((role for role in roles if role.role_id == requested_role_id), None)
                 if selected_role is None:
                     raise ValueError("requested model role is not configured")
@@ -768,7 +1000,8 @@ class CME:
                 modalities,
                 payload.get("acceptance_criteria", []), payload.get("engineering_assignment"),
                 payload.get("depends_on_activity_ids"),
-                payload.get("requested_activity_id", payload.get("activity_id")), task_class)
+                activity_id, task_class, resident_id=target_resident_id or self.module_id,
+                resident_profile=resident_profile)
         if operation == "config.reload":
             if any(not task.done() for task in self.active_activities.values()):
                 raise RuntimeError("Config reload waits for in-flight activity to reach a safe boundary")
@@ -951,6 +1184,19 @@ class CME:
 
     async def _objective_context(self, activity: dict[str, Any]) -> dict[str, Any]:
         event_input = activity["input"]
+        resident_id = event_input.get("resident_id") or self.module_id
+        resident_profile = event_input.get("resident_profile")
+        if resident_id == self.module_id:
+            if resident_profile is not None:
+                raise ValueError("primary resident activity cannot carry a delegated profile")
+        else:
+            resident_profile = validate_resident_profile(
+                resident_profile, resident_id=resident_id,
+                config_revision=self.settings.source_digest)
+            configured_role = self.settings.model_role_for_office(resident_profile["office_role"])
+            if (configured_role.role_id != event_input.get("role_id")
+                    or configured_role.route_id != resident_profile["model_route_id"]):
+                raise PermissionError("durable resident profile does not match configured route binding")
         engineering_assignment = event_input.get("engineering_assignment")
         acceptance_contract = event_input.get("acceptance_contract") or {
             "contract_id": OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
@@ -976,7 +1222,7 @@ class CME:
                               self.settings.source_digest,
                               request_id=str(uuid.uuid4()), activity_id=str(activity["activity_id"]),
                               attempt_id=str(activity["attempt_id"]), correlation_id=str(activity["activity_id"]),
-                              resident_id=self.module_id, evaluated_at=utcnow().isoformat()), 0)
+                              resident_id=resident_id, evaluated_at=utcnow().isoformat()), 0)
         if selected_role_id:
             roles = self.settings.model_roles
             if event_input.get("role_config_revision") != self.settings.source_digest:
@@ -988,7 +1234,7 @@ class CME:
                                   activity_id=str(activity["activity_id"]),
                                   attempt_id=str(activity["attempt_id"]),
                                   correlation_id=str(activity["activity_id"]),
-                                  resident_id=self.module_id,
+                                  resident_id=resident_id,
                                   evaluated_at=utcnow().isoformat()), 0)
             observations = await self._model_readiness_observations()
             decision_role_id = saved.get("selected_role_id") or event_input["role_id"]
@@ -1000,14 +1246,14 @@ class CME:
                                   self.settings.source_digest,
                                   request_id=str(uuid.uuid4()), activity_id=str(activity["activity_id"]),
                                   attempt_id=str(activity["attempt_id"]), correlation_id=str(activity["activity_id"]),
-                                  resident_id=self.module_id, evaluated_at=utcnow().isoformat()), 0)
+                                  resident_id=resident_id, evaluated_at=utcnow().isoformat()), 0)
             decision = resolve_role(
                 roles, decision_role_id, set(event_input.get("required_capabilities", [])),
                 observations, config_revision=self.settings.source_digest,
                 permit_fallback=not bool(saved.get("selected_role_id")),
                 request_id=str(uuid.uuid4()), activity_id=str(activity["activity_id"]),
                 attempt_id=str(activity["attempt_id"]),
-                correlation_id=str(activity["activity_id"]), resident_id=self.module_id,
+                correlation_id=str(activity["activity_id"]), resident_id=resident_id,
                 required_modalities=set(event_input.get("required_modalities", [])))
             if decision.action != "route":
                 raise ModelRoleUnavailable(decision, next(
@@ -1037,6 +1283,15 @@ class CME:
             raise RuntimeError("Persisted Grace reasoning continuation is malformed")
         available_tools = [tool for tool in self._resident_tools()
                            if tool["capability_id"] in self.settings.module_capabilities]
+        if resident_id != self.module_id:
+            authorized_tools = []
+            for tool in available_tools:
+                try:
+                    await self.store.require_capability(resident_id, tool["capability_id"])
+                except PermissionError:
+                    continue
+                authorized_tools.append(tool)
+            available_tools = authorized_tools
         available_engineering_operations = []
         if engineering_assignment is not None and self.settings.capability_registry is not None:
             available_engineering_operations = [
@@ -1047,6 +1302,49 @@ class CME:
         evidence = saved.get("evidence", [])
         if not isinstance(evidence, list):
             raise RuntimeError("Persisted resident evidence is malformed")
+        available_residents = []
+        # Residents are offered to Grace only when the configured directory adapter
+        # returned a measured snapshot during this activity and the target has an
+        # explicit execution route and effective CME execution grant.
+        for invocation in reasoning_state.get("capability_invocations", []):
+            request = invocation.get("capability_request", {})
+            result = invocation.get("result", {})
+            if request.get("capability_id") != "institutional.directory.discover":
+                continue
+            output = result.get("output", {})
+            source = output.get("source", {}) if isinstance(output, dict) else {}
+            if (not isinstance(source, dict) or source.get("availability") != "measured"
+                    or source.get("freshness") != "fresh"):
+                continue
+            for directory_resident in output.get("residents", []):
+                target_id = directory_resident.get("resident_id")
+                office_role = directory_resident.get("office_role")
+                if not isinstance(target_id, str) or target_id == resident_id:
+                    continue
+                try:
+                    role_binding = self.settings.model_role_for_office(str(office_role))
+                    await self.store.require_capability(target_id, "resident.objective.execute")
+                except (KeyError, PermissionError, ConfigurationError):
+                    continue
+                available_residents.append({
+                    "resident_id": target_id,
+                    "office_id": directory_resident.get("office_id"),
+                    "office_role": office_role,
+                    "model_role_id": role_binding.role_id,
+                    "model_route_id": role_binding.route_id,
+                    "directory_evidence": {
+                        "source_id": source.get("source_id"),
+                        "snapshot_sha256": source.get("snapshot_sha256"),
+                        "observed_at": source.get("observed_at"),
+                    },
+                })
+        # De-duplicate by canonical principal in case the directory adapter produced
+        # repeated source rows. Ambiguous identities are never offered to the model.
+        resident_counts: dict[str, int] = {}
+        for entry in available_residents:
+            resident_counts[entry["resident_id"]] = resident_counts.get(entry["resident_id"], 0) + 1
+        available_residents = [entry for entry in available_residents
+                               if resident_counts[entry["resident_id"]] == 1]
         required_evidence_refs = list(saved.get("required_evidence_refs", []))
         if notification is not None:
             notification_source = f"notification:{notification['source_id']}:{notification['source_event_id']}"
@@ -1096,6 +1394,7 @@ class CME:
             }
         return {"activity_type": "grace.objective", "activity_id": str(activity["activity_id"]),
                 "attempt_id": str(activity["attempt_id"]),
+                "resident_id": resident_id, "resident_profile": resident_profile,
                 "objective": event_input["objective"], "event_kind": event_input.get("event_kind", "objective"),
                 "task_class": task_class,
                 "notification": notification,
@@ -1112,6 +1411,7 @@ class CME:
                 "evidence": evidence,
                 "dependency_context": await self.store.activity_dependency_context(event_input.get("dependencies")),
                 "available_tools": available_tools,
+                "available_residents": available_residents,
                 "engineering_assignment": engineering_assignment,
                 "available_engineering_operations": available_engineering_operations,
                 "reasoning_escalation": escalation_offer,
@@ -1122,6 +1422,7 @@ class CME:
 
     async def _invoke_resident_capability(self, activity: dict[str, Any],
                                           request: dict[str, Any]) -> dict[str, Any]:
+        resident_id = activity.get("input", {}).get("resident_id") or self.module_id
         capability_id = request.get("capability_id")
         arguments = request.get("arguments")
         tool = next((entry for entry in self._resident_tools()
@@ -1158,6 +1459,7 @@ class CME:
             authorization = await self._authorize_capability(
                 capability_id, activity_id=str(activity["activity_id"]),
                 attempt_id=str(activity["attempt_id"]),
+                resident_id=resident_id,
                 context={"invocation_source": "resident_selected_action",
                          "tool_contract_id": tool["contract_id"], "effect_class": "read",
                          "query_sha256": hashlib.sha256(arguments.get("query", "").encode()).hexdigest()
@@ -1176,7 +1478,7 @@ class CME:
                 "invocation_id": invocation_id,
                 "operation_id": descriptor["operation_id"],
                 "operation_contract_version": descriptor["contract_version"],
-                "caller": {"principal_id": self.module_id, "resident_id": self.module_id,
+                "caller": {"principal_id": resident_id, "resident_id": resident_id,
                            "service_id": None},
                 "target": {}, "input": arguments,
                 "activity_id": str(activity["activity_id"]),
@@ -1209,6 +1511,64 @@ class CME:
         if registered_operation is not None:
             result["invocation"] = invocation_summary
         return result
+
+    async def _await_resident_handoff(self, activity: dict[str, Any], handoff: dict[str, Any]) -> dict[str, Any]:
+        """Wait on a durable child activity; the child's deterministic ID makes recovery idempotent."""
+        child_id = handoff["child_activity_id"]
+        while True:
+            rows = await self.store.rows(
+                "SELECT state,result,exception FROM r3a.activities WHERE activity_id=%s",
+                (uuid.UUID(child_id),))
+            if not rows:
+                raise RuntimeError("durable resident handoff activity disappeared")
+            row = rows[0]
+            if row["state"] in {"COMPLETED", "BLOCKED", "FAILED", "CANCELLED"}:
+                return {"activity_id": child_id, "resident_id": handoff["target_resident_id"],
+                        "state": row["state"], "result": row.get("result"),
+                        "exception": row.get("exception"),
+                        "directory_snapshot_sha256": handoff["directory_snapshot_sha256"]}
+            await asyncio.sleep(max(0.25, min(1.0, self.settings.scheduler_interval_seconds)))
+
+    async def _create_resident_handoff(self, activity: dict[str, Any], request: dict[str, Any],
+                                       turn: int) -> dict[str, Any]:
+        """Authorize, resolve and enqueue one resident handoff through canonical CME intake."""
+        target_id = request.get("target_resident_id")
+        objective = request.get("objective")
+        rationale = request.get("rationale")
+        criteria = request.get("acceptance_criteria")
+        if (not isinstance(target_id, str) or not isinstance(objective, str)
+                or not isinstance(rationale, str) or not isinstance(criteria, list)):
+            raise ValueError("resident delegation request is incomplete")
+        parent_id = str(activity["activity_id"])
+        idempotency = f"resident-handoff:{parent_id}:{turn}"
+        child_id = str(uuid.uuid5(uuid.NAMESPACE_URL, idempotency))
+        profile, role = await self._resolve_resident_execution_profile(
+            target_id, activity_id=parent_id, idempotency_key=idempotency)
+        delegation_auth = await self._authorize_capability(
+            "resident.delegate", activity_id=parent_id,
+            request_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{idempotency}:authorize")),
+            context={"target_resident_id": target_id, "child_activity_id": child_id,
+                     "rationale_sha256": hashlib.sha256(rationale.encode()).hexdigest()},
+            resident_id=activity.get("input", {}).get("resident_id", self.module_id))
+        execution_auth = await self._authorize_capability(
+            "resident.objective.execute", activity_id=child_id,
+            request_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{idempotency}:target-authorize")),
+            context={"resident_profile": profile,
+                     "delegation_audit_event_id": delegation_auth["audit_event_id"]},
+            resident_id=target_id)
+        if execution_auth.get("allowed") is False:
+            raise PermissionError("target resident is not authorized for delegated execution")
+        child = await self.store.submit_grace_objective(
+            objective, idempotency, role_id=role.role_id, requested_activity_id=child_id,
+            resident_id=target_id, resident_profile=profile, acceptance_criteria=criteria)
+        return {"child_activity_id": str(child["activity_id"]),
+                "target_resident_id": target_id,
+                "directory_snapshot_sha256": profile["directory_evidence"]["snapshot_sha256"],
+                "office_id": profile["office_id"], "office_role": profile["office_role"],
+                "model_role_id": role.role_id, "model_route_id": role.route_id,
+                "directory_authorization_audit_event_id": delegation_auth.get("audit_event_id"),
+                "execution_authorization_audit_event_id": execution_auth.get("audit_event_id"),
+                "rationale_sha256": hashlib.sha256(rationale.encode()).hexdigest()}
 
     async def invoke_capability(self, request: dict[str, Any], *,
                                 work_order: EngineeringWorkOrder | None = None,
@@ -1868,13 +2228,32 @@ class CME:
 
     async def _run_activity(self, activity: dict[str, Any]) -> None:
         lease_task: asyncio.Task | None = None
+        resident_id = activity.get("input", {}).get("resident_id") or self.module_id
         try:
-            if self.module_process is None or self.module_process.returncode is not None:
+            if (resident_id == self.module_id
+                    and (self.module_process is None or self.module_process.returncode is not None)):
                 raise RuntimeError("registered module process is not running")
             context = (await self._objective_context(activity) if activity["activity_type"] == "grace.objective"
                        else await self._observer_context(activity))
             if activity["activity_type"] == "grace.objective":
+                if resident_id != self.module_id:
+                    execution_authorization = await self._authorize_capability(
+                        "resident.objective.execute", activity_id=str(activity["activity_id"]),
+                        attempt_id=str(activity["attempt_id"]),
+                        request_id=str(uuid.uuid5(uuid.NAMESPACE_URL,
+                                                  f"resident.execute:{activity['activity_id']}:{activity['attempt_id']}")),
+                        context={"resident_profile": context["resident_profile"]},
+                        resident_id=resident_id)
+                    context["resident_execution_authorization"] = execution_authorization
+                    await self.store.record_progress(
+                        activity, {"phase": "resident.execution.authorized", "at": utcnow().isoformat(),
+                                   "resident_id": resident_id,
+                                   "authorization_audit_event_id": execution_authorization["audit_event_id"],
+                                   "directory_snapshot_sha256": context["resident_profile"][
+                                       "directory_evidence"]["snapshot_sha256"]})
                 if context.get("engineering_assignment") is not None:
+                    if resident_id != self.module_id:
+                        raise PermissionError("Engineering work-order execution is not yet a delegated resident handler")
                     lease_task = asyncio.create_task(self._lease_heartbeat(activity),
                                                      name=f"lease-heartbeat:{activity['activity_id']}")
                     await self._run_engineering_activity(activity, context)
@@ -1889,6 +2268,7 @@ class CME:
                 required_evidence_refs = list(context.get("required_evidence_refs") or [])
                 acceptance_rejections = list(reasoning_state.get("acceptance_rejections") or [])
                 last_rejected_fingerprint = reasoning_state.get("last_rejected_evidence_fingerprint")
+                pending_handoff = reasoning_state.get("pending_handoff")
                 escalation_state = dict(reasoning_state.get("escalation") or {"requests": []})
                 escalation_requests = list(escalation_state.get("requests") or [])
 
@@ -1959,6 +2339,7 @@ class CME:
                                                 "model_turns": turns,
                                                 "capability_invocations": invocations,
                                                 "acceptance_rejections": acceptance_rejections,
+                                                "pending_handoff": pending_handoff,
                                                 "escalation": {"requests": escalation_requests},
                                                 "last_rejected_evidence_fingerprint": last_rejected_fingerprint,
                                                 "pending_final": context.get("pending_final")}}
@@ -1972,6 +2353,19 @@ class CME:
 
                 lease_task = asyncio.create_task(self._lease_heartbeat(activity),
                                                  name=f"lease-heartbeat:{activity['activity_id']}")
+                if pending_handoff is not None:
+                    handoff_result = await self._await_resident_handoff(activity, pending_handoff)
+                    conversation.append({"role": "user", "content": json.dumps(
+                        {"resident_handoff_response": handoff_result,
+                         "instruction": "Evaluate this resident's independently produced result and decide the next action for the original objective."},
+                        separators=(",", ":"), ensure_ascii=False)})
+                    pending_handoff = None
+                    await self.store.record_progress(
+                        activity, {"phase": "resident.handoff.response", "at": utcnow().isoformat(),
+                                   "child_activity_id": handoff_result["activity_id"],
+                                   "child_state": handoff_result["state"],
+                                   "target_resident_id": handoff_result["resident_id"]},
+                        durable_checkpoint())
                 observations = context.get("pending_final")
                 while observations is None:
                     context["conversation"] = conversation
@@ -2094,6 +2488,38 @@ class CME:
                              "authorization_audit_event_id": capability_result["authorization"].get(
                                  "audit_event_id"),
                              "evidence_count": len(capability_result["evidence"])},
+                            durable_checkpoint())
+                        observations = None
+                        continue
+                    if observations.get("action") == "delegate_to_resident":
+                        handoff_request = observations.get("delegation_request")
+                        if not isinstance(handoff_request, dict):
+                            raise RuntimeError("Grace returned an incomplete resident handoff request")
+                        handoff_turn = len(turns)
+                        pending_handoff = await self._create_resident_handoff(
+                            activity, handoff_request, handoff_turn)
+                        pending_handoff["status"] = "SCHEDULED"
+                        await self.store.record_progress(
+                            activity, {"phase": "resident.handoff.scheduled", "at": utcnow().isoformat(),
+                                       "child_activity_id": pending_handoff["child_activity_id"],
+                                       "target_resident_id": pending_handoff["target_resident_id"],
+                                       "model_role_id": pending_handoff["model_role_id"],
+                                       "model_route_id": pending_handoff["model_route_id"],
+                                       "authorization_audit_event_ids": [
+                                           pending_handoff.get("directory_authorization_audit_event_id"),
+                                           pending_handoff.get("execution_authorization_audit_event_id")]},
+                            durable_checkpoint())
+                        handoff_result = await self._await_resident_handoff(activity, pending_handoff)
+                        conversation.append({"role": "user", "content": json.dumps(
+                            {"resident_handoff_response": handoff_result,
+                             "instruction": "Evaluate this resident's independently produced result and decide the next action for the original objective."},
+                            separators=(",", ":"), ensure_ascii=False)})
+                        pending_handoff = None
+                        await self.store.record_progress(
+                            activity, {"phase": "resident.handoff.response", "at": utcnow().isoformat(),
+                                       "child_activity_id": handoff_result["activity_id"],
+                                       "child_state": handoff_result["state"],
+                                       "target_resident_id": handoff_result["resident_id"]},
                             durable_checkpoint())
                         observations = None
                         continue

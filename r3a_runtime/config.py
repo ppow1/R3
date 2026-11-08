@@ -109,6 +109,12 @@ class NotificationSourceSettings:
     event_types: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class ResidentOfficeRoute:
+    office_role: str
+    model_role_id: str
+
+
 def resolve_model_route(routes: tuple[ModelRoute, ...], default_route: str,
                         requested_route: str | None = None) -> ModelRoute:
     selected = requested_route or default_route
@@ -272,6 +278,7 @@ class Settings:
     knowledge_sources: tuple[Path, ...]
     capability_registry: Any
     notification_sources: tuple[NotificationSourceSettings, ...]
+    resident_office_routes: tuple[ResidentOfficeRoute, ...]
 
     def model_route(self, route_id: str | None = None) -> ModelRoute:
         return resolve_model_route(self.model_routes, self.default_model_route, route_id)
@@ -283,6 +290,16 @@ class Settings:
         role = next((item for item in self.model_roles if item.role_id == role_id), None)
         if role is None or task_class not in role.task_classes:
             raise ConfigurationError(f"Configured model role does not serve task class: {task_class}")
+        return role
+
+    def model_role_for_office(self, office_role: str) -> ModelRole:
+        binding = next((item for item in self.resident_office_routes
+                        if item.office_role == office_role), None)
+        if binding is None:
+            raise ConfigurationError(f"No resident execution route is configured for directory office role: {office_role}")
+        role = next((item for item in self.model_roles if item.role_id == binding.model_role_id), None)
+        if role is None or "objective_reasoning" not in role.task_classes:
+            raise ConfigurationError(f"Resident execution model role is not configured for office role: {office_role}")
         return role
 
     @property
@@ -311,7 +328,8 @@ def load_settings(path: str | Path) -> Settings:
         raise ConfigurationError("bootstrap config must be a JSON object")
     expected_root = {"schema_version", "instance_id", "paths", "postgres", "module", "timing"}
     extra = value.keys() - expected_root - {
-        "grace", "authorization", "capability_plugins", "capability_operations", "notification_intake"}
+        "grace", "authorization", "capability_plugins", "capability_operations", "notification_intake",
+        "resident_execution"}
     missing = expected_root - value.keys()
     if missing or extra:
         raise ConfigurationError(f"root keys invalid; missing={sorted(missing)}, unknown={sorted(extra)}")
@@ -668,6 +686,40 @@ def load_settings(path: str | Path) -> Settings:
             reasoning_escalation = ReasoningEscalationPolicy(
                 contract_id, contract_version, enabled, grant, tuple(allowed), max_requests, max_tokens)
 
+    resident_office_routes: tuple[ResidentOfficeRoute, ...] = ()
+    resident_execution = value.get("resident_execution")
+    if resident_execution is not None:
+        if not isinstance(resident_execution, dict):
+            raise ConfigurationError("resident_execution must be an object")
+        _keys(resident_execution, {"contract_id", "contract_version", "office_role_routes"},
+              "resident_execution")
+        if (resident_execution["contract_id"] != "r3a.resident.execution-routing"
+                or resident_execution["contract_version"] != "1.0.0"):
+            raise ConfigurationError("resident_execution contract is unsupported")
+        raw_office_routes = resident_execution["office_role_routes"]
+        if not isinstance(raw_office_routes, list):
+            raise ConfigurationError("resident_execution.office_role_routes must be an array")
+        role_ids = {role.role_id for role in model_roles}
+        parsed_office_routes: list[ResidentOfficeRoute] = []
+        seen_office_roles: set[str] = set()
+        for index, item in enumerate(raw_office_routes):
+            where = f"resident_execution.office_role_routes[{index}]"
+            if not isinstance(item, dict):
+                raise ConfigurationError(f"{where} must be an object")
+            _keys(item, {"office_role", "model_role_id"}, where)
+            office_role = _text(item["office_role"], f"{where}.office_role")
+            model_role_id = _text(item["model_role_id"], f"{where}.model_role_id")
+            if office_role in seen_office_roles:
+                raise ConfigurationError(f"{where}.office_role must be unique")
+            if model_role_id not in role_ids:
+                raise ConfigurationError(f"{where}.model_role_id must reference a configured model role")
+            model_role = next(role for role in model_roles if role.role_id == model_role_id)
+            if "objective_reasoning" not in model_role.task_classes:
+                raise ConfigurationError(f"{where}.model_role_id must serve objective_reasoning")
+            seen_office_roles.add(office_role)
+            parsed_office_routes.append(ResidentOfficeRoute(office_role, model_role_id))
+        resident_office_routes = tuple(parsed_office_routes)
+
     authorization = value.get("authorization", {"provider_id": "capability_grants",
                                                     "contract_version": "1.0.0", "options": {}})
     if not isinstance(authorization, dict):
@@ -852,6 +904,7 @@ def load_settings(path: str | Path) -> Settings:
         knowledge_sources=knowledge_sources,
         capability_registry=capability_registry,
         notification_sources=notification_sources,
+        resident_office_routes=resident_office_routes,
     )
 
 
@@ -887,6 +940,11 @@ def sanitized_config(settings: Settings) -> dict[str, Any]:
                                              "enabled": source.enabled,
                                              "event_types": list(source.event_types)}
                                             for source in settings.notification_sources]},
+        "resident_execution": {"contract_id": "r3a.resident.execution-routing",
+                               "contract_version": "1.0.0",
+                               "office_role_routes": [{"office_role": route.office_role,
+                                                       "model_role_id": route.model_role_id}
+                                                      for route in settings.resident_office_routes]},
         "grace": ({"default_route": settings.default_model_route,
                    "routes": [{"route_id": route.route_id, "provider": route.provider,
                                "endpoint": route.endpoint, "model": route.model,

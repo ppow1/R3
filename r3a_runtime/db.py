@@ -1102,7 +1102,9 @@ class Store:
                                      depends_on_activity_ids: Any = None,
                                      requested_activity_id: str | None = None,
                                      task_class: str = "objective_reasoning",
-                                     notification_envelope: dict[str, Any] | None = None) -> dict[str, Any]:
+                                     notification_envelope: dict[str, Any] | None = None,
+                                     resident_id: str | None = None,
+                                     resident_profile: dict[str, Any] | None = None) -> dict[str, Any]:
         """Durably enqueue one objective/notification; duplicate keys return the same activity."""
         if not objective.strip() or len(objective) > 4000:
             raise ValueError("event content must contain 1 to 4000 characters")
@@ -1118,6 +1120,21 @@ class Store:
             raise ValueError("only objectives may depend on other activities")
         if task_class not in {"objective_reasoning", "vision"}:
             raise ValueError("Grace objective intake cannot use autonomic-only task classes")
+        resident_id = resident_id or self.settings.module_id
+        if not isinstance(resident_id, str) or not resident_id.strip():
+            raise ValueError("resident_id must be a canonical resident identity")
+        if resident_id == self.settings.module_id:
+            if resident_profile is not None:
+                raise ValueError("primary resident objectives do not accept a delegated execution profile")
+        else:
+            if not isinstance(resident_profile, dict):
+                raise ValueError("non-primary resident objectives require a directory-backed execution profile")
+            from .grace_module import validate_resident_profile
+            resident_profile = validate_resident_profile(
+                resident_profile, resident_id=resident_id, config_revision=self.settings.source_digest)
+            if resident_profile["office_role"] not in {
+                    item.office_role for item in self.settings.resident_office_routes}:
+                raise ValueError("resident office role has no configured execution route")
         dependencies = ActivityDependencySet.from_value(depends_on_activity_ids)
         selected_activity_id = uuid.UUID(requested_activity_id) if requested_activity_id else uuid.uuid4()
         if dependencies and str(selected_activity_id) in dependencies.activity_ids:
@@ -1172,6 +1189,8 @@ class Store:
                                                 "contract_version": OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION,
                                                 "criteria": acceptance_criteria},
                        "engineering_assignment": engineering_assignment,
+                       "resident_id": resident_id,
+                       "resident_profile": resident_profile,
                        "role_config_revision": self.settings.source_digest if selected_role_id else None}
         if notification_envelope is not None:
             event_input["notification"] = notification_envelope
@@ -1209,6 +1228,8 @@ class Store:
                     "criteria": []})
                 prior_input.setdefault("role_config_revision", None)
                 prior_input.setdefault("engineering_assignment", None)
+                prior_input.setdefault("resident_id", self.settings.module_id)
+                prior_input.setdefault("resident_profile", None)
                 if not dependencies:
                     prior_input.setdefault("dependencies", None)
                     if prior_input.get("dependencies") is None:
@@ -1261,6 +1282,9 @@ class Store:
                                          {"idempotency_key": idempotency_key, "objective_sha256": hashlib.sha256(objective.encode()).hexdigest(),
                                           "event_kind": event_kind, "route_id": selected_route_id,
                                           "role_id": selected_role_id,
+                                          "resident_id": resident_id,
+                                          "resident_profile_ref": (resident_profile.get("directory_evidence", {}).get("snapshot_sha256")
+                                                                   if resident_profile else None),
                                           "required_capabilities": list(required_capabilities),
                                          "required_modalities": list(required_modalities),
                                           "dependencies": dependencies.to_dict() if dependencies else None,
