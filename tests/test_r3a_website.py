@@ -58,6 +58,8 @@ class StewardWebsiteApiTests(unittest.TestCase):
         self.assertIn("fetchRoadmapIssues", module.text)
         page = self.client.get("/")
         self.assertIn('id="nav-roadmap"', page.text)
+        self.assertIn("roadmap:{rect:normalizedRect(roadmapPanel)", page.text)
+        self.assertIn("if(p.roadmap)", page.text)
         self.assertIn("issue reports are not proof of CME execution", module.text)
 
     def test_website_identity_reports_running_build_version_environment_and_port(self):
