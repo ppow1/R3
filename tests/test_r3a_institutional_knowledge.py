@@ -136,15 +136,30 @@ class InstitutionalKnowledgeProviderTests(unittest.TestCase):
             self.assertEqual("1.1.0", registered.descriptor["operation_revision"])
             tool = registered.resident_tool_projection()
             cme = CME.__new__(CME)
+            cme.module_id = "resident.grace"
             cme.settings = SimpleNamespace(module_capabilities=("institution.knowledge.read",),
                                            capability_registry=registry, source_digest="config-rev-1")
-            cme._authorize_capability = AsyncMock(return_value={"audit_event_id": "audit-read"})
+            raw = registered.load_provider().invoke(
+                {"query": "What is the retention period?"}, context={})
+            output, evidence = normalize_provider_result(raw, registered.descriptor)
+            cme.invoke_capability = AsyncMock(return_value={
+                "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+                "invocation_id": "knowledge-invocation", "operation_id": "institution.knowledge.read",
+                "operation_contract_version": "1.0.0", "provider": registered.descriptor["provider"],
+                "outcome": "SUCCEEDED", "started_at": "2026-11-08T01:00:00Z",
+                "finished_at": "2026-11-08T01:00:01Z", "output": output, "evidence": evidence,
+                "authorization": {"provider_id": "capability_grants", "allowed": True,
+                                  "decision_id": "decision-read", "audit_event_id": "audit-read",
+                                  "policy_revision": None, "config_revision": "config-rev-1"}})
             request = {"contract_id": tool["contract_id"], "contract_version": tool["contract_version"],
                        "capability_id": tool["capability_id"],
                        "arguments": {"query": "What is the retention period?"}}
             result = asyncio.run(cme._invoke_resident_capability(
                 {"activity_id": "activity-1", "attempt_id": "attempt-1"}, request))
-            cme._authorize_capability.assert_awaited_once()
+            cme.invoke_capability.assert_awaited_once()
+            invocation = cme.invoke_capability.await_args.args[0]
+            self.assertEqual("r3a.capability-invocation.v1", invocation["contract_id"])
+            self.assertEqual("institution.knowledge.read", invocation["operation_id"])
             fact = result["output"]["results"][0]
             self.assertEqual("knowledge.test.policy", fact["source_id"])
             self.assertEqual(fact["source_id"], result["evidence"][0]["evidence_id"])
@@ -186,15 +201,16 @@ class InstitutionalKnowledgeProviderTests(unittest.TestCase):
                                            self._configuration(source), legacy_manifest=manifest)
             tool = registered.resident_tool_projection()
             cme = CME.__new__(CME)
+            cme.module_id = "resident.grace"
             cme.settings = SimpleNamespace(module_capabilities=("institution.knowledge.read",),
                                            capability_registry=registry, source_digest="config-rev-1")
-            cme._authorize_capability = AsyncMock(side_effect=PermissionError("grant denied"))
+            cme.invoke_capability = AsyncMock(side_effect=PermissionError("grant denied"))
             request = {"contract_id": tool["contract_id"], "contract_version": tool["contract_version"],
                        "capability_id": tool["capability_id"], "arguments": {"query": "secret policy"}}
             with self.assertRaisesRegex(PermissionError, "grant denied"):
                 asyncio.run(cme._invoke_resident_capability(
                     {"activity_id": "activity-1", "attempt_id": "attempt-1"}, request))
-            cme._authorize_capability.assert_awaited_once()
+            cme.invoke_capability.assert_awaited_once()
 
     def test_stale_missing_and_changed_documents_are_visible_and_retrieval_is_deterministic(self):
         with tempfile.TemporaryDirectory() as directory:
