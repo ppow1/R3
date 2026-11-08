@@ -1,0 +1,175 @@
+<!--
+R3 CONTROLLED DOCUMENT
+File: web/knowledge-review.html
+Component: R3A-KNOWLEDGE-REVIEW-DRAFT-UI
+File Revision: 1.0.0
+Created: 2026-11-08 UTC (exact time recorded in Git commit)
+Created By: Codex GPT-6
+Purpose: Display source-grounded knowledge proposal batches and prepare resumable item-level Steward review drafts.
+Execution Model: Static browser interface; localStorage draft persistence only.
+Observability: Proposal, source, decision-draft status, local save time, and explicit unavailable promotion status.
+Dependencies: ../docs/knowledge-discovery/knowledge_review_proposals.v1.json; browser localStorage.
+Authority: Review aid only; it does not authenticate a Steward, record institutional decisions, or promote knowledge.
+Changed: 2026-11-08 | R3A-KNOWLEDGE-DISCOVERY | Codex GPT-6 | Add batch review and resumable draft interaction.
+Supersedes: None
+Contracts: r3a.knowledge-review-proposals.v1; existing Steward Access authentication remains external.
+Tests: tests/test_knowledge_review_batches.py; manual local HTTP smoke check.
+History/Predecessor: None; new file.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>R3A Knowledge Proposal Review</title>
+  <style>
+    :root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; --line: #7777; --card: #8881; --accent: #5ca6ff; }
+    body { max-width: 1100px; margin: 0 auto; padding: 1.25rem; }
+    h1, h2, h3 { line-height: 1.2; }
+    .notice { border: 2px solid #d89d22; padding: 1rem; border-radius: .5rem; margin: 1rem 0; }
+    .batch, .entry { border: 1px solid var(--line); border-radius: .5rem; padding: 1rem; margin: 1rem 0; background: var(--card); }
+    .batch-head, .entry-head { display: flex; gap: .75rem; align-items: flex-start; }
+    .batch-head > div, .entry-head > div { flex: 1; }
+    .meta { opacity: .8; font-size: .92rem; }
+    .flag { display: inline-block; border: 1px solid #d89d22; border-radius: 1rem; padding: .05rem .55rem; margin: .15rem; font-size: .83rem; }
+    .decision { font-weight: 700; }
+    button { padding: .45rem .7rem; margin: .2rem; cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .55; }
+    a { color: var(--accent); }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+    summary { cursor: pointer; font-weight: 600; }
+    .actions { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .7rem; }
+    .excluded { border-left: .3rem solid #d89d22; padding-left: .65rem; }
+    #summary { position: sticky; top: 0; background: Canvas; border-bottom: 1px solid var(--line); padding: .65rem 0; z-index: 2; }
+    #status { min-height: 1.5rem; }
+    .small { font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>R3A Institutional Knowledge — Proposal Review</h1>
+    <p>This review groups seven source-grounded proposals into three batches. Recommendations are advisory; no proposal has a decision.</p>
+  </header>
+  <section class="notice" aria-labelledby="authority-heading">
+    <h2 id="authority-heading">Review draft only — promotion is not connected</h2>
+    <p>The registered <code>institution.knowledge.read@1.1.0</code> operation is read-only. The current prototype exposes no authenticated knowledge decision or ingestion operation. Choices below are resumable in this browser only; they are <strong>not Steward approvals</strong>, are not durable institutional records, and do not promote knowledge. Batch actions exclude entries flagged for individual review.</p>
+    <label>Reviewer note (unverified local label): <input id="reviewer" autocomplete="off" maxlength="100"></label>
+    <p class="small">To finish an institutional decision, integrate the existing Steward Access session with a canonical decision operation and authorized promotion path. Do not treat this draft as evidence of approval.</p>
+  </section>
+  <section id="summary" aria-live="polite"></section>
+  <section aria-label="Common decision for selected entries">
+    <h2>Selected entries</h2>
+    <p>Selection supports one common draft decision. Flagged items can be explicitly selected here; batch actions never include them.</p>
+    <div class="actions">
+      <button data-selected="approve">Draft approve selected</button>
+      <button data-selected="reject">Draft reject selected</button>
+      <button data-selected="defer">Draft defer selected</button>
+      <button id="export">Download review draft</button>
+      <button id="clear">Clear this browser's draft</button>
+    </div>
+    <p id="status" role="status"></p>
+  </section>
+  <main id="batches" aria-live="polite"></main>
+  <script>
+  (() => {
+    "use strict";
+    const DATA_URL = "../docs/knowledge-discovery/knowledge_review_proposals.v1.json";
+    const STORAGE_KEY = "r3a.knowledge-review.draft.v1:";
+    const decisions = new Set(["approve", "reject", "defer"]);
+    let catalog;
+    let draft = { schema_id: "r3a.knowledge-review-draft.v1", catalog_id: "", reviewer_label: "", updated_at: null, decisions: {} };
+    const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
+    const id = value => `r3a-review-${value.replace(/[^a-z0-9_-]/gi, "-")}`;
+    const save = message => {
+      draft.updated_at = new Date().toISOString();
+      draft.reviewer_label = document.querySelector("#reviewer").value.trim();
+      localStorage.setItem(STORAGE_KEY + catalog.catalog_id, JSON.stringify(draft));
+      renderSummary();
+      if (message) document.querySelector("#status").textContent = message + " Saved as a local draft only.";
+    };
+    const renderSummary = () => {
+      const values = Object.values(draft.decisions);
+      const count = decision => values.filter(item => item.decision === decision).length;
+      document.querySelector("#summary").textContent = `Draft only · ${catalog.entries.length} entries · ${count("approve")} approve · ${count("reject")} reject · ${count("defer")} defer · ${values.length} decided · updated ${draft.updated_at || "not yet"}`;
+    };
+    const setDecision = (entryId, decision, reason = "individual draft decision") => {
+      if (!decisions.has(decision)) return;
+      const prior = draft.decisions[entryId];
+      const history = prior ? [...(prior.history || []), { decision: prior.decision, reason: prior.reason, decided_at: prior.decided_at, batch_id: prior.batch_id || null }] : [];
+      draft.decisions[entryId] = { decision, reason, batch_id: reason.startsWith("batch:") ? reason.slice(6) : null, entry_version: catalog.entries.find(item => item.entry_id === entryId).version, decided_at: new Date().toISOString(), authority_status: "local-unverified-draft", history };
+      save(`${entryId}: ${decision}.`);
+      render();
+    };
+    const applyBatch = (batch, decision) => {
+      const entries = batch.entry_ids.map(entryId => catalog.entries.find(item => item.entry_id === entryId));
+      const eligible = entries.filter(entry => !entry.flags.includes("requires-individual-review"));
+      eligible.forEach(entry => setDecision(entry.entry_id, decision, `batch:${batch.batch_id}`));
+      const skipped = entries.length - eligible.length;
+      document.querySelector("#status").textContent = `${eligible.length} unflagged entries set to ${decision}; ${skipped} flagged entries left unchanged for individual review. Draft only.`;
+      save();
+    };
+    const renderSources = sources => `<ul>${sources.map(source => `<li><a href="${esc(source.url)}" target="_blank" rel="noreferrer">${esc(source.repository)}/${esc(source.path)}</a> — rev ${esc(source.revision)}; ${source.sha256 ? `SHA-256 <code>${esc(source.sha256)}</code>` : `Git blob <code>${esc(source.git_blob)}</code>`}; commit <code>${esc(source.commit)}</code></li>`).join("")}</ul>`;
+    const render = () => {
+      document.querySelector("#batches").innerHTML = catalog.batches.map(batch => {
+        const entries = batch.entry_ids.map(entryId => catalog.entries.find(item => item.entry_id === entryId));
+        return `<section class="batch" aria-labelledby="${id(batch.batch_id)}">
+          <div class="batch-head"><div><h2 id="${id(batch.batch_id)}">${esc(batch.title)}</h2><p>${esc(batch.description)}</p></div><strong>${entries.length} proposed entries</strong></div>
+          <p><strong>Project/category:</strong> ${esc(batch.project)} / ${esc(batch.category)}</p>
+          <p><strong>Useful information:</strong> ${esc(batch.summary)}</p>
+          <p><strong>Conflicts or supersession:</strong> ${esc(batch.conflicts_and_supersession)}</p>
+          <p><strong>Recommended disposition:</strong> ${esc(batch.recommended_disposition)}</p>
+          <details><summary>${batch.source_count} source documents and revisions</summary>${renderSources(batch.source_documents)}</details>
+          <div class="actions"><strong>Draft decision for eligible entries:</strong>
+            <button data-batch="${esc(batch.batch_id)}" data-decision="approve">Approve batch</button>
+            <button data-batch="${esc(batch.batch_id)}" data-decision="reject">Reject batch</button>
+            <button data-batch="${esc(batch.batch_id)}" data-decision="defer">Defer batch</button>
+          </div>
+          ${entries.map(entry => {
+            const saved = draft.decisions[entry.entry_id];
+            const flagged = entry.flags.includes("requires-individual-review");
+            return `<article class="entry ${flagged ? "excluded" : ""}">
+              <div class="entry-head"><input type="checkbox" aria-label="Select ${esc(entry.title)}" data-entry-select="${esc(entry.entry_id)}"><div><h3>${esc(entry.title)}</h3><div>${entry.flags.map(flag => `<span class="flag">${esc(flag)}</span>`).join("")}</div></div><span class="decision">${saved ? `Draft: ${esc(saved.decision)}` : "No decision"}</span></div>
+              ${flagged ? `<p><strong>Individual review required:</strong> excluded from batch decisions because this item is flagged.</p>` : ""}
+              <p><strong>Summary:</strong> ${esc(entry.summary)}</p><p><strong>Why it matters:</strong> ${esc(entry.why_it_matters)}</p>
+              <details><summary>Source excerpt, proposed wording, authority, freshness, conflicts</summary>
+                ${entry.sources.map(source => `<p><a href="${esc(source.url)}" target="_blank" rel="noreferrer">${esc(source.repository)}/${esc(source.path)}</a>, ${esc(source.location)} — revision ${esc(source.revision)}; ${source.sha256 ? `SHA-256 ${esc(source.sha256)}` : `Git blob ${esc(source.git_blob)}`}</p><blockquote>${esc(source.excerpt)}</blockquote>`).join("")}
+                <p><strong>Proposed canonical entry:</strong> ${esc(entry.proposed_canonical_knowledge)}</p><p><strong>Authority/freshness:</strong> ${esc(entry.authority_assessment)} ${esc(entry.freshness)}</p><p><strong>Known conflicts:</strong> ${esc(entry.conflicts.length ? entry.conflicts.join("; ") : "None identified in this review")}</p>
+              </details>
+              <div class="actions">Recommended: ${esc(entry.recommended_disposition)}
+                <button data-item="${esc(entry.entry_id)}" data-decision="approve">Approve item</button><button data-item="${esc(entry.entry_id)}" data-decision="reject">Reject item</button><button data-item="${esc(entry.entry_id)}" data-decision="defer">Defer item</button>
+              </div>
+            </article>`;
+          }).join("")}
+        </section>`;
+      }).join("");
+      renderSummary();
+      document.querySelectorAll("button[data-item]").forEach(button => button.addEventListener("click", () => setDecision(button.dataset.item, button.dataset.decision)));
+      document.querySelectorAll("button[data-batch]").forEach(button => button.addEventListener("click", () => applyBatch(catalog.batches.find(item => item.batch_id === button.dataset.batch), button.dataset.decision)));
+    };
+    document.querySelectorAll("button[data-selected]").forEach(button => button.addEventListener("click", () => {
+      const selected = [...document.querySelectorAll("[data-entry-select]:checked")].map(node => node.dataset.entrySelect);
+      selected.forEach(entryId => setDecision(entryId, button.dataset.selected, "multi-select draft decision"));
+      document.querySelector("#status").textContent = `${selected.length} selected entries set to ${button.dataset.selected}. Draft only.`;
+      save();
+    }));
+    document.querySelector("#reviewer").addEventListener("change", () => save("Reviewer label updated."));
+    document.querySelector("#export").addEventListener("click", () => {
+      const file = new Blob([JSON.stringify(draft, null, 2)], { type: "application/json" });
+      const link = Object.assign(document.createElement("a"), { href: URL.createObjectURL(file), download: `${catalog.catalog_id}-review-draft.json` });
+      link.click(); URL.revokeObjectURL(link.href);
+    });
+    document.querySelector("#clear").addEventListener("click", () => {
+      localStorage.removeItem(STORAGE_KEY + catalog.catalog_id);
+      draft = { schema_id: "r3a.knowledge-review-draft.v1", catalog_id: catalog.catalog_id, reviewer_label: "", updated_at: null, decisions: {} };
+      document.querySelector("#reviewer").value = ""; render();
+      document.querySelector("#status").textContent = "Local draft cleared. No institutional decision was changed.";
+    });
+    fetch(DATA_URL).then(response => { if (!response.ok) throw new Error(`proposal data: HTTP ${response.status}`); return response.json(); }).then(data => {
+      catalog = data; draft.catalog_id = catalog.catalog_id;
+      try { const old = JSON.parse(localStorage.getItem(STORAGE_KEY + catalog.catalog_id) || "null"); if (old?.schema_id === "r3a.knowledge-review-draft.v1" && old.catalog_id === catalog.catalog_id) draft = old; } catch { /* invalid local draft stays untouched and is not treated as institutional state */ }
+      document.querySelector("#reviewer").value = draft.reviewer_label || ""; render();
+    }).catch(error => { document.querySelector("#status").textContent = `Could not load proposals: ${error.message}. Serve this repository over HTTP to enable review.`; });
+  })();
+  </script>
+</body>
+</html>

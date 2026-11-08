@@ -1,0 +1,235 @@
+{
+  "schema_id": "r3a.knowledge-review-proposals.v1",
+  "schema_version": 1,
+  "catalog_id": "r3a-ai-guidance-discovery-2026-11-08",
+  "catalog_revision": 1,
+  "review_state": "proposed",
+  "batches": [
+    {
+      "batch_id": "r3-current-source-governance",
+      "title": "R3 source governance and authority boundaries",
+      "description": "Current R3 guidance that constrains what may be carried into R3A and where new institutional guidance belongs.",
+      "project": "R3 / R3 Alpha",
+      "category": "institutional-governance",
+      "source_documents": [
+        {
+          "repository": "ppow1/R3",
+          "path": "AI_HINTS.md",
+          "revision": "1.0.8",
+          "commit": "0636704f9b9f1dfba346dfcdd24a70c0f35b62f7",
+          "git_blob": "a076a5ad0a13433a4e4ad1ccf7b8f029a5c6d06d",
+          "sha256": "67b51a8269a49e86718023a37ffa79190ee6ab433df26a56f980adea994268b7",
+          "modified_at": "2026-11-06T05:05:20Z",
+          "url": "https://github.com/ppow1/R3/blob/0636704f9b9f1dfba346dfcdd24a70c0f35b62f7/AI_HINTS.md"
+        },
+        {
+          "repository": "ppow1/R3",
+          "path": "docs/PROJECT_CHARTER_REVISION_2_REVIEW.md",
+          "revision": "1.0.0 (provenance baseline)",
+          "commit": "703ff61ddcef5c26b0163215eacdfe98b535db47",
+          "git_blob": "23f50b1a0309a3f89d7e8fc25bedef68cf86cd63",
+          "sha256": "89c5e72d48dea8770bc8a9b15f2992073f1d9e450f6b4c50980ad509376a75e5",
+          "modified_at": "2026-10-31T15:48:52-04:00",
+          "url": "https://github.com/ppow1/R3/blob/703ff61ddcef5c26b0163215eacdfe98b535db47/docs/PROJECT_CHARTER_REVISION_2_REVIEW.md"
+        }
+      ],
+      "summary": "The current R3 index directs new R3 runbooks to ppow1/R3, treats Riverview- as reference, and says not to migrate Riverview 2 wholesale. The approved charter requires relevant knowledge retrieval and preserves evidence provenance.",
+      "conflicts_and_supersession": "Legacy Riverview execution-first directions cannot override the current R3 charter or this Steward-directed review and approval requirement.",
+      "recommended_disposition": "Review each item; the batch has no default decision.",
+      "entry_ids": ["r3-source-boundary", "r3-knowledge-grounding", "r3-evidence-epistemics"],
+      "source_count": 2
+    },
+    {
+      "batch_id": "external-review-promotion-practices",
+      "title": "External review and promotion practices",
+      "description": "Potentially reusable process ideas from older Riverview and Estate guidance; neither repository governs R3A.",
+      "project": "Riverview- / TheEstate",
+      "category": "knowledge-governance-reference",
+      "source_documents": [
+        {
+          "repository": "ppow1/Riverview-",
+          "path": "AI_HINTS.md",
+          "revision": "1.0.7",
+          "commit": "2a861dabc6549aaf130139dfb6915b45fa3f1700",
+          "git_blob": "16771b9df9b00f1758f45ca277bd675c217fc4ca",
+          "sha256": null,
+          "modified_at": "2026-10-22T19:09:10Z",
+          "url": "https://github.com/ppow1/Riverview-/blob/2a861dabc6549aaf130139dfb6915b45fa3f1700/AI_HINTS.md"
+        },
+        {
+          "repository": "ppow1/theestate",
+          "path": "AI_SOFTWARE_DEVELOPMENT_HINTS.md",
+          "revision": "unversioned in inspected header",
+          "commit": "50b8b69b7d828a9afd45f01dad9248271652abf2",
+          "git_blob": "b1cea1f39cc6ec828699b5bed62e4a922fff084b",
+          "sha256": null,
+          "modified_at": "2026-08-11T21:19:57Z",
+          "url": "https://github.com/ppow1/theestate/blob/50b8b69b7d828a9afd45f01dad9248271652abf2/AI_SOFTWARE_DEVELOPMENT_HINTS.md"
+        },
+        {
+          "repository": "ppow1/R3",
+          "path": "docs/architecture/R3A_INSTITUTIONAL_KNOWLEDGE_CAPABILITY.md",
+          "revision": "1.2.0",
+          "commit": "d0404a5fd1f41ad520428078ea64f7631d393a6f",
+          "git_blob": "93dc69e1982b20a77cc9029cb6c368e67a764e55",
+          "sha256": "6ddb9e77a8cc34d6cc7d9cee97cfb0c8bd04f6d298728f586e82509adbfdfa67",
+          "modified_at": "2026-11-07T17:09:54-05:00",
+          "url": "https://github.com/ppow1/R3/blob/d0404a5fd1f41ad520428078ea64f7631d393a6f/docs/architecture/R3A_INSTITUTIONAL_KNOWLEDGE_CAPABILITY.md"
+        }
+      ],
+      "summary": "Both external projects distinguish draft material from institutional authority or warn against silent promotion. These are reference ideas. R3A already requires explicit Steward authority; this batch cannot alter that rule.",
+      "conflicts_and_supersession": "External repository instructions are not R3A authority. Any external text conflicting with the current R3 charter or explicit Steward direction remains ineligible for bulk disposition.",
+      "recommended_disposition": "Defer the external adaptation for R3A policy review; review entries individually.",
+      "entry_ids": ["external-separate-proposal-from-promotion", "external-no-silent-promotion"],
+      "source_count": 3
+    },
+    {
+      "batch_id": "legacy-project-specific-operating-rules",
+      "title": "Legacy and project-specific operating rules",
+      "description": "Examples identified during discovery that should not become current R3A knowledge without an explicit scope decision.",
+      "project": "Riverview legacy / CueMastery",
+      "category": "historical-and-scope-boundary",
+      "source_documents": [
+        {
+          "repository": "ppow1/Riverview",
+          "path": "AI_HINTS.md",
+          "revision": "not stated in inspected header",
+          "commit": "4590f2fb5e6813d409b3faf8e37a151778aea1f6",
+          "git_blob": "77c966d641ccf508177f0828b49a8b85dcfa67b3",
+          "sha256": null,
+          "modified_at": null,
+          "url": "https://github.com/ppow1/Riverview/blob/4590f2fb5e6813d409b3faf8e37a151778aea1f6/AI_HINTS.md"
+        },
+        {
+          "repository": "ppow1/CueMastery",
+          "path": "AI_HINTS.md",
+          "revision": "unversioned in inspected header",
+          "commit": "1f03e77da9fbbdb131d923f7b616feb5b9415b27",
+          "git_blob": "f6cecd550aace5b67d09e1fe21c70469649fb264",
+          "sha256": null,
+          "modified_at": "2026-06-11T00:40:35Z",
+          "url": "https://github.com/ppow1/CueMastery/blob/1f03e77da9fbbdb131d923f7b616feb5b9415b27/AI_HINTS.md"
+        }
+      ],
+      "summary": "The legacy guide contains older execution-first operating language. CueMastery assigns a project-specific communication authority to Ionoge Comms7. Both demonstrate why scope and current authority must be checked before reuse.",
+      "conflicts_and_supersession": "The execution-first legacy instruction conflicts with explicit R3A Steward approval and non-promotion requirements. CueMastery authority is not transferable to R3A.",
+      "recommended_disposition": "Reject the legacy instruction as current R3A policy; defer the CueMastery item as out of scope. Both require individual review.",
+      "entry_ids": ["legacy-execution-first-conflict", "cuemastery-authority-is-project-specific"],
+      "source_count": 2
+    }
+  ],
+  "entries": [
+    {
+      "entry_id": "r3-source-boundary",
+      "version": 1,
+      "title": "Keep new R3 engineering guidance in the R3 repository",
+      "summary": "The R3 guidance index assigns new R3 runbooks to ppow1/R3, treats ppow1/Riverview- as historical/reference material, and rejects wholesale migration of Riverview 2.",
+      "why_it_matters": "Keeps new R3A operational instructions discoverable in the repository designated by current R3 guidance and prevents legacy instructions from silently becoming R3A policy.",
+      "category": "source-governance",
+      "proposed_canonical_knowledge": "For new Riverview 3 engineering and operational runbooks, use ppow1/R3. Treat ppow1/Riverview- as historical/reference material and assess legacy material before any R3A adaptation.",
+      "sources": [{"repository": "ppow1/R3", "path": "AI_HINTS.md", "location": "Runbook ownership and Essential rules, lines 30-38; line 46", "revision": "1.0.8", "commit": "0636704f9b9f1dfba346dfcdd24a70c0f35b62f7", "git_blob": "a076a5ad0a13433a4e4ad1ccf7b8f029a5c6d06d", "sha256": "67b51a8269a49e86718023a37ffa79190ee6ab433df26a56f980adea994268b7", "excerpt": "All NEW Riverview 3 engineering and operational runbooks ... must be created or updated in ppow1/R3 only. ppow1/Riverview- is historical/reference material ... Do not migrate Riverview 2 wholesale.", "url": "https://github.com/ppow1/R3/blob/0636704f9b9f1dfba346dfcdd24a70c0f35b62f7/AI_HINTS.md"}],
+      "authority_assessment": "Current R3 repository guidance; subordinate to approved R3 charter and roadmap. Applicable for R3A source location, subject to current owner confirmation if repository roles change.",
+      "freshness": "Current inspected branch index, last changed 2026-11-06.",
+      "conflicts": [],
+      "flags": [],
+      "recommended_disposition": "approve",
+      "decision": null
+    },
+    {
+      "entry_id": "r3-knowledge-grounding",
+      "version": 1,
+      "title": "Residents should consult relevant existing institutional knowledge",
+      "summary": "The approved R3 charter requires residents to consult relevant existing knowledge before independently investigating or acting and to preserve evidence and provenance for verified facts.",
+      "why_it_matters": "Makes retrieval a normal part of resident work and reduces repeated rediscovery while retaining source lineage.",
+      "category": "knowledge-and-evidence",
+      "proposed_canonical_knowledge": "When relevant institutional knowledge exists, residents consult it before independent investigation or action. Verified facts retain evidence and provenance; binding rules retain scope and authority.",
+      "sources": [{"repository": "ppow1/R3", "path": "docs/PROJECT_CHARTER_REVISION_2_REVIEW.md", "location": "Institutional knowledge and grounding, section 5, lines 68-72", "revision": "1.0.0 (provenance baseline); Charter Revision 2 approved 2026-10-31", "commit": "703ff61ddcef5c26b0163215eacdfe98b535db47", "git_blob": "23f50b1a0309a3f89d7e8fc25bedef68cf86cd63", "sha256": "89c5e72d48dea8770bc8a9b15f2992073f1d9e450f6b4c50980ad509376a75e5", "excerpt": "Every resident shall consult relevant existing knowledge before independently investigating or acting ... Verified facts shall retain evidence and provenance; binding rules shall retain scope and authority.", "url": "https://github.com/ppow1/R3/blob/703ff61ddcef5c26b0163215eacdfe98b535db47/docs/PROJECT_CHARTER_REVISION_2_REVIEW.md"}],
+      "authority_assessment": "Current authoritative R3 charter; Steward approval is recorded in the source document.",
+      "freshness": "Approved 2026-10-31; checked against current R3A knowledge contract and roadmap on 2026-11-08.",
+      "conflicts": [],
+      "flags": [],
+      "recommended_disposition": "approve",
+      "decision": null
+    },
+    {
+      "entry_id": "r3-evidence-epistemics",
+      "version": 1,
+      "title": "Keep evidence, inference, uncertainty, and fiction distinct",
+      "summary": "The R3 charter requires residents to distinguish verified claims from inference, unknowns, fictional improvisation, and operational observation; retrieval or citation alone is not proof.",
+      "why_it_matters": "A retrieved passage is evidence for Grace to interpret, not an automatic decision or proof that every adjacent claim is true.",
+      "category": "evidence-integrity",
+      "proposed_canonical_knowledge": "Residents label claims according to their support. Retrieval and citations are not themselves proof; preserve the evidence pointers and distinguish inference and uncertainty from verified institutional facts.",
+      "sources": [{"repository": "ppow1/R3", "path": "docs/PROJECT_CHARTER_REVISION_2_REVIEW.md", "location": "Epistemic integrity, section 5, lines 74-91", "revision": "1.0.0 (provenance baseline); Charter Revision 2 approved 2026-10-31", "commit": "703ff61ddcef5c26b0163215eacdfe98b535db47", "git_blob": "23f50b1a0309a3f89d7e8fc25bedef68cf86cd63", "sha256": "89c5e72d48dea8770bc8a9b15f2992073f1d9e450f6b4c50980ad509376a75e5", "excerpt": "Retrieval and citation are not themselves proof: evidence must actually support the specific claim. Residents shall explicitly acknowledge uncertainty and distinguish inference from fact.", "url": "https://github.com/ppow1/R3/blob/703ff61ddcef5c26b0163215eacdfe98b535db47/docs/PROJECT_CHARTER_REVISION_2_REVIEW.md"}],
+      "authority_assessment": "Current authoritative R3 charter.",
+      "freshness": "Approved 2026-10-31; no superseding charter identified in inspected R3 guidance.",
+      "conflicts": [],
+      "flags": [],
+      "recommended_disposition": "approve",
+      "decision": null
+    },
+    {
+      "entry_id": "external-separate-proposal-from-promotion",
+      "version": 1,
+      "title": "Keep proposal review separate from institutional promotion",
+      "summary": "Riverview- guidance says a proposal draft is not execution authority and distinguishes Steward approval from a separately authorized promotion step.",
+      "why_it_matters": "This separation may help keep discovery and proposal generation from becoming an implicit authority path in R3A.",
+      "category": "knowledge-governance-reference",
+      "proposed_canonical_knowledge": "Candidate wording for review only: a generated knowledge proposal remains non-authoritative until the designated Steward decision and established authorized promotion operation are recorded.",
+      "sources": [{"repository": "ppow1/Riverview-", "path": "AI_HINTS.md", "location": "Proposal and approval guidance; repository scope section", "revision": "1.0.7", "commit": "2a861dabc6549aaf130139dfb6915b45fa3f1700", "git_blob": "16771b9df9b00f1758f45ca277bd675c217fc4ca", "sha256": null, "excerpt": "Proposal drafts are not execution authority; use the documented authenticated Steward flow; approval and separately authorized promotion are distinct.", "url": "https://github.com/ppow1/Riverview-/blob/2a861dabc6549aaf130139dfb6915b45fa3f1700/AI_HINTS.md"}],
+      "authority_assessment": "Historical/reference guidance from a separate Riverview repository; adaptation requires R3A owner review. Current R3 charter and this Steward directive independently require explicit authority.",
+      "freshness": "File modified 2026-10-22; verify against current source before any future ingestion.",
+      "conflicts": [],
+      "flags": ["external-authority", "requires-individual-review"],
+      "recommended_disposition": "defer",
+      "decision": null
+    },
+    {
+      "entry_id": "external-no-silent-promotion",
+      "version": 1,
+      "title": "Do not silently promote AI classifications into canonical knowledge",
+      "summary": "Estate software-development guidance allows AI systems to propose, classify, summarize, and identify gaps, but says they do not silently promote canonical knowledge or alter accepted baselines.",
+      "why_it_matters": "This is a candidate design principle for keeping the batch tool advisory and approval-controlled.",
+      "category": "knowledge-governance-reference",
+      "proposed_canonical_knowledge": "Candidate adaptation only: discovery and classification may prepare review proposals; promotion requires the established R3A Steward approval and authorized ingestion path.",
+      "sources": [{"repository": "ppow1/theestate", "path": "AI_SOFTWARE_DEVELOPMENT_HINTS.md", "location": "AI services and governance guidance, lines 158 onward", "revision": "unversioned in inspected header", "commit": "50b8b69b7d828a9afd45f01dad9248271652abf2", "git_blob": "b1cea1f39cc6ec828699b5bed62e4a922fff084b", "sha256": null, "excerpt": "Local AI may propose, classify, summarize, and identify gaps, but does not silently promote canonical knowledge or alter accepted baselines.", "url": "https://github.com/ppow1/theestate/blob/50b8b69b7d828a9afd45f01dad9248271652abf2/AI_SOFTWARE_DEVELOPMENT_HINTS.md"}],
+      "authority_assessment": "Estate-only guidance; compatible with this task but not binding R3A authority.",
+      "freshness": "Last changed 2026-08-11; confirm source before future reuse.",
+      "conflicts": [],
+      "flags": ["external-authority", "requires-individual-review"],
+      "recommended_disposition": "defer",
+      "decision": null
+    },
+    {
+      "entry_id": "legacy-execution-first-conflict",
+      "version": 1,
+      "title": "Legacy execution-first instruction is not current R3A policy",
+      "summary": "The legacy Riverview AI guide contains execution-first operating language. That language must not be carried into R3A where it conflicts with the current explicit Steward approval requirement.",
+      "why_it_matters": "Makes a known conflict visible so a future reader does not mistake a legacy repository instruction for current R3A authority.",
+      "category": "historical-conflict",
+      "proposed_canonical_knowledge": "Historical note: do not apply Riverview legacy execution-first wording to R3A knowledge promotion; current R3A decisions follow the approved R3 charter and explicit Steward direction.",
+      "sources": [{"repository": "ppow1/Riverview", "path": "AI_HINTS.md", "location": "Execution-first operating instructions and durable-knowledge guidance (exact line mapping not retained)", "revision": "not stated in inspected header", "commit": "4590f2fb5e6813d409b3faf8e37a151778aea1f6", "git_blob": "77c966d641ccf508177f0828b49a8b85dcfa67b3", "sha256": null, "excerpt": "The inspected guide contains execution-first operating directions; those directions conflict with the current R3A requirement for explicit Steward approval before promotion.", "url": "https://github.com/ppow1/Riverview/blob/4590f2fb5e6813d409b3faf8e37a151778aea1f6/AI_HINTS.md"}],
+      "authority_assessment": "Legacy project-specific source. Current R3 charter/Steward directive take precedence for R3A.",
+      "freshness": "Current default-branch snapshot inspected 2026-11-08; source modification timestamp unavailable.",
+      "conflicts": ["Conflicts with R3A explicit approval-before-promotion requirement."],
+      "flags": ["conflict", "historical", "uncertain-lineage", "requires-individual-review"],
+      "recommended_disposition": "reject",
+      "decision": null
+    },
+    {
+      "entry_id": "cuemastery-authority-is-project-specific",
+      "version": 1,
+      "title": "CueMastery communications authority is project-specific",
+      "summary": "CueMastery guidance assigns communications authority in that project to Ionoge Comms7. It provides no R3A resident or institutional authority.",
+      "why_it_matters": "Captures the scope check and avoids importing unrelated project identities or authority structures into R3A.",
+      "category": "scope-boundary",
+      "proposed_canonical_knowledge": "Do not import CueMastery or Ionoge authority assignments into R3A; consult R3A's own approved charter, roster, and contracts.",
+      "sources": [{"repository": "ppow1/CueMastery", "path": "AI_HINTS.md", "location": "Fast recovery pointer / project authority note", "revision": "unversioned in inspected header", "commit": "1f03e77da9fbbdb131d923f7b616feb5b9415b27", "git_blob": "f6cecd550aace5b67d09e1fe21c70469649fb264", "sha256": null, "excerpt": "The guidance is scoped to CueMastery / Ionoge and identifies Ionoge Comms7 as that project's commit authority.", "url": "https://github.com/ppow1/CueMastery/blob/1f03e77da9fbbdb131d923f7b616feb5b9415b27/AI_HINTS.md"}],
+      "authority_assessment": "CueMastery-specific; not R3A authority and not a useful institutional knowledge fact for normal R3A retrieval.",
+      "freshness": "Last changed 2026-06-11; project-local scope remains explicit.",
+      "conflicts": [],
+      "flags": ["out-of-scope", "external-authority", "requires-individual-review"],
+      "recommended_disposition": "reject",
+      "decision": null
+    }
+  ]
+}
