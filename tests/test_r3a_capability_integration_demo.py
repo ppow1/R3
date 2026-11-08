@@ -55,11 +55,12 @@ if importlib.util.find_spec("psycopg_pool") is None:
 from r3a_runtime.capability_contracts import (CapabilityRegistry, operation_from_manifest,
                                               validate_invocation_request)
 from r3a_runtime.cme import CME
-from r3a_runtime.config import _validate_plugin_config
+from r3a_runtime.config import _validate_plugin_config, load_settings
 from r3a_runtime.engineering import (CapabilityOperationRef, CriterionResult, EngineeringWorkOrder,
                                     VerificationResult, validate_completion)
 from r3a_runtime.db import utcnow
 from r3a_runtime.provider_runtime import ProviderProcessManager, _module_environment
+from tests.test_r3a_modular_autonomy import make_config
 
 
 ACTIVITY = "11111111-1111-4111-8111-111111111111"
@@ -215,9 +216,27 @@ class ProviderLifecycleFixtureStore:
 class IsolatedCapabilityIntegrationTests(unittest.TestCase):
     def test_registered_engineering_provider_process_can_be_replaced_and_stopped(self):
         async def scenario(root: Path):
-            first = descriptor()
+            bootstrap = make_config(root)
+            config = json.loads(bootstrap.read_text(encoding="utf-8"))
+            engineering_root = Path(__file__).parents[1] / "r3a_plugins/engineering_workspace"
+            engineering_config = root / "engineering-workspace.json"
+            engineering_config.write_text(json.dumps({"workspace_root": str(root)}), encoding="utf-8")
+            telemetry_root = Path(__file__).parents[1] / "r3a_plugins/octominer_telemetry"
+            config["module"]["capabilities"].extend([
+                "engineering.workspace.apply_patch", "infrastructure.octominer.telemetry.read"])
+            config["capability_operations"] = [
+                {"manifest": str(engineering_root / "manifest.json"),
+                 "configuration": str(engineering_config)},
+                {"manifest": str(telemetry_root / "manifest.json"),
+                 "configuration": str(telemetry_root / "config.example.json")},
+            ]
+            bootstrap.write_text(json.dumps(config), encoding="utf-8")
+            settings = load_settings(bootstrap)
+            registry = settings.capability_registry
+            first_registered = registry.resolve_provider("engineering.workspace.apply_patch", "1.0.0")
+            first = first_registered.descriptor
+            first_manifest = copy.deepcopy(first_registered.legacy_manifest)
             second = copy.deepcopy(first)
-            first_manifest = engineering_manifest()
             second["provider"]["provider_version"] = "1.0.1"
             replacement_artifact = (Path(__file__).parents[1] /
                                     "r3a_plugins/engineering_workspace/replacement_test_fixture.py")
@@ -236,41 +255,24 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             second_manifest["provider"].update(second["provider"])
             second_manifest["operation"]["operation_revision"] = "1.0.1"
             second_manifest["operation"]["provider"].update(second["provider"])
-            registry = CapabilityRegistry()
-            first_manifest["_provider_artifact_path"] = str(
-                Path(__file__).parents[1] / "r3a_plugins/engineering_workspace/provider.py")
-            first_manifest["_pinned_artifact_paths"] = {first_manifest["_provider_artifact_path"]:
-                                                         first["provider"]["artifact_sha256"]}
             second_manifest["_provider_artifact_path"] = str(replacement_artifact)
             second_manifest["_pinned_artifact_paths"] = {
                 str(replacement_artifact): second["provider"]["artifact_sha256"],
-                str(Path(__file__).parents[1] /
-                    "r3a_plugins/engineering_workspace/provider.py"): first["provider"]["artifact_sha256"]}
-            registry.register(first, {"workspace_root": str(root)}, legacy_manifest=first_manifest)
+                **first_manifest["_pinned_artifact_paths"]}
             registry.register(second, {"workspace_root": str(root)}, legacy_manifest=second_manifest)
-            telemetry_root = Path(__file__).parents[1] / "r3a_plugins/octominer_telemetry"
-            telemetry_manifest = json.loads((telemetry_root / "manifest.json").read_text())
-            telemetry_config = json.loads((telemetry_root / "config.example.json").read_text())
-            artifact_paths = {telemetry_manifest["artifact_sha256"]: str(telemetry_root / telemetry_manifest["artifact_ref"])}
-            for supporting in telemetry_manifest["supporting_artifacts"]:
-                artifact_paths[supporting["artifact_sha256"]] = str(telemetry_root / supporting["artifact_ref"])
-            telemetry_operation = operation_from_manifest(telemetry_manifest)
-            telemetry_manifest["_provider_artifact_path"] = artifact_paths[
-                telemetry_operation["provider"]["artifact_sha256"]]
-            telemetry_manifest["_pinned_artifact_paths"] = artifact_paths
-            registry.register(telemetry_operation, telemetry_config, legacy_manifest=telemetry_manifest)
             with patch.dict("os.environ", {"R3A_TELEMETRY_DATABASE_DSN": "must-not-cross-module-boundary",
                                             "R3A_OCTOMINER_SSH_HOST": "telemetry-host"}):
-                module_env = _module_environment(registry.resolve(
-                    "infrastructure.octominer.telemetry.read"))
+                telemetry = registry.resolve("infrastructure.octominer.telemetry.read")
+                module_env = _module_environment(telemetry)
             self.assertNotIn("R3A_TELEMETRY_DATABASE_DSN", module_env)
             self.assertEqual("telemetry-host", module_env["R3A_OCTOMINER_SSH_HOST"])
+            self.assertTrue(telemetry.legacy_manifest["_pinned_artifact_paths"])
+            self.assertTrue(all(len(digest) == 64 and Path(path).is_file()
+                                for path, digest in telemetry.legacy_manifest["_pinned_artifact_paths"].items()))
             store = ProviderLifecycleFixtureStore()
-            settings = SimpleNamespace(data_dir=root / "data")
             runtime = ProviderProcessManager(settings, store, registry)
             cme = CME.__new__(CME)
-            cme.settings = SimpleNamespace(capability_registry=registry, source_digest="lifecycle-demo",
-                                           data_dir=root / "data")
+            cme.settings = settings
             cme.store = store
             cme.provider_runtime = runtime
             telemetry_discovery = await cme._control_request(
