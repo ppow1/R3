@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.10.0
+File Revision: 1.10.1
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
 Purpose: Execute Grace objectives through configured inference and resident-selected capabilities in the authorized canonical runtime.
@@ -35,7 +35,8 @@ Changed: 2026-11-07T23:50:40Z | R3A-AP2-DELEGATION-CONTINUATION | Codex GPT-6 | 
 Changed: 2026-11-08T00:04:44Z | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Validate and deliver generic versioned institutional results to Grace while rejecting claims that override failed verification.
 Changed: 2026-11-08T01:06:38Z | R3A-MULTI-RESIDENT | Codex GPT-6 | Accept directory-proven resident execution profiles and select their externally configured inference route without embedding resident identities.
 Changed: 2026-11-08T02:44:52Z | R3A-AP1-EVIDENCE-FEEDBACK | Codex GPT-6 | Expose complete evidence provenance and require all institutional citation refs in final responses.
-History/Predecessor: Prior revision preserved at commit 0d24f9433a670598499c55ca9071acda79e080b3, blob ca79f168f5a1d86bb1bc22c6d694e3247eb37853.
+Changed: 2026-11-08T02:49:00Z | R3A-AP1-EVIDENCE-FEEDBACK | Codex GPT-6 | Associate evidence references with returned provider and invocation provenance.
+History/Predecessor: Prior revision preserved at commit 11d4c898eea1fef6caf6a22b72bbd827217ccf15, blob 8f6e0c9bd146d95ff853d3a78ec01924fcdad68f.
 """
 from __future__ import annotations
 
@@ -233,8 +234,42 @@ def provider_usage_record(provider_usage: Any, *, request_ref: str, route_id: st
     return usage
 
 
-def resident_evidence_inventory(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def resident_evidence_inventory(evidence: list[dict[str, Any]],
+                                conversation: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Expose one stable, provenance-bearing reference for each returned evidence record."""
+    provenance_by_evidence: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for message in conversation:
+        try:
+            message_value = json.loads(message["content"])
+        except (KeyError, TypeError, json.JSONDecodeError):
+            continue
+        capability_result = (message_value.get("capability_result")
+                             if isinstance(message_value, dict) else None)
+        if not isinstance(capability_result, dict):
+            continue
+        result = capability_result.get("result")
+        result = result if isinstance(result, dict) else capability_result
+        invocation = result.get("invocation") or capability_result.get("invocation") or {}
+        provider = invocation.get("provider") if isinstance(invocation, dict) else {}
+        provider = provider if isinstance(provider, dict) else {}
+        provider_provenance = {
+            "capability_id": capability_result.get("capability_id"),
+            "operation_id": invocation.get("operation_id") if isinstance(invocation, dict) else None,
+            "invocation_id": invocation.get("invocation_id") if isinstance(invocation, dict) else None,
+            "provider_id": provider.get("provider_id"),
+            "provider_version": provider.get("provider_version"),
+            "provider_artifact_sha256": provider.get("artifact_sha256"),
+        }
+        returned = result.get("evidence")
+        if not isinstance(returned, list):
+            returned = capability_result.get("evidence", [])
+        for record in returned:
+            if not isinstance(record, dict) or not isinstance(record.get("source_id"), str):
+                continue
+            digest = record.get("excerpt_sha256") or record.get("sha256")
+            if isinstance(digest, str):
+                provenance_by_evidence.setdefault((record["source_id"], digest), []).append(
+                    provider_provenance)
     inventory = []
     for item in evidence:
         if not isinstance(item, dict):
@@ -256,6 +291,7 @@ def resident_evidence_inventory(evidence: list[dict[str, Any]]) -> list[dict[str
             "freshness": item.get("freshness"),
             "provider_id": item.get("provider_id"),
             "invocation_id": item.get("invocation_id"),
+            "provider_provenance": provenance_by_evidence.get((source_id, digest), []),
         })
     return inventory
 
@@ -372,7 +408,7 @@ class GraceResident:
             if (not isinstance(required_evidence_refs, list)
                     or any(not isinstance(ref, str) or not ref for ref in required_evidence_refs)):
                 raise ValueError("required_evidence_refs must be an array of source identifiers")
-            evidence_inventory = resident_evidence_inventory(evidence)
+            evidence_inventory = resident_evidence_inventory(evidence, conversation)
             resident_result_value = payload.get("resident_result")
             resident_result = None
             if resident_result_value is not None:
