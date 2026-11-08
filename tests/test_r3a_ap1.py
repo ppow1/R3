@@ -42,10 +42,11 @@ Changed: 2026-11-08T01:40:00Z | R3A-MODULAR-RUNTIME | Codex GPT-6 | Verify Grace
 Changed: 2026-11-08T01:42:00Z | R3A-MODULAR-RUNTIME | Codex GPT-6 | Verify older continuation checkpoints are compacted during activity recovery.
 Changed: 2026-11-08T01:07:51Z | R3A-MULTI-RESIDENT | Codex GPT-6 | Verify a directory-bound resident uses its independent configured model route and identity context with profile lineage enforcement.
 Changed: 2026-11-08T02:44:52Z | R3A-AP1-EVIDENCE-FEEDBACK | Codex GPT-6 | Verify complete evidence inventory delivery, mandatory citation guidance, and provenance retention.
+Changed: 2026-11-08T02:49:00Z | R3A-AP1-EVIDENCE-FEEDBACK | Codex GPT-6 | Verify evidence records retain provider and invocation provenance.
 Supersedes: None.
 Contracts: R3A-019; proposed r3a.resident.execution-profile@1.0.0; configured model routing and evidence provenance.
 Tests: This test module.
-History/Predecessor: Prior revision preserved at commit 0d24f9433a670598499c55ca9071acda79e080b3, blob e46522742dbd84fbcbe941a19f8a7f63134f4a14.
+History/Predecessor: Prior revision preserved at commit 11d4c898eea1fef6caf6a22b72bbd827217ccf15, blob 1872ea87c658fad39fd180170ecbd3fb7c23ca41.
 """
 from __future__ import annotations
 
@@ -782,6 +783,13 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
              "content": {"available": False}, "sha256": "e" * 64,
              "observed_at": "2026-11-08T02:00:02Z", "freshness": {"state": "unavailable"}},
         ]
+        payload["conversation"] = [{"role": "user", "content": json.dumps({"capability_result": {
+            "capability_id": "infrastructure.gpu.read",
+            "result": {"invocation": {"invocation_id": "invocation-gpu-1",
+                                        "operation_id": "infrastructure.gpu.read",
+                                        "provider": {"provider_id": "provider.gpu", "provider_version": "2.0.0",
+                                                     "artifact_sha256": "f" * 64}},
+                        "evidence": [payload["evidence"][1]]}}})}]
         feedback = self._resident_result()
         feedback["outcome"] = "REJECTED"
         feedback["failure_reasons"] = [{"code": "evidence_citations_incomplete",
@@ -803,6 +811,8 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         self.assertEqual(inventory[0]["evidence_ref"], "knowledge.process#sha256:" + "a" * 64)
         self.assertEqual(inventory[1]["source_sha256"], "d" * 64)
         self.assertEqual(inventory[2]["freshness"]["state"], "unavailable")
+        self.assertEqual(inventory[1]["provider_provenance"][0]["provider_id"], "provider.gpu")
+        self.assertEqual(inventory[1]["provider_provenance"][0]["invocation_id"], "invocation-gpu-1")
         self.assertIn("include every identifier", resident._model_request.await_args.args[2]["messages"][0]["content"])
         self.assertIn("Do not repeat an unchanged rejected final", resident._model_request.await_args.args[2]["messages"][0]["content"])
 
