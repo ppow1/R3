@@ -21,6 +21,7 @@ Changed: 2026-11-07T22:03:19Z | AP3-M1 | Codex GPT-6 | Verify remote configurati
 Changed: 2026-11-07T23:43:25Z | AP3-M1 | Codex GPT-6 | Verify replacement identity-provider binding, published principal/session response, and shared CME path.
 Changed: 2026-11-07T23:43:25Z | AP3-M1 | Codex GPT-6 | Reject malformed replacement-provider results.
 Changed: 2026-11-07T23:43:25Z | AP3-M1 | Codex GPT-6 | Verify the website session read returns the trusted provider principal.
+Changed: 2026-11-07T23:55:00Z | AP3-M1/#51 | Codex GPT-6 | Verify shared cookie scope, generic capability registry discovery, and #50 v1.1 reason-code handling.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1; r3a.capability-invocation.v1.
 Tests: python -m unittest tests.test_r3a_steward_access.
@@ -30,15 +31,17 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 import time
 import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 
 from r3a_runtime.steward_access import (
     AccessUnavailable, HmacIngressIdentityProvider, IdentityAssertion, StewardAccess, load_access_config,
@@ -169,6 +172,7 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
                                          headers={"Origin": "http://testserver",
                                                   "X-Correlation-ID": str(uuid.uuid4())})
             self.assertEqual(200, response.status_code)
+            self.assertIn("Path=/api/v1", response.headers.get("set-cookie", ""))
             payload = response.json()
             self.assertEqual("r3a.steward-session.v1", payload["contract"])
             self.assertEqual({"contract": "r3a.steward-principal.v1",
@@ -211,6 +215,26 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
     def test_rejects_malformed_identity_provider_result(self):
         with self.assertRaisesRegex(AccessUnavailable, "identity_provider_contract_result_invalid"):
             StewardAccess._validate_provider_assertion({"principal_id": "browser:forged"})
+
+    def test_bitwarden_reference_uses_v11_and_reason_code_does_not_leak_error_text(self):
+        example = json.loads(Path("r3a_plugins/steward_access.config.example.json").read_text())
+        self.assertEqual("1.1.0", example["identity"]["assertion_secret_ref"]["provider_version"])
+
+        class ProviderFailure(Exception):
+            outcome = "UNAVAILABLE"
+            reason_code = "cli_unavailable"
+
+        class BrokenProvider:
+            def resolve(self, _reference, *, correlation_id):
+                raise ProviderFailure("private CLI output and secret token")
+
+        headers = assertion_headers()
+        request = Request({"type": "http", "headers": [(key.lower().encode(), value.encode())
+                          for key, value in headers.items()]})
+        provider = HmacIngressIdentityProvider(config(), BrokenProvider(), config()["identity"]["assertion_secret_ref"])
+        with self.assertRaisesRegex(AccessUnavailable, "identity_secret_cli_unavailable") as caught:
+            provider.authenticate(request, correlation_id=str(uuid.uuid4()))
+        self.assertNotIn("private CLI output", str(caught.exception))
 
     async def asyncTearDown(self):
         await self.client.aclose()
@@ -284,6 +308,23 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(200, result.status_code)
         self.assertEqual("audit-1", result.json()["result"]["authorization"]["audit_event_id"])
         self.assertEqual("steward.operation.completed", self.store.events[-1]["event_type"])
+
+    async def test_capability_discovery_uses_cme_registry_without_granting_authority(self):
+        await self.client.post("/api/v1/steward/session", headers=assertion_headers())
+        registry = [{"descriptor": {"operation_id": "institution.directory.discover",
+                                     "contract_version": "1.0.0"}, "health": "available"}]
+        with patch("r3a_runtime.control.control_request", new=AsyncMock(return_value={"operations": registry})) as call:
+            result = await self.client.get("/api/v1/steward/capabilities")
+        self.assertEqual(200, result.status_code)
+        self.assertEqual(registry, result.json()["operations"])
+        self.assertFalse(result.json()["authorization_evaluated"])
+        self.assertEqual("capability.discover", call.await_args.args[1])
+        self.assertEqual("steward.capability_discovery", self.store.events[-1]["event_type"])
+
+    async def test_capability_discovery_requires_and_audits_shared_session(self):
+        response = await self.client.get("/api/v1/steward/capabilities")
+        self.assertEqual(401, response.status_code)
+        self.assertEqual("steward.session.access_denied", self.store.events[-1]["event_type"])
 
     async def test_cme_grant_denial_remains_a_denial(self):
         await self.client.post("/api/v1/steward/session", headers=assertion_headers())

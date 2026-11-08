@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: docs/architecture/R3A_STEWARD_WEBSITE_SESSION_CONTRACT.md
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-07T23:43:25Z
 Created By: Codex GPT-6
 Purpose: Publish the versioned Steward principal/session contract and integration instructions for website clients.
@@ -12,6 +12,7 @@ Dependencies: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-se
 Authority: AP3-M1 Issue #49; coordinated with #50 and #51.
 Changed: 2026-11-07T23:43:25Z | AP3-M1 | Codex GPT-6 | Publish website session contract and integration instructions.
 Changed: 2026-11-07T23:43:25Z | AP3-M1 | Codex GPT-6 | Publish standalone principal schema alongside the session schema.
+Changed: 2026-11-07T23:55:00Z | AP3-M1/#51 | Codex GPT-6 | Document shared cookie scope and generic registry discovery for same-origin workspace clients.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1.
 Tests: tests/test_r3a_steward_access.py validates provider replacement and session responses.
@@ -27,7 +28,7 @@ The machine-readable schemas are [steward-session.v1.schema.json](../../r3a_runt
 
 ## Browser operations
 
-Base path: `/api/v1/steward`. Requests are same-origin only, use `credentials: "same-origin"` and `cache: "no-store"`. Mutation requests must include the browser's `Origin`; the server checks it against configured origins. SameSite=Strict and HttpOnly cookies are set by the server. The API does not enable cross-origin credentialed access.
+Base path: `/api/v1/steward`. Requests are same-origin only, use `credentials: "same-origin"` and `cache: "no-store"`. Mutation requests must include the browser's `Origin`; the server checks it against configured origins. SameSite=Strict and HttpOnly cookies are set by the server. The shared cookie uses `Path=/api/v1` so authorized sibling APIs such as the recipient notification endpoints can validate the same opaque session; the session token is never returned in JSON or exposed to browser JavaScript. The API does not enable cross-origin credentialed access.
 
 | Operation | Request | Success | Common outcomes |
 | --- | --- | --- | --- |
@@ -35,6 +36,7 @@ Base path: `/api/v1/steward`. Requests are same-origin only, use `credentials: "
 | `GET /session` | Cookie only. | 200 `r3a.steward-session.v1` with server-derived principal and expiry. | 401 missing, expired, or revoked session; 503 session store unavailable. |
 | `DELETE /session` | Cookie and `Origin`. | 200 `{contract, state:"revoked", revoked:true, principal_id, correlation_id}`; clears cookie. | 401 invalid session; 403 origin denied; 503 session/audit state unavailable. |
 | `GET /status` | Cookie only. | 200 `r3a.steward-access-status.v1` with session principal, CME health/freshness, audit event ID, correlation. | 401 no valid session; 503 session state unavailable. CME unavailable/stale is represented in the 200 status body, not as healthy. |
+| `GET /capabilities` | Cookie only. | 200 `r3a.steward-capability-discovery.v1` from CME registry discovery; explicitly reports `authorization_evaluated: false`. | 401 no valid session; 503 CME registry unavailable. Discovery does not authorize invocation. |
 | `POST /operations/invoke` | Cookie, `Origin`, `{request: <r3a.capability-invocation.v1>}`. | 200 `r3a.steward-operation-result.v1`, authoritative result, audit event ID, correlation. | 401 unauthenticated; 403 CME grant denied; 422 malformed invocation; 503 CME/session/audit unavailable. |
 
 Do not add a route per capability. Submit canonical versioned invocations through `/operations/invoke`; CME resolves the operation and remains authoritative for grants, execution, and its audit. The website must not set `caller.principal_id`, resident/service identity, or grants as authority. The gateway overwrites caller identity from the validated session and clears resident/service self-claims.

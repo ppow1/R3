@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.14
+# File Revision: 1.0.16
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Serve visual estate UI and authenticated, canonical R3A Steward API adapters
@@ -20,6 +20,8 @@
 # Changed: 2026-11-07T21:58:03Z | R3A-007/R3A-013 | Codex GPT-6 | Expose read-only effective sanitized configuration and bounded activation history from authoritative diagnostics.
 # Changed: 2026-11-07T22:02:09Z | R3A-007/R3A-013 | Codex GPT-6 | Record focused API test coverage and current verification limits in provenance.
 # Changed: 2026-11-07T22:04:07Z | R3A-007/R3A-010 | Codex GPT-6 | Add structured request correlation and preserve CME's actual objective correlation ID.
+# Changed: 2026-11-07T23:40:00Z | R3A-007/R3A-010 | Codex GPT-6 | Serve versioned Steward workspace browser client module.
+# Changed: 2026-11-07T23:55:00Z | R3A-010 | Codex GPT-6 | Replace temporary bearer checks with the shared AP3 opaque session and version the objective result.
 
 """R3 first vertical slice: shared read-only capabilities, not UI-owned logic.
 
@@ -36,13 +38,13 @@ import sys
 import struct
 import math
 import asyncio
-import hmac
 import uuid
 import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Body, Header
+from typing import Literal
+from fastapi import FastAPI, HTTPException, Body, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
@@ -70,20 +72,20 @@ async def log_correlated_request(request, call_next):
 
 
 class GraceObjectiveRequest(BaseModel):
+    contract: Literal["r3a.grace-objective-submission.v1"]
+    contract_version: Literal["1.0.0"]
     objective: str = Field(min_length=1, max_length=4000)
     acceptance_criteria: list[dict] = Field(min_length=1, max_length=20)
     idempotency_key: str = Field(min_length=8, max_length=200)
 
 
-def _steward_settings(authorization: str | None):
-    """Resolve an externally configured bearer identity and isolated R3A runtime."""
-    expected = os.environ.get("R3A_WEBSITE_STEWARD_TOKEN")
+async def _steward_settings(request: Request):
+    """Validate the shared AP3 cookie session and resolve external R3A runtime settings."""
     config_path = os.environ.get("R3A_CONFIG")
-    if not expected or not config_path:
-        raise HTTPException(503, "Steward operations are unavailable: R3A website authentication or runtime configuration is missing")
-    supplied = authorization.removeprefix("Bearer ") if authorization and authorization.startswith("Bearer ") else ""
-    if not hmac.compare_digest(supplied, expected):
-        raise HTTPException(401, "Steward authentication required")
+    access = getattr(app.state, "steward_access", None)
+    if not access or not config_path:
+        raise HTTPException(503, "Steward operations are unavailable: shared AP3 session or runtime configuration is missing")
+    await access.authenticated_principal(request, "steward.r3a.read_or_submit")
     try:
         from r3a_runtime.config import load_settings
         return load_settings(config_path)
@@ -92,8 +94,8 @@ def _steward_settings(authorization: str | None):
 
 
 @app.get("/api/v1/steward/r3a/status")
-async def steward_r3a_status(authorization: str | None = Header(default=None, alias="Authorization")):
-    settings = _steward_settings(authorization)
+async def steward_r3a_status(request: Request):
+    settings = await _steward_settings(request)
     from r3a_runtime.control import control_request
     try:
         return await control_request(settings.diagnostics_socket, "status", timeout=4.0)
@@ -102,8 +104,8 @@ async def steward_r3a_status(authorization: str | None = Header(default=None, al
 
 
 @app.get("/api/v1/steward/r3a/events")
-async def steward_r3a_events(authorization: str | None = Header(default=None, alias="Authorization")):
-    settings = _steward_settings(authorization)
+async def steward_r3a_events(request: Request):
+    settings = await _steward_settings(request)
     from r3a_runtime.control import control_request
     try:
         return await control_request(settings.diagnostics_socket, "events", timeout=4.0)
@@ -112,8 +114,8 @@ async def steward_r3a_events(authorization: str | None = Header(default=None, al
 
 
 @app.get("/api/v1/steward/r3a/configuration")
-async def steward_r3a_configuration(authorization: str | None = Header(default=None, alias="Authorization")):
-    settings = _steward_settings(authorization)
+async def steward_r3a_configuration(request: Request):
+    settings = await _steward_settings(request)
     from r3a_runtime.control import control_request
     try:
         current, history = await asyncio.gather(
@@ -143,9 +145,8 @@ async def steward_r3a_configuration(authorization: str | None = Header(default=N
 
 
 @app.post("/api/v1/steward/r3a/objectives", status_code=202)
-async def submit_grace_objective(request: GraceObjectiveRequest,
-                                 authorization: str | None = Header(default=None, alias="Authorization")):
-    settings = _steward_settings(authorization)
+async def submit_grace_objective(request: GraceObjectiveRequest, http_request: Request):
+    settings = await _steward_settings(http_request)
     from r3a_runtime.control import control_request
     try:
         result = await control_request(settings.control_socket, "grace.objective.submit", {
@@ -154,7 +155,7 @@ async def submit_grace_objective(request: GraceObjectiveRequest,
             "acceptance_criteria": request.acceptance_criteria,
             "task_class": "objective_reasoning",
         }, idempotency_key=request.idempotency_key, timeout=6.0)
-        return result
+        return {"contract": "r3a.grace-objective-submission.v1", "contract_version": "1.0.0", **result}
     except Exception as exc:
         raise HTTPException(503, f"Grace objective was not accepted: {type(exc).__name__}") from exc
 
@@ -162,7 +163,8 @@ async def submit_grace_objective(request: GraceObjectiveRequest,
 @app.middleware("http")
 async def steward_no_store_headers(request, call_next):
     response = await call_next(request)
-    if request.url.path.startswith("/api/v1/steward/"):
+    if (request.url.path.startswith("/api/v1/steward/")
+            or request.url.path.startswith("/api/v1/notifications")):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -172,8 +174,11 @@ async def steward_no_store_headers(request, call_next):
 # Authenticated access is opt-in and fails closed when explicitly configured but invalid.
 # There is no default listener, identity, credential, session store, or public route exposure.
 if os.environ.get("R3A_STEWARD_ACCESS_CONFIG"):
-    from r3a_runtime.steward_access import create_router_from_environment
-    app.include_router(create_router_from_environment())
+    from r3a_runtime.steward_access import create_access_from_environment
+    app.state.steward_access = create_access_from_environment()
+    app.include_router(app.state.steward_access.router())
+else:
+    app.state.steward_access = None
 
 def git(*args):
     p = subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True,
@@ -270,6 +275,13 @@ def steward_access_script():
         raise HTTPException(404, "Steward access interface unavailable")
     return FileResponse(script, media_type="text/javascript", headers={"Cache-Control": "no-cache",
                        "X-Content-Type-Options": "nosniff"})
+@app.get("/web/steward-workspace-api.mjs")
+def steward_workspace_module():
+    """Serve the same-origin client for the versioned Steward workspace APIs."""
+    module = ROOT / "web" / "steward-workspace-api.mjs"
+    if not module.is_file():
+        raise HTTPException(404, "Steward workspace client unavailable")
+    return FileResponse(module, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
 
 

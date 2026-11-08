@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/steward_access.py
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.0.9
+File Revision: 1.0.10
 Created: 2026-11-07T21:37:42Z
 Created By: Codex GPT-6
 Purpose: Verify ingress-authenticated Steward identity, manage revocable durable sessions, and audit portal operations.
@@ -19,6 +19,8 @@ Changed: 2026-11-07T22:02:18Z | AP3-M1 | Codex GPT-6 | Audit invalid-origin and 
 Changed: 2026-11-07T22:03:19Z | AP3-M1 | Codex GPT-6 | Require Secure cookies when remote transport is configured.
 Changed: 2026-11-07T23:43:25Z | AP3-M1 | Codex GPT-6 | Bind replaceable versioned identity providers and publish authoritative session principal projections.
 Changed: 2026-11-07T23:43:25Z | AP3-M1 | Codex GPT-6 | Validate normalized identity-provider results before shared session issuance.
+Changed: 2026-11-07T23:55:00Z | AP3-M1/#51 | Codex GPT-6 | Scope the shared HttpOnly session cookie to /api/v1 for sibling authenticated institutional APIs.
+Changed: 2026-11-07T23:55:00Z | AP3-M2 | Codex GPT-6 | Preserve the finite Issue #50 reason code and contract provenance for assertion-secret leases.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1; r3a.capability-invocation.v1; r3a.secrets.provider.v1; r3a.machine-principal.v1.
 Tests: tests/test_r3a_steward_access.py.
@@ -216,17 +218,27 @@ class HmacIngressIdentityProvider:
             lease = self.secret_provider.resolve(self.secret_reference, correlation_id=correlation_id)
             key = lease.reveal()
             secret_provenance = {"provider_id": lease.provider_id,
+                                 "provider_contract_id": getattr(lease, "contract_id", "r3a.secrets.provider.v1"),
+                                 "provider_contract_version": getattr(lease, "contract_version", "1.1.0"),
                                  "provider_version": lease.provider_version,
                                  "remote_revision": lease.remote_revision,
                                  "fetched_at": lease.fetched_at,
                                  "machine_principal": {
+                                     "contract_id": getattr(lease.machine_principal, "contract_id", "r3a.machine-principal.v1"),
+                                     "contract_version": getattr(lease.machine_principal, "contract_version", "1.0.0"),
                                      "principal_id": lease.machine_principal.principal_id,
                                      "issuer": lease.machine_principal.issuer,
                                      "authenticated_at": lease.machine_principal.authenticated_at,
                                      "correlation_id": lease.machine_principal.correlation_id}}
         except Exception as exc:
             outcome = getattr(exc, "outcome", "UNAVAILABLE")
-            raise AccessUnavailable(f"identity_secret_{str(outcome).lower()}") from None
+            reason_code = getattr(exc, "reason_code", None)
+            safe_reasons = {"provider_unavailable", "credentials_unavailable", "cli_unavailable",
+                            "request_timeout", "reference_not_found", "access_denied",
+                            "provider_start_failed", "provider_failure", "invalid_reference",
+                            "invalid_request", "response_invalid", "response_mismatch"}
+            safe_reason = reason_code if isinstance(reason_code, str) and reason_code in safe_reasons else str(outcome).lower()
+            raise AccessUnavailable(f"identity_secret_{safe_reason}") from None
         finally:
             if lease is not None:
                 lease.close()
@@ -270,6 +282,27 @@ class StewardAccess:
         if not record or record.get("revoked_at") or record["expires_at"] <= datetime.now(timezone.utc):
             raise PermissionError("session_invalid_or_expired")
         return record
+
+    async def authenticated_principal(self, request: Request, action: str = "session.protected_read") -> dict[str, Any]:
+        """Resolve the same authoritative cookie session for sibling institutional APIs."""
+        correlation = self._correlation(request)
+        try:
+            record = await self._session(request.cookies.get(self.config["session"]["cookie_name"]))
+            return {
+                "contract": PRINCIPAL_CONTRACT,
+                "principal_id": record["principal_id"],
+                "issuer": record["issuer"],
+                "authenticated_at": record["authenticated_at"].isoformat(),
+                "factor_refs": list(record["factor_refs"]),
+                "correlation_id": correlation,
+            }
+        except PermissionError as exc:
+            await self._store_call(self.store.audit, event_type="steward.session.access_denied",
+                                   principal_id=None, outcome="denied", correlation_id=correlation,
+                                   details={"action": action, "reason": str(exc)})
+            raise HTTPException(401, "Steward session unavailable") from exc
+        except AccessUnavailable as exc:
+            raise HTTPException(503, "Session state unavailable") from exc
 
     @staticmethod
     def _validate_provider_assertion(assertion: Any) -> IdentityAssertion:
@@ -323,7 +356,7 @@ class StewardAccess:
                 response.set_cookie(self.config["session"]["cookie_name"], token,
                                     max_age=self.config["session"]["lifetime_seconds"],
                                     httponly=True, secure=self.config["session"]["secure_cookie"],
-                                    samesite="strict", path="/api/v1/steward")
+                                    samesite="strict", path="/api/v1")
                 logger.info("steward_session_created", extra={"correlation_id": correlation,
                             "principal_id": assertion.principal_id, "contract": SESSION_CONTRACT})
                 return {"contract": SESSION_CONTRACT, "state": "authenticated",
@@ -378,7 +411,7 @@ class StewardAccess:
                 token = request.cookies.get(self.config["session"]["cookie_name"])
                 record = await self._session(token)
                 revoked = await self._store_call(self.store.revoke, self._digest(token), correlation_id=correlation)
-                response.delete_cookie(self.config["session"]["cookie_name"], path="/api/v1/steward",
+                response.delete_cookie(self.config["session"]["cookie_name"], path="/api/v1",
                                        secure=self.config["session"]["secure_cookie"], httponly=True,
                                        samesite="strict")
                 return {"contract": SESSION_CONTRACT, "state": "revoked", "revoked": revoked,
@@ -497,6 +530,31 @@ class StewardAccess:
             except AccessUnavailable as exc:
                 raise HTTPException(503, "Session state unavailable") from exc
 
+        @router.get("/capabilities")
+        async def discover_capabilities(request: Request):
+            """Expose read-only CME registry discovery; discoverability grants no authority."""
+            correlation = self._correlation(request)
+            try:
+                identity = await self.authenticated_principal(request, "capability.discovery")
+                from .control import control_request
+                result = await control_request(self.config["cme"]["control_socket"], "capability.discover",
+                                               {}, timeout=self.config["cme"]["request_timeout_seconds"])
+                audit_id = await self._store_call(
+                    self.store.audit, event_type="steward.capability_discovery",
+                    principal_id=identity["principal_id"], outcome="accepted", correlation_id=correlation,
+                    details={"count": len(result.get("operations", [])) if isinstance(result, dict) else None})
+                return {"contract": "r3a.steward-capability-discovery.v1",
+                        "operations": result.get("operations", []), "authorization_evaluated": False,
+                        "effect": "none; discovery does not authorize invocation",
+                        "audit_event_id": audit_id, "correlation_id": correlation,
+                        "freshness": "current", "observed_at": datetime.now(timezone.utc).isoformat()}
+            except PermissionError as exc:
+                raise HTTPException(401, "Steward session unavailable") from exc
+            except AccessUnavailable as exc:
+                raise HTTPException(503, "Session state unavailable") from exc
+            except Exception as exc:
+                raise HTTPException(503, "CME capability registry unavailable") from exc
+
         return router
 
     def _verify_origin(self, origin: str | None) -> None:
@@ -575,7 +633,7 @@ def load_access_config(path: str | Path) -> dict[str, Any]:
     return config
 
 
-def create_router_from_environment() -> APIRouter:
+def create_access_from_environment() -> StewardAccess:
     config_path = os.environ.get("R3A_STEWARD_ACCESS_CONFIG", "")
     if not config_path:
         raise AccessUnavailable("steward_access_configuration_unavailable")
@@ -592,4 +650,8 @@ def create_router_from_environment() -> APIRouter:
     identity_provider = HmacIngressIdentityProvider(config, provider, secret_reference)
     return StewardAccess(config,
                          PostgresSessionStore(dsn, config["session"]["connect_timeout_seconds"]),
-                         identity_provider).router()
+                         identity_provider)
+
+
+def create_router_from_environment() -> APIRouter:
+    return create_access_from_environment().router()

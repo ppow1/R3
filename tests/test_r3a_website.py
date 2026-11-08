@@ -2,18 +2,20 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_website.py
 Component: R3A-WEBSITE-API-TESTS
-File Revision: 1.0.1
+File Revision: 1.0.3
 Created: 2026-11-07T21:59:13Z
 Created By: Codex GPT-6
-Purpose: Verify Steward website auth gates and canonical runtime API forwarding.
+Purpose: Verify shared-session gating, versioned objective forwarding, and website client assets.
 Execution Model: unittest with FastAPI TestClient and mocked Unix socket responses.
 Observability: HTTP status/body assertions and CME control request assertions.
 Dependencies: FastAPI, httpx, r3_app, unittest.mock.
 Authority: R3A Class I website development authorized by Issue #51.
 Changed: 2026-11-07T21:59:13Z | R3A-007/R3A-010/R3A-013/R3A-019 | Codex GPT-6 | Add API tests for effective config, authentication, diagnostics, and objective submission.
 Changed: 2026-11-07T22:04:07Z | R3A-007/R3A-010 | Codex GPT-6 | Verify request correlation header and preservation of CME correlation IDs.
+Changed: 2026-11-07T23:40:00Z | R3A-007/R3A-010 | Codex GPT-6 | Verify the versioned workspace client asset route.
+Changed: 2026-11-07T23:55:00Z | R3A-010 | Codex GPT-6 | Verify shared AP3 session gating and no browser bearer-token auth.
 Supersedes: None.
-Contracts: R3A AP0 diagnostic socket; grace.objective.submit; R3A website Steward adapter.
+Contracts: r3a.steward-session.v1; r3a.grace-objective-submission.v1; R3A AP0 diagnostic socket.
 Tests: python -m unittest tests.test_r3a_website.
 History/Predecessor: New file; initial publication recorded in Git.
 """
@@ -32,23 +34,34 @@ from r3_app import app
 class StewardWebsiteApiTests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
+        self.previous_access = app.state.steward_access
+        self.access = SimpleNamespace(authenticated_principal=AsyncMock(return_value={"principal_id": "steward:test"}))
+        app.state.steward_access = self.access
         self.settings = SimpleNamespace(
             diagnostics_socket="/run/r3a/diagnostics.sock",
             control_socket="/run/r3a/control.sock",
         )
+
+    def tearDown(self):
+        app.state.steward_access = self.previous_access
+
+    def test_versioned_workspace_browser_client_is_served(self):
+        response = self.client.get("/web/steward-workspace-api.mjs")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("r3a.steward-workspace-web.v1", response.text)
 
     def test_missing_external_auth_configuration_is_explicitly_unavailable(self):
         with patch.dict(os.environ, {}, clear=True):
             response = self.client.get("/api/v1/steward/r3a/status")
         self.assertEqual(response.status_code, 503)
 
-    def test_invalid_bearer_is_denied_before_runtime_access(self):
-        with patch.dict(os.environ, {"R3A_WEBSITE_STEWARD_TOKEN": "configured", "R3A_CONFIG": "/tmp/r3a.json"}), \
-                patch("r3a_runtime.config.load_settings", return_value=self.settings), \
+    def test_temporary_bearer_does_not_replace_shared_session(self):
+        app.state.steward_access = None
+        with patch.dict(os.environ, {"R3A_CONFIG": "/tmp/r3a.json"}), \
                 patch("r3a_runtime.control.control_request", new_callable=AsyncMock) as request:
             response = self.client.get("/api/v1/steward/r3a/status",
-                                       headers={"Authorization": "Bearer invalid"})
-        self.assertEqual(response.status_code, 401)
+                                       headers={"Authorization": "Bearer configured"})
+        self.assertEqual(response.status_code, 503)
         request.assert_not_awaited()
 
     def test_configuration_view_uses_current_revision_and_bounded_activation_events(self):
@@ -62,12 +75,11 @@ class StewardWebsiteApiTests(unittest.TestCase):
              "actor": "uid:1000", "config_revision": "rev-2", "reason": "configuration activated"},
             {"event_type": "activity.completed", "event_id": "evt-1"},
         ]}
-        with patch.dict(os.environ, {"R3A_WEBSITE_STEWARD_TOKEN": "configured", "R3A_CONFIG": "/tmp/r3a.json"}), \
+        with patch.dict(os.environ, {"R3A_CONFIG": "/tmp/r3a.json"}), \
                 patch("r3a_runtime.config.load_settings", return_value=self.settings), \
                 patch("r3a_runtime.control.control_request", new_callable=AsyncMock,
                       side_effect=[status, events]):
-            response = self.client.get("/api/v1/steward/r3a/configuration",
-                                       headers={"Authorization": "Bearer configured"})
+            response = self.client.get("/api/v1/steward/r3a/configuration")
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["revision"]["revision_id"], "rev-2")
@@ -78,18 +90,20 @@ class StewardWebsiteApiTests(unittest.TestCase):
 
     def test_objective_is_forwarded_to_cme_with_idempotency(self):
         result = {"activity_id": "activity-1", "state": "QUEUED", "correlation_id": "cme-correlation-1"}
-        with patch.dict(os.environ, {"R3A_WEBSITE_STEWARD_TOKEN": "configured", "R3A_CONFIG": "/tmp/r3a.json"}), \
+        with patch.dict(os.environ, {"R3A_CONFIG": "/tmp/r3a.json"}), \
                 patch("r3a_runtime.config.load_settings", return_value=self.settings), \
                 patch("r3a_runtime.control.control_request", new_callable=AsyncMock,
                       return_value=result) as request:
-            response = self.client.post("/api/v1/steward/r3a/objectives",
-                headers={"Authorization": "Bearer configured"}, json={
+            response = self.client.post("/api/v1/steward/r3a/objectives", json={
+                    "contract": "r3a.grace-objective-submission.v1", "contract_version": "1.0.0",
                     "objective": "Check runtime", "acceptance_criteria": [{
                         "criterion_id": "path", "type": "transition_path",
                         "from_state": "RUNNING", "to_state": "STOPPING"}],
                     "idempotency_key": "website-request-1"})
         self.assertEqual(response.status_code, 202)
         self.assertTrue(response.headers["X-Request-ID"])
+        self.assertEqual(response.json()["contract"], "r3a.grace-objective-submission.v1")
+        self.assertEqual(response.json()["contract_version"], "1.0.0")
         self.assertEqual(response.json()["activity_id"], "activity-1")
         self.assertEqual(response.json()["correlation_id"], "cme-correlation-1")
         self.assertEqual(request.await_args.args[1], "grace.objective.submit")
