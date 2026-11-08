@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.10.11
+File Revision: 1.10.12
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -52,6 +52,7 @@ Changed: 2026-11-08T17:31:16Z | R3A-CHARACTER-CONTEXT-V2 | Codex GPT-6 | Validat
 Changed: 2026-11-08T17:33:14Z | R3A-CHARACTER-CONTEXT-V2 | Codex GPT-6 | Cover the shared provider's natural-conversation boundary without adding a second inference loop.
 Changed: 2026-11-08T17:34:06Z | R3A-CHARACTER-CONTEXT-V2 | Codex GPT-6 | Preserve immediate test-file predecessor provenance.
 Changed: 2026-11-08T17:35:30Z | R3A-CHARACTER-CONTEXT-V2 | Codex GPT-6 | Reject activity-crossing and content-digest substitution before inference.
+Changed: 2026-11-08T18:29:46Z | R3A-CONTEXT-PIN-RECOVERY | Codex GPT-6 | Verify a compacted provider-rejection retry preserves the v2 pin without exposing protected provenance.
 History (continued): Per-change provenance continues in the repository history.
 """
 from __future__ import annotations
@@ -432,6 +433,31 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         self.assertEqual(durable_context["retry"]["request_ref"], result["model"]["request_ref"])
         self.assertNotEqual(first_request, second_request)
         self.assertNotEqual(first_user["evidence"], second_user["evidence"])
+
+    def test_compacted_context_recovery_keeps_the_same_v2_character_pin(self):
+        context = self._character_context()
+        response_content = ('{"action":"final","decision":{"assessment":"The returned evidence supports the answer.",'
+                            '"status":"healthy","evidence_refs":[],"recommended_action":"none"}}')
+        resident = self._resident(response_content)
+        resident._model_request = AsyncMock(side_effect=[
+            ModelContextLimitError(23154, 16384, "provider context limit"),
+            {"id": "recovered", "usage": {"prompt_tokens": 5200, "completion_tokens": 45},
+             "choices": [{"finish_reason": "stop", "message": {"content": response_content}}]},
+        ])
+        payload = self._payload([])
+        payload["resident_character_context"] = context
+
+        result = asyncio.run(resident.handle("execute", payload))
+
+        first_request, retry_request = [call.args[2] for call in resident._model_request.await_args_list]
+        self.assertIn(context["prompt_text"], first_request["messages"][0]["content"])
+        self.assertEqual(first_request["messages"][0]["content"], retry_request["messages"][0]["content"])
+        self.assertIn("context_recovery_feedback", json.loads(retry_request["messages"][-1]["content"]))
+        self.assertEqual(character_context_binding(context),
+                         result["model"]["usage"]["resident_character_context"])
+        self.assertNotIn(context["authorization_ref"], json.dumps(result))
+        self.assertNotIn(context["hr_principal_association_ref"], json.dumps(result))
+        self.assertEqual("provider_context_recovery", result["context_compaction"]["mode"])
 
     def test_provider_context_rejection_is_parsed_with_reported_prompt_and_window(self):
         resident = self._resident('{"action":"final"}')
