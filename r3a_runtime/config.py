@@ -42,6 +42,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+from .timestamp_presentation import (DEFAULT_PRESENTATION_TIMEZONE,
+                                    TimestampPresentationError, resolve_timezone)
 
 from .module_contracts import validate_dependency_graph
 
@@ -284,6 +286,7 @@ class Settings:
     capability_registry: Any
     notification_sources: tuple[NotificationSourceSettings, ...]
     resident_office_routes: tuple[ResidentOfficeRoute, ...]
+    presentation_timezone: str = DEFAULT_PRESENTATION_TIMEZONE
 
     def model_route(self, route_id: str | None = None) -> ModelRoute:
         return resolve_model_route(self.model_routes, self.default_model_route, route_id)
@@ -334,7 +337,7 @@ def load_settings(path: str | Path) -> Settings:
     expected_root = {"schema_version", "instance_id", "paths", "postgres", "module", "timing"}
     extra = value.keys() - expected_root - {
         "grace", "authorization", "capability_plugins", "capability_operations", "notification_intake",
-        "resident_execution"}
+        "resident_execution", "presentation_timezone"}
     missing = expected_root - value.keys()
     if missing or extra:
         raise ConfigurationError(f"root keys invalid; missing={sorted(missing)}, unknown={sorted(extra)}")
@@ -378,6 +381,11 @@ def load_settings(path: str | Path) -> Settings:
     instance_id = _text(value["instance_id"], "instance_id")
     if not instance_id.startswith("r3a_") or not instance_id.replace("_", "").isalnum():
         raise ConfigurationError("instance_id must use the isolated r3a_<name> form")
+    presentation_timezone = value.get("presentation_timezone", DEFAULT_PRESENTATION_TIMEZONE)
+    try:
+        resolve_timezone(presentation_timezone)
+    except TimestampPresentationError as exc:
+        raise ConfigurationError(f"presentation_timezone is invalid: {exc}") from exc
 
     paths = value["paths"]
     if not isinstance(paths, dict):
@@ -934,6 +942,7 @@ def load_settings(path: str | Path) -> Settings:
         capability_registry=capability_registry,
         notification_sources=notification_sources,
         resident_office_routes=resident_office_routes,
+        presentation_timezone=presentation_timezone,
     )
 
 
@@ -950,6 +959,7 @@ def sanitized_config(settings: Settings) -> dict[str, Any]:
     """Return non-secret effective values suitable for durable config history."""
     return {
         "instance_id": settings.instance_id,
+        "presentation_timezone": settings.presentation_timezone,
         "database": {"name": settings.database, "user": settings.database_user,
                      "socket_dir": str(settings.database_socket_dir), "port": settings.database_port},
         "paths": {"data_dir": str(settings.data_dir), "control_socket": str(settings.control_socket),
