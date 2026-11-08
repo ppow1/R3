@@ -35,6 +35,8 @@ from .governance import (GovernedActor, GovernancePolicy, authorize_workflow_act
 from .postgres_repository import PostgresDossierRepository
 from .workflow_service import CharacterWorkflowService
 from .hr_gateway import HRCapabilityIdentityResolver
+from .r3_authority_adapter import R3CapabilityGrantAdapter
+from .identity_association import validate_identity_association
 
 __all__ = [
     "DossierRepository", "DossierError", "RevisionConflict",
@@ -51,4 +53,5 @@ __all__ = [
     "GovernedActor", "GovernancePolicy", "authorize_workflow_action",
     "PostgresDossierRepository", "CharacterWorkflowService",
     "HRCapabilityIdentityResolver",
+    "R3CapabilityGrantAdapter", "validate_identity_association",
 ]

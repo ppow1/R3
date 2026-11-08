@@ -36,9 +36,11 @@ from r3a_runtime.residents import (
     validate_runtime_character_context,
     GovernedActor, GovernancePolicy, authorize_workflow_action,
     HRCapabilityIdentityResolver,
+    R3CapabilityGrantAdapter, validate_identity_association,
 )
 from r3a_runtime.residents.validation import validate_epistemic_span
 from r3a_runtime.residents.legacy_import import extract_legacy_hr_candidates
+from r3a_runtime.capability_contracts import validate_schema_definition
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -70,11 +72,14 @@ class ResidentDossierTests(unittest.TestCase):
             "institutional-identity.v1.schema.json": "r3a.institutional.identity.v1",
             "protected-relationship.v1.schema.json": "r3a.resident.protected-relationship.v1",
             "runtime-character-context.v1.schema.json": "r3a.resident.runtime-character-context.v1",
+            "resident-identity-association.v1.schema.json": "r3a.resident.identity-association.v1",
         }
         for filename, contract_id in expected.items():
             schema = json.loads((ROOT / "r3a_runtime/schemas" / filename).read_text())
             self.assertEqual(schema["$schema"], "https://json-schema.org/draft/2020-12/schema")
             self.assertEqual(schema["$id"], contract_id)
+            if filename == "resident-identity-association.v1.schema.json":
+                validate_schema_definition(schema)
 
     def test_private_hr_office_and_protected_relationship_facts_are_not_in_git_dossiers(self):
         for resident_id in ("r3:evelyn", "r3:gm"):
@@ -404,6 +409,74 @@ class ResidentDossierTests(unittest.TestCase):
         })
         self.assertEqual(hr.calls, [("principal:verified", "r3:vicky")])
         self.assertEqual(resolver(actor, "r3:missing")["status"], "missing")
+
+    def test_r3_exact_grant_adapter_verifies_actor_and_records_auditable_decisions(self):
+        from types import SimpleNamespace
+
+        class R3AuthorityStub:
+            def __init__(self):
+                self.checks = []
+                self.audits = []
+            def authorize(self, **request):
+                self.checks.append(request)
+                if request["scope_ref"] == "r3:denied":
+                    raise PermissionError("no exact grant")
+                return {"grant_id": "grant:test:1"}
+            def audit(self, event):
+                self.audits.append(event)
+
+        authority = R3AuthorityStub()
+        adapter = R3CapabilityGrantAdapter(
+            authority,
+            resolve_verified_principal=lambda actor: (
+                SimpleNamespace(principal_id=actor.principal_id, role="steward")
+                if actor.authentication_ref == "server-session:valid" else None),
+        )
+        valid = GovernedActor("human:steward:test", "server-session:valid")
+        forged = GovernedActor("human:steward:test", "client-supplied-session")
+        self.assertTrue(adapter.verify_actor(valid))
+        self.assertFalse(adapter.verify_actor(forged))
+        self.assertTrue(adapter.authorize_character(valid, "character.propose", "r3:vicky"))
+        self.assertFalse(adapter.authorize_character(valid, "character.propose", "r3:denied"))
+        self.assertTrue(adapter.authorize_hr(
+            SimpleNamespace(principal_id="human:steward:test", role="steward"),
+            "hr.read", "r3:vicky"))
+        self.assertEqual(authority.checks[0], {
+            "principal": "human:steward:test", "resource_id": "r3:character-dossiers",
+            "action": "character.propose", "operation": "write", "scope_ref": "r3:vicky",
+        })
+        self.assertEqual([entry["outcome"] for entry in authority.audits],
+                         ["allowed", "denied", "allowed"])
+        self.assertTrue(all(entry["correlation_id"] and entry["scope_ref"]
+                            for entry in authority.audits))
+
+    def test_identity_association_requires_independent_source_references_and_matching_binding(self):
+        association = {
+            "schema_id": "r3a.resident.identity-association", "schema_version": 1,
+            "association_ref": "association://r3:grace/revision/1", "resident_id": "r3:grace",
+            "hr": {"resident_id": "r3:grace", "revision": 3,
+                   "source_ref": "hr://record/r3:grace@3",
+                   "authority_principal": "resident:grace",
+                   "principal_association_ref": "hr://association/r3:grace@3"},
+            "dossier": {"resident_id": "r3:grace", "revision": "1.0.1", "status": "active"},
+            "directory": {"source_id": "riverview_authority.directory",
+                          "source_contract": "riverview-authority.directory.v1",
+                          "snapshot_sha256": "a" * 64, "observed_at": "2026-11-08T14:01:26Z",
+                          "principal_id": "resident:grace", "office_id": "office:grace",
+                          "office_role": "Director of Operations", "binding_revision": 9},
+            "credential_ref": "credential://resident:grace/credential-id",
+            "grant_refs": ["grant://character/read/1", "grant://character/activate/1"],
+            "runtime": {"profile_id": "resident.grace", "profile_revision": "1.2.9",
+                        "route_id": "objective_reasoning"},
+            "evidence_refs": ["source://hr", "source://directory", "source://credential", "source://runtime"],
+            "verified_at": "2026-11-08T14:02:00Z",
+        }
+        self.assertIs(validate_identity_association(association), association)
+        with self.assertRaises(ValueError):
+            validate_identity_association({**association, "directory": {
+                **association["directory"], "principal_id": "resident:someone-else"}})
+        with self.assertRaises(ValueError):
+            validate_identity_association({**association, "credential_ref": "credential://?token=secret"})
 
     def test_runtime_context_resolves_hr_identity_before_applying_prompt(self):
         dossier = self.repo.get("r3:grace")
