@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/secrets.py
 Component: R3A-SECRETS-API
-File Revision: 1.0.0
+File Revision: 1.1.0
 Created: 2026-11-07T21:36:43Z
 Created By: Codex GPT-6
 Purpose: Define a versioned secret reference, provider, lease, and machine-principal boundary.
@@ -11,10 +11,11 @@ Observability: Non-secret provider identity, revision, status, timestamp, and co
 Dependencies: Python standard library; AP3-M2 Issue #50.
 Authority: R3A AP3-M2; CME retains operation authorization and audit ownership.
 Changed: 2026-11-07T21:36:43Z | R3A-AP3-M2-ISSUE-50 | Codex GPT-6 | Define private, versioned secret resolution and machine identity contracts.
+Changed: 2026-11-07T22:09:29Z | R3A-AP3-M2-CONSUMER | Codex GPT-6 | Version sanitized reason codes for distinct provider availability/failure outcomes.
 Supersedes: None.
 Contracts: r3a.secrets.provider.v1; r3a.machine-principal.v1.
 Tests: tests/test_r3a_bitwarden_secrets.py.
-History/Predecessor: New file; initial publication recorded in Git.
+History/Predecessor: Revision 1.0.0 at commit d07bade6dfa6e6ef498f454d82866aa592b899ba, blob e327f90f402faf70dd513bd71147ef2b78719944.
 """
 from __future__ import annotations
 
@@ -27,20 +28,34 @@ from typing import Any, Protocol, runtime_checkable
 
 SECRET_PROVIDER_CONTRACT_ID = "r3a.secrets.provider.v1"
 MACHINE_PRINCIPAL_CONTRACT_ID = "r3a.machine-principal.v1"
-SECRET_PROVIDER_CONTRACT_VERSION = "1.0.0"
+SECRET_PROVIDER_CONTRACT_VERSION = "1.1.0"
 MACHINE_PRINCIPAL_CONTRACT_VERSION = "1.0.0"
 BITWARDEN_PROVIDER_ID = "r3a.bitwarden-secrets"
-BITWARDEN_PROVIDER_VERSION = "1.0.0"
+BITWARDEN_PROVIDER_VERSION = "1.1.0"
 _ENVIRONMENT_VARIABLE = re.compile(r"[A-Z][A-Z0-9_]*")
+_SECRET_ERROR_REASONS = frozenset({
+    "provider_unavailable", "credentials_unavailable", "cli_unavailable", "request_timeout",
+    "provider_start_failed", "access_denied", "reference_not_found", "provider_failure",
+    "invalid_reference", "invalid_request", "response_invalid", "response_mismatch",
+})
 
 
 class SecretProviderError(RuntimeError):
-    """A redacted secret lookup outcome safe to report in status and diagnostics."""
+    """A redacted secret outcome and stable reason code safe for status and diagnostics."""
 
-    def __init__(self, outcome: str, message: str):
+    def __init__(self, outcome: str, message: str, *, reason_code: str | None = None):
         if outcome not in {"UNAVAILABLE", "DENIED", "NOT_FOUND", "FAILED"}:
             raise ValueError("unsupported secret provider outcome")
         self.outcome = outcome
+        default_reason = {
+            "UNAVAILABLE": "provider_unavailable",
+            "DENIED": "access_denied",
+            "NOT_FOUND": "reference_not_found",
+            "FAILED": "provider_failure",
+        }[outcome]
+        if reason_code is not None and reason_code not in _SECRET_ERROR_REASONS:
+            raise ValueError("secret provider reason code is invalid")
+        self.reason_code = reason_code or default_reason
         super().__init__(message)
 
 
