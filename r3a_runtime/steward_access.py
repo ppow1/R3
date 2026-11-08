@@ -2,13 +2,13 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/steward_access.py
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.1.2
+File Revision: 1.2.0
 Created: 2026-11-07T21:37:42Z
 Created By: Codex GPT-6
-Purpose: Verify ingress-authenticated Steward identity, manage revocable durable sessions, and audit portal operations.
+Purpose: Verify Steward identity through a replaceable institutional adapter, manage revocable durable sessions, and audit portal operations.
 Execution Model: FastAPI router over a PostgreSQL session/audit store and the existing CME control socket.
 Observability: Versioned structured audit events with request correlation and session provenance; secret values are excluded.
-Dependencies: FastAPI, psycopg, r3a_runtime.control, r3a_runtime.secrets and r3a_plugins.bitwarden_secrets after AP3-M2 integration; external identity ingress and CME.
+Dependencies: FastAPI, psycopg, r3a_runtime.control; existing R3 account portal or trusted ingress; CME; Bitwarden provider for HMAC ingress binding.
 Authority: AP3-M1 / R3A-010, R3A-013; Issue #49; Roadmap Baseline 1.0; no exception.
 Changed: 2026-11-07T21:37:42Z | AP3-M1 | Codex GPT-6 | Implement ingress-asserted identity, PostgreSQL sessions, CME authorization delegation, and freshness-aware endpoints.
 Changed: 2026-11-07T21:44:36Z | AP3-M1 | Codex GPT-6 | Preserve authentication factor provenance and mount the touch-friendly Steward access interface.
@@ -23,6 +23,7 @@ Changed: 2026-11-07T23:53:17Z | AP3-M1/AP3-M2 | Codex GPT-6 | Align Bitwarden 1.
 Changed: 2026-11-07T23:53:17Z | AP3-M1/#51 | Codex GPT-6 | Expose a shared FastAPI principal dependency for Website routes on the same session authority.
 Changed: 2026-11-07T23:57:23Z | AP3-M1/#51 | Codex GPT-6 | Return unavailable explicitly from Website dependencies when session storage cannot be read.
 Changed: 2026-11-08T00:01:13Z | AP3-M1/#51 | Codex GPT-6 | Share the session cookie across /api/v1, require Origin on Website mutations, and expose generic CME discovery.
+Changed: 2026-11-08T13:45:00Z | AP3-M1/#51 | Codex GPT-6 | Bind the existing R3 account-session authority through the versioned identity-provider contract.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1; r3a.capability-invocation.v1; r3a.secrets.provider.v1; r3a.machine-principal.v1.
 Tests: tests/test_r3a_steward_access.py; tests/test_r3a_capability_contracts.py.
@@ -38,6 +39,9 @@ import os
 import re
 import secrets
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -273,6 +277,78 @@ class HmacIngressIdentityProvider:
             raise PermissionError("identity_assertion_invalid")
         return IdentityAssertion(issuer, principal, assertion_id, issued_at,
                                 authenticated_at.astimezone(timezone.utc), factors, secret_provenance)
+
+
+class R3AccountSessionIdentityProvider:
+    """Bind the established R3 account portal session to the shared AP3 session store."""
+    contract_id = IDENTITY_PROVIDER_CONTRACT
+    contract_version = "1.0.0"
+    portal_cookie_name = "rv_account_session"
+
+    def __init__(self, config: dict[str, Any]):
+        self.config = config
+
+    def authenticate(self, request: Request, *, correlation_id: str) -> IdentityAssertion:
+        portal_cookie = request.cookies.get(self.portal_cookie_name, "")
+        if not portal_cookie or len(portal_cookie) > 4096:
+            raise PermissionError("identity_not_authenticated")
+        identity_config = self.config["identity"]
+        headers = {"Accept": "application/json", "Cookie": f"{self.portal_cookie_name}={portal_cookie}",
+                   "X-Correlation-ID": correlation_id}
+        req = urllib.request.Request(identity_config["session_url"], headers=headers, method="GET")
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *_args, **_kwargs):
+                return None
+        try:
+            opener = urllib.request.build_opener(NoRedirect)
+            with opener.open(req, timeout=identity_config.get("request_timeout_seconds", 5)) as response:
+                status, body = response.status, response.read(65537)
+        except urllib.error.HTTPError as exc:
+            if exc.code in {401, 403}:
+                raise PermissionError("identity_not_authenticated") from None
+            raise AccessUnavailable("identity_provider_unavailable") from None
+        except (OSError, TimeoutError, urllib.error.URLError):
+            raise AccessUnavailable("identity_provider_unavailable") from None
+        if status in {401, 403}:
+            raise PermissionError("identity_not_authenticated")
+        if status != 200:
+            raise AccessUnavailable("identity_provider_unavailable")
+        if len(body) > 65536:
+            raise AccessUnavailable("identity_provider_response_invalid")
+        try:
+            session = json.loads(body)
+        except (TypeError, ValueError):
+            raise AccessUnavailable("identity_provider_response_invalid") from None
+        identity = session.get("identity") if isinstance(session, dict) else None
+        if (not isinstance(session, dict) or session.get("authenticated") is not True
+                or not isinstance(identity, dict)):
+            raise PermissionError("identity_not_authenticated")
+        email = identity.get("email")
+        roles = identity.get("roles", session.get("roles", []))
+        if (not isinstance(email, str) or "@" not in email or not isinstance(roles, list)
+                or identity_config["required_role"] not in roles):
+            raise PermissionError("identity_not_authorized")
+        authenticated_at = datetime.now(timezone.utc)
+        timestamp = identity.get("authenticated_at", session.get("authenticated_at"))
+        if timestamp is not None:
+            try:
+                authenticated_at = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+            except ValueError:
+                raise AccessUnavailable("identity_provider_response_invalid") from None
+            if authenticated_at.tzinfo is None or authenticated_at > datetime.now(timezone.utc):
+                raise AccessUnavailable("identity_provider_response_invalid")
+            authenticated_at = authenticated_at.astimezone(timezone.utc)
+        factors = identity.get("factor_refs", session.get("factor_refs", []))
+        if (not isinstance(factors, list)
+                or any(not isinstance(item, str) or not item or len(item) > 128 for item in factors)):
+            raise AccessUnavailable("identity_provider_response_invalid")
+        return IdentityAssertion(
+            identity_config["issuer"], email.strip().lower(), str(uuid.uuid4()), int(time.time()),
+            authenticated_at, tuple(factors),
+            {"identity_provider_id": "r3.account-session",
+             "identity_provider_contract_id": self.contract_id,
+             "identity_provider_contract_version": self.contract_version,
+             "identity_source_issuer": identity_config["issuer"]})
 
 
 class StewardAccess:
@@ -615,8 +691,10 @@ def load_access_config(path: str | Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError) as exc:
         raise AccessUnavailable("steward_access_configuration_unavailable") from exc
     required = {"schema_id", "schema_version", "enabled", "identity", "session", "cme",
-                "remote_transport", "session_dsn_env", "secret_provider_manifest", "secret_provider_config"}
-    if not isinstance(config, dict) or set(config) != required:
+                "remote_transport", "session_dsn_env"}
+    optional = {"secret_provider_manifest", "secret_provider_config"}
+    if (not isinstance(config, dict) or not required <= set(config)
+            or set(config) - required - optional):
         raise AccessUnavailable("steward_access_configuration_invalid")
     if (config["schema_id"] != "r3a.steward-access.config.v1"
             or type(config["schema_version"]) is not int or config["schema_version"] != 1):
@@ -624,37 +702,56 @@ def load_access_config(path: str | Path) -> dict[str, Any]:
     if config["enabled"] is not True:
         raise AccessUnavailable("steward_access_disabled")
     identity_keys = {"issuer", "steward_principal_id", "assertion_secret_ref", "assertion_max_age_seconds"}
+    portal_identity_keys = {"provider", "issuer", "session_url", "required_role", "request_timeout_seconds"}
     session_keys = {"cookie_name", "lifetime_seconds", "secure_cookie", "allowed_origins",
                     "connect_timeout_seconds"}
     cme_keys = {"control_socket", "request_timeout_seconds", "health_stale_after_seconds"}
     transport_keys = {"state", "public_exposure"}
-    for section, keys in (("identity", identity_keys), ("session", session_keys),
-                          ("cme", cme_keys), ("remote_transport", transport_keys)):
+    for section, keys in (("session", session_keys), ("cme", cme_keys),
+                          ("remote_transport", transport_keys)):
         if not isinstance(config[section], dict) or set(config[section]) != keys:
             raise AccessUnavailable(f"steward_access_{section}_configuration_invalid")
+    identity = config["identity"]
+    identity_provider = identity.get("provider", "hmac-ingress") if isinstance(identity, dict) else None
+    expected_identity_keys = (identity_keys if identity_provider == "hmac-ingress"
+                              else portal_identity_keys if identity_provider == "r3.account-session"
+                              else set())
+    if not expected_identity_keys or set(identity) != expected_identity_keys:
+        raise AccessUnavailable("steward_access_identity_configuration_invalid")
     if config["remote_transport"]["public_exposure"] is not False:
         raise AccessUnavailable("public_exposure_requires_separate_review")
     if (not isinstance(config["session_dsn_env"], str)
             or re.fullmatch(r"[A-Z][A-Z0-9_]*", config["session_dsn_env"]) is None
             or not os.environ.get(config["session_dsn_env"], "")):
         raise AccessUnavailable("session_store_unavailable")
-    identity = config["identity"]
     session = config["session"]
     cme = config["cme"]
     transport = config["remote_transport"]
-    if (any(not isinstance(identity.get(key), str) or not identity[key]
-            for key in ("issuer", "steward_principal_id"))
-            or type(identity.get("assertion_max_age_seconds")) is not int
-            or identity["assertion_max_age_seconds"] <= 0):
-        raise AccessUnavailable("steward_access_identity_configuration_invalid")
-    secret_ref = identity.get("assertion_secret_ref")
-    if (not isinstance(secret_ref, dict)
-            or set(secret_ref) != {"provider_id", "provider_version", "secret_id"}
-            or any(not isinstance(value, str) or not value for value in secret_ref.values())):
-        raise AccessUnavailable("steward_access_secret_reference_invalid")
-    if any(not isinstance(config[key], str) or not Path(config[key]).is_absolute()
-           for key in ("secret_provider_manifest", "secret_provider_config")):
-        raise AccessUnavailable("steward_access_secret_provider_configuration_invalid")
+    if identity_provider == "hmac-ingress":
+        if (any(not isinstance(identity.get(key), str) or not identity[key]
+                for key in ("issuer", "steward_principal_id"))
+                or type(identity.get("assertion_max_age_seconds")) is not int
+                or identity["assertion_max_age_seconds"] <= 0):
+            raise AccessUnavailable("steward_access_identity_configuration_invalid")
+        secret_ref = identity.get("assertion_secret_ref")
+        if (not isinstance(secret_ref, dict)
+                or set(secret_ref) != {"provider_id", "provider_version", "secret_id"}
+                or any(not isinstance(value, str) or not value for value in secret_ref.values())):
+            raise AccessUnavailable("steward_access_secret_reference_invalid")
+        if any(not isinstance(config.get(key), str) or not Path(config[key]).is_absolute()
+               for key in ("secret_provider_manifest", "secret_provider_config")):
+            raise AccessUnavailable("steward_access_secret_provider_configuration_invalid")
+    else:
+        issuer, role, url = identity.get("issuer"), identity.get("required_role"), identity.get("session_url")
+        parsed = urllib.parse.urlsplit(url) if isinstance(url, str) else None
+        if (not isinstance(issuer, str) or not issuer or not isinstance(role, str) or not role
+                or parsed is None or parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
+                or parsed.port is None or parsed.username or parsed.password or parsed.query or parsed.fragment
+                or parsed.path != "/api/v1/auth/session"
+                or not isinstance(identity.get("request_timeout_seconds"), (int, float))
+                or isinstance(identity.get("request_timeout_seconds"), bool)
+                or identity["request_timeout_seconds"] <= 0):
+            raise AccessUnavailable("steward_access_identity_configuration_invalid")
     if (not isinstance(session.get("cookie_name"), str) or not session["cookie_name"]
             or type(session.get("lifetime_seconds")) is not int or session["lifetime_seconds"] <= 0
             or not isinstance(session.get("connect_timeout_seconds"), (int, float))
@@ -685,15 +782,18 @@ def create_access_from_environment() -> StewardAccess:
         raise AccessUnavailable("steward_access_configuration_unavailable")
     config = load_access_config(config_path)
     dsn = os.environ.get(config["session_dsn_env"], "")
-    try:
-        from r3a_plugins.bitwarden_secrets.provider import load_configured_provider
-        from r3a_runtime.secrets import SecretReference
-        provider = load_configured_provider(config["secret_provider_manifest"],
-                                            config["secret_provider_config"])
-        secret_reference = SecretReference(**config["identity"]["assertion_secret_ref"])
-    except Exception as exc:
-        raise AccessUnavailable("steward_identity_provider_unavailable") from exc
-    identity_provider = HmacIngressIdentityProvider(config, provider, secret_reference)
+    if config["identity"].get("provider", "hmac-ingress") == "r3.account-session":
+        identity_provider = R3AccountSessionIdentityProvider(config)
+    else:
+        try:
+            from r3a_plugins.bitwarden_secrets.provider import load_configured_provider
+            from r3a_runtime.secrets import SecretReference
+            provider = load_configured_provider(config["secret_provider_manifest"],
+                                                config["secret_provider_config"])
+            secret_reference = SecretReference(**config["identity"]["assertion_secret_ref"])
+        except Exception as exc:
+            raise AccessUnavailable("steward_identity_provider_unavailable") from exc
+        identity_provider = HmacIngressIdentityProvider(config, provider, secret_reference)
     return StewardAccess(config,
                          PostgresSessionStore(dsn, config["session"]["connect_timeout_seconds"]),
                          identity_provider)

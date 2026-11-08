@@ -2,7 +2,7 @@
 R3 CONTROLLED TEST SOURCE
 File: tests/test_r3a_steward_access.py
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.1.4
+File Revision: 1.2.0
 Created: 2026-11-07T21:37:42Z
 Created By: Codex GPT-6
 Purpose: Verify Steward assertion validation, opaque sessions, revocation, CSRF origin policy, and CME identity delegation.
@@ -24,6 +24,7 @@ Changed: 2026-11-07T23:43:25Z | AP3-M1 | Codex GPT-6 | Verify the website sessio
 Changed: 2026-11-07T23:53:17Z | AP3-M1/AP3-M2 | Codex GPT-6 | Verify provider reason-code/provenance compatibility, lease ordering/cleanup, and Website dependency revocation.
 Changed: 2026-11-07T23:57:23Z | AP3-M1/#51 | Codex GPT-6 | Verify the prototype operation returns correlated CME activity and audit evidence through the shared session.
 Changed: 2026-11-08T00:01:13Z | AP3-M1/#51 | Codex GPT-6 | Verify /api/v1 cookie sharing, Origin-protected Website mutations, and generic CME registry discovery.
+Changed: 2026-11-08T13:45:00Z | AP3-M1/#51 | Codex GPT-6 | Verify existing R3 portal session binding to the shared revocable AP3 session.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1; r3a.capability-invocation.v1.
 Tests: python -m unittest tests.test_r3a_steward_access.
@@ -44,7 +45,8 @@ import httpx
 from fastapi import Depends, FastAPI
 
 from r3a_runtime.steward_access import (
-    AccessUnavailable, HmacIngressIdentityProvider, IdentityAssertion, StewardAccess, load_access_config,
+    AccessUnavailable, HmacIngressIdentityProvider, IdentityAssertion, R3AccountSessionIdentityProvider,
+    StewardAccess, create_access_from_environment, load_access_config,
     require_steward_principal,
 )
 
@@ -402,6 +404,124 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.delete("/api/v1/steward/session", headers={"Origin": "https://attacker.invalid"})
         self.assertEqual(403, response.status_code)
         self.assertEqual("steward.request.denied", self.store.events[-1]["event_type"])
+
+    async def test_existing_r3_account_portal_session_establishes_shared_ap3_cookie_session(self):
+        import json
+        cfg = config()
+        cfg["identity"] = {"provider": "r3.account-session", "issuer": "r3-account-portal",
+                            "session_url": "http://127.0.0.1:8767/api/v1/auth/session",
+                            "required_role": "steward", "request_timeout_seconds": 2}
+        cfg.pop("secret_provider_manifest")
+        cfg.pop("secret_provider_config")
+        self.access = StewardAccess(cfg, self.store, R3AccountSessionIdentityProvider(cfg))
+        app = FastAPI()
+        app.state.steward_access = self.access
+        app.include_router(self.access.router())
+        payload = {"authenticated": True,
+                   "identity": {"email": "Steward@Example.org", "roles": ["steward"],
+                                "factor_refs": ["portal-session"]}}
+
+        class PortalResponse:
+            status = 200
+            def __enter__(inner): return inner
+            def __exit__(inner, *_args): return None
+            def read(inner, _limit=-1): return json.dumps(payload).encode()
+
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://testserver") as client:
+            with patch("r3a_runtime.steward_access.urllib.request.build_opener") as upstream:
+                upstream.return_value.open.return_value = PortalResponse()
+                started = await client.post("/api/v1/steward/session",
+                                            headers={"Origin": "http://testserver",
+                                                     "Cookie": "rv_account_session=opaque-r2-cookie"})
+            self.assertEqual(200, started.status_code)
+            forwarded = upstream.return_value.open.call_args.args[0]
+            self.assertEqual("rv_account_session=opaque-r2-cookie", forwarded.get_header("Cookie"))
+            redirect_handler = upstream.call_args.args[0]
+            self.assertIsNone(redirect_handler().redirect_request(None, None, 302, "redirect", {}, "https://outside.invalid"))
+            self.assertEqual("steward@example.org", started.json()["principal"]["principal_id"])
+            self.assertNotIn("opaque-r2-cookie", started.headers["set-cookie"])
+            self.assertTrue(started.cookies.get("r3_steward_session"))
+            self.assertIn("httponly", started.headers["set-cookie"].lower())
+            self.assertIn("samesite=strict", started.headers["set-cookie"].lower())
+            current = await client.get("/api/v1/steward/session")
+            self.assertEqual(200, current.status_code)
+            self.assertEqual("steward@example.org", current.json()["principal"]["principal_id"])
+            provenance = next(iter(self.store.sessions.values()))["secret_provenance"]
+            self.assertEqual("r3.account-session", provenance["identity_provider_id"])
+            self.assertEqual("r3a.identity-provider.v1", provenance["identity_provider_contract_id"])
+            ended = await client.delete("/api/v1/steward/session", headers={"Origin": "http://testserver"})
+            self.assertEqual(200, ended.status_code)
+            self.assertEqual(401, (await client.get("/api/v1/steward/session")).status_code)
+
+    async def test_account_portal_provider_rejects_missing_cookie_and_non_steward_role(self):
+        import json
+        cfg = config()
+        cfg["identity"] = {"provider": "r3.account-session", "issuer": "r3-account-portal",
+                            "session_url": "http://127.0.0.1:8767/api/v1/auth/session",
+                            "required_role": "steward", "request_timeout_seconds": 2}
+        self.access = StewardAccess(cfg, self.store, R3AccountSessionIdentityProvider(cfg))
+        app = FastAPI(); app.include_router(self.access.router())
+        class PortalResponse:
+            status = 200
+            def __enter__(inner): return inner
+            def __exit__(inner, *_args): return None
+            def read(inner, _limit=-1):
+                return json.dumps({"authenticated": True,
+                                   "identity": {"email": "person@example.org", "roles": ["resident"]}}).encode()
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://testserver") as client:
+            with patch("r3a_runtime.steward_access.urllib.request.build_opener") as upstream:
+                upstream.return_value.open.return_value = PortalResponse()
+                no_cookie = await client.post("/api/v1/steward/session", headers={"Origin": "http://testserver"})
+                self.assertEqual(401, no_cookie.status_code)
+                upstream.assert_not_called()
+                denied_role = await client.post("/api/v1/steward/session",
+                                                headers={"Origin": "http://testserver",
+                                                         "Cookie": "rv_account_session=opaque"})
+            self.assertEqual(401, denied_role.status_code)
+            self.assertEqual({}, self.store.sessions)
+
+    async def test_account_portal_outage_fails_closed_as_unavailable(self):
+        cfg = config()
+        cfg["identity"] = {"provider": "r3.account-session", "issuer": "r3-account-portal",
+                            "session_url": "http://127.0.0.1:8767/api/v1/auth/session",
+                            "required_role": "steward", "request_timeout_seconds": 2}
+        self.access = StewardAccess(cfg, self.store, R3AccountSessionIdentityProvider(cfg))
+        app = FastAPI(); app.include_router(self.access.router())
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://testserver") as client:
+            with patch("r3a_runtime.steward_access.urllib.request.build_opener") as upstream:
+                upstream.return_value.open.side_effect = OSError("offline")
+                response = await client.post("/api/v1/steward/session",
+                                             headers={"Origin": "http://testserver",
+                                                      "Cookie": "rv_account_session=opaque"})
+            self.assertEqual(503, response.status_code)
+            self.assertEqual({}, self.store.sessions)
+
+    async def test_account_portal_config_is_loopback_only_and_does_not_require_bitwarden(self):
+        import json
+        import tempfile
+        cfg = config()
+        cfg["identity"] = {"provider": "r3.account-session", "issuer": "r3-account-portal",
+                            "session_url": "http://127.0.0.1:8767/api/v1/auth/session",
+                            "required_role": "steward", "request_timeout_seconds": 2}
+        cfg.pop("secret_provider_manifest")
+        cfg.pop("secret_provider_config")
+        with patch.dict(os.environ, {"R3A_TEST_STEWARD_DSN": "postgresql://test"}):
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8") as handle:
+                json.dump(cfg, handle); handle.flush()
+                loaded = load_access_config(handle.name)
+                with patch.dict(os.environ, {"R3A_STEWARD_ACCESS_CONFIG": handle.name,
+                                             "R3A_TEST_STEWARD_DSN": "postgresql://test"}):
+                    access = create_access_from_environment()
+            self.assertEqual("r3.account-session", loaded["identity"]["provider"])
+            self.assertIsInstance(access.identity_provider, R3AccountSessionIdentityProvider)
+            cfg["identity"]["session_url"] = "https://identity.example.org/api/v1/auth/session"
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8") as handle:
+                json.dump(cfg, handle); handle.flush()
+                with self.assertRaisesRegex(AccessUnavailable, "steward_access_identity_configuration_invalid"):
+                    load_access_config(handle.name)
 
     async def test_configuration_refuses_public_exposure(self):
         import json
