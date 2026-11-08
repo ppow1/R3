@@ -33,6 +33,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 if importlib.util.find_spec("psycopg") is None:
     pg_module = types.ModuleType("psycopg")
     pg_module.__spec__ = importlib.machinery.ModuleSpec("psycopg", loader=None)
@@ -53,6 +55,7 @@ if importlib.util.find_spec("psycopg_pool") is None:
 from r3a_runtime.capability_contracts import (CapabilityRegistry, operation_from_manifest,
                                               validate_invocation_request)
 from r3a_runtime.cme import CME
+from r3a_runtime.config import _validate_plugin_config
 from r3a_runtime.engineering import (CapabilityOperationRef, CriterionResult, EngineeringWorkOrder,
                                     VerificationResult, validate_completion)
 from r3a_runtime.db import utcnow
@@ -69,33 +72,24 @@ VERIFICATION = "77777777-7777-4777-8777-777777777777"
 
 
 def descriptor() -> dict:
-    provider = Path(__file__).parents[1] / "r3a_runtime/providers/isolated_workspace.py"
-    return {
-        "contract_id": "r3a.capability-operation.v1", "contract_version": "1.0.0",
-        "operation_id": "engineering.workspace.apply_patch", "operation_revision": "demo-v1",
-        "provider": {"provider_id": "r3a.isolated_workspace", "provider_version": "1.0.0",
-                     "entrypoint": "r3a_runtime.providers.isolated_workspace:create_provider",
-                     "artifact_sha256": hashlib.sha256(provider.read_bytes()).hexdigest()},
-        "input_schema": {"type": "object", "required": ["path", "content"], "additionalProperties": False,
-                         "properties": {"path": {"type": "string"}, "content": {"type": "string"}}},
-        "output_schema": {"type": "object", "required": ["path", "sha256", "bytes_written", "replayed"],
-                          "additionalProperties": False,
-                          "properties": {"path": {"type": "string"}, "sha256": {"type": "string"},
-                                         "bytes_written": {"type": "integer", "minimum": 0},
-                                         "replayed": {"type": "boolean"}}},
-        "effect_class": "isolated_write",
-        "caller_constraints": {"allowed_principals": ["resident.grace"],
-                                "allowed_residents": ["resident.grace"], "allowed_services": []},
-        "target_scope_schema": {"type": "object", "required": ["workspace_id"],
-                                "additionalProperties": False,
-                                "properties": {"workspace_id": {"type": "string", "enum": ["candidate-1"]}}},
-        "required_grants": ["engineering.workspace.apply_patch"],
-        "evidence": {"schema": {"type": "object"}, "verification_obligations": ["independent_digest_check"]},
-        "recovery": {"idempotency_required": True, "idempotency_scope": "work_order",
-                     "replay_safe": True, "reconciliation_operation_id": None},
-        "execution": {"timeout_seconds": 30, "retry_disposition": "safe_retry"},
-        "lifecycle": {"desired_state": "enabled"},
-        "resident_tool": {"name": "engineering_workspace_apply_patch", "description": "Apply one bounded file."}}
+    return operation_from_manifest(engineering_manifest())
+
+
+def engineering_manifest() -> dict:
+    path = Path(__file__).parents[1] / "r3a_plugins/engineering_workspace/manifest.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_engineering_operation_is_defined_by_external_versioned_manifest():
+    manifest = engineering_manifest()
+    operation = operation_from_manifest(manifest)
+    assert operation["operation_id"] == "engineering.workspace.apply_patch"
+    assert operation["provider"]["provider_version"] == manifest["plugin_version"]
+    _validate_plugin_config({"workspace_root": "/tmp/r3a-engineering-workspace"},
+                            manifest["configuration_schema"], "engineering configuration")
+    with pytest.raises(ValueError, match="configuration"):
+        _validate_plugin_config({"workspace_root": "/tmp/workspace", "secret": "forbidden"},
+                                manifest["configuration_schema"], "engineering configuration")
 
 
 def work_order() -> EngineeringWorkOrder:
@@ -223,16 +217,37 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
         async def scenario(root: Path):
             first = descriptor()
             second = copy.deepcopy(first)
+            first_manifest = engineering_manifest()
             second["provider"]["provider_version"] = "1.0.1"
             replacement_artifact = (Path(__file__).parents[1] /
-                                    "r3a_runtime/providers/isolated_workspace_replacement_fixture.py")
+                                    "r3a_plugins/engineering_workspace/replacement_test_fixture.py")
             second["provider"]["entrypoint"] = (
-                "r3a_runtime.providers.isolated_workspace_replacement_fixture:create_provider")
+                "r3a_plugins.engineering_workspace.replacement_test_fixture:create_provider")
             second["provider"]["artifact_sha256"] = hashlib.sha256(
                 replacement_artifact.read_bytes()).hexdigest()
+            second_manifest = copy.deepcopy(first_manifest)
+            second_manifest["plugin_version"] = "1.0.1"
+            second_manifest["artifact_ref"] = "replacement_test_fixture.py"
+            second_manifest["artifact_sha256"] = second["provider"]["artifact_sha256"]
+            second_manifest["supporting_artifacts"] = [{
+                "artifact_ref": "provider.py",
+                "artifact_sha256": first["provider"]["artifact_sha256"]
+            }]
+            second_manifest["provider"].update(second["provider"])
+            second_manifest["operation"]["operation_revision"] = "1.0.1"
+            second_manifest["operation"]["provider"].update(second["provider"])
             registry = CapabilityRegistry()
-            registry.register(first, {"workspace_root": str(root)})
-            registry.register(second, {"workspace_root": str(root)})
+            first_manifest["_provider_artifact_path"] = str(
+                Path(__file__).parents[1] / "r3a_plugins/engineering_workspace/provider.py")
+            first_manifest["_pinned_artifact_paths"] = {first_manifest["_provider_artifact_path"]:
+                                                         first["provider"]["artifact_sha256"]}
+            second_manifest["_provider_artifact_path"] = str(replacement_artifact)
+            second_manifest["_pinned_artifact_paths"] = {
+                str(replacement_artifact): second["provider"]["artifact_sha256"],
+                str(Path(__file__).parents[1] /
+                    "r3a_plugins/engineering_workspace/provider.py"): first["provider"]["artifact_sha256"]}
+            registry.register(first, {"workspace_root": str(root)}, legacy_manifest=first_manifest)
+            registry.register(second, {"workspace_root": str(root)}, legacy_manifest=second_manifest)
             telemetry_root = Path(__file__).parents[1] / "r3a_plugins/octominer_telemetry"
             telemetry_manifest = json.loads((telemetry_root / "manifest.json").read_text())
             telemetry_config = json.loads((telemetry_root / "config.example.json").read_text())
@@ -392,8 +407,8 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 "activity_id": ACTIVITY, "attempt_id": ATTEMPT, "correlation_id": CORRELATION,
                 "work_order": None, "evidence_purpose": "Read one registered capability fixture.",
                 "idempotency_key": None, "deadline": None, "config_revision": "cfg-demo"}
-            from r3a_runtime.providers import isolated_workspace
-            with patch.object(isolated_workspace, "create_provider", return_value=Reader()):
+            from r3a_plugins.engineering_workspace import provider as engineering_provider
+            with patch.object(engineering_provider, "create_provider", return_value=Reader()):
                 result = await instance._control_request(
                     "capability.invoke", {"request": request}, "control-idempotency")
             self.assertEqual("SUCCEEDED", result["outcome"])

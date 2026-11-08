@@ -1,13 +1,13 @@
-"""Test-only replacement implementation for the Engineering provider lifecycle test."""
+"""Test-only replacement implementation for the provider lifecycle regression."""
 from __future__ import annotations
 
 from typing import Any
 
-from .isolated_workspace import IsolatedWorkspaceProvider
+from .provider import IsolatedWorkspaceProvider
 
 
 class ReplacementProvider(IsolatedWorkspaceProvider):
-    """Distinct implementation used to prove artifact replacement, not just version labels."""
+    """Distinct provider artifact used to verify immutable implementation replacement."""
 
     def invoke(self, arguments: dict[str, Any], *, context: dict[str, Any]) -> dict[str, Any]:
         replaced = dict(arguments)
