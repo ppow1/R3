@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: web/knowledge-review.html
 Component: R3A-KNOWLEDGE-REVIEW-DRAFT-UI
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-08 UTC (exact time recorded in Git commit)
 Created By: Codex GPT-6
 Purpose: Display source-grounded knowledge proposal batches and prepare resumable item-level Steward review drafts.
@@ -11,6 +11,7 @@ Observability: Proposal, source, decision-draft status, local save time, and exp
 Dependencies: ../docs/knowledge-discovery/knowledge_review_proposals.v1.json; browser localStorage.
 Authority: Review aid only; it does not authenticate a Steward, record institutional decisions, or promote knowledge.
 Changed: 2026-11-08 | R3A-KNOWLEDGE-DISCOVERY | Codex GPT-6 | Add batch review and resumable draft interaction.
+Changed: 2026-11-08 | R3A-KNOWLEDGE-DISCOVERY | Codex GPT-6 | Bind draft decisions to source provenance and catalog revision.
 Supersedes: None
 Contracts: r3a.knowledge-review-proposals.v1; existing Steward Access authentication remains external.
 Tests: tests/test_knowledge_review_batches.py; manual local HTTP smoke check.
@@ -77,13 +78,14 @@ History/Predecessor: None; new file.
     const STORAGE_KEY = "r3a.knowledge-review.draft.v1:";
     const decisions = new Set(["approve", "reject", "defer"]);
     let catalog;
-    let draft = { schema_id: "r3a.knowledge-review-draft.v1", catalog_id: "", reviewer_label: "", updated_at: null, decisions: {} };
+    let draft = { schema_id: "r3a.knowledge-review-draft.v1", catalog_id: "", catalog_revision: 0, reviewer_label: "", updated_at: null, decisions: {} };
+    const storageKey = () => `${STORAGE_KEY}${catalog.catalog_id}:${catalog.catalog_revision}`;
     const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
     const id = value => `r3a-review-${value.replace(/[^a-z0-9_-]/gi, "-")}`;
     const save = message => {
       draft.updated_at = new Date().toISOString();
       draft.reviewer_label = document.querySelector("#reviewer").value.trim();
-      localStorage.setItem(STORAGE_KEY + catalog.catalog_id, JSON.stringify(draft));
+      localStorage.setItem(storageKey(), JSON.stringify(draft));
       renderSummary();
       if (message) document.querySelector("#status").textContent = message + " Saved as a local draft only.";
     };
@@ -95,8 +97,10 @@ History/Predecessor: None; new file.
     const setDecision = (entryId, decision, reason = "individual draft decision") => {
       if (!decisions.has(decision)) return;
       const prior = draft.decisions[entryId];
-      const history = prior ? [...(prior.history || []), { decision: prior.decision, reason: prior.reason, decided_at: prior.decided_at, batch_id: prior.batch_id || null }] : [];
-      draft.decisions[entryId] = { decision, reason, batch_id: reason.startsWith("batch:") ? reason.slice(6) : null, entry_version: catalog.entries.find(item => item.entry_id === entryId).version, decided_at: new Date().toISOString(), authority_status: "local-unverified-draft", history };
+      const proposal = catalog.entries.find(item => item.entry_id === entryId);
+      const sourceRefs = proposal.sources.map(source => ({ repository: source.repository, path: source.path, revision: source.revision, commit: source.commit, git_blob: source.git_blob, sha256: source.sha256 || null }));
+      const history = prior ? [...(prior.history || []), { decision: prior.decision, reason: prior.reason, batch_id: prior.batch_id || null, entry_version: prior.entry_version, decided_at: prior.decided_at, source_refs: prior.source_refs }] : [];
+      draft.decisions[entryId] = { decision, reason, batch_id: reason.startsWith("batch:") ? reason.slice(6) : null, entry_version: proposal.version, catalog_revision: catalog.catalog_revision, source_refs: sourceRefs, decided_at: new Date().toISOString(), authority_status: "local-unverified-draft", history };
       save(`${entryId}: ${decision}.`);
       render();
     };
@@ -159,14 +163,14 @@ History/Predecessor: None; new file.
       link.click(); URL.revokeObjectURL(link.href);
     });
     document.querySelector("#clear").addEventListener("click", () => {
-      localStorage.removeItem(STORAGE_KEY + catalog.catalog_id);
-      draft = { schema_id: "r3a.knowledge-review-draft.v1", catalog_id: catalog.catalog_id, reviewer_label: "", updated_at: null, decisions: {} };
+      localStorage.removeItem(storageKey());
+      draft = { schema_id: "r3a.knowledge-review-draft.v1", catalog_id: catalog.catalog_id, catalog_revision: catalog.catalog_revision, reviewer_label: "", updated_at: null, decisions: {} };
       document.querySelector("#reviewer").value = ""; render();
       document.querySelector("#status").textContent = "Local draft cleared. No institutional decision was changed.";
     });
     fetch(DATA_URL).then(response => { if (!response.ok) throw new Error(`proposal data: HTTP ${response.status}`); return response.json(); }).then(data => {
-      catalog = data; draft.catalog_id = catalog.catalog_id;
-      try { const old = JSON.parse(localStorage.getItem(STORAGE_KEY + catalog.catalog_id) || "null"); if (old?.schema_id === "r3a.knowledge-review-draft.v1" && old.catalog_id === catalog.catalog_id) draft = old; } catch { /* invalid local draft stays untouched and is not treated as institutional state */ }
+      catalog = data; draft.catalog_id = catalog.catalog_id; draft.catalog_revision = catalog.catalog_revision;
+      try { const old = JSON.parse(localStorage.getItem(storageKey()) || "null"); if (old?.schema_id === "r3a.knowledge-review-draft.v1" && old.catalog_id === catalog.catalog_id && old.catalog_revision === catalog.catalog_revision) draft = old; } catch { /* invalid local draft stays untouched and is not treated as institutional state */ }
       document.querySelector("#reviewer").value = draft.reviewer_label || ""; render();
     }).catch(error => { document.querySelector("#status").textContent = `Could not load proposals: ${error.message}. Serve this repository over HTTP to enable review.`; });
   })();

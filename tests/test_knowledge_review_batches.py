@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_knowledge_review_batches.py
 Component: R3A-KNOWLEDGE-REVIEW-BATCH-TESTS
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-08 UTC (exact time recorded in Git commit)
 Created By: Codex GPT-6
 Purpose: Validate source-grounded batch proposal invariants and draft-only review UI boundaries.
@@ -11,6 +11,7 @@ Observability: Assertion failures identify invalid catalog, batch, or UI semanti
 Dependencies: Python standard library; review catalog and temporary browser interface.
 Authority: Tests only; recommendations never become decisions.
 Changed: 2026-11-08 | R3A-KNOWLEDGE-DISCOVERY | Codex GPT-6 | Add focused proposal and batch review regressions.
+Changed: 2026-11-08 | R3A-KNOWLEDGE-DISCOVERY | Codex GPT-6 | Assert decisions remain tied to source revisions.
 Supersedes: None
 Contracts: r3a.knowledge-review-proposals.v1.
 Tests: This module.
@@ -96,6 +97,9 @@ class KnowledgeReviewBatchTests(unittest.TestCase):
             "not Steward approvals",
             "promotion is not connected",
             "authority_status: \"local-unverified-draft\"",
+            "source_refs: sourceRefs",
+            "catalog_revision: catalog.catalog_revision",
+            "old.catalog_revision === catalog.catalog_revision",
             "Download review draft",
         ):
             self.assertIn(phrase, self.html)

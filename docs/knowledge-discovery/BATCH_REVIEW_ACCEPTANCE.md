@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/knowledge-discovery/BATCH_REVIEW_ACCEPTANCE.md
 Component: R3A-KNOWLEDGE-BATCH-REVIEW-ACCEPTANCE
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-08 UTC (exact time recorded in Git commit)
 Created By: Codex GPT-6
 Purpose: Provide a runnable review-interface check and distinguish it from pending authorized institutional acceptance.
@@ -11,6 +11,7 @@ Observability: Rendered batches, per-entry draft records, localStorage resume, e
 Dependencies: Python 3; modern browser; proposal catalog and review UI in this repository.
 Authority: Interface acceptance only. The local actions are not Steward approvals and do not ingest material.
 Changed: 2026-11-08 | R3A-KNOWLEDGE-DISCOVERY | Codex GPT-6 | Document local acceptance procedure and limits.
+Changed: 2026-11-08 | R3A-KNOWLEDGE-DISCOVERY | Codex GPT-6 | Require draft source lineage and catalog revision in observed checks.
 Supersedes: None
 Contracts: r3a.knowledge-review-proposals.v1; local draft schema r3a.knowledge-review-draft.v1.
 Tests: Executed through Chrome DevTools against a local static server on 2026-11-08.
@@ -32,7 +33,7 @@ Open `http://127.0.0.1:8765/web/knowledge-review.html`. The page loads the check
 
 Use a clean browser profile or clear the page's local review draft first.
 
-1. Apply “Approve batch” to **R3 source governance and authority boundaries**. Each of its three unflagged proposals receives its own draft entry with a version, timestamp, reason/batch ID, and `local-unverified-draft` marker.
+1. Apply “Approve batch” to **R3 source governance and authority boundaries**. Each of its three unflagged proposals receives its own draft entry with an item version, catalog revision, exact source references/digests, timestamp, reason/batch ID, and `local-unverified-draft` marker.
 2. Change **Residents should consult relevant existing institutional knowledge** to “Reject item.” Confirm the latest draft status changes to reject and its draft history retains the prior batch-derived approve decision.
 3. Apply “Approve batch” to **External review and promotion practices**. Both entries carry `requires-individual-review`; confirm the action reports zero eligible entries and changes neither item's decision.
 4. Individually set **Do not silently promote AI classifications into canonical knowledge** to defer and **Legacy execution-first instruction is not current R3A policy** to reject. The item decision controls override any earlier eligible batch decision without removing the earlier event from that local draft's history.
