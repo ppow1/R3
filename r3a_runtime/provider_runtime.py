@@ -101,6 +101,23 @@ class ProviderProcessManager:
     def _manifest(self, operation: RegisteredOperation) -> dict[str, Any]:
         provider = operation.descriptor["provider"]
         legacy = operation.legacy_manifest or {}
+        declared = legacy.get("module_manifest")
+        if declared is not None:
+            binding = declared["binding"]
+            artifact = declared["artifact"]
+            return {"module_id": declared["module_id"], "module_version": declared["module_version"],
+                    "contract_id": binding["contract_id"], "protocol_major": binding["protocol_major"],
+                    "protocol_minor": PROTOCOL_MINOR, "protocol_min_minor": binding["protocol_min_minor"],
+                    "protocol_max_minor": binding["protocol_max_minor"], "owner": declared["owner"],
+                    "entrypoint": binding["entrypoint"], "dependencies": declared["dependencies"],
+                    "configuration_schema": legacy["configuration_schema"],
+                    "configuration_ref": declared["configuration"]["configuration_ref"],
+                    "capability_refs": declared["capability_refs"],
+                    "migration_contract": declared["migration_contract"],
+                    "artifact_ref": artifact["artifact_ref"], "artifact_digest": artifact["artifact_sha256"],
+                    "recovery_policy": declared["recovery_policy"],
+                    "resource_refs": declared["resource_refs"],
+                    "state_namespace": declared["state_namespace"]}
         return {"module_id": provider["provider_id"], "module_version": provider["provider_version"],
                 "contract_id": "r3a.capability-provider.v1", "protocol_major": PROTOCOL_MAJOR,
                 "protocol_minor": PROTOCOL_MINOR, "protocol_min_minor": 0, "protocol_max_minor": 0,
@@ -126,6 +143,15 @@ class ProviderProcessManager:
             operation = self.registry.resolve_provider(descriptor["operation_id"],
                                                        provider["provider_version"])
             manifest = self._manifest(operation)
+            if (manifest["protocol_major"] != PROTOCOL_MAJOR
+                    or not manifest["protocol_min_minor"] <= PROTOCOL_MINOR <= manifest["protocol_max_minor"]):
+                await self.store.register_module(manifest, "INCOMPATIBLE", "unavailable",
+                                                 {"reason": "module manifest protocol range excludes host"})
+                await self._state(*key, "INCOMPATIBLE", "unavailable",
+                                  {"reason": "module manifest protocol range excludes host"})
+                self.registry.set_provider_state(*key, "INCOMPATIBLE",
+                                                 {"reason": "module manifest protocol range excludes host"})
+                continue
             await self.store.register_module(manifest, "INSTALLED", "unknown")
             rows = await self.store.rows(
                 "SELECT lifecycle_state FROM r3a.module_registry WHERE module_id=%s AND module_version=%s",
@@ -153,6 +179,15 @@ class ProviderProcessManager:
             rows = await self.store.rows(
                 "SELECT artifact_digest,lifecycle_state FROM r3a.module_registry WHERE module_id=%s AND module_version=%s",
                 key)
+            if (manifest["protocol_major"] != PROTOCOL_MAJOR
+                    or not manifest["protocol_min_minor"] <= PROTOCOL_MINOR <= manifest["protocol_max_minor"]):
+                if not rows:
+                    await self.store.register_module(manifest, "INSTALLED", "unknown")
+                await self._state(*key, "INCOMPATIBLE", "unavailable",
+                                  {"reason": "module manifest protocol range excludes host"})
+                self.registry.set_provider_state(*key, "INCOMPATIBLE",
+                                                 {"reason": "module manifest protocol range excludes host"})
+                raise RuntimeError("module manifest protocol range excludes host")
             if not rows:
                 await self.store.register_module(manifest, "INSTALLED", "unknown")
                 await self._state(*key, "INSTALLED", "unknown", {"source": "capability manifest"})
