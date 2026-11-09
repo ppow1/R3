@@ -63,6 +63,8 @@ from .acceptance import (OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
                          OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, validate_required_criteria)
 from .notifications import (INSTITUTION_EVENT_SOURCE, institution_event_envelope,
                             same_notification_input, validate_notification_envelope)
+from .notification_delivery import (delivery_visible_to, route_notification, transition_delivery,
+                                    validate_delivery_envelope)
 from .contracts import ActivityDependencySet, ReadinessObservation, parse_timestamp
 from .authorization import AuthorizationDecision
 from .module_contracts import is_legacy_manifest_promotion
@@ -1379,6 +1381,128 @@ class Store:
         return await self.submit_grace_objective(
             objective, stable_key, event_kind="notification", notification_envelope=envelope,
             acceptance_criteria=[])
+
+    async def enqueue_notification_deliveries(self, notification: dict[str, Any],
+                                              directory: dict[str, Any],
+                                              policy: dict[str, Any]) -> list[dict[str, Any]]:
+        """Persist idempotent recipient delivery records in the CME event ledger."""
+        deliveries = route_notification(notification, directory, policy)
+        persisted = []
+        async with self.pool.connection() as conn, conn.transaction():
+            for delivery in deliveries:
+                delivery = validate_delivery_envelope(delivery)
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                                   (delivery["idempotency_key"],))
+                existing = await (await conn.execute(
+                    "SELECT evidence FROM r3a.institution_events "
+                    "WHERE event_type='grace.notification.delivery.queued' "
+                    "AND evidence->>'delivery_id'=%s LIMIT 1", (delivery["delivery_id"],)
+                )).fetchone()
+                if existing:
+                    persisted.append({**existing["evidence"], "duplicate": True})
+                    continue
+                await self._event(
+                    conn, "grace.notification.delivery.queued", "notification_delivery",
+                    delivery["delivery_id"], "r3a.notification-delivery", 1, None, "queued",
+                    "CME queued a recipient-scoped notification delivery",
+                    {**delivery, "directory_snapshot_sha256": directory["source"]["snapshot_sha256"]},
+                    event_id=uuid.uuid5(uuid.NAMESPACE_URL, delivery["idempotency_key"]),
+                    correlation_id=uuid.UUID(delivery["correlation_id"]),
+                    causation_id=uuid.UUID(delivery["notification_event_id"]))
+                persisted.append({**delivery, "duplicate": False})
+        return persisted
+
+    async def transition_notification_delivery(self, delivery_id: str, operation: str, *,
+                                               principal_id: str, request: Any,
+                                               decision: AuthorizationDecision,
+                                               directory: dict[str, Any],
+                                               disposition: str | None = None,
+                                               resolution_evidence_refs: list[str] | None = None) -> dict[str, Any]:
+        """Append an authorized acknowledgment/resolution to the CME event ledger."""
+        try:
+            delivery_uuid = uuid.UUID(delivery_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("delivery_id must be a UUID") from exc
+        event_type = {"acknowledge": "grace.notification.delivery.acknowledged",
+                      "resolve": "grace.notification.delivery.resolved"}.get(operation)
+        if event_type is None:
+            raise ValueError("notification delivery operation must be acknowledge or resolve")
+        async with self.pool.connection() as conn, conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                               (f"notification-delivery:{delivery_id}",))
+            rows = await (await conn.execute(
+                "SELECT event_type,evidence FROM r3a.institution_events "
+                "WHERE subject_type='notification_delivery' AND subject_id=%s "
+                "ORDER BY persisted_at DESC,event_id DESC FOR UPDATE", (str(delivery_uuid),)
+            )).fetchall()
+            if not rows:
+                raise KeyError(f"notification delivery not found: {delivery_id}")
+            latest_evidence = rows[0]["evidence"]
+            fields = ("contract_id", "contract_version", "delivery_id", "idempotency_key",
+                      "notification_event_id", "source_id", "source_event_id", "correlation_id",
+                      "recipient", "severity", "urgency", "requires_action", "status", "created_at",
+                      "acknowledged_at", "resolved_at", "resolution_disposition", "evidence_refs")
+            delivery = validate_delivery_envelope({key: latest_evidence[key] for key in fields})
+            # Replays of one authorization request return its already-appended outcome.
+            request_id = getattr(request, "request_id", None)
+            if request_id:
+                for row in rows:
+                    evidence = row["evidence"]
+                    if evidence.get("authorization_request_id") == request_id:
+                        return {**evidence, "duplicate": True}
+            updated = transition_delivery(delivery, operation, principal_id=principal_id,
+                                         request=request, decision=decision, directory=directory,
+                                         disposition=disposition,
+                                         resolution_evidence_refs=resolution_evidence_refs)
+            await self._event(
+                conn, event_type, "notification_delivery", str(delivery_uuid),
+                "r3a.notification-delivery", 1, delivery["status"], updated["status"],
+                f"Recipient {operation}d the notification delivery",
+                {**updated, "authorization_request_id": request_id,
+                 "authorization_decision_id": decision.decision_id,
+                 "authorization_audit_event_id": decision.audit_event_id,
+                 "authorization_provider_id": decision.provider_id,
+                 "actor_id": principal_id},
+                event_id=uuid.uuid5(uuid.NAMESPACE_URL,
+                                    f"notification-delivery:{delivery_id}:{operation}:{request_id}"),
+                correlation_id=uuid.UUID(delivery["correlation_id"]),
+                causation_id=uuid.UUID(delivery["notification_event_id"]))
+            return updated
+
+    async def notification_delivery_history(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Return the latest durable delivery projection; callers must authorize/filter recipients."""
+        if not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("notification history limit must be between 1 and 500")
+        rows = await self.rows(
+            "SELECT DISTINCT ON (subject_id) subject_id,evidence FROM r3a.institution_events "
+            "WHERE subject_type='notification_delivery' "
+            "AND event_type LIKE 'grace.notification.delivery.%' "
+            "ORDER BY subject_id,persisted_at DESC,event_id DESC LIMIT %s", (limit,))
+        return [dict(row["evidence"]) for row in rows]
+
+    async def notification_delivery_inbox(self, principal_id: str, directory: dict[str, Any],
+                                          request: Any, decision: AuthorizationDecision, *,
+                                          limit: int = 100) -> list[dict[str, Any]]:
+        """Read only the caller's recipient-scoped items after CME grants read authority."""
+        if (getattr(request, "resident_id", None) != principal_id
+                or getattr(request, "capability_id", None) != "notification.delivery.read"
+                or decision.allowed is not True
+                or decision.correlation_id != request.correlation_id
+                or not decision.audit_event_id):
+            raise PermissionError("matching CME notification.delivery.read authorization is required")
+        deliveries = await self.notification_delivery_history(limit=limit)
+        visible = []
+        for evidence in deliveries:
+            fields = ("contract_id", "contract_version", "delivery_id", "idempotency_key",
+                      "notification_event_id", "source_id", "source_event_id", "correlation_id",
+                      "recipient", "severity", "urgency", "requires_action", "status", "created_at",
+                      "acknowledged_at", "resolved_at", "resolution_disposition", "evidence_refs")
+            delivery = validate_delivery_envelope({key: evidence[key] for key in fields})
+            if delivery_visible_to(delivery, principal_id, directory):
+                visible.append({**delivery,
+                                "authorization_decision_id": decision.decision_id,
+                                "authorization_audit_event_id": decision.audit_event_id})
+        return visible
 
     async def acknowledge_notification(self, activity: dict[str, Any]) -> None:
         """Record acknowledgment only after Grace returned an actual reasoning response."""

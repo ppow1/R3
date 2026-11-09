@@ -1,0 +1,11 @@
+{
+  "dsn_env": "R3A_NOTIFICATION_SOURCE_DSN",
+  "connect_timeout_seconds": 3,
+  "statement_timeout_ms": 2000,
+  "source_id": "r3a.institution-events",
+  "event_types": [
+    "process.state_transition",
+    "process.restarted",
+    "process.failed"
+  ]
+}

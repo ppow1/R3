@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://r3a.local/schemas/notification-delivery-policy.v1.schema.json",
+  "title": "R3A notification delivery routing policy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_id", "contract_version", "rules"],
+  "properties": {
+    "contract_id": {"const": "r3a.notification-delivery"},
+    "contract_version": {"const": "1.0.0"},
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["source_id", "event_type", "recipient", "urgency", "requires_action"],
+        "properties": {
+          "source_id": {"type": "string", "minLength": 1},
+          "event_type": {"type": "string", "minLength": 1},
+          "recipient": {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "office_role"],
+            "properties": {
+              "kind": {"enum": ["resident", "office", "steward"]},
+              "office_role": {"type": "string", "minLength": 1}
+            }
+          },
+          "urgency": {"enum": ["low", "normal", "high", "critical"]},
+          "requires_action": {"type": "boolean"}
+        }
+      }
+    }
+  }
+}
