@@ -10,6 +10,8 @@ Security: No database password, token, browser cookie, or principal secret is in
 
 # AP3 durable session store activation
 
+> **Historical prototype runbook (2026-11-09):** This document records the prior development deployment bound to the R3 account portal. It is not the procedure for independent R3A authentication and must not be followed to configure a new deployment. The R3 portal dependency is retired for the target architecture. See [R3A Authentication Independence Plan](../architecture/R3A_AUTH_INDEPENDENCE_PLAN.md). Do not migrate identities or credentials until the specified Steward approval is recorded.
+
 This runbook binds AP3 to the isolated AP0-M1 PostgreSQL cluster and its append-only `r3a.institution_events` ledger. It does not authorize changes to production R3/V2 databases or public transport.
 
 ## Migration ownership and order

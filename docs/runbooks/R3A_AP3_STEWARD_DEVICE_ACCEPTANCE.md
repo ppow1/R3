@@ -2,16 +2,19 @@
 R3 CONTROLLED RUNBOOK
 File: docs/runbooks/R3A_AP3_STEWARD_DEVICE_ACCEPTANCE.md
 Component: R3A AP3 Steward Access
-Revision: 1.3.0
+Revision: 1.3.1
 Purpose: Give a Steward a safe, reproducible browser acceptance path over supported development networks.
 Authority: Issue #49; coordinate Website #51 and Coordinator #56.
 Security: Uses only the existing R3 portal identity, AP3 durable session and CME authorization. Does not expose or configure a public listener.
 Changed: 2026-11-09T13:10:00Z | AP3-M1 | Codex GPT-6 | Record LAN portal listener restoration and interactive acceptance boundary.
 Changed: 2026-11-09T14:00:00Z | AP3-M1 | Codex GPT-6 | Diagnose provider Origin rejection and prepare coordinated allowlist correction.
 Changed: 2026-11-09T14:06:39Z | R3A Coordinator | Codex GPT-6 | Record deployed additive account-Origin override and no-credential live verification.
+Changed: 2026-11-09T16:32:39Z | R3A-AUTH-INDEPENDENCE-001 | Codex GPT-6 | Mark portal-login steps as historical; link independent R3A authentication design and approval boundary.
 -->
 
 # Steward device acceptance
+
+> **Historical prototype acceptance only (2026-11-09):** The steps below use the former R3 portal login and the legacy `r3_steward_session` cookie. They do not meet R3A Authentication Independence and must not be reported as current acceptance. The independent R3A login and `r3a_steward_session` flow is pending implementation and the identity provisioning approval recorded in [R3A Authentication Independence Plan](../architecture/R3A_AUTH_INDEPENDENCE_PLAN.md). Existing live R3 services remain unchanged.
 
 ## Live LAN portal listener restoration (2026-11-09)
 

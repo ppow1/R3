@@ -2,7 +2,7 @@
 R3 CONTROLLED TEST SOURCE
 File: tests/test_r3a_steward_access.py
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.2.0
+File Revision: 1.2.1
 Created: 2026-11-07T21:37:42Z
 Created By: Codex GPT-6
 Purpose: Verify Steward assertion validation, opaque sessions, revocation, CSRF origin policy, and CME identity delegation.
@@ -25,6 +25,7 @@ Changed: 2026-11-07T23:53:17Z | AP3-M1/AP3-M2 | Codex GPT-6 | Verify provider re
 Changed: 2026-11-07T23:57:23Z | AP3-M1/#51 | Codex GPT-6 | Verify the prototype operation returns correlated CME activity and audit evidence through the shared session.
 Changed: 2026-11-08T00:01:13Z | AP3-M1/#51 | Codex GPT-6 | Verify /api/v1 cookie sharing, Origin-protected Website mutations, and generic CME registry discovery.
 Changed: 2026-11-08T13:45:00Z | AP3-M1/#51 | Codex GPT-6 | Verify existing R3 portal session binding to the shared revocable AP3 session.
+Changed: 2026-11-09T16:32:39Z | R3A-AUTH-INDEPENDENCE-001 | Codex GPT-6 | Use the R3A-only cookie namespace in session tests and guard published examples against R3 cookie collisions.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1; r3a.capability-invocation.v1.
 Tests: python -m unittest tests.test_r3a_steward_access.
@@ -34,11 +35,13 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 import time
 import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -92,12 +95,27 @@ def config():
                                                   "secret_id": "test-secret"}, "assertion_max_age_seconds": 60},
             "secret_provider_manifest": "/etc/r3a/test/manifest.json",
             "secret_provider_config": "/etc/r3a/test/provider.json",
-            "session": {"cookie_name": "r3_steward_session", "lifetime_seconds": 600,
+            "session": {"cookie_name": "r3a_steward_session", "lifetime_seconds": 600,
                         "connect_timeout_seconds": 3, "secure_cookie": False,
                         "allowed_origins": ["http://testserver"]},
             "cme": {"control_socket": "/tmp/r3a-cme.sock", "request_timeout_seconds": 5,
                     "health_stale_after_seconds": 30},
             "remote_transport": {"state": "unavailable", "public_exposure": False}}
+
+
+class CookieNamespaceContractTests(unittest.TestCase):
+    def test_published_configs_use_r3a_cookie_namespace(self):
+        examples = ("steward_access.config.example.json",
+                    "steward_access.r3-portal.config.example.json")
+        for name in examples:
+            with self.subTest(name=name):
+                path = Path(__file__).parents[1] / "r3a_plugins" / name
+                cookie_name = json.loads(path.read_text(encoding="utf-8"))["session"]["cookie_name"]
+                self.assertTrue(cookie_name.startswith("r3a_"))
+                self.assertNotIn(cookie_name, {"r3_steward_session", "rv_account_session",
+                                               "rv_account_csrf"})
+                self.assertNotEqual("steward:pat", json.loads(path.read_text(encoding="utf-8"))
+                                     .get("identity", {}).get("steward_principal_id"))
 
 
 def assertion_headers(*, issuer="test-ingress", subject="steward:test", assertion_id=None,
@@ -319,7 +337,7 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("r3a.steward-principal.v1", response.json()["principal"]["contract"])
         self.assertEqual([], response.json()["factor_refs"])
         self.assertTrue(self.secret_provider.leases[-1].closed)
-        token = self.client.cookies.get("r3_steward_session")
+        token = self.client.cookies.get("r3a_steward_session")
         self.assertIsNotNone(token)
         digest = hashlib.sha256(token.encode()).hexdigest()
         self.assertIn(digest, self.store.sessions)
@@ -346,7 +364,7 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
     async def test_expired_durable_session_is_denied_and_audited(self):
         response = await self.client.post("/api/v1/steward/session", headers=assertion_headers())
         self.assertEqual(200, response.status_code)
-        token = self.client.cookies.get("r3_steward_session")
+        token = self.client.cookies.get("r3a_steward_session")
         digest = hashlib.sha256(token.encode()).hexdigest()
         self.store.sessions[digest]["expires_at"] = datetime.now(timezone.utc) - timedelta(seconds=1)
 
@@ -459,7 +477,7 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(redirect_handler().redirect_request(None, None, 302, "redirect", {}, "https://outside.invalid"))
             self.assertEqual("steward@example.org", started.json()["principal"]["principal_id"])
             self.assertNotIn("opaque-r2-cookie", started.headers["set-cookie"])
-            self.assertTrue(started.cookies.get("r3_steward_session"))
+            self.assertTrue(started.cookies.get("r3a_steward_session"))
             self.assertIn("httponly", started.headers["set-cookie"].lower())
             self.assertIn("samesite=strict", started.headers["set-cookie"].lower())
             current = await client.get("/api/v1/steward/session")

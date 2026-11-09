@@ -6,8 +6,8 @@
   "secret_provider_manifest": "/etc/r3a/plugins/bitwarden_secrets/manifest.json",
   "secret_provider_config": "/etc/r3a/bitwarden/provider.json",
   "identity": {
-    "issuer": "r3-steward-ingress",
-    "steward_principal_id": "steward:pat",
+    "issuer": "r3a-steward-ingress",
+    "steward_principal_id": "<canonical-r3a-steward-principal>",
     "assertion_secret_ref": {
       "provider_id": "r3a.bitwarden-secrets",
       "provider_version": "1.1.0",
@@ -16,7 +16,7 @@
     "assertion_max_age_seconds": 60
   },
   "session": {
-    "cookie_name": "r3_steward_session",
+    "cookie_name": "r3a_steward_session",
     "lifetime_seconds": 28800,
     "connect_timeout_seconds": 3,
     "secure_cookie": true,

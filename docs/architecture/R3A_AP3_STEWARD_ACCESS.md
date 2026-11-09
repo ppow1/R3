@@ -2,11 +2,11 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_AP3_STEWARD_ACCESS.md
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.0.9
+File Revision: 1.1.0
 Created: 2026-11-07T21:37:42Z
 Created By: Codex GPT-6
 Purpose: Specify the AP3-M1 identity/session boundary, portal endpoints, authority delegation, and freshness behavior.
-Execution Model: Architecture/contract record for the optional R3 portal router.
+Execution Model: Architecture/contract record for the R3A-owned Steward identity and session boundary.
 Observability: Versioned contracts, correlation IDs, structured log metadata, PostgreSQL append-only audit evidence.
 Dependencies: AP0 PostgreSQL event ledger and CME Unix control protocol; Bitwarden/machine identity provider coordination in Issue #50.
 Authority: Roadmap Baseline 1.0, AP3-M1 Issue #49, R3A-010 and R3A-013; exception None.
@@ -20,6 +20,7 @@ Changed: 2026-11-07T22:03:19Z | AP3-M1 | Codex GPT-6 | Specify mandatory Secure 
 Changed: 2026-11-07T23:53:17Z | AP3-M1/AP3-M2 | Codex GPT-6 | Record Bitwarden 1.1.0 compatibility, safe reason codes, and complete contract provenance.
 Changed: 2026-11-07T23:53:17Z | AP3-M1/#51 | Codex GPT-6 | Document the shared Website principal dependency and coordinated prototype demonstration.
 Changed: 2026-11-07T23:57:23Z | AP3-M1/#51 | Codex GPT-6 | Share one /api/v1 cookie with Website APIs and expose generic CME operation discovery.
+Changed: 2026-11-09T16:32:39Z | R3A-AUTH-INDEPENDENCE-001 | Codex GPT-6 | Correct target authority boundary to R3A-owned identity and mark R3 portal adapter as legacy-only.
 Supersedes: None.
 Contracts: r3a.steward-identity.v1; r3a.steward-session.v1; r3a.steward-operation-result.v1; r3a.steward-access-status.v1.
 Tests: tests/test_r3a_steward_access.py; live transport remains unconfigured.
@@ -38,11 +39,11 @@ History/Predecessor: New file; initial publication recorded in Git.
 
 ## Existing authority boundaries
 
-The AP3 Website had no login or session API. The existing R3 account portal remains the human identity authority, and the AP3 router stores only its own revocable session. The R3A directory provider is read-only discovery and does not grant authority. CME's `r3a.capability-invocation.v1` path and configured authorization provider remain responsible for operation grants, denials, and capability audit. The AP3 session gateway does not create or modify grants.
+R3A must own its login and session authority and must remain operable when R3 login, account/session services, database, and website are unavailable. The current R3 account-session adapter is a legacy prototype dependency and is not acceptable for independent R3A deployment. The AP3 router stores only R3A-owned revocable sessions. The R3A directory provider is read-only discovery and does not grant authority. CME's `r3a.capability-invocation.v1` path and configured authorization provider remain responsible for operation grants, denials, and capability audit. The AP3 session gateway does not create or modify grants. See the [authentication independence plan](R3A_AUTH_INDEPENDENCE_PLAN.md) for the bounded association and enrollment design and its approval gate.
 
 ## Contracts and flow
 
-Identity is provided by one replaceable `r3a.identity-provider.v1` adapter. `HmacIngressIdentityProvider` supports trusted ingress assertions using `X-R3-Identity-Issuer`, `X-R3-Identity-Subject`, `X-R3-Identity-ID`, `X-R3-Identity-Time`, `X-R3-Identity-Authenticated-At`, `X-R3-Identity-Factors`, and `X-R3-Identity-Signature`. Its signing key is resolved through Issue #50 `r3a.secrets.provider.v1@1.1.0` and a closeable `SecretLease`; durable non-secret provenance includes provider and machine-principal contract IDs/versions, secret reference, remote revision, and fetch time. The machine account remains secret-fetch metadata and never becomes the Steward principal. `R3AccountSessionIdentityProvider` binds the already deployed R3 account portal by forwarding only the `rv_account_session` cookie to its loopback session endpoint and requiring its authoritative `steward` role. It does not accept browser-supplied identity claims or create another identity authority. Both adapters feed the same durable AP3 session store, principal contract, origin checks, generic CME invocation, and revocation flow.
+The target identity adapter is one replaceable `r3a.identity-provider.v1` implementation owned and operated by R3A. It must emit a verified canonical R3A principal assertion and must not create grants. The existing `HmacIngressIdentityProvider` and `R3AccountSessionIdentityProvider` are prior prototypes; in particular, the latter calls the live R3 account portal and is prohibited in independent R3A runtime configuration. Reuse of reviewed source does not permit runtime calls to R3. All accepted assertions enter the existing AP3 durable session store, principal contract, origin checks, generic CME invocation, and revocation flow.
 
 On success, the portal creates a cryptographically random bearer token, stores only its SHA-256 digest plus principal/issuer/authentication-time/factor/expiry/revocation metadata in `r3a.steward_sessions`, and sets an HttpOnly, Secure (configurable for local testing), SameSite=Strict cookie. A unique assertion ID prevents replay. Logout revokes the durable session and expires the browser cookie. Session lookup reads the durable database each time, so revocation and unavailable state are visible immediately.
 

@@ -11,7 +11,7 @@
     "request_timeout_seconds": 5
   },
   "session": {
-    "cookie_name": "r3_steward_session",
+    "cookie_name": "r3a_steward_session",
     "lifetime_seconds": 28800,
     "connect_timeout_seconds": 3,
     "secure_cookie": false,
