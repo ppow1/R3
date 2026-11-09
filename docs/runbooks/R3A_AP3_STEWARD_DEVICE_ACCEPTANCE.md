@@ -2,12 +2,13 @@
 R3 CONTROLLED RUNBOOK
 File: docs/runbooks/R3A_AP3_STEWARD_DEVICE_ACCEPTANCE.md
 Component: R3A AP3 Steward Access
-Revision: 1.2.0
+Revision: 1.3.0
 Purpose: Give a Steward a safe, reproducible browser acceptance path over supported development networks.
 Authority: Issue #49; coordinate Website #51 and Coordinator #56.
 Security: Uses only the existing R3 portal identity, AP3 durable session and CME authorization. Does not expose or configure a public listener.
 Changed: 2026-11-09T13:10:00Z | AP3-M1 | Codex GPT-6 | Record LAN portal listener restoration and interactive acceptance boundary.
 Changed: 2026-11-09T14:00:00Z | AP3-M1 | Codex GPT-6 | Diagnose provider Origin rejection and prepare coordinated allowlist correction.
+Changed: 2026-11-09T14:30:00Z | AP3-M1 | Codex GPT-6 | Trace accepted login through cookie failure and document scoped LAN proxy fix.
 -->
 
 # Steward device acceptance
@@ -30,7 +31,19 @@ The provider checks `Origin` before parsing the login body or looking up an acco
 
 The prepared [account-origin systemd override](../../deploy/systemd/riverview-account-lan-origin.conf) retains the two current HTTPS origins and adds only `http://192.168.1.155:8303`. The account/session authority is Coordinator-owned. After coordination, install it as `/etc/systemd/system/riverview-status-dashboard.service.d/90-r3a-lan-account-origin.conf`, run `systemctl daemon-reload`, then restart only `riverview-status-dashboard.service`. Rollback removes that dedicated file, runs `daemon-reload`, and restarts only the same service. Remote Access has not installed the override or restarted that service. Rewriting or dropping the browser Origin at Nginx would bypass the provider's CSRF boundary and is not an acceptable fix.
 
-Exact account provisioning was not verified: the rejected request never queried an account, and the authenticated account-admin status endpoint is not available without a Steward session. Do not diagnose an account or password problem from this response. After Coordinator activation, the no-credential origin probe should return 400 (valid Origin, invalid empty-body shape) and foreign Origin should remain 403. Then the Steward can retry once in the browser; only the actual account response can validate the existing credential and provisioned account. Password reset remains outside this work without Steward approval.
+Before Coordinator activation, exact account provisioning could not be verified because the rejected request never queried an account. Coordinator integration `dd8aaae4028c57b4be40419fb0da7887498f9608` later activated the LAN Origin; the probes returned 400 for valid Origin with an empty body and 403 for a foreign Origin. The subsequent real browser requests and read-only account metadata are recorded below. Password reset remains outside this work without Steward approval.
+
+## Browser login cookie failure and correction (2026-11-09)
+
+After Coordinator integration `dd8aaae4028c57b4be40419fb0da7887498f9608` activated the LAN Origin, sanitized R3 access logs from client `192.168.1.88` showed four sequences of `POST /api/v1/chat/login` 200, `GET /` 303, `GET /login` 200. The login endpoint returns 200 only after the account authority authenticates the request and the R3 app verifies the `steward` role. This confirms the submitted credentials/account were accepted, the account met enabled/password/grant conditions, and the authority issued a session. The subsequent 303 shows the R3 app received no usable portal session on the redirected request.
+
+A read-only aggregate query of the authoritative account schema returned two Steward rows, both enabled, email-verified, password-configured, and with unrevoked/unexpired grants. No email, account ID, password hash, session token, or cookie value was returned. The login POST 200 is the evidence that the particular submitted account also passed provider validation; account changes are not indicated.
+
+The provider issues `rv_account_session` with `Secure; HttpOnly; SameSite=Lax; Path=/api/v1` and `rv_account_csrf` with `Secure; SameSite=Strict; Path=/`. The R3 login adapter changes cookie Path to `/`, sets no Domain attribute, and retains Secure. Host-only cookies are shared across ports for the same host, so port 8303 to 8311 is valid; Path `/` and SameSite do not explain the redirect. Secure is incompatible with this HTTP LAN browser session: the cookie is not sent on the following HTTP request, so `/` redirects back to `/login`. The active immutable portal release `r3-auth-3cf805d461eb` lacks the exact-LAN Secure exception present in the current R3 checkout.
+
+Remote Access added `proxy_cookie_flags rv_account_session nosecure` and `proxy_cookie_flags rv_account_csrf nosecure` only inside the existing port-8303 LAN server. This mirrors the documented HTTP LAN exception without changing the authoritative provider or R3 process. HttpOnly and SameSite are preserved for the session cookie; SameSite is preserved for the CSRF cookie; unrelated cookies retain Secure. The listener remains bound to `192.168.1.155`, restricted to `192.168.1.0/24`, and checks the exact mutation Origin. The response cookie changes are limited to the two named account cookies on this server. The change is validated with an isolated Nginx upstream test and deployed by reloading Nginx only.
+
+This does not count as browser acceptance. The Steward must repeat login at `http://192.168.1.155:8303/login`; expected after submit: R3 root no longer loops to `/login`. Then, in the same browser, open `http://192.168.1.155:8311/steward`, begin the AP3 session, verify status, and report only contract state/status codes. Do not share credentials, cookie values, or tokens.
 
 ## Current development reachability
 

@@ -10,6 +10,7 @@ Execution Model: unittest static configuration contract assertions.
 Observability: Checks LAN bind/ACL, exact mutation Origin, and existing loopback upstream.
 Authority: Steward directive AP3 Remote Access; Issues #49, #51, #56.
 Changed: 2026-11-09T13:04:00Z | AP3-M1 | Codex GPT-6 | Add LAN proxy configuration regression checks.
+Changed: 2026-11-09T14:30:00Z | AP3-M1 | Codex GPT-6 | Guard named-cookie Secure exception and attribute preservation.
 Supersedes: None.
 Contracts: R3 portal login at 192.168.1.155:8303; existing app at 127.0.0.1:18303.
 Tests: python -m unittest tests.test_r3a_portal_login_proxy_config.
@@ -43,6 +44,15 @@ class PortalLoginProxyConfigTests(unittest.TestCase):
         )
         self.assertIn("if ($r3a_login_invalid_origin) { return 403; }", config)
         self.assertNotIn("proxy_pass http://127.0.0.1:8767", config)
+
+    def test_only_named_account_cookies_lose_secure_on_the_lan_http_listener(self):
+        config = CONFIG.read_text(encoding="utf-8")
+
+        self.assertIn("proxy_cookie_flags rv_account_session nosecure;", config)
+        self.assertIn("proxy_cookie_flags rv_account_csrf nosecure;", config)
+        self.assertNotIn("proxy_cookie_flags ~", config)
+        self.assertNotIn("nohttponly", config)
+        self.assertNotIn("nosamesite", config)
 
 
 if __name__ == "__main__":
