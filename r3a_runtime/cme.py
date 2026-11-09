@@ -1107,7 +1107,7 @@ class CME:
                 if accepted["resident_id"] != self.module_id:
                     submit_payload["target_resident_id"] = accepted["resident_id"]
                 submitted = await self._control_request(
-                    "grace.objective.submit", submit_payload,
+                    "resident.objective.submit", submit_payload,
                     f"steward-chat:{conversation_id}:{message_id}")
                 activity_id = str(submitted["activity_id"])
                 await self.store.link_steward_message_activity(principal_id, message_id, activity_id)
@@ -1223,8 +1223,8 @@ class CME:
                         result={"role_id": role.role_id, "status": observation.status,
                                 "provider_id": observation.provider_id,
                                 "deferred_activities_requeued": queued}).to_dict()}
-        if operation == "grace.objective.submit":
-            if self.module_id != "resident.grace":
+        if operation in {"grace.objective.submit", "resident.objective.submit"}:
+            if operation == "grace.objective.submit" and self.module_id != "resident.grace":
                 raise RuntimeError("The configured module is not the AP1 Grace resident")
             modalities = tuple(payload.get("required_modalities", ()))
             task_class = payload.get("task_class")
@@ -1247,7 +1247,7 @@ class CME:
                     "resident.delegate", activity_id=activity_id,
                     request_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"resident.delegate:{idempotency_key}")),
                     context={"target_resident_id": target_resident_id,
-                             "intake": "grace.objective.submit"},
+                             "intake": operation},
                     resident_id=self.module_id)
                 resident_profile, selected_role = await self._resolve_resident_execution_profile(
                     target_resident_id, activity_id=activity_id,

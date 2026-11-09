@@ -76,6 +76,13 @@ export function notificationPresentation(notification, timezone = '') {
   };
 }
 
+export function residentProgressLabel(displayName) {
+  const name = typeof displayName === 'string' && displayName.trim()
+    ? displayName.trim()
+    : 'Selected resident';
+  return `${name} is working on this turn through managed CME…`;
+}
+
 export class StewardWorkspaceApi {
   constructor(fetchImpl = globalThis.fetch) {
     if (typeof fetchImpl !== 'function') throw new TypeError('A fetch implementation is required');
@@ -183,6 +190,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   let directoryAvailable = false;
   let creatingConversation = false;
   const authorizedResidentIds = new Set();
+  const residentNames = new Map();
   let pendingConversationId = null;
   let pendingMessage = null;
   const newConversationButton = root.getElementById('chat-new');
@@ -222,7 +230,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
       composer.disabled = processing;
       sendButton.disabled = processing;
       if (processing) {
-        setText(status, 'Grace is working on this turn through managed CME…');
+        setText(status, residentProgressLabel(residentNames.get(selectedResident)));
         setTimeout(() => { if (selectedConversation === conversationId) loadMessages(conversationId); }, 1500);
       }
       return result.messages || [];
@@ -252,6 +260,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     loaded = true;
     directoryAvailable = false;
     authorizedResidentIds.clear();
+    residentNames.clear();
     selectedResident = '';
     syncNewConversationButton();
     residentSelect.disabled = true;
@@ -263,6 +272,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
       for (const resident of result.residents || []) {
         if (!resident.resident_id || resident.authorized === false) continue;
         authorizedResidentIds.add(resident.resident_id);
+        residentNames.set(resident.resident_id, resident.display_name || resident.resident_id);
         residentSelect.add(new Option(resident.display_name || resident.resident_id, resident.resident_id));
       }
       residentSelect.disabled = false;

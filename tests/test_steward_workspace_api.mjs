@@ -20,7 +20,7 @@ History/Predecessor: New file; initial publication recorded in Git.
 // Mock fetch never supplies live institutional data.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp, notificationPresentation} from '../web/steward-workspace-api.mjs';
+import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp, notificationPresentation, residentProgressLabel} from '../web/steward-workspace-api.mjs';
 
 function response(status, payload, headers = {}) {
   return {
@@ -108,6 +108,12 @@ test('new conversation creation routes the selected authoritative resident with 
   assert.equal(call[1].credentials, 'same-origin');
   assert.deepEqual(JSON.parse(call[1].body), {resident_id: 'resident:grace', client_conversation_id: 'request-1'});
   assert.equal(result.conversation.resident_id, 'resident:grace');
+});
+
+test('resident progress presentation uses the dynamically selected resident name', () => {
+  assert.equal(residentProgressLabel('Grace'), 'Grace is working on this turn through managed CME…');
+  assert.equal(residentProgressLabel('Vicky'), 'Vicky is working on this turn through managed CME…');
+  assert.equal(residentProgressLabel('  '), 'Selected resident is working on this turn through managed CME…');
 });
 
 test('notification acknowledgment uses the #48 delivery route and idempotency key', async () => {

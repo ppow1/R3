@@ -57,6 +57,7 @@ class ConversationControlTests(unittest.TestCase):
         self.assertEqual(submit_call.args[7], [])
         self.assertIn("Earlier answer", submit_call.args[0])
         self.assertIn("Continue our discussion.", submit_call.args[0])
+        self.assertEqual(observed[1][0], "resident.objective.submit")
         cme.store.link_steward_message_activity.assert_awaited_once()
 
     def test_directory_bound_vicky_uses_cme_delegation_route(self):
@@ -72,7 +73,7 @@ class ConversationControlTests(unittest.TestCase):
         cme._resolve_resident_execution_profile = AsyncMock(return_value=(profile, role))
         cme.store.submit_grace_objective = AsyncMock(return_value={"activity_id": "activity-vicky",
                                                                     "state": "QUEUED"})
-        result = asyncio.run(CME._control_request(cme, "grace.objective.submit", {
+        result = asyncio.run(CME._control_request(cme, "resident.objective.submit", {
             "objective": "Answer a Steward conversation turn", "event_kind": "conversation",
             "target_resident_id": "resident.vicky", "acceptance_criteria": [],
             "task_class": "objective_reasoning"}, "vicky-turn-key"))
