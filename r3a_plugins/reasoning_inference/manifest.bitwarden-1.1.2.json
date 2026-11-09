@@ -1,0 +1,387 @@
+{
+  "schema_version": 1,
+  "plugin_id": "r3a.reasoning-inference",
+  "plugin_version": "1.1.2",
+  "artifact_ref": "plugin_bitwarden_v1_1_2.py",
+  "artifact_sha256": "cb4931e2e7b5c48cc764cecb2e4ff2096a47758cd55a3b516d07af97c237a0e4",
+  "configuration_schema": {
+    "schema_id": "r3a.reasoning-inference.config.v3",
+    "type": "object",
+    "required": [
+      "temperature"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "temperature": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 2
+      },
+      "api_key_env": {
+        "type": "string",
+        "pattern": "[A-Z][A-Z0-9_]*"
+      },
+      "secret_reference": {
+        "type": "object",
+        "required": [
+          "provider_id",
+          "provider_version",
+          "secret_id",
+          "manifest_path",
+          "configuration_path",
+          "access_token_env"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "provider_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "secret_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "manifest_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "configuration_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "access_token_env": {
+            "type": "string",
+            "pattern": "[A-Z][A-Z0-9_]*"
+          }
+        }
+      }
+    }
+  },
+  "operation": {
+    "contract_id": "r3a.capability-operation.v1",
+    "contract_version": "1.0.0",
+    "operation_id": "reasoning.model.invoke",
+    "operation_revision": "1.1.2",
+    "provider": {
+      "provider_id": "r3a.reasoning-inference",
+      "provider_version": "1.1.2",
+      "entrypoint": "r3a_plugins.reasoning_inference.plugin_bitwarden_v1_1_2:create_provider",
+      "artifact_sha256": "cb4931e2e7b5c48cc764cecb2e4ff2096a47758cd55a3b516d07af97c237a0e4"
+    },
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "messages"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "messages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "role",
+              "content"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": [
+                  "system",
+                  "user",
+                  "assistant"
+                ]
+              },
+              "content": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "required": [
+        "role_id",
+        "route_id",
+        "provider",
+        "model",
+        "content",
+        "provider_result_ref",
+        "usage",
+        "elapsed_ms",
+        "finished_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "role_id": {
+          "type": "string"
+        },
+        "route_id": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider_result_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "usage": {
+          "type": "object"
+        },
+        "elapsed_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "finished_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "effect_class": "external_write",
+    "caller_constraints": {
+      "allowed_principals": [],
+      "allowed_residents": [
+        "resident.grace"
+      ],
+      "allowed_services": []
+    },
+    "target_scope_schema": {
+      "type": "object",
+      "required": [
+        "role_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "role_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "required_grants": [
+      "reasoning.model.invoke"
+    ],
+    "evidence": {
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "evidence_id",
+            "request_ref",
+            "request_sha256",
+            "result_ref",
+            "result_sha256",
+            "role_id",
+            "route_id",
+            "provider",
+            "model",
+            "usage",
+            "elapsed_ms",
+            "observed_at"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "evidence_id": {
+              "type": "string"
+            },
+            "request_ref": {
+              "type": "string"
+            },
+            "request_sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "result_ref": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "result_sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "role_id": {
+              "type": "string"
+            },
+            "route_id": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "usage": {
+              "type": "object"
+            },
+            "elapsed_ms": {
+              "type": "number",
+              "minimum": 0
+            },
+            "observed_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "credential_source": {
+              "type": "object",
+              "required": [
+                "contract_id",
+                "contract_version",
+                "provider_id",
+                "provider_version",
+                "secret_id",
+                "remote_revision",
+                "fetched_at",
+                "machine_principal"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "contract_id": {
+                  "type": "string",
+                  "const": "r3a.secrets.provider.v1"
+                },
+                "contract_version": {
+                  "type": "string",
+                  "const": "1.1.0"
+                },
+                "provider_id": {
+                  "type": "string"
+                },
+                "provider_version": {
+                  "type": "string"
+                },
+                "secret_id": {
+                  "type": "string"
+                },
+                "remote_revision": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "fetched_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "machine_principal": {
+                  "type": "object",
+                  "required": [
+                    "contract_id",
+                    "contract_version",
+                    "issuer",
+                    "principal_id",
+                    "authenticated_at",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "contract_id": {
+                      "type": "string",
+                      "const": "r3a.machine-principal.v1"
+                    },
+                    "contract_version": {
+                      "type": "string",
+                      "const": "1.0.0"
+                    },
+                    "issuer": {
+                      "type": "string"
+                    },
+                    "principal_id": {
+                      "type": "string"
+                    },
+                    "authenticated_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "verification_obligations": [
+        "Preserve provider/model/route identity and request/result digest and usage."
+      ]
+    },
+    "recovery": {
+      "idempotency_required": true,
+      "idempotency_scope": "invocation",
+      "replay_safe": false,
+      "reconciliation_operation_id": null
+    },
+    "execution": {
+      "timeout_seconds": 180,
+      "retry_disposition": "never"
+    },
+    "lifecycle": {
+      "desired_state": "enabled"
+    },
+    "resident_tool": {
+      "name": "Configured Reasoning Provider",
+      "description": "Perform one authorized, budget-reserved model inference selected by CME for Grace's reasoning continuation."
+    }
+  },
+  "provider": {
+    "provider_id": "r3a.reasoning-inference",
+    "provider_version": "1.1.2",
+    "entrypoint": "r3a_plugins.reasoning_inference.plugin_bitwarden_v1_1_2:create_provider",
+    "artifact_sha256": "cb4931e2e7b5c48cc764cecb2e4ff2096a47758cd55a3b516d07af97c237a0e4"
+  },
+  "module_manifest": {
+    "contract_id": "r3a.module-manifest.v1",
+    "contract_version": "1.0.0",
+    "module_id": "r3a.reasoning-inference",
+    "module_version": "1.1.2",
+    "owner": "R3A AP3",
+    "binding": {
+      "contract_id": "r3a.capability-provider.v1",
+      "protocol_major": 1,
+      "protocol_min_minor": 0,
+      "protocol_max_minor": 0,
+      "entrypoint": "r3a_plugins.reasoning_inference.plugin_bitwarden_v1_1_2:create_provider"
+    },
+    "dependencies": [],
+    "configuration": {
+      "schema_ref": "r3a.reasoning-inference.config.v3",
+      "configuration_ref": "capability_operations[].configuration"
+    },
+    "capability_refs": [
+      "reasoning.model.invoke"
+    ],
+    "resource_refs": [],
+    "state_namespace": "r3a.reasoning.inference",
+    "migration_contract": "r3a.stateless-provider.v1",
+    "recovery_policy": "operation-contract.v1",
+    "artifact": {
+      "artifact_ref": "plugin_bitwarden_v1_1_2.py",
+      "artifact_sha256": "cb4931e2e7b5c48cc764cecb2e4ff2096a47758cd55a3b516d07af97c237a0e4"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "temperature": 0.1,
+  "secret_reference": {
+    "provider_id": "r3a.bitwarden-secrets",
+    "provider_version": "1.1.2",
+    "secret_id": "<Bitwarden-secret-id>",
+    "manifest_path": "/etc/r3a/providers/bitwarden/manifest.json",
+    "configuration_path": "/etc/r3a/providers/bitwarden/provider.json",
+    "access_token_env": "R3A_BITWARDEN_ACCESS_TOKEN"
+  }
+}
