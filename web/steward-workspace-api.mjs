@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: web/steward-workspace-api.js
 Component: R3A-STEWARD-WORKSPACE-CLIENT
-File Revision: 1.0.6
+File Revision: 1.0.7
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Same-origin client for versioned resident conversation and notification contracts
@@ -16,6 +16,7 @@ Changed: 2026-11-08 | #48/#51 | Render canonical notification details, recipient
 Changed: 2026-11-08 | #49/#51 | Refresh directory on shared session establishment and clear resident conversation view on revocation/401.
 Changed: 2026-11-08 | #51 | Gate creation on current resident selection and expose request progress accessibly.
 Changed: 2026-11-09 | R3A-WEBSITE-WIDE-AUTH | R3A Coordinator | Inherit global Website authentication, redirect expired sessions, and remove chat sign-in/session activation controls.
+Changed: 2026-11-09 | R3A-LOGIN-REDIRECT-LOOP | R3A Coordinator | Recheck only the canonical session after operation 401; preserve authenticated Website navigation on scoped denials.
 Tests: tests/test_steward_workspace_api.mjs uses mocked fetch only as a labeled development test
 */
 
@@ -100,7 +101,7 @@ export class StewardWorkspaceApi {
     if (!response.ok) {
       const code = payload.error?.code || payload.code || (response.status === 401 ? 'session_required' : 'request_failed');
       const message = payload.error?.message || payload.detail || `Workspace request failed (${response.status})`;
-      if (response.status === 401) globalThis.window?.r3aRequireWebsiteLogin?.();
+      if (response.status === 401) globalThis.window?.r3aCheckWebsiteSession?.();
       throw new WorkspaceApiError(message, {status: response.status, code, correlationId});
     }
     if (contract && payload.contract !== contract) {
@@ -194,22 +195,10 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   const unavailable = error => {
     const message = error instanceof WorkspaceApiError ? error.message : 'Resident conversation service unavailable';
     const missing = error?.status === 404 ? 'Authoritative resident directory and conversation APIs are not mounted on this website service. ' : '';
-    setText(status, `${error?.status === 401 ? 'Website session expired; returning to institutional sign in. ' : missing}${message}${error?.correlationId ? ` · correlation ${error.correlationId}` : ''}`);
-    status.dataset.state = error?.status === 401 ? 'unauthenticated' : 'unavailable';
+    setText(status, `${error?.status === 401 ? 'This request was unauthorized (401); checking Website session separately. ' : missing}${message}${error?.correlationId ? ` · correlation ${error.correlationId}` : ''}`);
+    status.dataset.state = error?.status === 401 ? 'unauthorized' : 'unavailable';
     if (error?.status === 401) {
-      directoryAvailable = false;
-      loaded = false;
-      selectedResident = '';
-      selectedConversation = '';
-      pendingMessage = null;
-      composer.value = '';
-      residentSelect.disabled = true;
-      residentSelect.replaceChildren(new Option('Website session required', ''));
-      conversationList.replaceChildren();
-      messageList.replaceChildren();
-      composer.disabled = true;
-      sendButton.disabled = true;
-      syncNewConversationButton();
+      globalThis.window?.r3aCheckWebsiteSession?.();
     }
   };
 
@@ -466,8 +455,8 @@ export function mountNotificationInbox({api = new StewardWorkspaceApi(), root = 
       if (!append) list.replaceChildren();
       if (olderControl) olderControl.disabled = false;
       const unavailable = error.status === 404 ? 'Recipient notification inbox API is not mounted on this website service. ' : '';
-      setText(status, `${error.status === 401 ? 'Sign in through the Steward session service. ' : unavailable}${append ? 'Older notification history unavailable; previously loaded records are retained. ' : ''}${error.message}${error.correlationId ? ` · correlation ${error.correlationId}` : ''}`);
-      status.dataset.state = error.status === 401 ? 'unauthenticated' : 'unavailable';
+      setText(status, `${error.status === 401 ? 'This notification request was unauthorized (401); Website session is checked separately. ' : unavailable}${append ? 'Older notification history unavailable; previously loaded records are retained. ' : ''}${error.message}${error.correlationId ? ` · correlation ${error.correlationId}` : ''}`);
+      status.dataset.state = error.status === 401 ? 'unauthorized' : 'unavailable';
     }
   }
   root.getElementById('nav-notifications')?.addEventListener('click', refresh);

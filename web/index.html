@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: web/index.html
 Component: R3-ESTATE-HOME
-File Revision: 1.0.29
+File Revision: 1.0.30
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Present the R3 estate home with Engineering and Infrastructure observability panels
@@ -29,6 +29,7 @@ Changed: 2026-11-08 | #51 | Codex GPT-6 | Add browser-local opacity controls for
 Changed: 2026-11-08 | #49/#51 | Codex GPT-6 | Emit shared session lifecycle events for resident chat refresh and revocation clearing.
 Changed: 2026-11-09T19:57:00Z | AP3/R3A-010-LIVE-LOGIN | R3A Coordinator | Remove legacy R3 portal prompts from the R3A workspace and route sign-in to native R3A auth.
 Changed: 2026-11-09T20:25:00Z | R3A-WEBSITE-WIDE-AUTH | R3A Coordinator | Gate the full Website on its native session; remove chat/panel session controls and add one global sign-out.
+Changed: 2026-11-09T21:20:00Z | R3A-LOGIN-REDIRECT-LOOP | R3A Coordinator | Only canonical session verification may redirect to login; operation 401 responses recheck session without forcing navigation.
 -->
 <!doctype html>
 <html lang="en">
@@ -40,6 +41,7 @@ Changed: 2026-11-09T20:25:00Z | R3A-WEBSITE-WIDE-AUTH | R3A Coordinator | Gate t
 <script>
 (() => {
   let redirecting = false;
+  let sessionRecheck = null;
   const showFailure = () => {
     const reveal = () => {
       const gate = document.getElementById('r3a-auth-gate');
@@ -56,6 +58,21 @@ Changed: 2026-11-09T20:25:00Z | R3A-WEBSITE-WIDE-AUTH | R3A Coordinator | Gate t
     if (redirecting || location.pathname === '/login') return;
     redirecting = true;
     location.replace('/login');
+  };
+  // A 401 from an operation API may mean that operation denied access while
+  // the Website session remains valid. Only the canonical session endpoint
+  // is allowed to move a signed-in browser back to login.
+  window.r3aCheckWebsiteSession = () => {
+    if (location.pathname === '/login' || redirecting) return Promise.resolve(false);
+    if (sessionRecheck) return sessionRecheck;
+    sessionRecheck = fetch('/api/v1/steward/session', {credentials:'same-origin', cache:'no-store', headers:{Accept:'application/vnd.r3a.steward-session.v1+json','X-R3A-Contract':'r3a.steward-session.v1'}})
+      .then(response => {
+        if (response.status === 401) { window.r3aRequireWebsiteLogin(); return false; }
+        return response.ok;
+      })
+      .catch(() => false)
+      .finally(() => { sessionRecheck = null; });
+    return sessionRecheck;
   };
   fetch('/api/v1/steward/session', {credentials:'same-origin', cache:'no-store', headers:{Accept:'application/vnd.r3a.steward-session.v1+json','X-R3A-Contract':'r3a.steward-session.v1'}})
     .then(response => {
@@ -410,7 +427,7 @@ document.getElementById('nav-steward').addEventListener('click',openSteward);doc
 document.getElementById('website-signout').addEventListener('click',async()=>{const button=document.getElementById('website-signout');button.disabled=true;try{await stewardApi('/api/v1/steward/session',{method:'DELETE'});document.dispatchEvent(new CustomEvent('r3:steward-session-revoked'));window.location.replace('/login');}catch(error){if(error.status===401){window.location.replace('/login');return;}button.disabled=false;button.textContent='Sign out unavailable · retry';}});
 document.getElementById('steward-refresh').addEventListener('click',refreshStewardState);
 document.getElementById('settings-config-refresh').addEventListener('click',async()=>{const status=document.getElementById('settings-config-status'),values=document.getElementById('settings-config-values'),history=document.getElementById('settings-config-history');status.textContent='Reading authoritative configuration…';try{const result=await stewardApi('/api/v1/steward/r3a/configuration');values.textContent=JSON.stringify(result.effective_values,null,2);history.replaceChildren();const revision=document.createElement('div');revision.className='settings-config-revision';revision.textContent='Revision '+(result.revision.revision_id||'unknown')+' · activated '+(result.revision.activated_at||'unknown')+' · actor '+(result.revision.actor||'unknown');history.appendChild(revision);const timezone=result.effective_values?.presentation_timezone;if(typeof timezone==='string'&&timezone.trim()){document.documentElement.dataset.presentationTimezone=timezone.trim();document.dispatchEvent(new Event('r3:presentation-timezone'));}for(const item of(result.activation_history||[])){const row=document.createElement('div');row.className='settings-config-revision';row.textContent=(item.occurred_at||'time unknown')+' · '+(item.config_revision||'revision unknown')+' · '+(item.actor||'actor unknown');history.appendChild(row);}status.textContent='Read from '+(result.source||'unknown')+' at '+(result.observed_at||'unknown')+' · activation history is limited to the latest '+result.history_window+' events'+(result.history_complete?'':' (not complete)')+' · writes unavailable';}catch(error){status.textContent='Configuration unavailable: '+error.message;values.textContent='No configuration values loaded.';history.replaceChildren();}});
-async function stewardApi(path,options={}){const response=await fetch(path,{credentials:'same-origin',cache:'no-store',...options,headers:{...(options.headers||{}),...(options.body?{'Content-Type':'application/json'}:{})}});const body=await response.json().catch(()=>({}));body.request_id=body.request_id||response.headers.get('X-Request-ID');if(!response.ok){const error=new Error(body.detail||('Request failed ('+response.status+')'));error.status=response.status;error.correlationId=body.correlation_id||response.headers.get('X-Correlation-ID')||response.headers.get('X-Request-ID');if(response.status===401)window.r3aRequireWebsiteLogin?.();throw error;}return body;}
+async function stewardApi(path,options={}){const response=await fetch(path,{credentials:'same-origin',cache:'no-store',...options,headers:{...(options.headers||{}),...(options.body?{'Content-Type':'application/json'}:{})}});const body=await response.json().catch(()=>({}));body.request_id=body.request_id||response.headers.get('X-Request-ID');if(!response.ok){const error=new Error(body.detail||('Request failed ('+response.status+')'));error.status=response.status;error.correlationId=body.correlation_id||response.headers.get('X-Correlation-ID')||response.headers.get('X-Request-ID');if(response.status===401)window.r3aCheckWebsiteSession?.();throw error;}return body;}
 function showStewardSession(session){const principal=session.principal||{},status=document.getElementById('steward-auth-status');document.getElementById('steward-workspace').hidden=false;status.textContent='Website session active · '+(principal.principal_id||session.principal_id||'principal unknown')+' · expires '+(session.expires_at||'unknown');document.getElementById('steward-source-state').textContent='Session current · '+(principal.principal_id||session.principal_id||'principal unknown');}
 async function checkStewardSession(){try{const session=await stewardApi('/api/v1/steward/session');showStewardSession(session);refreshStewardState();refreshStewardCapabilities();}catch(error){document.getElementById('steward-workspace').hidden=true;document.getElementById('steward-auth-status').textContent='Institutional Website session unavailable: '+error.message;}}
 async function refreshStewardCapabilities(){const container=document.getElementById('steward-capabilities');if(!container)return;container.textContent='Reading CME registry…';try{const result=await stewardApi('/api/v1/steward/capabilities');container.replaceChildren();for(const entry of(result.operations||[])){const descriptor=entry.descriptor||entry;const row=document.createElement('details');row.className='steward-row';const heading=document.createElement('summary');heading.textContent=(descriptor.operation_id||'Registered operation')+' · '+(descriptor.contract_version||descriptor.operation_contract_version||'contract version unknown');const detail=document.createElement('pre');detail.textContent=JSON.stringify({descriptor,health:entry.health,availability:entry.availability},null,2);row.append(heading,detail);container.appendChild(row);}if(!container.childNodes.length)container.textContent='CME returned no registered operations.';}catch(error){container.textContent='Capability registry unavailable: '+error.message;}}
@@ -583,7 +600,6 @@ window.addEventListener('resize',()=>{if(innerWidth<=760&&sideRail.classList.con
 
 async function getJson(path){
   const response=await fetch(path,{cache:'no-store'});
-  if(response.status===401)window.r3aRequireWebsiteLogin?.();
   if(!response.ok)throw new Error('Request failed');
   return response.json();
 }
@@ -655,7 +671,6 @@ snapshotButton.addEventListener('click',async()=>{
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify(browser)
     });
-    if(response.status===401)window.r3aRequireWebsiteLogin?.();
     if(!response.ok)throw new Error('Snapshot API unavailable');
     const snapshot=await response.json();
     const blob=new Blob([JSON.stringify(snapshot,null,2)],{type:'application/json'});

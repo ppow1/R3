@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_website.py
 Component: R3A-WEBSITE-API-TESTS
-File Revision: 1.0.7
+File Revision: 1.0.8
 Created: 2026-11-07T21:59:13Z
 Created By: Codex GPT-6
 Purpose: Verify shared-session gating, versioned objective forwarding, and website client assets.
@@ -18,6 +18,7 @@ Changed: 2026-11-08T13:30:00Z | R3A-WEB-IDENTITY | Verify running identity metad
 Changed: 2026-11-08T14:30:00Z | R3A-010/#49/#51 | Verify same-host configured R3 portal login discovery and reject cross-host links.
 Changed: 2026-11-09T18:10:00Z | AP3/R3A-010 | Verify native R3A login page, HTTPS-only submission, and no R3 portal discovery in native mode.
 Changed: 2026-11-09T19:57:00Z | AP3/R3A-010-LIVE-LOGIN | Verify native-mode base routing, no R3 portal UI, and workspace return after login.
+Changed: 2026-11-09T21:20:00Z | R3A-LOGIN-REDIRECT-LOOP | Verify only canonical session 401 redirects and operation 401s trigger a session recheck.
 Supersedes: None.
 Contracts: r3a.steward-session.v1; r3a.grace-objective-submission.v1; R3A AP0 diagnostic socket.
 Tests: python -m unittest tests.test_r3a_website.
@@ -157,7 +158,24 @@ class StewardWebsiteApiTests(unittest.TestCase):
                             "Open existing R3 account sign-in",
                             "R3 portal session not authenticated"):
             self.assertNotIn(legacy_copy, workspace.text)
-        self.assertIn("window.r3aRequireWebsiteLogin", workspace.text)
+        self.assertIn("window.r3aCheckWebsiteSession", workspace.text)
+        self.assertIn("if (response.status === 401) { window.r3aRequireWebsiteLogin(); return null; }", workspace.text)
+
+    def test_workspace_operation_401_rechecks_session_without_forcing_login_redirect(self):
+        response = self.client.get("/web/steward-workspace-api.mjs")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("r3aCheckWebsiteSession?.()", response.text)
+        self.assertNotIn("r3aRequireWebsiteLogin?.()", response.text)
+
+    def test_login_page_stays_available_when_session_verification_returns_401(self):
+        login = self.client.get("/login")
+        script = self.client.get("/web/steward-login.js")
+        self.assertEqual(login.status_code, 200)
+        self.assertIn('value="enroll"', login.text)
+        self.assertEqual(script.status_code, 200)
+        self.assertIn("resumeExistingSession", script.text)
+        self.assertIn("body.state === 'authenticated'", script.text)
+        self.assertNotIn("r3aRequireWebsiteLogin", script.text)
 
     def test_nonpublic_website_apis_require_the_same_authenticated_session(self):
         self.access.authenticated_principal.side_effect = HTTPException(401, "Steward session unavailable")
