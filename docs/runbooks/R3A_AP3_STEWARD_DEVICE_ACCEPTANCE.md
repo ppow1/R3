@@ -2,11 +2,12 @@
 R3 CONTROLLED RUNBOOK
 File: docs/runbooks/R3A_AP3_STEWARD_DEVICE_ACCEPTANCE.md
 Component: R3A AP3 Steward Access
-Revision: 1.1.0
+Revision: 1.2.0
 Purpose: Give a Steward a safe, reproducible browser acceptance path over supported development networks.
 Authority: Issue #49; coordinate Website #51 and Coordinator #56.
 Security: Uses only the existing R3 portal identity, AP3 durable session and CME authorization. Does not expose or configure a public listener.
 Changed: 2026-11-09T13:10:00Z | AP3-M1 | Codex GPT-6 | Record LAN portal listener restoration and interactive acceptance boundary.
+Changed: 2026-11-09T14:00:00Z | AP3-M1 | Codex GPT-6 | Diagnose provider Origin rejection and prepare coordinated allowlist correction.
 -->
 
 # Steward device acceptance
@@ -20,6 +21,16 @@ Remote Access installed [`r3-steward-login-lan.conf`](../../deploy/nginx/r3-stew
 Live HTTP checks after reload: `/login` 200, `/api/v1/health` 200, anonymous `/api/v1/chat/session` 401, AP3 `/api/v1/steward/session` and `/status` 401, and anonymous AP3 `/operations/invoke` 401. An untrusted mutation Origin was denied 403 in an isolated Nginx proxy check. These prove listener/routing and anonymous denial only; no successful real-account login or authenticated browser session has yet been observed. AP3 website source currently running is Coordinator revision `7452b970ec04671acf26f6aa3a020162171cf558`; account app release directory is `r3-auth-3cf805d461eb`; AP3 service remains active as PID 417257, and portal app remains active as PID 1359. The Remote Access source revision is the commit recorded with this runbook change.
 
 The next acceptance step requires a Steward to enter real account credentials directly into the browser at the LAN login page. Do not send credentials, cookies, or session-secret values in chat or issues. After login, use the same browser/device at `http://192.168.1.155:8311/steward` and follow the acceptance steps below. If sign-in succeeds but AP3 does not establish a session, capture only status codes, non-secret contract state, and correlation IDs for diagnosis.
+
+## Follow-up login failure diagnosis (2026-11-09)
+
+The Steward reported that `/login` opens but sign-in displays “Sign-in unsuccessful.” The request reaches Nginx port 8303 and the existing R3 app at 18303. Safe service access logs show `POST /api/v1/chat/login` from LAN client `192.168.1.88` returning 401. The app forwards the request to the authoritative account/session endpoint `127.0.0.1:8767/api/v1/auth/session`; it maps provider 401/403 responses to the generic UI response, so the UI text does not identify the internal cause.
+
+The provider checks `Origin` before parsing the login body or looking up an account. `RIVERVIEW_PUBLIC_ORIGINS` is not set in the active service environment; its code default contains only `https://192.168.1.155` and `https://riverview.ionoge.com`. A no-credential empty-object probe with the established LAN origin returned 403 from the provider, while the configured HTTPS origin passed the Origin check and then returned 400 for the intentionally invalid request shape. Through the R3 app, the LAN-origin probe is presented as 401. This isolates the confirmed defect to the provider's Origin allowlist; password validation, account lookup/state, and session creation were not reached. No account or credential was changed.
+
+The prepared [account-origin systemd override](../../deploy/systemd/riverview-account-lan-origin.conf) retains the two current HTTPS origins and adds only `http://192.168.1.155:8303`. The account/session authority is Coordinator-owned. After coordination, install it as `/etc/systemd/system/riverview-status-dashboard.service.d/90-r3a-lan-account-origin.conf`, run `systemctl daemon-reload`, then restart only `riverview-status-dashboard.service`. Rollback removes that dedicated file, runs `daemon-reload`, and restarts only the same service. Remote Access has not installed the override or restarted that service. Rewriting or dropping the browser Origin at Nginx would bypass the provider's CSRF boundary and is not an acceptable fix.
+
+Exact account provisioning was not verified: the rejected request never queried an account, and the authenticated account-admin status endpoint is not available without a Steward session. Do not diagnose an account or password problem from this response. After Coordinator activation, the no-credential origin probe should return 400 (valid Origin, invalid empty-body shape) and foreign Origin should remain 403. Then the Steward can retry once in the browser; only the actual account response can validate the existing credential and provisioned account. Password reset remains outside this work without Steward approval.
 
 ## Current development reachability
 
