@@ -206,6 +206,10 @@ class InstitutionalDirectoryProviderTests(unittest.TestCase):
         self.assertIn("engineering.assignment.execute",
                       {row["capability_id"] for row in result["output"]["capabilities"]})
         self.assertEqual("riverview_authority.directory", result["evidence"][0]["source_id"])
+        self.assertTrue(result["evidence"][0]["source_path"].startswith("capability."))
+        self.assertEqual(hashlib.sha256(result["evidence"][0]["content"].encode()).hexdigest(),
+                         result["evidence"][0]["sha256"])
+        self.assertEqual(64, len(result["evidence"][0]["source_sha256"]))
         self.assertTrue(result["authorization"]["audit_event_id"])
         instance.invoke_capability.assert_awaited_once()
         self.assertEqual("r3a.capability-invocation.v1",

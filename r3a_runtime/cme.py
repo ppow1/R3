@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.17.0
+File Revision: 1.18.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -17,6 +17,7 @@ Changed: 2026-11-08 | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Persist gene
 Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Omit CME-only durable reasoning checkpoint internals from resident protocol frames.
 Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Keep full capability evidence once in context and compact its conversation receipt.
 Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Compact legacy durable capability receipts when resuming activities.
+Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Normalize typed module evidence into generic CME resident envelopes.
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Dispatch generic versioned Steward read/write effects through existing authorization, invocation, and provider paths.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
@@ -57,6 +58,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import hashlib
 import json
 import os
@@ -1678,7 +1680,9 @@ class CME:
             if canonical_result["outcome"] != "SUCCEEDED":
                 raise RuntimeError("CME capability invocation did not succeed")
             capability_output = canonical_result["output"]
-            evidence.extend(canonical_result["evidence"])
+            evidence.extend(self._resident_evidence_envelope(
+                descriptor, capability_output, canonical_result["evidence"],
+                canonical_result["finished_at"]))
             authorization = canonical_result["authorization"]
             invocation_summary = {key: canonical_result[key] for key in
                                   ("invocation_id", "operation_id", "operation_contract_version",
@@ -1694,6 +1698,50 @@ class CME:
         if registered_operation is not None:
             result["invocation"] = invocation_summary
         return result
+
+    @staticmethod
+    def _resident_evidence_envelope(descriptor: dict[str, Any], output: Any,
+                                    provider_evidence: Any,
+                                    observed_at: str) -> list[dict[str, Any]]:
+        """Adapt typed provider evidence to CME's common, digest-checked resident evidence shape.
+
+        Providers keep their contract-specific evidence in the durable invocation record. Resident
+        reasoning consumes either native source excerpts or one generic envelope over the exact
+        provider output and evidence. This keeps capability discovery and authorization generic
+        while allowing modules to expose different, versioned evidence contracts.
+        """
+        items = provider_evidence if isinstance(provider_evidence, list) else [provider_evidence]
+        if (items and all(isinstance(item, dict)
+                          and all(isinstance(item.get(key), str) and item.get(key)
+                                  for key in ("source_id", "source_path", "content", "sha256"))
+                          for item in items)):
+            return [copy.deepcopy(item) for item in items]
+
+        provider = descriptor["provider"]
+        source_id = next((item.get("source_id") for item in items
+                          if isinstance(item, dict) and isinstance(item.get("source_id"), str)
+                          and item["source_id"]),
+                         f"provider.{provider['provider_id']}.{descriptor['operation_id']}")
+        source_digest = next((item.get(key) for item in items if isinstance(item, dict)
+                              for key in ("source_sha256", "snapshot_sha256", "payload_sha256")
+                              if isinstance(item.get(key), str)
+                              and re.fullmatch(r"[a-f0-9]{64}", item[key])), None)
+        content = json.dumps({"operation_id": descriptor["operation_id"],
+                              "operation_contract_version": descriptor["contract_version"],
+                              "provider": {key: provider[key] for key in
+                                           ("provider_id", "provider_version", "artifact_sha256")},
+                              "output": output, "provider_evidence": items},
+                             sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        envelope = {"source_id": source_id,
+                    "source_path": f"capability.{descriptor['operation_id']}.output",
+                    "content": content,
+                    "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                    "source": f"{provider['provider_id']}@{provider['provider_version']}",
+                    "observed_at": observed_at,
+                    "provider_artifact_sha256": provider["artifact_sha256"]}
+        if source_digest is not None:
+            envelope["source_sha256"] = source_digest
+        return [envelope]
 
     async def _await_resident_handoff(self, activity: dict[str, Any], handoff: dict[str, Any]) -> dict[str, Any]:
         """Wait on a durable child activity; the child's deterministic ID makes recovery idempotent."""
