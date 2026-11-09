@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_AUTH_INDEPENDENCE_PLAN.md
 Component: R3A-AP3-AUTH-INDEPENDENCE
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-09T16:32:39Z
 Created By: Codex GPT-6
 Purpose: Define a bounded integration design for R3A-owned Steward authentication and governed initial identity provisioning.
@@ -11,6 +11,7 @@ Observability: Contract revision, provider health, session lifecycle events, and
 Dependencies: R3A Master Roadmap Baseline 1.0; R3A Architecture Charter; AP3 Steward Access contract; Steward approval for identity provisioning policy.
 Authority: Steward directive — R3A Authentication Independence; AP3/R3A-010; no phase exception.
 Changed: 2026-11-09T16:32:39Z | R3A-AUTH-INDEPENDENCE-001 | Codex GPT-6 | Record target boundary, safe association plan, workstream contracts, and approval gates.
+Changed: 2026-11-09T16:32:39Z | R3A-AUTH-INDEPENDENCE-001 | Codex GPT-6 | Specify the one-time non-secret R3 identity provenance read and prevent ongoing R3 synchronization dependencies.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1; r3a.capability-invocation.v1.
 Tests: Documentation/design review only; implementation and operational acceptance pending.
@@ -38,8 +39,8 @@ Authentication establishes a verified canonical R3A principal only. It does not 
 
 ## Existing identity association and credential plan
 
-1. Character Architecture/HR authority identifies the authoritative existing Steward HR/account record through its authenticated read interface. Capture only the minimum permitted stable source identifier, active/verified state, source revision, and provenance reference; do not copy protected HR fields into Website or authentication records.
-2. The Steward approves the canonical association between that source identity and the R3A principal. Record the source authority, source revision, actor, time, and association operation ID. Reject ambiguous, stale-revision, inactive, or duplicate associations.
+1. Character Architecture/HR authority identifies the authoritative existing Steward HR record through its authenticated read interface. Separately, the R3 identity owner provides a one-time authorized read of the existing account's stable subject identifier, active/verified state, Steward eligibility, source revision, and provenance reference. The exact R3 read interface and allowed fields must be confirmed with its owner before use. Never read or copy password hashes, sessions, reset tokens, factor seeds, or recovery material. Do not copy protected HR fields into Website or authentication records.
+2. The Steward approves the canonical association across the HR identity, existing R3 account subject, and R3A principal. Record the source authorities, source revisions, actor, time, and idempotent association operation ID. Reject ambiguous, stale-revision, inactive, or duplicate associations. The R3 metadata read is a migration input only; R3A performs no ongoing runtime lookup or synchronization against R3.
 3. Do not copy R3 password hashes, sessions, reset tokens, MFA seeds, or recovery material. Preferred enrollment is a fresh R3A credential set through a short-lived single-use enrollment challenge delivered by an already approved out-of-band procedure. The challenge conveys no capability grants.
 4. Provision CME grants separately through the canonical R3A grant authority after identity association. Authentication roles or HR office bindings never synthesize grants.
 5. Until the Steward approves the identity association and enrollment/recovery policy, do not create the R3A account, enroll a credential, issue a real session, or activate the independent authority. No fabricated principal, credential, or grant may be used for acceptance.
