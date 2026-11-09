@@ -2,12 +2,13 @@
 R3 CONTROLLED RUNBOOK
 File: docs/runbooks/R3A_AP3_STEWARD_DEVICE_ACCEPTANCE.md
 Component: R3A AP3 Steward Access
-Revision: 1.2.0
+Revision: 1.3.0
 Purpose: Give a Steward a safe, reproducible browser acceptance path over supported development networks.
 Authority: Issue #49; coordinate Website #51 and Coordinator #56.
 Security: Uses only the existing R3 portal identity, AP3 durable session and CME authorization. Does not expose or configure a public listener.
 Changed: 2026-11-09T13:10:00Z | AP3-M1 | Codex GPT-6 | Record LAN portal listener restoration and interactive acceptance boundary.
 Changed: 2026-11-09T14:00:00Z | AP3-M1 | Codex GPT-6 | Diagnose provider Origin rejection and prepare coordinated allowlist correction.
+Changed: 2026-11-09T14:06:39Z | R3A Coordinator | Codex GPT-6 | Record deployed additive account-Origin override and no-credential live verification.
 -->
 
 # Steward device acceptance
@@ -28,9 +29,9 @@ The Steward reported that `/login` opens but sign-in displays “Sign-in unsucce
 
 The provider checks `Origin` before parsing the login body or looking up an account. `RIVERVIEW_PUBLIC_ORIGINS` is not set in the active service environment; its code default contains only `https://192.168.1.155` and `https://riverview.ionoge.com`. A no-credential empty-object probe with the established LAN origin returned 403 from the provider, while the configured HTTPS origin passed the Origin check and then returned 400 for the intentionally invalid request shape. Through the R3 app, the LAN-origin probe is presented as 401. This isolates the confirmed defect to the provider's Origin allowlist; password validation, account lookup/state, and session creation were not reached. No account or credential was changed.
 
-The prepared [account-origin systemd override](../../deploy/systemd/riverview-account-lan-origin.conf) retains the two current HTTPS origins and adds only `http://192.168.1.155:8303`. The account/session authority is Coordinator-owned. After coordination, install it as `/etc/systemd/system/riverview-status-dashboard.service.d/90-r3a-lan-account-origin.conf`, run `systemctl daemon-reload`, then restart only `riverview-status-dashboard.service`. Rollback removes that dedicated file, runs `daemon-reload`, and restarts only the same service. Remote Access has not installed the override or restarted that service. Rewriting or dropping the browser Origin at Nginx would bypass the provider's CSRF boundary and is not an acceptable fix.
+The [account-origin systemd override](../../deploy/systemd/riverview-account-lan-origin.conf) was integrated from Remote Access commit `a07d901e9f06b36677bafce1e5ab476c361fedaf` and deployed by Coordinator commit `d9ddcafed34ac49c5d2391b35b6d74e059ee72e9`. It is installed as `/etc/systemd/system/riverview-status-dashboard.service.d/90-r3a-lan-account-origin.conf`. The effective allowlist retains both HTTPS origins and adds only `http://192.168.1.155:8303`. Only `riverview-status-dashboard.service` was restarted; it is active with no systemd restart failures. Rollback removes this one additive drop-in, runs `systemctl daemon-reload`, and restarts only the same service. Rewriting or dropping the browser Origin at Nginx would bypass the provider's CSRF boundary and is not an acceptable fix.
 
-Exact account provisioning was not verified: the rejected request never queried an account, and the authenticated account-admin status endpoint is not available without a Steward session. Do not diagnose an account or password problem from this response. After Coordinator activation, the no-credential origin probe should return 400 (valid Origin, invalid empty-body shape) and foreign Origin should remain 403. Then the Steward can retry once in the browser; only the actual account response can validate the existing credential and provisioned account. Password reset remains outside this work without Steward approval.
+After deployment, a no-credential POST with body `{}` returned 400 for the exact LAN origin and for each retained HTTPS origin; `https://attacker.invalid` returned 403. The targeted account-Origin contract suite passed all three checks with live probes enabled. The 400 results show request-shape validation was reached; they do not establish account provisioning, validate a password, or create a session. The actual browser sign-in is now ready for Steward verification. Password reset remains outside this work without Steward approval.
 
 ## Current development reachability
 
@@ -78,6 +79,6 @@ For cellular without an approved VPN, do not attempt to expose the development l
 - Configuration changes require the Website service owner to update the external file, validate it with `load_access_config`, verify the DB peer role and CME socket, and restart only the Website-owned development unit. Remote/VPN mode requires TLS (`Secure=true`) and a verified private route. Keep the Coordinator-owned AP0/CME service and unrelated R3 services untouched.
 - AP3 config validation now refuses `remote_transport.state="configured"` unless the session cookie is Secure and every allowed origin is a bare HTTPS origin. A trusted certificate on the proxy alone is insufficient; it must actually route the AP3 Website and the phone must trust that certificate.
 
-## Current acceptance blocker
+## Steward browser acceptance
 
-No real Steward portal cookie has been supplied in the running browser, so the session table remains empty. A Steward-operated LAN test is now ready. The invocation payload must be provided by Coordinator #56 for a safe read-only operation granted to the authenticated Steward principal. VPN and cellular acceptance additionally require network-owner provisioning described above. No credentials or authenticated browser session are requested in chat.
+No real Steward sign-in or authenticated browser session was performed during this deployment. A Steward-operated LAN test is now ready using the steps above. The invocation payload must be provided by Coordinator #56 for a safe read-only operation granted to the authenticated Steward principal. VPN and cellular acceptance additionally require network-owner provisioning described above. Do not place credentials, cookies, or session-secret values in chat or issues.
