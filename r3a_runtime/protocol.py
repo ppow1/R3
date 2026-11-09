@@ -33,10 +33,15 @@ MAX_MESSAGE_BYTES = 65536
 MAX_RESIDENT_EXECUTION_FRAME_BYTES = 1_048_576
 
 
+class ProtocolFrameTooLarge(ValueError):
+    """A JSON-lines protocol frame exceeded its configured wire-size bound."""
+
+
 def encode(message: dict[str, Any], *, max_message_bytes: int = MAX_MESSAGE_BYTES) -> bytes:
     raw = json.dumps(message, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
     if len(raw) > max_message_bytes:
-        raise ValueError("Protocol message exceeds the configured contract frame size")
+        raise ProtocolFrameTooLarge(
+            f"Protocol message exceeds the configured {max_message_bytes}-byte contract frame size")
     return raw
 
 
@@ -70,7 +75,11 @@ async def request(socket_path: str | Path, module_id: str, module_version: str,
         if response.get("protocol_version", {}).get("major") != PROTOCOL_MAJOR:
             raise ValueError("Protocol major version mismatch")
         if not response.get("ok", False):
-            raise RuntimeError(response.get("error", "module protocol operation failed"))
+            error = response.get("error", "module protocol operation failed")
+            code = response.get("error_code")
+            if code:
+                error = f"{code}: {error}"
+            raise RuntimeError(error)
         return response
     finally:
         writer.close()
@@ -115,9 +124,17 @@ class ModuleProtocolServer:
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         request_id = str(uuid.uuid4())
+        correlation_id = request_id
         try:
             message = await read_message(reader, max_message_bytes=self.max_message_bytes)
-            request_id = str(message.get("request_id", request_id))
+            candidate_request_id = message.get("request_id", request_id)
+            candidate_correlation_id = message.get("correlation_id", candidate_request_id)
+            if (not isinstance(candidate_request_id, str) or len(candidate_request_id) > 128
+                    or not isinstance(candidate_correlation_id, str)
+                    or len(candidate_correlation_id) > 128):
+                raise ValueError("request and correlation IDs must be strings of at most 128 characters")
+            request_id = candidate_request_id
+            correlation_id = candidate_correlation_id
             version = message.get("protocol_version")
             if not isinstance(version, dict) or version.get("major") != PROTOCOL_MAJOR:
                 raise ValueError("incompatible protocol major version")
@@ -132,18 +149,35 @@ class ModuleProtocolServer:
             result = await self.handler(operation, payload)
             response = {"protocol_version": {"major": PROTOCOL_MAJOR, "minor": PROTOCOL_MINOR},
                         "module_id": self.module_id, "module_version": self.module_version,
-                        "request_id": request_id, "correlation_id": message.get("correlation_id", request_id),
+                        "request_id": request_id, "correlation_id": correlation_id,
                         "observed_at": datetime.now(timezone.utc).isoformat(),
                         "ok": True, "result": result}
         except Exception as exc:
             response = {"protocol_version": {"major": PROTOCOL_MAJOR, "minor": PROTOCOL_MINOR},
                         "module_id": self.module_id, "module_version": self.module_version,
-                        "request_id": request_id, "correlation_id": request_id,
+                        "request_id": request_id, "correlation_id": correlation_id,
                         "ok": False, "error": f"{type(exc).__name__}: {str(exc)[:1000]}"}
         try:
-            writer.write(encode(response, max_message_bytes=self.max_message_bytes))
+            try:
+                encoded = encode(response, max_message_bytes=self.max_message_bytes)
+            except ProtocolFrameTooLarge:
+                encoded = encode({"protocol_version": {"major": PROTOCOL_MAJOR, "minor": PROTOCOL_MINOR},
+                                  "module_id": self.module_id, "module_version": self.module_version,
+                                  "request_id": request_id, "correlation_id": correlation_id,
+                                  "ok": False, "error_code": "response_too_large",
+                                  "error": ("Provider response exceeds "
+                                            f"{self.max_message_bytes}-byte protocol frame limit")},
+                                 max_message_bytes=self.max_message_bytes)
+            except (TypeError, ValueError, OverflowError):
+                encoded = encode({"protocol_version": {"major": PROTOCOL_MAJOR, "minor": PROTOCOL_MINOR},
+                                  "module_id": self.module_id, "module_version": self.module_version,
+                                  "request_id": request_id, "correlation_id": correlation_id,
+                                  "ok": False, "error_code": "response_encoding_failed",
+                                  "error": "Provider response could not be encoded as bounded JSON"},
+                                 max_message_bytes=self.max_message_bytes)
+            writer.write(encoded)
             await writer.drain()
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, OSError):
             pass
         finally:
             writer.close()
