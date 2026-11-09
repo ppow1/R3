@@ -1287,8 +1287,9 @@ class Store:
                     prior_input.pop("requested_activity_id", None)
                 prior_input.pop("authorized_capability", None)
                 prior_input.pop("correlation_id", None)
-                expected_activity_type = "grace.conversation" if event_kind == "conversation" else "grace.objective"
-                if (existing["activity_type"] != expected_activity_type
+                # Notifications and conversations share the legacy Grace objective
+                # executor; semantic intake type is independently versioned in input.
+                if (existing["activity_type"] != "grace.objective"
                         or not same_notification_input(prior_input, event_input)
                         or (requested_activity_id and str(existing["activity_id"]) != str(selected_activity_id))):
                     raise ValueError("idempotency key already belongs to a different request")
@@ -1316,9 +1317,11 @@ class Store:
             await conn.execute(
                 "INSERT INTO r3a.activities(activity_id,activity_type,idempotency_key,machine_id,machine_version,state,"
                 "available_at,recovery_policy,config_revision,input) "
-                "VALUES (%s,%s,%s,'activity.generic',1,%s,clock_timestamp(),'idempotent',%s,%s)",
-                (activity_id, "grace.conversation" if event_kind == "conversation" else "grace.objective",
-                 idempotency_key, state, config["revision_id"] if config else None,
+                # Conversation turns use the existing Grace objective executor and
+                # model/artifact contract. Their distinct intake semantics are
+                # preserved in input.event_kind without a per-resident module fork.
+                "VALUES (%s,'grace.objective',%s,'activity.generic',1,%s,clock_timestamp(),'idempotent',%s,%s)",
+                (activity_id, idempotency_key, state, config["revision_id"] if config else None,
                  json.dumps(durable_input)),
             )
             event_type = ("grace.notification.received" if event_kind == "notification" else
