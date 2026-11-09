@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.14.0
+File Revision: 1.15.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -45,6 +45,7 @@ Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Resolve routes by co
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Bind manifest-declared capability provider versions through the generic CME module lifecycle while preserving CME authorization and invocation persistence.
 Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | R3A Coordinator | Reload external module manifests through lifecycle manager and refresh provider health independently.
 Changed: 2026-11-08 | R3A-CONTEXT-RECOVERY | R3A Coordinator | Apply the larger bounded frame to generic resident execution while preserving provider IPC bounds.
+Changed: 2026-11-08 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Reconcile absent processes from superseded primary-resident versions through durable module lifecycle transitions.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; module.lifecycle v2; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py; tests/test_r3a_telemetry_providers.py; tests/test_r3a_capability_contracts.py; tests/test_r3a_engineering.py.
@@ -309,6 +310,7 @@ class CME:
         await self.control.start()
         await self.diagnostics.start()
         await self._activate_configured_module()
+        await self._reconcile_stale_primary_resident_versions()
         await self.store.record_process_state("cme", os.getpid(), "RUNNING", "healthy",
                                               "CME control and scheduler ready")
         self.heartbeat_task = asyncio.create_task(self._heartbeat_loop(), name="cme-db-heartbeat")
@@ -355,6 +357,56 @@ class CME:
         await self.store.ensure_observer_activity()
         await self.store.process_heartbeat("cme", os.getpid(), "STARTING", "recovering",
                                            {"reconciled_activities": count})
+
+    async def _reconcile_stale_primary_resident_versions(self) -> int:
+        """Mark dead superseded versions of the configured resident unavailable durably.
+
+        A matching live process is left untouched. This only reconciles prior versions
+        of this CME's configured primary resident; directory-bound residents retain
+        their independent profile and recovery behavior.
+        """
+        rows = await self.store.rows(
+            "SELECT module_version,lifecycle_state,diagnostic,manifest FROM r3a.module_registry "
+            "WHERE module_id=%s AND module_version<>%s "
+            "AND lifecycle_state IN ('ACTIVE','ACTIVATING','REPLACING','STOPPING') "
+            "ORDER BY module_version",
+            (self.module_id, self.module_version),
+        )
+        reconciled = 0
+        for row in rows:
+            diagnostic = row.get("diagnostic") if isinstance(row.get("diagnostic"), dict) else {}
+            pid = diagnostic.get("pid")
+            manifest = row.get("manifest") if isinstance(row.get("manifest"), dict) else {}
+            entrypoint = manifest.get("entrypoint")
+            if isinstance(pid, int) and entrypoint and self._resident_process_matches(
+                    pid, self.module_id, row["module_version"], entrypoint):
+                continue
+            await self.store.module_state(
+                self.module_id, row["module_version"], "FAILED", "unavailable",
+                {"reason": "superseded_resident_process_absent",
+                 "prior_state": row["lifecycle_state"],
+                 "recorded_pid": pid if isinstance(pid, int) else None,
+                 "configured_version": self.module_version,
+                 "resume_on_start": False},
+                machine_version=2,
+            )
+            reconciled += 1
+        return reconciled
+
+    @staticmethod
+    def _resident_process_matches(pid: int, resident_id: str, version: str,
+                                  entrypoint: str) -> bool:
+        """Confirm a recorded PID still belongs to this exact same-user resident."""
+        proc = Path(f"/proc/{pid}")
+        try:
+            if proc.stat().st_uid != os.getuid() or not process_alive(pid):
+                return False
+            argv = proc.joinpath("cmdline").read_bytes().split(b"\0")
+            expected = (b"-m", entrypoint.encode(), b"--module-id", resident_id.encode(),
+                        b"--module-version", version.encode())
+            return all(item in argv for item in expected)
+        except (FileNotFoundError, PermissionError, ProcessLookupError):
+            return False
 
     async def _ensure_registered_module(self) -> None:
         module = self.manifest()
