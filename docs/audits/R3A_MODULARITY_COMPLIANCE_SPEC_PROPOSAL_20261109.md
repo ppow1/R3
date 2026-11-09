@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/audits/R3A_MODULARITY_COMPLIANCE_SPEC_PROPOSAL_20261109.md
 Component: R3A-MODULARITY-COMPLIANCE-SPEC
-File Revision: 1.0.0
+File Revision: 1.1.0
 Created: 2026-11-09T23:34:13Z
 Created By: Codex GPT-6, acting as independent Auditor
 Purpose: Propose an enforceable, cross-cutting definition of R3A modular compliance for Steward review.
@@ -11,6 +11,7 @@ Observability: Requirement IDs, contract matrix, and acceptance evidence are rec
 Dependencies: Approved R3 Charter Revision 2; R3A Charter and Roadmap Baseline 1.0; AP0/module/capability/state/acceptance contracts; cited shared interfaces.
 Authority: Proposal only under Steward Directive — Auditor / Reviewer V2, 2026-11-09. Does not amend approved requirements or authorize implementation.
 Changed: 2026-11-09T23:34:13Z | R3A-AUDIT-V2 | Codex GPT-6 | Initial modular compliance specification proposal.
+Changed: 2026-11-09 | R3A-AUDIT-V2 | Codex GPT-6 | Recalibrated P-01–P-13 against executable provider, reload, dependency, authorization, and Website evidence; see existing extensibility verification.
 Supersedes: None
 Contracts: MOD-001–MOD-010; AP0-004–010; AD-001–010; capability, lifecycle, state, and shared domain interfaces.
 Tests: N/A; specification proposal.
@@ -19,7 +20,7 @@ History/Predecessor: New proposal; initial revision in auditor branch.
 # R3A Modularity Compliance Specification — proposal for Steward review
 
 **Status:** Proposed, not approved.
-**Review baseline:** `9a41d7e9647d37c2b7dc6f2aca3be3f5f82ccfe9`; relevant contract comparison is in [the interface gap analysis](R3A_INTERFACE_CONTRACT_GAP_ANALYSIS_20261109.md).
+**Review baseline:** `9a41d7e9647d37c2b7dc6f2aca3be3f5f82ccfe9`; current extension verification and contract comparison are in [the existing extensibility report](R3A_EXISTING_EXTENSIBILITY_VERIFICATION_20261109.md) and [the interface gap analysis](R3A_INTERFACE_CONTRACT_GAP_ANALYSIS_20261109.md).
 **Purpose:** Turn the approved modularity direction into an auditable definition across core, modules, residents, external integrations, and user interfaces.
 
 This proposal preserves approved requirements and offers additional clarifications for Steward decision. Nothing in the proposed section below is an approved architectural requirement until the Steward accepts it and records the decision in the approved architecture/decision mechanism.
@@ -54,7 +55,7 @@ The following are already directed or approved; this proposal does not create th
 | A-09 | Capability Contract v1 / AP0 | Capability operations use versioned typed requests/results, declared effects, schemas, grants, evidence, retry/idempotency and reconciliation semantics; CME owns invocation authorization and audit. |
 | A-10 | Charter / AP0 / TAP-001–006 | Operational acceptance requires evidence at the intended boundary. Tests, source presence, mocks, and an HTTP success alone do not establish operation or acceptance. |
 
-The existing definitions **do not yet fully enable** this architecture. The intent is normative, but the implementation-facing contracts are incomplete at the extension points: the generic operation/provider interface does not define a module-owned activity/workflow handler; the module manifest and runtime binding are only partially joined; dependency/state compatibility semantics are not executable end to end; and modules currently loaded by external startup configuration are not generally discoverable/installable from an unlisted manifest through the live CME control surface. `R3A_MODULAR_FOUNDATION_IMPLEMENTATION.md` and the 2026-11-07 modularity audit record these limits. The generic provider lifecycle is meaningful progress, but does not alone make Engineering, Notifications, Knowledge, or resident execution replaceable without shared-core domain logic.
+The implementation evidence changes the initial assessment. Generic capability-provider packages already have a usable external configuration, registry, lifecycle, invocation, authorization, and replacement path; configuration can be reloaded by a running CME. This demonstrates replaceable provider behavior without modifying CME or Ring 0 source. It does not establish a generic resident-executor loader or arbitrary durable module-owned workflow handler. The exact limitation for durable intake is that `Store.submit_activity_intake` accepts only `grace.objective`. Domain-specific CME branches are concrete, but whether each branch violates the approved module boundary depends on which domain behavior the assigned module is required to own; a provider implementation can be replaced today without claiming the entire related workflow has been extracted. The prior foundation implementation note's statements that dependency ranges are unsolved and modules are startup-only are contradicted by current source and fixture tests and should be treated as stale evidence.
 
 Two implementation observations conflict with existing contract text and need reconciliation even before proposed requirements are considered: the module lifecycle contract describes supervised **unprivileged** child processes, while the implementation record says provider children share the CME service UID; and the module manifest requires state/migration/recovery fields while that implementation record says current providers are assumed stateless. These are contract/implementation clarity or conformance issues; this proposal does not select a stronger sandbox or migration technology.
 
@@ -77,6 +78,26 @@ These proposals make existing terms more testable or add requirements beyond cur
 | P-11 | Domain behavior that turns events into durable work, advances module-owned workflows, or imposes evidence obligations uses generic handler/intake/evidence interfaces. Domain-specific policy and judgment stay in the owner module/resident; generic CME persists, schedules, authorizes, and exposes lifecycle. | New extension-point requirement. Prior audit explicitly found notification intake, Engineering workflow, and Knowledge evidence semantics remain core-specific and the generic activity-handler/evidence contracts are missing. |
 | P-12 | Website extensions consume discoverable, versioned service/API contracts and registry metadata. A module capability or Website panel is not accepted as institutionally usable solely from backend/API tests when the assignment requires a user-facing function. Website must not hold a second scheduler, identity source, authorization store, or direct model route. | Adds testable cross-cutting interpretation of approved HMI/registry boundaries and the later Class I Website directive, prospectively. |
 | P-13 | Define extension conformance as both negative and positive: a generic fixture module can be added, configured, activated, invoked under grant, denied without grant, replaced/stopped, and removed/disabled without module-specific core edits; existing unrelated modules continue to work. | Makes independent replaceability measurable. Current MOD criteria cover parts but not a full add/use/remove/coexistence cycle. |
+
+## 3A. Evidence-based disposition of proposals (2026-11-09)
+
+The classifications below supersede the initial “why needed” assumptions in P-01–P-13. They do not approve any proposal or add mandatory requirements. Evidence and limits are in [the existing extensibility verification](R3A_EXISTING_EXTENSIBILITY_VERIFICATION_20261109.md).
+
+| Proposal | Classification | Verified disposition / smallest action |
+|---|---|---|
+| P-01 | DOCUMENTATION ONLY | Document capability-provider package, resident executor, and durable activity handler as distinct existing/possible roles. No new interface is needed for ordinary capability providers; resident execution and durable handler limitations are separately identified. |
+| P-02 | IMPLEMENTATION CORRECTION | Approved MOD-002 already supplies the core-boundary obligation. Correct only specific behavior that an assigned module must own and that CME prevents replacing; no wholesale extraction. |
+| P-03 | ALREADY SATISFIED | Provider install/status/activate/deactivate/replace and config revision are implemented and fixture-tested. Live production operation remains unverified. |
+| P-04 | NEW POLICY DECISION | CME reload and provider registration without CME restart are implemented. Stronger guarantees for all package staging and arbitrary resident executors exceed the existing Ring 0 availability guarantee. |
+| P-05 | ALREADY SATISFIED | Dependency range grammar, compatibility evaluation, missing/incompatible dependency and cycle validation run during config load; covered by module-contract tests. |
+| P-06 | IMPLEMENTATION CORRECTION | Existing state contract applies. Provider fixture path is stateless; generic stateful migration/replacement recovery is not established. Smallest correction is enforce truthful stateless/stateful declarations and implement missing migration guarantees only for modules that own durable state. |
+| P-07 | IMPLEMENTATION CORRECTION | Current resident executor configuration is limited to Observer/Grace and no generic resident-to-module artifact binding exists. Correct this only if generic independently developed resident executors are in approved scope; no new HR operation is implied. |
+| P-08 | DOCUMENTATION ONLY | Provider adapter and worker protocol already connect typed invocation to isolated provider process lifecycle. Clarify mapping of errors/timeouts where the documents diverge; no new transport abstraction shown necessary. |
+| P-09 | NEW POLICY DECISION | Runtime providers are separate processes with scrubbed environment and private socket but share CME's service UID. Resolve the meaning of “unprivileged” with a threat model before selecting stronger isolation. |
+| P-10 | NEW POLICY DECISION | Existing interface versions and schema validation work; a universal deprecation/unknown-field evolution policy is additional policy, not a demonstrated extension blocker. |
+| P-11 | CONTRACT GAP | Existing provider calls and Grace activity intake work, but durable intake rejects non-`grace.objective` activity. A generic handler extension is only needed if approved assignments require module-owned durable workflows; use the existing intake/scheduler boundary for the smallest extension. |
+| P-12 | ALREADY SATISFIED | Generic capability discovery/invocation API and generic Website operation UI exist. Unique module panels are not required. Live authenticated Website operation is not verified. |
+| P-13 | ALREADY SATISFIED | Existing isolated fixture tests cover external provider registration, discovery, lifecycle, authorized/denied invocation, replacement, stop/disable, and coexistence without core edits. They do not establish live Ring 0/PostgreSQL operation. |
 
 ## 4. Responsibility boundaries under this proposal
 
