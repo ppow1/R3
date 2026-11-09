@@ -2,7 +2,7 @@
 R3 CONTROLLED TEST SOURCE
 File: tests/test_r3a_steward_access.py
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.2.1
+File Revision: 1.2.2
 Created: 2026-11-07T21:37:42Z
 Created By: Codex GPT-6
 Purpose: Verify Steward assertion validation, opaque sessions, revocation, CSRF origin policy, and CME identity delegation.
@@ -26,6 +26,7 @@ Changed: 2026-11-07T23:57:23Z | AP3-M1/#51 | Codex GPT-6 | Verify the prototype 
 Changed: 2026-11-08T00:01:13Z | AP3-M1/#51 | Codex GPT-6 | Verify /api/v1 cookie sharing, Origin-protected Website mutations, and generic CME registry discovery.
 Changed: 2026-11-08T13:45:00Z | AP3-M1/#51 | Codex GPT-6 | Verify existing R3 portal session binding to the shared revocable AP3 session.
 Changed: 2026-11-09T16:32:39Z | R3A-AUTH-INDEPENDENCE-001 | Codex GPT-6 | Use the R3A-only cookie namespace in session tests and guard published examples against R3 cookie collisions.
+Changed: 2026-11-09T17:06:17Z | R3A-AUTH-INDEPENDENCE-SECURE-LAN | Codex GPT-6 | Assert the target R3A configuration requires Secure cookies for LAN authentication.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1; r3a.capability-invocation.v1.
 Tests: python -m unittest tests.test_r3a_steward_access.
@@ -116,6 +117,12 @@ class CookieNamespaceContractTests(unittest.TestCase):
                                                "rv_account_csrf"})
                 self.assertNotEqual("steward:pat", json.loads(path.read_text(encoding="utf-8"))
                                      .get("identity", {}).get("steward_principal_id"))
+
+    def test_target_steward_config_requires_secure_cookie(self):
+        path = Path(__file__).parents[1] / "r3a_plugins" / "steward_access.config.example.json"
+        session = json.loads(path.read_text(encoding="utf-8"))["session"]
+        self.assertEqual("r3a_steward_session", session["cookie_name"])
+        self.assertIs(session["secure_cookie"], True)
 
 
 def assertion_headers(*, issuer="test-ingress", subject="steward:test", assertion_id=None,

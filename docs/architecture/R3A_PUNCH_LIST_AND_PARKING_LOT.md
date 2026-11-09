@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_PUNCH_LIST_AND_PARKING_LOT.md
 Component: R3A-PUNCH-LIST
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-06T03:39:05Z
 Created By: Codex GPT-6
 Purpose: Track R3A requirements, dependencies, acceptance and intentionally unresolved decisions.
@@ -15,6 +15,8 @@ Changed: 2026-11-06T04:57:50Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Alig
 Changed: 2026-11-06T05:03:56Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Record milestone issue/integration authority prerequisite.
 Changed: 2026-11-06T05:18:48Z | AP0-M1-PLAN | Codex GPT-6 | Link AP0-M1 decision plan and separate selected implementation details from deferred policy decisions.
 Changed: 2026-11-09T16:32:39Z | R3A-AUTH-INDEPENDENCE-001 | Codex GPT-6 | Clarify R3A-owned authentication acceptance for R3A-010 and record identity provisioning approval dependency.
+Changed: 2026-11-09T17:04:07Z | R3A-AUTH-INDEPENDENCE-APPROVED | Codex GPT-6 | Record approved identity association/enrollment design while retaining live identity verification and Steward participation gates.
+Changed: 2026-11-09T17:06:17Z | R3A-AUTH-INDEPENDENCE-SECURE-LAN | Codex GPT-6 | Require trusted HTTPS for private-LAN authentication and sessions.
 Supersedes: None; supplements rather than closes docs/PUNCH_LIST.md and docs/PARKING_LOT.md.
 Contracts: R3A Architecture Charter; State Machine and Diagnostic Contract; Bounded Testing and Acceptance Policy.
 Tests: Not run; documentation only.
@@ -70,6 +72,6 @@ History/Predecessor: Git blob 287cb3cd599a4f746adf3a30365a78cc13d3d8e5 at baseli
 | R3A-L012 | Cryptographic erasure key ownership, key rotation, backups and residual metadata policy. | AP6 detailed design. | Steward / privacy and security owners. | OPEN |
 | R3A-L013 | Future TOTP/YubiKey factors and account recovery policy. | AP3/AP6 implementation. | Steward. | OPEN |
 | R3A-L014 | Coordination issue and integration authority for active AP0-M1 planning. | For this milestone. | Steward. | RESOLVED — Issue #42; Steward is integration authority until explicitly reassigned there |
-| R3A-L015 | Initial canonical Steward-to-R3A-principal association and fresh credential enrollment/recovery procedure; credential-hash migration is excluded unless separately approved. | Before creating R3A identity records, enrolling credentials, issuing an authenticated session, or activating an independent identity authority. | Steward, HR authority, Remote Access #49, Coordinator #56. | OPEN — Design and bounded migration plan recorded in [R3A Authentication Independence Plan](R3A_AUTH_INDEPENDENCE_PLAN.md); requires explicit Steward approval of association/enrollment policy before provisioning. |
+| R3A-L015 | Initial canonical Steward-to-R3A-principal association and fresh credential enrollment/recovery procedure; credential-hash migration is excluded. | Before real account activation: verified authoritative identity, governed association, Steward-controlled enrollment, and live acceptance. | HR authority, Remote Access #49, Website #51, Coordinator #56, Steward. | APPROVED FOR IMPLEMENTATION — Steward approved the identity-provenance and fresh-enrollment policy on 2026-11-09. No account or credential is active until verified and the Steward completes enrollment. |
 
 The AP0-M1 selections and dependency-ordered running milestone are in [First Living Water Wheel Technical Plan](R3A_AP0_M1_FIRST_LIVING_WATER_WHEEL_PLAN.md). “Selected” means planning choice, not implemented or operational. Environmental facts and deferred policy decisions remain open with the owners and gates above.
