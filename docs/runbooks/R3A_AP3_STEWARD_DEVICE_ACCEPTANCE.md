@@ -2,19 +2,30 @@
 R3 CONTROLLED RUNBOOK
 File: docs/runbooks/R3A_AP3_STEWARD_DEVICE_ACCEPTANCE.md
 Component: R3A AP3 Steward Access
-Revision: 1.0.0
+Revision: 1.1.0
 Purpose: Give a Steward a safe, reproducible browser acceptance path over supported development networks.
 Authority: Issue #49; coordinate Website #51 and Coordinator #56.
 Security: Uses only the existing R3 portal identity, AP3 durable session and CME authorization. Does not expose or configure a public listener.
+Changed: 2026-11-09T13:10:00Z | AP3-M1 | Codex GPT-6 | Record LAN portal listener restoration and interactive acceptance boundary.
 -->
 
 # Steward device acceptance
 
+## Live LAN portal listener restoration (2026-11-09)
+
+The configured R3 account login URL is `http://192.168.1.155:8303/login`. It was failing because port 8303 had no listener. The existing account application remains on loopback `127.0.0.1:18303`, with its existing institutional session authority on `127.0.0.1:8767`. No account store, provider, credential, database, or firewall rule was changed.
+
+Remote Access installed [`r3-steward-login-lan.conf`](../../deploy/nginx/r3-steward-login-lan.conf) as `/etc/nginx/conf.d/01-r3-steward-login-lan.conf`, validated the complete configuration with `nginx -t`, and reloaded only Nginx. It binds only `192.168.1.155:8303`, allows `192.168.1.0/24`, validates mutation Origin against the exact configured LAN URL, and proxies to `127.0.0.1:18303`. Rollback is removal of that dedicated file followed by `nginx -t` and an Nginx reload. R2/R3/V2 application processes and AP3 were not restarted.
+
+Live HTTP checks after reload: `/login` 200, `/api/v1/health` 200, anonymous `/api/v1/chat/session` 401, AP3 `/api/v1/steward/session` and `/status` 401, and anonymous AP3 `/operations/invoke` 401. An untrusted mutation Origin was denied 403 in an isolated Nginx proxy check. These prove listener/routing and anonymous denial only; no successful real-account login or authenticated browser session has yet been observed. AP3 website source currently running is Coordinator revision `7452b970ec04671acf26f6aa3a020162171cf558`; account app release directory is `r3-auth-3cf805d461eb`; AP3 service remains active as PID 417257, and portal app remains active as PID 1359. The Remote Access source revision is the commit recorded with this runbook change.
+
+The next acceptance step requires a Steward to enter real account credentials directly into the browser at the LAN login page. Do not send credentials, cookies, or session-secret values in chat or issues. After login, use the same browser/device at `http://192.168.1.155:8311/steward` and follow the acceptance steps below. If sign-in succeeds but AP3 does not establish a session, capture only status codes, non-secret contract state, and correlation IDs for diagnosis.
+
 ## Current development reachability
 
-Observed on 2026-11-08:
+Observed on 2026-11-09:
 
-- Website development service revision `ca07de47ddc1587471b81bffe3bd0b4b602ad2c8` is listening on IPv4 `0.0.0.0:8311`; its page is reachable at `http://192.168.1.155:8311/steward` from this host. The existing R3 portal login is reachable at `http://192.168.1.155:8303/login`. Its session verification endpoint at `127.0.0.1:8767` remains loopback-only.
+- Website development service revision `7452b970ec04671acf26f6aa3a020162171cf558` is listening on IPv4 `0.0.0.0:8311`; its page is reachable at `http://192.168.1.155:8311/steward` from this host. The existing R3 portal login is reachable at `http://192.168.1.155:8303/login` through the new LAN-only Nginx mount. Its session verification endpoint at `127.0.0.1:8767` remains loopback-only.
 - The host LAN address is `192.168.1.155/24`. AP3's external config allows only origin `http://192.168.1.155:8311`, keeps `public_exposure=false`, and uses `Secure=false` for this HTTP-only LAN development origin. The session cookie is still `HttpOnly`, `SameSite=Strict`, scoped to `/api/v1`, and never returned in JSON.
 - An existing shared Nginx service listens on IPv4 port 443. The host trusts its TLS certificate (`curl` certificate verification result 0), but `https://192.168.1.155/` serves the existing Riverview Operations site, `/steward` returns 404, and the unauthenticated API health route returns the existing R3 auth middleware's 401. It is not currently an AP3 Website route. Its virtual-host config is root-owned mode 0600; Remote Access cannot inspect or change it. Coordinator/proxy-owner confirmation is required before using that listener.
 - The development host has no active VPN interface or route; an OpenVPN executable exists, but no tunnel is configured. Port 8311 and 443 are not listening on IPv6. Although the NIC has global IPv6 addresses, these services have no IPv6 listener. No public forwarding or AP3 public ingress was configured or tested; external scope of the existing shared Nginx listener is not established here.
