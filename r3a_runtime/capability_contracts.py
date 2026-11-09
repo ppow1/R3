@@ -21,7 +21,7 @@ from typing import Any, Protocol, runtime_checkable
 OPERATION_CONTRACT_ID = "r3a.capability-operation.v1"
 INVOCATION_CONTRACT_ID = "r3a.capability-invocation.v1"
 CONTRACT_VERSION = "1.0.0"
-EFFECT_CLASSES = frozenset({"read", "isolated_write", "external_write"})
+EFFECT_CLASSES = frozenset({"read", "isolated_write", "external_write", "steward_read", "steward_write"})
 _SCHEMA_DIR = Path(__file__).with_name("schemas")
 
 
@@ -204,7 +204,15 @@ def validate_operation(descriptor: Any) -> dict[str, Any]:
     for field in ("input_schema", "output_schema", "target_scope_schema"):
         validate_schema_definition(descriptor[field], path=f"$.{field}")
     validate_schema_definition(descriptor["evidence"]["schema"], path="$.evidence.schema")
-    if descriptor["effect_class"] != "read" and not descriptor["recovery"]["idempotency_required"]:
+    if descriptor["effect_class"] in {"steward_read", "steward_write"}:
+        if descriptor["contract_version"] != "1.1.0":
+            raise CapabilityContractError("Steward effects require capability-operation.v1 contract 1.1.0")
+        principals = descriptor["caller_constraints"]["allowed_principals"]
+        if not principals or descriptor["caller_constraints"]["allowed_residents"] or descriptor["caller_constraints"]["allowed_services"]:
+            raise CapabilityContractError("Steward effects must be restricted to explicit Steward principals")
+    elif descriptor["contract_version"] != "1.0.0":
+        raise CapabilityContractError("capability-operation.v1 1.1.0 is reserved for Steward operations")
+    if descriptor["effect_class"] in {"isolated_write", "external_write", "steward_write"} and not descriptor["recovery"]["idempotency_required"]:
         raise CapabilityContractError("write operations must require a stable idempotency key")
     if descriptor["recovery"]["idempotency_required"] and not descriptor["recovery"]["replay_safe"]:
         if descriptor["recovery"]["reconciliation_operation_id"] is None:
@@ -250,6 +258,14 @@ def validate_invocation_request(request: Any, descriptor: dict[str, Any]) -> dic
     if request["operation_contract_version"] != descriptor["contract_version"]:
         raise CapabilityContractError("invocation operation contract version is unsupported")
     constraints = descriptor["caller_constraints"]
+    if descriptor["effect_class"] in {"steward_read", "steward_write"}:
+        if request["contract_version"] != "1.1.0" or request["operation_contract_version"] != "1.1.0":
+            raise CapabilityContractError("Steward effects require invocation and operation contract 1.1.0")
+    if descriptor["effect_class"] in {"steward_read", "steward_write"}:
+        if request["activity_id"] is not None or request["attempt_id"] is not None or request["work_order"] is not None or request.get("budget_reservation") is not None:
+            raise CapabilityContractError("Steward operation cannot be attached to resident activity work")
+    elif request["activity_id"] is None or request["attempt_id"] is None:
+        raise CapabilityContractError("activity_id and attempt_id are required outside direct Steward operations")
     caller = request["caller"]
     for field, caller_key in (("allowed_principals", "principal_id"),
                               ("allowed_residents", "resident_id"),
@@ -321,7 +337,7 @@ def validate_invocation_result(result: Any, descriptor: dict[str, Any]) -> dict[
             not result["authorization"]["decision_id"] or not result["authorization"]["audit_event_id"]):
         raise CapabilityContractError("completed authorization requires decision and audit references")
     if result["outcome"] == "SUCCEEDED":
-        expected_disposition = "NOT_STARTED" if descriptor["effect_class"] == "read" else "COMMITTED"
+        expected_disposition = "NOT_STARTED" if descriptor["effect_class"] in {"read", "steward_read"} else "COMMITTED"
         if result["effect_disposition"] != expected_disposition:
             raise CapabilityContractError("successful result has an invalid effect disposition")
     if result["outcome"] == "UNKNOWN" and result["effect_disposition"] != "UNKNOWN":

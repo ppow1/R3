@@ -17,6 +17,7 @@ Changed: 2026-11-08 | R3A-AP2-VERIFICATION-FEEDBACK | Codex GPT-6 | Persist gene
 Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Omit CME-only durable reasoning checkpoint internals from resident protocol frames.
 Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Keep full capability evidence once in context and compact its conversation receipt.
 Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Compact legacy durable capability receipts when resuming activities.
+Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Dispatch generic versioned Steward read/write effects through existing authorization, invocation, and provider paths.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
 Changed: 2026-11-06T18:16:39Z | R3A-019 | Codex GPT-6 | Bound module-child termination when a model request does not drain.
@@ -263,7 +264,9 @@ class CME:
             operation = self.settings.capability_registry.resolve(
                 descriptor["operation_id"], descriptor["contract_version"])
             manifest = operation.legacy_manifest or {}
-            access_mode = "read_only" if descriptor["effect_class"] == "read" else "read_write"
+            access_mode = ("read_only" if descriptor["effect_class"] == "read" else
+                           "steward_read" if descriptor["effect_class"] == "steward_read" else
+                           "steward_write" if descriptor["effect_class"] == "steward_write" else "read_write")
             await self.store.register_capability(
                 descriptor["operation_id"], descriptor["provider"]["provider_id"], access_mode,
                 contract_version=descriptor["contract_version"],
@@ -272,6 +275,7 @@ class CME:
                           "provider_version": descriptor["provider"]["provider_version"],
                           "effect_class": descriptor["effect_class"],
                           "required_grants": descriptor["required_grants"],
+                          "allowed_steward_principals": descriptor["caller_constraints"]["allowed_principals"] if descriptor["effect_class"] in {"steward_read", "steward_write"} else [],
                           "compatibility_manifest_id": manifest.get("contract_id"),
                           "operation_id": descriptor["operation_id"],
                           "version": descriptor["contract_version"],
@@ -1672,7 +1676,7 @@ class CME:
                                 work_order: EngineeringWorkOrder | None = None,
                                 _approved_budget_reservation: dict[str, Any] | None = None,
                                 _provider_context: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Single canonical CME dispatcher; read operations may omit Engineering work orders."""
+        """Single canonical CME dispatcher for resident and direct Steward operations."""
         if request.get("contract_id") != "r3a.capability-invocation.v1":
             raise CapabilityContractError("CME requires r3a.capability-invocation.v1")
         operation = self.settings.capability_registry.resolve(
@@ -1683,9 +1687,9 @@ class CME:
         if work_order is None:
             if checked["work_order"] is not None:
                 raise PermissionError("effectful invocation requires its validated Engineering work order")
-            if descriptor["effect_class"] == "read":
+            if descriptor["effect_class"] in {"read", "steward_read", "steward_write"}:
                 if checked.get("budget_reservation") is not None:
-                    raise PermissionError("read invocation cannot reserve an external effect budget")
+                    raise PermissionError("read and direct Steward invocations cannot reserve an external effect budget")
             elif descriptor["effect_class"] == "external_write":
                 reservation = checked.get("budget_reservation")
                 if (reservation is None or _approved_budget_reservation != reservation
@@ -1754,9 +1758,11 @@ class CME:
         try:
             provider_context = {
                 "invocation_id": checked["invocation_id"], "idempotency_key": persistence_key,
+                "operation_id": descriptor["operation_id"],
                 "activity_id": checked["activity_id"], "attempt_id": checked["attempt_id"],
                 "correlation_id": checked["correlation_id"], "target": checked["target"],
                 "work_order": order, "effect_class": descriptor["effect_class"],
+                "caller": checked["caller"], "authorization": auth_ref,
                 "config_revision": self.settings.source_digest,
                 **(_provider_context or {}),
                 "capability_catalog": list(self.settings.capability_registry.discover())}
@@ -1768,7 +1774,7 @@ class CME:
                 output = await runtime.invoke(operation, checked["input"], context=provider_context)
         except Exception as exc:
             finished = utcnow().isoformat()
-            result = {"contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+            result = {"contract_id": "r3a.capability-invocation.v1", "contract_version": checked["contract_version"],
                       "invocation_id": checked["invocation_id"], "operation_id": descriptor["operation_id"],
                       "operation_contract_version": descriptor["contract_version"],
                       "activity_id": checked["activity_id"], "attempt_id": checked["attempt_id"],
@@ -1784,7 +1790,7 @@ class CME:
             raise
         output, provider_evidence = normalize_provider_result(output, descriptor)
         finished_at = utcnow().isoformat()
-        result = {"contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+        result = {"contract_id": "r3a.capability-invocation.v1", "contract_version": checked["contract_version"],
                   "invocation_id": checked["invocation_id"], "operation_id": descriptor["operation_id"],
                   "operation_contract_version": descriptor["contract_version"],
                   "activity_id": checked["activity_id"], "attempt_id": checked["attempt_id"],
@@ -1793,7 +1799,7 @@ class CME:
                                ("provider_id", "provider_version", "artifact_sha256")},
                   "outcome": "SUCCEEDED", "started_at": started_at, "finished_at": finished_at,
                   "authorization": auth_ref,
-                  "effect_disposition": "NOT_STARTED" if descriptor["effect_class"] == "read" else "COMMITTED",
+                  "effect_disposition": "NOT_STARTED" if descriptor["effect_class"] in {"read", "steward_read"} else "COMMITTED",
                   "output": output, "error": None,
                   "evidence": provider_evidence if isinstance(provider_evidence, list) else [provider_evidence],
                   "retryable": False, "reconciliation_ref": None}
