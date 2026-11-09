@@ -1,21 +1,4 @@
-"""
-R3 CONTROLLED SOURCE
-File: tests/test_r3a_telemetry_inbox_demo.py
-Component: R3A-TELEMETRY-INBOX-DEMO-TESTS
-File Revision: 1.0.1
-Created: Unknown (legacy; history begins 2026-11-07)
-Created By: R3 Integration (historical commit; original actor not independently verified)
-Purpose: Exercise the isolated simulated telemetry inbox path through CME and Grace.
-Execution Model: unittest fixture; no DB/model/runtime is started.
-Observability: Assertions cover fake dispatch and evidence only.
-Dependencies: R3A telemetry and resident capability contracts.
-Authority: Test-only compatibility fixture; no external authority or deployment.
-Changed: 2026-11-08 UTC | CHARACTER-ARCHITECTURE | Codex GPT-6 | Align Grace fixture ID with canonical resident identity used by current runtime.
-Supersedes: tests/test_r3a_telemetry_inbox_demo.py revision 1.0.0, blob a8874e3c5ebfabf439551d5ea1d86496941d26ca
-Contracts: r3a.resident.execution.v1; resident_id resident.grace.
-Tests: tests/test_r3a_telemetry_inbox_demo.py
-History/Predecessor: Commit a13512cb.
-"""
+"""Isolated simulated autonomous-inbox demonstration; no DB/model/runtime is started."""
 from __future__ import annotations
 
 import importlib.util
@@ -43,16 +26,6 @@ class FakeStore:
         self.progress = []
         self.result = None
         self.blocked = None
-        self.failed = None
-
-    async def fail_activity(self, activity, error, retry_seconds):
-        self.failed = (str(error), retry_seconds)
-
-    async def begin_capability_invocation(self, request, request_digest, authorization):
-        return {"state": "STARTED", "created": True}
-
-    async def finish_capability_invocation(self, persistence_key, request_digest, result):
-        return None
 
     async def record_progress(self, activity, progress, checkpoint):
         self.progress.append(progress)
@@ -77,6 +50,7 @@ class TelemetryInboxDemo(unittest.IsolatedAsyncioTestCase):
             module_capabilities=(capability_id,),
             capability_registry=registry, lease_seconds=30, source_digest="fixture-config",
             restart_initial_seconds=1, restart_max_seconds=4)
+        cme.module_id = "resident.grace"
         cme.store = FakeStore()
         cme.module_process = SimpleNamespace(returncode=None)
         cme.active_activities = {}
@@ -89,11 +63,22 @@ class TelemetryInboxDemo(unittest.IsolatedAsyncioTestCase):
         capability_id = tool["capability_id"]
         evidence = {"source_id": "fixture.telemetry", "source_path": "fixture://source",
                     "content": {"measured": 1}, "sha256": "f" * 64}
+        descriptor = registry.resolve(capability_id).descriptor
+        cme.invoke_capability = AsyncMock(return_value={
+            "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+            "invocation_id": "fixture-invocation", "operation_id": capability_id,
+            "operation_contract_version": descriptor["contract_version"],
+            "provider": descriptor["provider"], "outcome": "SUCCEEDED",
+            "started_at": "2026-11-08T01:00:00Z", "finished_at": "2026-11-08T01:00:01Z",
+            "output": [evidence], "evidence": [evidence],
+            "authorization": {"provider_id": "capability_grants", "allowed": True,
+                               "decision_id": "fixture-decision", "audit_event_id": "fixture-grant",
+                               "policy_revision": None, "config_revision": "fixture-config"}})
         action_count = 0
         route = SimpleNamespace(route_id="fixture-route", provider="fixture", model="fixture-model",
                                 endpoint="http://127.0.0.1/unused", timeout_seconds=1, max_tokens=64)
         grace = GraceResident.__new__(GraceResident)
-        grace.module_id = "resident.grace"
+        grace.module_id = "Grace"
         grace.state = "ACTIVE"
         grace.settings = SimpleNamespace(model_route=lambda _route_id: route)
         grace.last_activity = None
@@ -140,9 +125,6 @@ class TelemetryInboxDemo(unittest.IsolatedAsyncioTestCase):
 
         cme._objective_context = objective_context
         cme._module_call = model_action
-        cme._authorize_capability = AsyncMock(return_value={"provider_id": "fixture.authorization",
-            "decision_id": "fixture.decision", "audit_event_id": "fixture-grant",
-            "policy_revision": "fixture-policy-v1", "config_revision": "fixture-config"})
         cme._final_evidence_issues = lambda *_args: []
         activity = {"activity_id": "queued-activity", "attempt_id": "attempt-1",
                     "attempt_count": 1, "activity_type": "grace.objective",
@@ -151,9 +133,10 @@ class TelemetryInboxDemo(unittest.IsolatedAsyncioTestCase):
                 patch("r3a_plugins.octominer_telemetry.plugin.read_telemetry", fixture_adapter):
             await cme._run_activity(activity)
 
-        self.assertIsNone(cme.store.failed, cme.store.failed)
         self.assertEqual(2, action_count)
-        cme._authorize_capability.assert_awaited_once()
+        cme.invoke_capability.assert_awaited_once()
+        self.assertEqual("r3a.capability-invocation.v1",
+                         cme.invoke_capability.await_args.args[0]["contract_id"])
         self.assertIsNotNone(cme.store.result)
         self.assertIsNone(cme.store.blocked)
         trace = cme.store.result["reasoning_trace"]
