@@ -63,7 +63,7 @@
     },
     {
       "artifact_ref": "../../r3a_runtime/capability_contracts.py",
-      "artifact_sha256": "6d5e361ca97ed462db32770305134e0a2c6a87536911280980969c60064cc482"
+      "artifact_sha256": "107ea3b45871477ab24038114d4f00b1bf92d4b78b2ca4882c859635800780c3"
     }
   ]
 }
