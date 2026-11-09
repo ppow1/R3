@@ -209,7 +209,7 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
         async def website_private(principal=Depends(require_steward_principal)):
             return principal
 
-        @app.post("/api/v1/notifications/private")
+        @app.post("/api/v1/steward/notifications/private")
         async def website_mutation(principal=Depends(require_steward_principal)):
             return principal
 
@@ -219,7 +219,7 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
                                          headers={"Origin": "http://testserver",
                                                   "X-Correlation-ID": str(uuid.uuid4())})
             self.assertEqual(200, response.status_code)
-            self.assertIn("Path=/api/v1", response.headers["set-cookie"])
+            self.assertIn("Path=/api/v1/steward", response.headers["set-cookie"])
             payload = response.json()
             self.assertEqual("r3a.steward-session.v1", payload["contract"])
             self.assertEqual({"contract": "r3a.steward-principal.v1",
@@ -232,8 +232,8 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
             website_identity = await client.get("/api/v1/steward/r3a/private")
             self.assertEqual(200, website_identity.status_code)
             self.assertEqual("steward:replacement", website_identity.json()["principal_id"])
-            self.assertEqual(403, (await client.post("/api/v1/notifications/private")).status_code)
-            mutation = await client.post("/api/v1/notifications/private",
+            self.assertEqual(403, (await client.post("/api/v1/steward/notifications/private")).status_code)
+            mutation = await client.post("/api/v1/steward/notifications/private",
                                          headers={"Origin": "http://testserver"})
             self.assertEqual(200, mutation.status_code)
             self.assertEqual("steward:replacement", mutation.json()["principal_id"])

@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/steward_access.py
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.3.0
+File Revision: 1.3.1
 Created: 2026-11-07T21:37:42Z
 Created By: Codex GPT-6
 Purpose: Verify Steward identity through a replaceable R3A identity adapter, manage revocable durable sessions, and audit operations; legacy R3 bindings remain compatibility-only.
@@ -26,6 +26,7 @@ Changed: 2026-11-08T00:01:13Z | AP3-M1/#51 | Codex GPT-6 | Share the session coo
 Changed: 2026-11-08T13:45:00Z | AP3-M1/#51 | Codex GPT-6 | Bind the existing R3 account-session authority through the versioned identity-provider contract.
 Changed: 2026-11-09T17:31:32Z | AP3-NATIVE-AUTH | R3 Integration | Add independent native provider binding, credential request validation, auth health and account-active session checks.
 Changed: 2026-11-09T17:54:09Z | R3A-AUTH-COOKIE-ISOLATION | Codex GPT-6 | Require native authentication to use HTTPS and a dedicated private hostname for cookie isolation.
+Changed: 2026-11-09T19:23:00Z | AP3-R3A-010-LAN-IP | Codex GPT-6 | Accept a validated private-LAN IP origin and scope native sessions to the Steward API path.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1; r3a.capability-invocation.v1; r3a.secrets.provider.v1; r3a.machine-principal.v1.
 Tests: tests/test_r3a_steward_access.py; tests/test_r3a_capability_contracts.py.
@@ -505,7 +506,7 @@ class StewardAccess:
                 response.set_cookie(self.config["session"]["cookie_name"], token,
                                     max_age=self.config["session"]["lifetime_seconds"],
                                     httponly=True, secure=self.config["session"]["secure_cookie"],
-                                    samesite="strict", path="/api/v1")
+                                    samesite="strict", path="/api/v1/steward")
                 logger.info("steward_session_created", extra={"correlation_id": correlation,
                             "principal_id": assertion.principal_id, "contract": SESSION_CONTRACT})
                 return {"contract": SESSION_CONTRACT, "state": "authenticated",
@@ -579,7 +580,7 @@ class StewardAccess:
                 token = request.cookies.get(self.config["session"]["cookie_name"])
                 record = await self._session(token)
                 revoked = await self._store_call(self.store.revoke, self._digest(token), correlation_id=correlation)
-                response.delete_cookie(self.config["session"]["cookie_name"], path="/api/v1",
+                response.delete_cookie(self.config["session"]["cookie_name"], path="/api/v1/steward",
                                        secure=self.config["session"]["secure_cookie"], httponly=True,
                                        samesite="strict")
                 return {"contract": SESSION_CONTRACT, "state": "revoked", "revoked": revoked,
@@ -841,10 +842,12 @@ def load_access_config(path: str | Path) -> dict[str, Any]:
             host = (parsed_origin.hostname or "").lower()
             try:
                 address = ipaddress.ip_address(host)
-                # A shared LAN IP/hostname would send this host's cookies to R3
-                # listeners on other ports. Allow loopback for isolated tests;
-                # the managed R3A origin must have its own local DNS name.
-                private_host = address.is_loopback
+                # Browser cookies are host scoped, not port scoped. Permit the
+                # approved private-LAN IP origin, while narrowing the cookie to
+                # /api/v1/steward so it is not sent to other same-host APIs.
+                private_host = (address.is_loopback or address.is_private) and not (
+                    address.is_link_local or address.is_multicast or
+                    address.is_unspecified or address.is_reserved)
             except ValueError:
                 # Browser cookies are not port-isolated. A dedicated local hostname avoids
                 # forwarding R3A session cookies to an R3 service on another port.

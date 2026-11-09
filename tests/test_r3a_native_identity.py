@@ -97,7 +97,7 @@ def native_config():
         "identity": {"provider": "r3a.native", "issuer": IDENTITY_ISSUER},
         "session": {"cookie_name": "r3a_steward_session", "lifetime_seconds": 600,
                     "connect_timeout_seconds": 2, "secure_cookie": True,
-                    "allowed_origins": ["https://r3a.riverview.home.arpa"]},
+                    "allowed_origins": ["https://192.168.1.155:8311"]},
         "cme": {"control_socket": "/tmp/r3a-cme.sock", "request_timeout_seconds": 2,
                 "health_stale_after_seconds": 30},
         "remote_transport": {"state": "unavailable", "public_exposure": False},
@@ -115,8 +115,8 @@ class NativeIdentityTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_login_issues_shared_opaque_cookie_and_logout_revokes_it(self):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app),
-                                     base_url="https://r3a.riverview.home.arpa") as client:
-            response = await client.post("/api/v1/steward/session", headers={"Origin": "https://r3a.riverview.home.arpa"},
+                                     base_url="https://192.168.1.155:8311") as client:
+            response = await client.post("/api/v1/steward/session", headers={"Origin": "https://192.168.1.155:8311"},
                                          json={"intent": "login", "login_name": self.repository.login,
                                                "password": self.repository.password})
             self.assertEqual(200, response.status_code)
@@ -128,27 +128,27 @@ class NativeIdentityTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("r3a_steward_session=", cookie)
             self.assertIn("httponly", cookie.lower())
             self.assertIn("samesite=strict", cookie.lower())
-            self.assertIn("path=/api/v1", cookie.lower())
+            self.assertIn("path=/api/v1/steward", cookie.lower())
             self.assertIn("secure", cookie.lower())
             self.assertEqual(1, len(self.store.rows))
             status = await client.get("/api/v1/steward/session")
             self.assertEqual(200, status.status_code)
             self.assertEqual("no-store", status.headers["cache-control"])
-            logout = await client.delete("/api/v1/steward/session", headers={"Origin": "https://r3a.riverview.home.arpa"})
+            logout = await client.delete("/api/v1/steward/session", headers={"Origin": "https://192.168.1.155:8311"})
             self.assertEqual(200, logout.status_code)
             denied = await client.get("/api/v1/steward/session")
             self.assertEqual(401, denied.status_code)
 
     async def test_credentials_are_origin_protected_and_failure_is_non_enumerating(self):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app),
-                                     base_url="https://r3a.riverview.home.arpa") as client:
+                                     base_url="https://192.168.1.155:8311") as client:
             no_origin = await client.post("/api/v1/steward/session",
                                           json={"login_name": self.repository.login, "password": self.repository.password})
             foreign = await client.post("/api/v1/steward/session", headers={"Origin": "https://attacker.invalid"},
                                         json={"login_name": self.repository.login, "password": self.repository.password})
-            wrong_account = await client.post("/api/v1/steward/session", headers={"Origin": "https://r3a.riverview.home.arpa"},
+            wrong_account = await client.post("/api/v1/steward/session", headers={"Origin": "https://192.168.1.155:8311"},
                                                json={"login_name": "unknown@example.test", "password": "wrong"})
-            wrong_password = await client.post("/api/v1/steward/session", headers={"Origin": "https://r3a.riverview.home.arpa"},
+            wrong_password = await client.post("/api/v1/steward/session", headers={"Origin": "https://192.168.1.155:8311"},
                                                 json={"login_name": self.repository.login, "password": "wrong"})
         self.assertEqual(403, no_origin.status_code)
         self.assertEqual(403, foreign.status_code)
@@ -160,13 +160,13 @@ class NativeIdentityTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_enrollment_uses_single_use_provider_contract_and_account_state_revokes_session(self):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app),
-                                     base_url="https://r3a.riverview.home.arpa") as client:
-            enrolled = await client.post("/api/v1/steward/session", headers={"Origin": "https://r3a.riverview.home.arpa"},
+                                     base_url="https://192.168.1.155:8311") as client:
+            enrolled = await client.post("/api/v1/steward/session", headers={"Origin": "https://192.168.1.155:8311"},
                 json={"intent": "enroll", "login_name": self.repository.login,
                       "password": "fresh-test-password-long-enough", "challenge": "one-time-test-challenge-value-1234567890"})
             self.assertEqual(200, enrolled.status_code)
             self.assertIn("governed-enrollment", enrolled.json()["factor_refs"])
-            replay = await client.post("/api/v1/steward/session", headers={"Origin": "https://r3a.riverview.home.arpa"},
+            replay = await client.post("/api/v1/steward/session", headers={"Origin": "https://192.168.1.155:8311"},
                 json={"intent": "enroll", "login_name": self.repository.login,
                       "password": "another-fresh-test-password", "challenge": "one-time-test-challenge-value-1234567890"})
             self.assertEqual(401, replay.status_code)
@@ -177,7 +177,7 @@ class NativeIdentityTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_independent_auth_and_session_health_is_unauthed_but_truthful(self):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app),
-                                     base_url="https://r3a.riverview.home.arpa") as client:
+                                     base_url="https://192.168.1.155:8311") as client:
             health = await client.get("/api/v1/steward/health")
         self.assertEqual(200, health.status_code)
         self.assertEqual("ready", health.json()["identity_provider"])
@@ -202,8 +202,8 @@ class NativeIdentityTests(unittest.IsolatedAsyncioTestCase):
                 json.dump(config, handle); handle.flush()
                 with self.assertRaisesRegex(AccessUnavailable, "origin_must_be_lan_only"):
                     load_access_config(handle.name)
-            for origin, secure_cookie in (("https://192.168.1.155", True),
-                                          ("http://r3a.riverview.home.arpa", False)):
+            for origin, secure_cookie in (("https://8.8.8.8:8311", True),
+                                          ("http://192.168.1.155:8311", False)):
                 config = native_config()
                 config["session"]["allowed_origins"] = [origin]
                 config["session"]["secure_cookie"] = secure_cookie

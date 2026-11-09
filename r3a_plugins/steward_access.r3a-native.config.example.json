@@ -13,7 +13,7 @@
     "lifetime_seconds": 28800,
     "connect_timeout_seconds": 3,
     "secure_cookie": true,
-    "allowed_origins": ["https://r3a.riverview.home.arpa"]
+    "allowed_origins": ["https://192.168.1.155:8311"]
   },
   "cme": {
     "control_socket": "/run/r3a/cme-control.sock",

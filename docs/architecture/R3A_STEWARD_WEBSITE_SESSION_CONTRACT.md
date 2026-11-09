@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: docs/architecture/R3A_STEWARD_WEBSITE_SESSION_CONTRACT.md
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.0.6
+File Revision: 1.0.7
 Created: 2026-11-07T23:43:25Z
 Created By: Codex GPT-6
 Purpose: Publish the versioned Steward principal/session contract and integration instructions for website clients.
@@ -17,6 +17,8 @@ Changed: 2026-11-09T16:32:39Z | R3A-AUTH-INDEPENDENCE-001 | Codex GPT-6 | Define
 Changed: 2026-11-09T17:06:17Z | R3A-AUTH-INDEPENDENCE-SECURE-LAN | Codex GPT-6 | Require trusted HTTPS for login and authenticated Website traffic over LAN.
 Changed: 2026-11-09T17:20:00Z | AP3-NATIVE-AUTH-INTEGRATION | Codex GPT-6 | Integrate native login/enrollment API contracts while requiring trusted HTTPS and R3A-origin return.
 Changed: 2026-11-09T17:54:09Z | R3A-AUTH-COOKIE-ISOLATION | Codex GPT-6 | Require a dedicated R3A hostname to isolate cookies across R3 and R3A sites.
+Changed: 2026-11-09T19:23:00Z | AP3-R3A-010-LAN-IP | Codex GPT-6 | Support the approved LAN IP origin with the existing IP-SAN certificate and restrict the session cookie path to the R3A Steward API.
+Changed: 2026-11-09T19:23:00Z | AP3-R3A-010-LAN-IP | Codex GPT-6 | Support the approved LAN IP origin with the existing IP-SAN certificate and restrict the session cookie path to the R3A Steward API.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1.
 Tests: tests/test_r3a_steward_access.py validates provider replacement and session responses.
@@ -32,7 +34,7 @@ The machine-readable schemas are [steward-session.v1.schema.json](../../r3a_runt
 
 ## Browser operations
 
-Base path: `/api/v1/steward`. Requests are same-origin only, use `credentials: "same-origin"` and `cache: "no-store"`; session responses set `Cache-Control: no-store`. Mutation requests must include the browser's `Origin`, which the server checks against configured origins. R3A sets the host-only `r3a_steward_session` cookie with `Path=/api/v1`, `HttpOnly`, `SameSite=Strict`, and `Secure`. Credential submission and authenticated Website traffic require browser-trusted HTTPS, including on the private LAN. The cookie name and dedicated R3A hostname isolate it from R3; browsers scope cookies by host, not port. Cross-origin credentialed access is disabled.
+Base path: `/api/v1/steward`. Requests are same-origin only, use `credentials: "same-origin"` and `cache: "no-store"`; session responses set `Cache-Control: no-store`. Mutation requests must include the browser's `Origin`, which the server checks against configured origins. R3A sets the host-only `r3a_steward_session` cookie with `Path=/api/v1/steward`, `HttpOnly`, `SameSite=Strict`, and `Secure`. Credential submission and authenticated Website traffic require browser-trusted HTTPS, including on the private LAN. Browsers scope cookies by host, not port; the narrow path keeps this cookie off R3's `/api/v1/auth` and `/api/v1/chat` routes when both use the LAN IP. Cross-origin credentialed access is disabled. The approved LAN origin is `https://192.168.1.155:8311`, using a certificate with IP SAN `192.168.1.155`; no custom DNS is required.
 
 The R3A Website owns the login presentation and post-login route. It starts authentication at its own same-origin login API and returns to the R3A Steward interface. It must never redirect to or require the R3 website or R3 account/session service. LAN-only means private routing with no public ingress; separate remote-access approval is still required.
 

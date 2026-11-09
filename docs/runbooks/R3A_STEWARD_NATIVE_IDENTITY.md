@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/runbooks/R3A_STEWARD_NATIVE_IDENTITY.md
 Component: R3A-AP3-IDENTITY
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-09T17:31:32Z
 Created By: R3 Integration
 Purpose: Document native identity components, least-privilege provisioning, association, enrollment, and rollback.
@@ -12,6 +12,7 @@ Dependencies: AP0 PostgreSQL; AP3 StewardAccess; approved R3/HR identity provena
 Authority: Steward-approved R3A Authentication Independence; AP3/R3A-010.
 Changed: 2026-11-09T17:31:32Z | AP3-NATIVE-AUTH | R3 Integration | Document independent native account and enrollment rollout.
 Changed: 2026-11-09T17:54:09Z | R3A-AUTH-COOKIE-ISOLATION | Codex GPT-6 | Require dedicated private DNS hostname and trusted HTTPS for all credential entry.
+Changed: 2026-11-09T19:23:00Z | AP3-R3A-010-LAN-IP | Codex GPT-6 | Use the approved LAN IP and existing IP-SAN certificate; constrain cookie path to the R3A Steward API.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-session.v1; r3a.steward-login-request.v1; r3a.steward-auth-health.v1.
 Tests: tests/test_r3a_native_identity.py; live deployment and browser acceptance pending.
@@ -31,7 +32,7 @@ This runbook describes the independent `r3a.identity-provider.v1` implementation
 - AP3 serves `GET /api/v1/steward/health`; `503` means the native identity or durable session store is unavailable. A healthy empty database does not imply that an account exists.
 - `r3a-steward-identity`: local operator CLI for association, one-time challenge issuance, and disabling/revoking. Runtime and operator use separate peer-authenticated database roles.
 
-Native credential entry is HTTPS-only, including on the LAN. Use a dedicated private name such as `r3a.riverview.home.arpa`, with a trusted certificate installed in the Steward browser and a LAN-only route to the Website. Do not reuse the R3 hostname: browser cookies are scoped by host, not port. `r3a_steward_session` must always be `Secure`. The target name currently does not resolve and no certificate/route has been verified; coordinate with the authorized proxy/DNS owner. The loader rejects HTTP origins, public origins, and shared IP origins for native mode. This change does not open a firewall or restart a service.
+Native credential entry is HTTPS-only, including on the LAN. The approved origin is `https://192.168.1.155:8311`, using the existing certificate with IP SAN `192.168.1.155` and a LAN-only route to the Website. No custom DNS is required. Browsers scope cookies by host, not port, so `r3a_steward_session` is `Secure`, host-only, and restricted to `Path=/api/v1/steward`; R3 authentication and chat routes do not receive it. The loader rejects HTTP origins, public origins, and non-private IP origins for native mode. Do not open a firewall or public ingress.
 
 Coordinator prepared mode-0600 external files at `/home/admin1/.config/r3a-ap3/steward-access.native.json` and `steward-auth-native.env`. The Website unit does not load the native environment file yet. Do not install it until the dedicated HTTPS origin and Website build are ready for a controlled service restart.
 
