@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -49,6 +50,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger("r3a.steward_access")
@@ -111,6 +113,14 @@ class PostgresSessionStore:
         if not dsn:
             raise AccessUnavailable("session_store_unavailable")
         self._dsn, self._connect_timeout_seconds = dsn, connect_timeout_seconds
+
+    def health(self) -> str:
+        try:
+            with self._connect() as conn:
+                conn.execute("SELECT token_digest FROM r3a.steward_sessions LIMIT 0").fetchone()
+            return "ready"
+        except Exception as exc:
+            raise AccessUnavailable("session_store_unavailable") from exc
 
     def _connect(self):
         try:
@@ -389,9 +399,15 @@ class StewardAccess:
     async def _session(self, token: str | None) -> dict[str, Any]:
         if not token:
             raise PermissionError("session_required")
-        record = await self._store_call(self.store.read, self._digest(token))
+        token_digest = self._digest(token)
+        record = await self._store_call(self.store.read, token_digest)
         if not record or record.get("revoked_at") or record["expires_at"] <= datetime.now(timezone.utc):
             raise PermissionError("session_invalid_or_expired")
+        account_check = getattr(self.identity_provider, "principal_active", None)
+        if account_check is not None and not await self._store_call(account_check, record["principal_id"]):
+            await self._store_call(self.store.revoke, token_digest,
+                                   correlation_id=str(uuid.uuid4()))
+            raise PermissionError("identity_account_inactive")
         return record
 
     async def authenticated_principal(self, request: Request,
@@ -453,8 +469,26 @@ class StewardAccess:
         async def start_session(request: Request, response: Response,
                                 origin: str | None = Header(default=None)):
             correlation = self._correlation(request)
+            response.headers["Cache-Control"] = "no-store"
             try:
                 await self._require_origin(request, origin, "session.create")
+                if getattr(self.identity_provider, "requires_credentials", False):
+                    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                    if content_type != "application/json":
+                        raise PermissionError("invalid_credentials")
+                    raw = bytearray()
+                    async for chunk in request.stream():
+                        raw.extend(chunk)
+                        if len(raw) > 8192:
+                            raise PermissionError("invalid_credentials")
+                    try:
+                        payload = json.loads(raw.decode("utf-8"))
+                    except (UnicodeDecodeError, ValueError):
+                        raise PermissionError("invalid_credentials") from None
+                    allowed = {"intent", "login_name", "password", "challenge"}
+                    if not isinstance(payload, dict) or set(payload) - allowed:
+                        raise PermissionError("invalid_credentials")
+                    request.state.r3a_identity_payload = payload
                 assertion = await self._store_call(self.identity_provider.authenticate,
                                                    request, correlation_id=correlation)
                 assertion = self._validate_provider_assertion(assertion)
@@ -484,19 +518,33 @@ class StewardAccess:
                         "expires_at": expires.isoformat(), "freshness": "current",
                         "correlation_id": correlation}
             except PermissionError as exc:
-                await self._audit(event_type="steward.authentication.denied",
+                try:
+                    await self._audit(event_type="steward.authentication.denied",
                                        principal_id=None, outcome="denied", correlation_id=correlation,
                                        details={"reason": str(exc)})
-                raise HTTPException(401, "Steward authentication denied") from exc
+                except HTTPException:
+                    return JSONResponse(status_code=503, content={"detail": "Steward audit state unavailable"},
+                                        headers={"Cache-Control": "no-store"})
+                return JSONResponse(status_code=401, content={"detail": "Steward authentication denied"},
+                                    headers={"Cache-Control": "no-store"})
             except AccessUnavailable as exc:
-                await self._audit(event_type="steward.authentication.unavailable",
-                    principal_id=None, outcome="unavailable", correlation_id=correlation,
-                    details={"reason_code": exc.reason_code or exc.code,
-                             "provider_outcome": exc.outcome})
-                raise HTTPException(503, "Steward authentication unavailable") from exc
+                try:
+                    await self._audit(event_type="steward.authentication.unavailable",
+                        principal_id=None, outcome="unavailable", correlation_id=correlation,
+                        details={"reason_code": exc.reason_code or exc.code,
+                                 "provider_outcome": exc.outcome})
+                except HTTPException:
+                    return JSONResponse(status_code=503, content={"detail": "Steward audit state unavailable"},
+                                        headers={"Cache-Control": "no-store"})
+                return JSONResponse(status_code=503, content={"detail": "Steward authentication unavailable"},
+                                    headers={"Cache-Control": "no-store"})
+            except HTTPException as exc:
+                return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail},
+                                    headers={"Cache-Control": "no-store"})
 
         @router.get("/session")
-        async def session_status(request: Request):
+        async def session_status(request: Request, response: Response):
+            response.headers["Cache-Control"] = "no-store"
             correlation = self._correlation(request)
             try:
                 record = await self._session(request.cookies.get(self.config["session"]["cookie_name"]))
@@ -522,6 +570,7 @@ class StewardAccess:
         @router.delete("/session")
         async def end_session(request: Request, response: Response,
                               origin: str | None = Header(default=None)):
+            response.headers["Cache-Control"] = "no-store"
             correlation = self._correlation(request)
             await self._require_origin(request, origin, "session.revoke")
             try:
@@ -676,6 +725,17 @@ class StewardAccess:
             except AccessUnavailable as exc:
                 raise HTTPException(503, "Session state unavailable") from exc
 
+        @router.get("/health")
+        async def health():
+            try:
+                provider_health, store_health = await self._store_call(self.identity_provider.health), await self._store_call(self.store.health)
+                return {"contract": "r3a.steward-auth-health.v1", "state": "ready",
+                        "identity_provider": provider_health, "session_store": store_health}
+            except AccessUnavailable:
+                return JSONResponse(status_code=503, content={"contract": "r3a.steward-auth-health.v1",
+                    "state": "unavailable", "identity_provider": "unavailable",
+                    "session_store": "unavailable"})
+
         return router
 
     def _verify_origin(self, origin: str | None) -> None:
@@ -691,7 +751,7 @@ def load_access_config(path: str | Path) -> dict[str, Any]:
         raise AccessUnavailable("steward_access_configuration_unavailable") from exc
     required = {"schema_id", "schema_version", "enabled", "identity", "session", "cme",
                 "remote_transport", "session_dsn_env"}
-    optional = {"secret_provider_manifest", "secret_provider_config"}
+    optional = {"secret_provider_manifest", "secret_provider_config", "identity_mode"}
     if (not isinstance(config, dict) or not required <= set(config)
             or set(config) - required - optional):
         raise AccessUnavailable("steward_access_configuration_invalid")
@@ -702,6 +762,7 @@ def load_access_config(path: str | Path) -> dict[str, Any]:
         raise AccessUnavailable("steward_access_disabled")
     identity_keys = {"issuer", "steward_principal_id", "assertion_secret_ref", "assertion_max_age_seconds"}
     portal_identity_keys = {"provider", "issuer", "session_url", "required_role", "request_timeout_seconds"}
+    native_identity_keys = {"provider", "issuer"}
     session_keys = {"cookie_name", "lifetime_seconds", "secure_cookie", "allowed_origins",
                     "connect_timeout_seconds"}
     cme_keys = {"control_socket", "request_timeout_seconds", "health_stale_after_seconds"}
@@ -712,8 +773,15 @@ def load_access_config(path: str | Path) -> dict[str, Any]:
             raise AccessUnavailable(f"steward_access_{section}_configuration_invalid")
     identity = config["identity"]
     identity_provider = identity.get("provider", "hmac-ingress") if isinstance(identity, dict) else None
+    if config.get("identity_mode") not in {None, "independent"}:
+        raise AccessUnavailable("steward_access_identity_mode_invalid")
+    if config.get("identity_mode") == "independent" and identity_provider != "r3a.native":
+        raise AccessUnavailable("legacy_identity_provider_forbidden")
+    if identity_provider == "r3a.native" and config.get("identity_mode") != "independent":
+        raise AccessUnavailable("independent_identity_mode_required")
     expected_identity_keys = (identity_keys if identity_provider == "hmac-ingress"
                               else portal_identity_keys if identity_provider == "r3.account-session"
+                              else native_identity_keys if identity_provider == "r3a.native"
                               else set())
     if not expected_identity_keys or set(identity) != expected_identity_keys:
         raise AccessUnavailable("steward_access_identity_configuration_invalid")
@@ -740,7 +808,7 @@ def load_access_config(path: str | Path) -> dict[str, Any]:
         if any(not isinstance(config.get(key), str) or not Path(config[key]).is_absolute()
                for key in ("secret_provider_manifest", "secret_provider_config")):
             raise AccessUnavailable("steward_access_secret_provider_configuration_invalid")
-    else:
+    elif identity_provider == "r3.account-session":
         issuer, role, url = identity.get("issuer"), identity.get("required_role"), identity.get("session_url")
         parsed = urllib.parse.urlsplit(url) if isinstance(url, str) else None
         if (not isinstance(issuer, str) or not issuer or not isinstance(role, str) or not role
@@ -751,6 +819,36 @@ def load_access_config(path: str | Path) -> dict[str, Any]:
                 or isinstance(identity.get("request_timeout_seconds"), bool)
                 or identity["request_timeout_seconds"] <= 0):
             raise AccessUnavailable("steward_access_identity_configuration_invalid")
+    else:
+        if identity.get("issuer") != "r3a-steward":
+            raise AccessUnavailable("steward_access_identity_configuration_invalid")
+        if session.get("cookie_name") != "r3a_steward_session":
+            raise AccessUnavailable("steward_access_cookie_configuration_invalid")
+        if (not isinstance(session.get("allowed_origins"), list)
+                or any(not isinstance(origin, str) for origin in session["allowed_origins"])):
+            raise AccessUnavailable("steward_access_session_configuration_invalid")
+        native_origin_schemes = set()
+        if not session.get("allowed_origins"):
+            raise AccessUnavailable("steward_access_origin_must_be_lan_only")
+        for origin in session.get("allowed_origins", []):
+            try:
+                parsed_origin = urllib.parse.urlsplit(origin)
+            except ValueError as exc:
+                raise AccessUnavailable("steward_access_origin_must_be_lan_only") from exc
+            native_origin_schemes.add(parsed_origin.scheme)
+            try:
+                address = ipaddress.ip_address(parsed_origin.hostname or "")
+            except ValueError:
+                if (parsed_origin.hostname or "").lower() != "localhost":
+                    raise AccessUnavailable("steward_access_origin_must_be_lan_only")
+                address = ipaddress.ip_address("127.0.0.1")
+            if (parsed_origin.scheme not in {"http", "https"} or not (address.is_private or address.is_loopback)
+                    or parsed_origin.username or parsed_origin.password or parsed_origin.path
+                    or parsed_origin.query or parsed_origin.fragment):
+                raise AccessUnavailable("steward_access_origin_must_be_lan_only")
+        if (len(native_origin_schemes) > 1
+                or (native_origin_schemes == {"https"}) != (session.get("secure_cookie") is True)):
+            raise AccessUnavailable("steward_access_cookie_transport_mismatch")
     if (not isinstance(session.get("cookie_name"), str) or not session["cookie_name"]
             or type(session.get("lifetime_seconds")) is not int or session["lifetime_seconds"] <= 0
             or not isinstance(session.get("connect_timeout_seconds"), (int, float))
@@ -791,8 +889,14 @@ def create_access_from_environment() -> StewardAccess:
         raise AccessUnavailable("steward_access_configuration_unavailable")
     config = load_access_config(config_path)
     dsn = os.environ.get(config["session_dsn_env"], "")
-    if config["identity"].get("provider", "hmac-ingress") == "r3.account-session":
+    identity_kind = config["identity"].get("provider", "hmac-ingress")
+    if identity_kind == "r3.account-session":
         identity_provider = R3AccountSessionIdentityProvider(config)
+    elif identity_kind == "r3a.native":
+        from .steward_identity import PostgresStewardIdentityRepository, R3aNativeIdentityProvider
+        identity_provider = R3aNativeIdentityProvider(
+            config["identity"],
+            PostgresStewardIdentityRepository(dsn, config["session"]["connect_timeout_seconds"]))
     else:
         try:
             from r3a_plugins.bitwarden_secrets.provider import load_configured_provider

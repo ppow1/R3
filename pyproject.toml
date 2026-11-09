@@ -28,6 +28,7 @@ dependencies = ["psycopg[binary,pool]>=3.2,<4"]
 
 [project.scripts]
 r3a = "r3a_runtime.cli:main"
+r3a-steward-identity = "r3a_runtime.steward_identity_cli:main"
 
 [tool.setuptools.packages.find]
 include = ["r3a_runtime*", "r3a_plugins*"]
