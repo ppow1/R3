@@ -24,6 +24,7 @@ Changed: 2026-11-07 | R3A-019 | Codex GPT-6 | Normalize omitted arguments to an 
 Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Give Grace explicit objective criteria and continuation feedback.
 Changed: 2026-11-07T02:41:51Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Deliver the versioned acceptance envelope in the resident inference context.
 Changed: 2026-11-07T03:34:34Z | R3A-019-INBOX-LOOP | Codex GPT-6 | Constrain capability identifiers to the exact configured tool manifest values.
+Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Project JSON evidence structurally to recover bounded module results.
 Supersedes: None.
 Contracts: R3A-019; AP1-M1 Issue #43 acceptance; r3a.resident.execution.v1; proposed r3a.resident.result@1.0.0; proposed r3a.resident.execution-profile@1.0.0.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_context_recovery.py; automated inference responses are fixtures.
@@ -377,8 +378,7 @@ def _value_terms(value: Any) -> set[str]:
         parts = []
         for key, item in value.items():
             parts.append(str(key))
-            parts.append(json.dumps(item, sort_keys=True, ensure_ascii=False, default=str)
-                         if not isinstance(item, (dict, list)) else "")
+            parts.append(" ".join(_value_terms(item)))
         return _context_terms(" ".join(parts))
     if isinstance(value, list):
         return set().union(*(_value_terms(item) for item in value)) if value else set()
@@ -461,11 +461,20 @@ def compact_evidence_for_context(evidence: list[dict[str, Any]], focus_text: str
     for source in evidence:
         item = dict(source)
         content = source.get("content")
+        projection_value = content
+        if isinstance(content, str):
+            try:
+                parsed_content = json.loads(content)
+            except (TypeError, json.JSONDecodeError):
+                pass
+            else:
+                if isinstance(parsed_content, (dict, list)):
+                    projection_value = parsed_content
         encoded = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
                              default=str).encode("utf-8")
         relevant = bool(focus_terms & (_context_terms(str(source.get("source_id", "")) + " " +
                                                        str(source.get("source_path", ""))) |
-                                       _value_terms(content)))
+                                       _value_terms(projection_value)))
         if len(encoded) <= max_record_bytes or not relevant:
             # Small status/availability records remain useful, but large unmatched content is represented
             # by its original digest and complete source metadata rather than silently discarded.
@@ -477,7 +486,7 @@ def compact_evidence_for_context(evidence: list[dict[str, Any]], focus_text: str
             omitted = True
         else:
             projected, retained_paths, omitted = _project_context_value(
-                content, focus_terms, aggressive=aggressive)
+                projection_value, focus_terms, aggressive=aggressive)
         if not omitted:
             output.append(item)
             continue

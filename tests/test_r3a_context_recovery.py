@@ -31,6 +31,31 @@ class ContextBudgetTests(unittest.TestCase):
         self.assertTrue(projected[0]["context_projection"]["omitted_content_sha256"])
         self.assertTrue(omissions)
 
+    def test_json_provider_evidence_projects_by_nested_values(self):
+        content = json.dumps({"operation_id": "institutional.directory.discover",
+                              "output": {"residents": [
+                                  {"resident_id": "resident.grace", "office_id": "office.steward",
+                                   "office_role": "Steward", "note": "approved binding"},
+                                  {"resident_id": "resident.vicky", "office_id": "office.engineering",
+                                   "office_role": "Engineering Manager"}],
+                                  "capabilities": [{"capability_id": f"resource.{i}"} for i in range(100)]},
+                              "provider_evidence": [{"snapshot_sha256": "a" * 64}]},
+                             separators=(",", ":"))
+        original = [{"source_id": "riverview_authority.directory",
+                     "source_path": "capability.institutional.directory.discover.output",
+                     "content": content, "sha256": "b" * 64, "source_sha256": "a" * 64}]
+        projected, omissions = compact_evidence_for_context(
+            original, "verify resident.grace directory office binding and listed capabilities")
+        self.assertEqual(content, original[0]["content"])
+        self.assertTrue(omissions)
+        self.assertIn("context_projection", projected[0])
+        self.assertIsInstance(projected[0]["content"], dict)
+        retained = projected[0]["content"]["output"]["capabilities"]["retained_items"]
+        self.assertEqual(100, projected[0]["content"]["output"]["capabilities"]["item_count"])
+        self.assertLessEqual(len(retained), 3)
+        residents = projected[0]["content"]["output"]["residents"]
+        self.assertIn("resident.grace", [item["resident_id"] for item in residents])
+
     def test_model_request_uses_projection_before_exceeding_route_budget(self):
         evidence = [{"source_id": "telemetry", "content":
                      "temperature is 72 degrees. " + "unrelated historical sample. " * 1400}]
