@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.18.0
+File Revision: 1.19.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -18,6 +18,7 @@ Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Omit CME-only durable 
 Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Keep full capability evidence once in context and compact its conversation receipt.
 Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Compact legacy durable capability receipts when resuming activities.
 Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Normalize typed module evidence into generic CME resident envelopes.
+Changed: 2026-11-09 | R3A-STEWARD-CHAT-ROSTER | R3A Coordinator | Preserve dynamic directory residents and report chat availability separately without inferring onboarding or module identity.
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Dispatch generic versioned Steward read/write effects through existing authorization, invocation, and provider paths.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
@@ -1006,25 +1007,18 @@ class CME:
             for entry in output.get("residents", []):
                 if not isinstance(entry, dict) or not isinstance(entry.get("resident_id"), str):
                     continue
-                # The primary configured resident is executable by this CME. Other
-                # residents are shown only when their canonical execution grant exists.
-                authorized = entry["resident_id"] == self.module_id
-                if not authorized:
-                    try:
-                        # A resident is chat-selectable only when the configured office
-                        # route and both sides of the durable handoff grant are present.
-                        self.settings.model_role_for_office(str(entry.get("office_role", "")))
-                        await self.store.require_capability(self.module_id, "resident.delegate")
-                        await self.store.require_capability(entry["resident_id"], "resident.objective.execute")
-                        authorized = True
-                    except (PermissionError, LookupError, ValueError):
-                        pass
-                if authorized:
-                    residents.append({"resident_id": entry["resident_id"],
-                                      "display_name": entry.get("display_name") or entry["resident_id"],
-                                      "office_id": entry.get("office_id"),
-                                      "office_role": entry.get("office_role"),
-                                      "authorized": True})
+                # Directory membership is roster evidence, not onboarding or an
+                # execution binding. Do not infer a resident/module association
+                # from similar identifiers or from an office route.
+                residents.append({"resident_id": entry["resident_id"],
+                                  "display_name": entry.get("display_name") or entry["resident_id"],
+                                  "office_id": entry.get("office_id"),
+                                  "office_role": entry.get("office_role"),
+                                  "onboarding_status": "unknown",
+                                  "execution_status": "unavailable",
+                                  "authorization_status": "not_evaluated",
+                                  "chat_available": False,
+                                  "chat_status": "governed_execution_binding_unavailable"})
             return {"contract": "r3a.resident-directory-view.v1", "contract_version": "1.0.0",
                     "residents": residents, "source": source, "freshness": "current",
                     "directory_invocation_id": result["invocation_id"],

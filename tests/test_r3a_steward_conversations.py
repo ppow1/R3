@@ -84,11 +84,8 @@ class ConversationControlTests(unittest.TestCase):
         self.assertEqual(cme._authorize_capability.await_args_list[0].args[0], "resident.delegate")
         self.assertEqual(cme._authorize_capability.await_args_list[1].args[0], "resident.objective.execute")
 
-    def test_resident_discovery_hides_route_or_grant_ineligible_residents(self):
+    def test_resident_discovery_preserves_roster_and_separates_chat_readiness(self):
         cme = self.cme()
-        cme.settings.model_role_for_office = lambda office: (
-            SimpleNamespace(role_id="role.eng", route_id="route.eng")
-            if office == "engineering_manager" else (_ for _ in ()).throw(ValueError("unconfigured")))
         cme._invoke_directory_for_principal = AsyncMock(return_value={
             "outcome": "SUCCEEDED", "invocation_id": "directory-invocation",
             "authorization": {"audit_event_id": "directory-auth"},
@@ -103,11 +100,15 @@ class ConversationControlTests(unittest.TestCase):
         cme.store.require_capability = AsyncMock()
         result = asyncio.run(CME._control_request(cme, "steward.residents.discover",
                                                   {"principal_id": "portal:steward-7"}, "discovery-key"))
-        self.assertEqual([item["resident_id"] for item in result["residents"]], ["resident.vicky"])
-        self.assertEqual(cme.store.require_capability.await_args_list[0].args,
-                         ("resident.grace", "resident.delegate"))
-        self.assertEqual(cme.store.require_capability.await_args_list[1].args,
-                         ("resident.vicky", "resident.objective.execute"))
+        self.assertEqual([item["resident_id"] for item in result["residents"]],
+                         ["resident.vicky", "resident.helen"])
+        self.assertTrue(all(item["chat_available"] is False for item in result["residents"]))
+        self.assertTrue(all(item["onboarding_status"] == "unknown" for item in result["residents"]))
+        self.assertTrue(all(item["authorization_status"] == "not_evaluated"
+                            for item in result["residents"]))
+        self.assertTrue(all(item["chat_status"] == "governed_execution_binding_unavailable"
+                            for item in result["residents"]))
+        cme.store.require_capability.assert_not_awaited()
 
 
 if __name__ == "__main__":

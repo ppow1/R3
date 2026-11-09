@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: web/steward-workspace-api.js
 Component: R3A-STEWARD-WORKSPACE-CLIENT
-File Revision: 1.0.7
+File Revision: 1.0.8
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Same-origin client for versioned resident conversation and notification contracts
@@ -17,6 +17,7 @@ Changed: 2026-11-08 | #49/#51 | Refresh directory on shared session establishmen
 Changed: 2026-11-08 | #51 | Gate creation on current resident selection and expose request progress accessibly.
 Changed: 2026-11-09 | R3A-WEBSITE-WIDE-AUTH | R3A Coordinator | Inherit global Website authentication, redirect expired sessions, and remove chat sign-in/session activation controls.
 Changed: 2026-11-09 | R3A-LOGIN-REDIRECT-LOOP | R3A Coordinator | Recheck only the canonical session after operation 401; preserve authenticated Website navigation on scoped denials.
+Changed: 2026-11-09 | R3A-STEWARD-CHAT-ROSTER | R3A Coordinator | Render all dynamic roster rows and disable chat when the current response does not establish availability.
 Tests: tests/test_steward_workspace_api.mjs uses mocked fetch only as a labeled development test
 */
 
@@ -189,15 +190,15 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   let loaded = false;
   let directoryAvailable = false;
   let creatingConversation = false;
-  const authorizedResidentIds = new Set();
+  const chatAvailableResidentIds = new Set();
   const residentNames = new Map();
   let pendingConversationId = null;
   let pendingMessage = null;
   const newConversationButton = root.getElementById('chat-new');
   function syncNewConversationButton() {
-    newConversationButton.disabled = !directoryAvailable || !selectedResident || !authorizedResidentIds.has(selectedResident) || creatingConversation;
+    newConversationButton.disabled = !directoryAvailable || !selectedResident || !chatAvailableResidentIds.has(selectedResident) || creatingConversation;
     newConversationButton.setAttribute('aria-busy', String(creatingConversation));
-    newConversationButton.title = creatingConversation ? 'Conversation creation in progress' : newConversationButton.disabled ? 'Select an authorized resident from the current directory' : 'Start a persistent conversation with the selected resident';
+    newConversationButton.title = creatingConversation ? 'Conversation creation in progress' : newConversationButton.disabled ? 'Select a resident whose current directory record is available for chat' : 'Start a persistent conversation with the selected resident';
   }
 
   const unavailable = error => {
@@ -259,27 +260,36 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     if (loaded) return;
     loaded = true;
     directoryAvailable = false;
-    authorizedResidentIds.clear();
+    chatAvailableResidentIds.clear();
     residentNames.clear();
     selectedResident = '';
     syncNewConversationButton();
     residentSelect.disabled = true;
-    residentSelect.replaceChildren(new Option('Loading authorized residents…', ''));
+    residentSelect.replaceChildren(new Option('Loading institutional resident roster…', ''));
     try {
       const result = await api.residents();
       directoryAvailable = true;
       residentSelect.replaceChildren(new Option('Select a resident…', ''));
+      let unavailableCount = 0;
       for (const resident of result.residents || []) {
-        if (!resident.resident_id || resident.authorized === false) continue;
-        authorizedResidentIds.add(resident.resident_id);
+        if (!resident.resident_id) continue;
+        const chatAvailable = resident.chat_available === true;
+        if (chatAvailable) chatAvailableResidentIds.add(resident.resident_id);
+        else unavailableCount += 1;
         residentNames.set(resident.resident_id, resident.display_name || resident.resident_id);
-        residentSelect.add(new Option(resident.display_name || resident.resident_id, resident.resident_id));
+        const onboarding = resident.onboarding_status || 'unknown';
+        const readiness = chatAvailable ? 'chat available' : 'chat unavailable';
+        const option = new Option(`${resident.display_name || resident.resident_id} · ${readiness} · onboarding ${onboarding}`, resident.resident_id);
+        option.disabled = !chatAvailable;
+        residentSelect.add(option);
       }
-      residentSelect.disabled = false;
+      residentSelect.disabled = !residentSelect.options.length;
       syncNewConversationButton();
-      setText(status, result.freshness === 'current' ? 'Resident directory loaded from the institutional directory.' : `Directory source ${result.freshness || 'unknown'}`);
+      setText(status, result.freshness === 'current'
+        ? `Institutional resident roster loaded · ${unavailableCount} resident(s) currently unavailable for chat.`
+        : `Directory source ${result.freshness || 'unknown'}`);
       status.dataset.state = result.freshness || 'unknown';
-      if (!residentSelect.options.length) setText(status, 'No authorized residents were returned by the institutional directory.');
+      if (!residentSelect.options.length) setText(status, 'The institutional directory returned no resident records.');
     } catch (error) {
       loaded = false;
       directoryAvailable = false;
@@ -334,8 +344,8 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   root.getElementById('nav-chat')?.addEventListener('click', () => loadResidents());
   root.addEventListener?.('r3:steward-session-established', () => {
     loaded = false; directoryAvailable = false; selectedResident = ''; selectedConversation = '';
-    pendingConversationId = null; pendingMessage = null; authorizedResidentIds.clear();
-    residentSelect.disabled = true; residentSelect.replaceChildren(new Option('Loading authorized residents…', ''));
+    pendingConversationId = null; pendingMessage = null; chatAvailableResidentIds.clear();
+    residentSelect.disabled = true; residentSelect.replaceChildren(new Option('Loading institutional resident roster…', ''));
     conversationList.replaceChildren(); messageList.replaceChildren(); composer.value = '';
     composer.disabled = true; sendButton.disabled = true; syncNewConversationButton();
     loadResidents();
@@ -343,7 +353,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   root.addEventListener?.('r3:steward-session-revoked', () => {
     loaded = false; directoryAvailable = false; selectedResident = ''; selectedConversation = '';
     pendingConversationId = null; pendingMessage = null; composer.value = '';
-    authorizedResidentIds.clear(); residentSelect.disabled = true;
+    chatAvailableResidentIds.clear(); residentSelect.disabled = true;
     residentSelect.replaceChildren(new Option('Website session required', ''));
     conversationList.replaceChildren(); messageList.replaceChildren();
     composer.disabled = true; sendButton.disabled = true; syncNewConversationButton();

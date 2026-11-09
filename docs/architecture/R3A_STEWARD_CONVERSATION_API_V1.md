@@ -5,7 +5,7 @@ Status: coordinator implementation on `integration/r3a-unified-20261109`; source
 ## Authority and flow
 
 - AP3 validates the existing `rv_account_session` portal session, required Steward role, expiration/revocation, and same-origin mutation requests. It supplies the session's canonical `principal_id`; callers cannot choose an owner identity.
-- CME reads residents only through the configured `institutional.directory.discover` capability invocation, using normal CME grant checks and the registered provider. An authenticated-principal read has no resident activity lineage; CME records the invocation and audit decision directly and still requires an active grant for that canonical principal. Chat selection is limited to directory records with a governed execution binding, configured office-role route, and required active grants. Matching a directory principal to a module ID by spelling or display name is not a binding.
+- CME reads residents only through the configured `institutional.directory.discover` capability invocation, using normal CME grant checks and the registered provider. An authenticated-principal read has no resident activity lineage; CME records the invocation and audit decision directly and still requires an active grant for that canonical principal. The roster includes all returned directory records; chat availability is evaluated separately and requires a governed execution binding, configured office-role route, and required active grants. Matching a directory principal to a module ID by spelling or display name is not a binding. The Website displays ineligible roster rows as disabled and does not imply onboarding when the directory supplies no onboarding evidence.
 - CME owns conversation records and messages in PostgreSQL schema `r3a`; each user turn is linked to one idempotent CME activity. CME resolves each selected resident through the authoritative directory and existing execution-profile/model-route contracts.
 - The Website never invokes a model endpoint or stores institutional conversation data locally. Its browser client uses the existing `r3a.steward-workspace-web.v1` contract and same-origin opaque cookie.
 
@@ -15,7 +15,7 @@ All routes require an active authenticated AP3 session. Mutations require a conf
 
 | Method and path | Behavior |
 |---|---|
-| `GET /api/v1/steward/residents` | Directory discovery with current provenance and only currently executable residents. |
+| `GET /api/v1/steward/residents` | Returns every resident in the current measured directory snapshot with provenance. Roster membership does not imply onboarding or chat eligibility. Each row carries separate `onboarding_status`, `execution_status`, `authorization_status`, `chat_available`, and `chat_status` fields; when the directory has no onboarding evidence, onboarding status is `unknown`. |
 | `GET /api/v1/steward/conversations?resident_id=…` | Lists the authenticated principal's conversations for one resident. |
 | `POST /api/v1/steward/conversations` | Idempotently creates a conversation using `{resident_id, client_conversation_id}`. |
 | `GET /api/v1/steward/conversations/{conversation_id}/messages` | Returns durable transcript, activity IDs and delivery state; a completed CME result is projected as the resident message. |
