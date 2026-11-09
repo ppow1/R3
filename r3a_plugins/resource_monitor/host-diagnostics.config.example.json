@@ -1,0 +1,8 @@
+{
+  "host_id": "replace-with-verified-host-identifier",
+  "timeout_seconds": 5,
+  "max_age_seconds": 60,
+  "filesystem_paths": [
+    "/"
+  ]
+}

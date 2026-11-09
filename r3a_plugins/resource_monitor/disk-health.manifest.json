@@ -1,0 +1,365 @@
+{
+  "schema_version": 1,
+  "plugin_id": "r3a.disk-health-monitor",
+  "plugin_version": "1.0.0",
+  "artifact_ref": "monitor.py",
+  "artifact_sha256": "587504888abdd51ed4a14bf45df5ecb01907d882ab307fae53320c97646df95e",
+  "configuration_schema": {
+    "schema_id": "r3a.resource-monitor.config.v1",
+    "type": "object",
+    "required": [
+      "host_id",
+      "timeout_seconds",
+      "max_age_seconds",
+      "executables"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "host_id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "timeout_seconds": {
+        "type": "number",
+        "minimum": 0.1,
+        "maximum": 30
+      },
+      "max_age_seconds": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 3600
+      },
+      "executables": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 16,
+        "uniqueItems": true,
+        "items": {
+          "type": "string",
+          "pattern": "[A-Za-z0-9._+-]{1,64}"
+        }
+      }
+    }
+  },
+  "provider": {
+    "provider_id": "r3a.disk-health-monitor",
+    "provider_version": "1.0.0",
+    "entrypoint": "r3a_plugins.resource_monitor.monitor:create_disk_provider",
+    "artifact_sha256": "587504888abdd51ed4a14bf45df5ecb01907d882ab307fae53320c97646df95e"
+  },
+  "operation": {
+    "contract_id": "r3a.capability-operation.v1",
+    "contract_version": "1.0.0",
+    "operation_id": "infrastructure.resources.disk-health.read",
+    "operation_revision": "1.0.0",
+    "provider": {
+      "provider_id": "r3a.disk-health-monitor",
+      "provider_version": "1.0.0",
+      "entrypoint": "r3a_plugins.resource_monitor.monitor:create_disk_provider",
+      "artifact_sha256": "587504888abdd51ed4a14bf45df5ecb01907d882ab307fae53320c97646df95e"
+    },
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "output_schema": {
+      "type": "object",
+      "required": [
+        "source_id",
+        "content",
+        "sha256",
+        "observed_at",
+        "source_timestamp",
+        "source_timestamp_basis",
+        "freshness",
+        "source_path"
+      ],
+      "properties": {
+        "source_id": {
+          "type": "string"
+        },
+        "content": {
+          "type": "object",
+          "required": [
+            "schema_id",
+            "host_id",
+            "observed_at",
+            "availability",
+            "disks",
+            "error"
+          ],
+          "properties": {
+            "schema_id": {
+              "type": "string",
+              "const": "r3a.physical-resource-inventory.v1"
+            },
+            "host_id": {
+              "type": "string"
+            },
+            "observed_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "availability": {
+              "type": "string",
+              "enum": [
+                "measured",
+                "unavailable"
+              ]
+            },
+            "disks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "resource_id",
+                  "host_id",
+                  "device",
+                  "name",
+                  "capacity_bytes",
+                  "rotational",
+                  "transport",
+                  "model",
+                  "observed_at",
+                  "health"
+                ],
+                "properties": {
+                  "resource_id": {
+                    "type": "string"
+                  },
+                  "host_id": {
+                    "type": "string"
+                  },
+                  "device": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "capacity_bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "rotational": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "transport": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "model": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "observed_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "health": {
+                    "type": "object",
+                    "required": [
+                      "health_state",
+                      "smart_passed",
+                      "temperature_c",
+                      "smart_capacity_bytes",
+                      "device_protocol",
+                      "reason"
+                    ],
+                    "properties": {
+                      "health_state": {
+                        "type": "string",
+                        "enum": [
+                          "measured",
+                          "unavailable"
+                        ]
+                      },
+                      "smart_passed": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      },
+                      "temperature_c": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "smart_capacity_bytes": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "device_protocol": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "reason": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "smartctl_exit_status": {
+                        "type": "integer"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              "maxItems": 1024
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source_timestamp": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_timestamp_basis": {
+          "type": "string"
+        },
+        "freshness": {
+          "type": "object",
+          "required": [
+            "state",
+            "age_seconds",
+            "max_age_seconds"
+          ],
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "fresh",
+                "stale",
+                "unavailable"
+              ]
+            },
+            "age_seconds": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "max_age_seconds": {
+              "type": "number"
+            }
+          },
+          "additionalProperties": false
+        },
+        "source_path": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "effect_class": "read",
+    "caller_constraints": {
+      "allowed_principals": [],
+      "allowed_residents": [],
+      "allowed_services": []
+    },
+    "target_scope_schema": {
+      "type": "object",
+      "properties": {
+        "host_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "required_grants": [
+      "infrastructure.resource-inventory.read"
+    ],
+    "evidence": {
+      "schema": {
+        "type": "object",
+        "required": [
+          "source_id",
+          "sha256",
+          "observed_at",
+          "freshness"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "freshness": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": true
+      },
+      "verification_obligations": [
+        "preserve_source_provenance_and_digest",
+        "state_source_freshness_and_timestamp_basis",
+        "do_not_infer_unavailable_measurements"
+      ]
+    },
+    "recovery": {
+      "idempotency_required": false,
+      "idempotency_scope": "invocation",
+      "replay_safe": true,
+      "reconciliation_operation_id": null
+    },
+    "execution": {
+      "timeout_seconds": 30,
+      "retry_disposition": "safe_retry"
+    },
+    "lifecycle": {
+      "desired_state": "enabled"
+    },
+    "resident_tool": {
+      "name": "Disk SMART Health and Capacity",
+      "description": "Read physical disk identity, byte capacity, and directly reported SMART/SAS health fields."
+    }
+  }
+}
