@@ -469,7 +469,7 @@ class CME:
                 raise PermissionError("non-primary resident execution requires a verified profile")
             binding = await self._ensure_resident_module(profile)
             version, socket = binding.version, binding.socket
-        if operation == "execute" and payload.get("activity_type") == "grace.objective":
+        if operation == "execute" and payload.get("activity_type") in {"grace.objective", "grace.conversation"}:
             # CME has already extracted these durable internals into its own state. The
             # resident receives the conversation and evidence, not a duplicate copy of
             # invocation history and retry bookkeeping that can exceed the module frame.
@@ -807,8 +807,35 @@ class CME:
         result["prior_version"] = old_version
         return result
 
+    async def _invoke_directory_for_principal(self, principal_id: str,
+                                              idempotency_key: str) -> dict[str, Any]:
+        """Read the authoritative directory through normal CME grant and provider checks."""
+        operation = self.settings.capability_registry.resolve("institutional.directory.discover")
+        invocation_id = str(uuid.uuid5(uuid.NAMESPACE_URL,
+                                       f"r3a.steward.directory:{principal_id}:{idempotency_key}"))
+        request = {
+            "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+            "invocation_id": invocation_id,
+            "operation_id": operation.descriptor["operation_id"],
+            "operation_contract_version": operation.descriptor["contract_version"],
+            "caller": {"principal_id": principal_id, "resident_id": None, "service_id": None},
+            "target": {}, "input": {"limit": 250}, "activity_id": None, "attempt_id": None,
+            "correlation_id": invocation_id, "work_order": None,
+            "evidence_purpose": "Discover residents for the authenticated Steward workspace",
+            "idempotency_key": f"steward-directory:{invocation_id}",
+            "deadline": (datetime.now(timezone.utc)
+                         + timedelta(seconds=operation.descriptor["execution"]["timeout_seconds"])).isoformat(),
+            "config_revision": self.settings.source_digest,
+        }
+        validate_json(request["input"], operation.descriptor["input_schema"], path="$.input")
+        return await self.invoke_capability(request)
+
     async def _control_request(self, operation: str, payload: dict[str, Any],
                                idempotency_key: str) -> dict[str, Any]:
+        if operation in {"diagnostics.status", "diagnostics.events"}:
+            from .diagnostics import DiagnosticProjection
+            return await DiagnosticProjection(self.settings, self.store).handle(
+                "status" if operation == "diagnostics.status" else "events", {}, idempotency_key)
         if operation == "health":
             return {"component": "cme", "pid": os.getpid(), "state": "RUNNING",
                     "health": "healthy", "scheduler_tick_age_seconds": max(
@@ -960,6 +987,131 @@ class CME:
                 operations = list(registry.discover())
             return {"operations": operations, "authorization_evaluated": False,
                     "effect": "none; discovery does not authorize invocation"}
+        if operation == "steward.residents.discover":
+            principal_id = str(payload.get("principal_id", "")).strip()
+            if not principal_id or len(principal_id) > 256:
+                raise PermissionError("canonical authenticated principal is required")
+            result = await self._invoke_directory_for_principal(principal_id, idempotency_key)
+            output = result.get("output", {})
+            source = output.get("source", {}) if isinstance(output, dict) else {}
+            if (result.get("outcome") != "SUCCEEDED"
+                    or not isinstance(output, dict)
+                    or output.get("schema_id") != "r3a.institutional-directory.v1"
+                    or not isinstance(source, dict) or source.get("availability") != "measured"
+                    or source.get("freshness") != "fresh"):
+                raise RuntimeError("authoritative resident directory is unavailable or stale")
+            if re.fullmatch(r"[0-9a-f]{64}", str(source.get("snapshot_sha256", ""))) is None:
+                raise RuntimeError("authoritative resident directory provenance is invalid")
+            residents = []
+            for entry in output.get("residents", []):
+                if not isinstance(entry, dict) or not isinstance(entry.get("resident_id"), str):
+                    continue
+                # The primary configured resident is executable by this CME. Other
+                # residents are shown only when their canonical execution grant exists.
+                authorized = entry["resident_id"] == self.module_id
+                if not authorized:
+                    try:
+                        await self.store.require_capability(entry["resident_id"], "resident.objective.execute")
+                        authorized = True
+                    except PermissionError:
+                        pass
+                if authorized:
+                    residents.append({"resident_id": entry["resident_id"],
+                                      "display_name": entry.get("display_name") or entry["resident_id"],
+                                      "office_id": entry.get("office_id"),
+                                      "office_role": entry.get("office_role"),
+                                      "authorized": True})
+            return {"contract": "r3a.resident-directory-view.v1", "contract_version": "1.0.0",
+                    "residents": residents, "source": source, "freshness": "current",
+                    "directory_invocation_id": result["invocation_id"],
+                    "authorization": result["authorization"]}
+        if operation == "steward.conversation.create":
+            principal_id = str(payload.get("principal_id", "")).strip()
+            resident_id = str(payload.get("resident_id", "")).strip()
+            client_id = str(payload.get("client_conversation_id", ""))
+            directory = await self._invoke_directory_for_principal(
+                principal_id, f"conversation-directory:{idempotency_key}")
+            directory_output = directory.get("output", {})
+            source = directory_output.get("source", {}) if isinstance(directory_output, dict) else {}
+            if (directory.get("outcome") != "SUCCEEDED" or not isinstance(directory_output, dict)
+                    or directory_output.get("schema_id") != "r3a.institutional-directory.v1"
+                    or not isinstance(source, dict)
+                    or source.get("availability") != "measured" or source.get("freshness") != "fresh"):
+                raise RuntimeError("authoritative resident directory is unavailable or stale")
+            if re.fullmatch(r"[0-9a-f]{64}", str(source.get("snapshot_sha256", ""))) is None:
+                raise RuntimeError("authoritative resident directory provenance is invalid")
+            residents = directory_output.get("residents", [])
+            if not any(isinstance(item, dict) and item.get("resident_id") == resident_id
+                       for item in residents):
+                raise PermissionError("selected resident is absent from the current authoritative directory")
+            resident_entry = next(item for item in residents if item.get("resident_id") == resident_id)
+            if resident_id != self.module_id:
+                self.settings.model_role_for_office(str(resident_entry.get("office_role", "")))
+                await self.store.require_capability(self.module_id, "resident.delegate")
+                await self.store.require_capability(resident_id, "resident.objective.execute")
+            conversation = await self.store.create_steward_conversation(
+                principal_id, resident_id,
+                str(resident_entry.get("display_name") or resident_id),
+                str(source.get("snapshot_sha256", "")), str(directory["invocation_id"]), client_id)
+            return {"contract": "r3a.steward-conversation.v1", "conversation": conversation,
+                    "freshness": "current"}
+        if operation == "steward.conversation.list":
+            principal_id = str(payload.get("principal_id", "")).strip()
+            resident_id = str(payload.get("resident_id", "")).strip()
+            conversations = await self.store.list_steward_conversations(principal_id, resident_id)
+            return {"contract": "r3a.steward-conversation.v1", "conversations": conversations,
+                    "freshness": "current"}
+        if operation == "steward.conversation.messages":
+            principal_id = str(payload.get("principal_id", "")).strip()
+            messages = await self.store.get_steward_conversation_messages(
+                principal_id, str(payload.get("conversation_id", "")))
+            return {"contract": "r3a.steward-conversation.v1", "messages": messages,
+                    "freshness": "current"}
+        if operation == "steward.conversation.send":
+            principal_id = str(payload.get("principal_id", "")).strip()
+            conversation_id = str(payload.get("conversation_id", ""))
+            message_id = str(payload.get("client_message_id", ""))
+            message_text = str(payload.get("text", ""))
+            accepted = await self.store.accept_steward_message(
+                principal_id, conversation_id, message_id, message_text)
+            activity_id = accepted.get("activity_id")
+            if activity_id is None:
+                # Include the durable transcript in the same CME activity. Replaying
+                # this request uses the same message-bound activity ID and cannot
+                # repeat a completed turn or its provider side effects.
+                transcript = []
+                remaining = 1200
+                for entry in reversed(accepted["transcript"]):
+                    content = str(entry.get("content", ""))[-remaining:]
+                    if content:
+                        transcript.append(f"{entry['role']}: {content}")
+                        remaining -= len(content)
+                    if remaining <= 0:
+                        break
+                conversation_text = "\n".join(reversed(transcript))
+                objective = ("Respond to the latest message in this Steward conversation. Use prior turns "
+                             "only as context. Be candid about uncertainty and never claim institutional "
+                             "actions unless a CME capability returned evidence.\nPrior turns:\n"
+                             f"{conversation_text}\nLatest Steward message:\n{message_text}")
+                if len(objective) > 4000:
+                    objective = objective[:4000]
+                activity_id = str(uuid.uuid5(uuid.NAMESPACE_URL,
+                                             f"r3a.steward.conversation.turn:{conversation_id}:{message_id}"))
+                submit_payload = {"objective": objective, "event_kind": "conversation",
+                                  "acceptance_criteria": [], "requested_activity_id": activity_id,
+                                  "task_class": "objective_reasoning"}
+                if accepted["resident_id"] != self.module_id:
+                    submit_payload["target_resident_id"] = accepted["resident_id"]
+                submitted = await self._control_request(
+                    "grace.objective.submit", submit_payload,
+                    f"steward-chat:{conversation_id}:{message_id}")
+                activity_id = str(submitted["activity_id"])
+                await self.store.link_steward_message_activity(principal_id, message_id, activity_id)
+            return {"contract": "r3a.steward-conversation.v1",
+                    "message": {"message_id": message_id, "delivery_state": "processing",
+                                "activity_id": activity_id},
+                    "duplicate": bool(accepted.get("duplicate")),
+                    "correlation_id": activity_id, "freshness": "current"}
         if operation == "capability.invoke":
             request = payload.get("request")
             if not isinstance(request, dict):
@@ -1374,7 +1526,8 @@ class CME:
         if activity_intake is not None:
             validate_json(activity_intake, ACTIVITY_INTAKE_SCHEMA, path="$.activity_intake")
         acceptance_criteria = (validate_required_criteria(acceptance_contract.get("criteria"))
-                               if engineering_assignment is None and notification is None
+                               if event_input.get("event_kind") != "conversation"
+                               and engineering_assignment is None and notification is None
                                and activity_intake is None else [])
         if engineering_assignment is not None:
             engineering_assignment = validate_engineering_assignment(engineering_assignment)
@@ -1577,7 +1730,7 @@ class CME:
                 "charged_completion_tokens": charged,
                 "available_roles": role_offers,
             }
-        return {"activity_type": "grace.objective", "activity_id": str(activity["activity_id"]),
+        return {"activity_type": activity.get("activity_type", "grace.objective"), "activity_id": str(activity["activity_id"]),
                 "attempt_id": str(activity["attempt_id"]),
                 "resident_id": resident_id, "resident_profile": resident_profile,
                 "objective": event_input["objective"], "event_kind": event_input.get("event_kind", "objective"),
@@ -2467,9 +2620,10 @@ class CME:
             if (resident_id == self.module_id
                     and (self.module_process is None or self.module_process.returncode is not None)):
                 raise RuntimeError("registered module process is not running")
-            context = (await self._objective_context(activity) if activity["activity_type"] == "grace.objective"
+            resident_activity = activity["activity_type"] in {"grace.objective", "grace.conversation"}
+            context = (await self._objective_context(activity) if resident_activity
                        else await self._observer_context(activity))
-            if activity["activity_type"] == "grace.objective":
+            if resident_activity:
                 if resident_id != self.module_id:
                     execution_authorization = await self._authorize_capability(
                         "resident.objective.execute", activity_id=str(activity["activity_id"]),

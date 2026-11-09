@@ -45,6 +45,7 @@ import json
 import logging
 import re
 import urllib.parse
+from types import SimpleNamespace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -143,9 +144,15 @@ async def _steward_settings(request: Request):
     """Validate the shared AP3 cookie session and resolve external R3A runtime settings."""
     config_path = os.environ.get("R3A_CONFIG")
     access = getattr(app.state, "steward_access", None)
-    if not access or not config_path:
-        raise HTTPException(503, "Steward operations are unavailable: shared AP3 session or runtime configuration is missing")
+    if not access:
+        raise HTTPException(503, "Steward operations are unavailable: shared AP3 session configuration is missing")
     await access.authenticated_principal(request, "steward.r3a.read_or_submit")
+    if not config_path:
+        access_config = getattr(access, "config", {})
+        socket_path = access_config.get("cme", {}).get("control_socket") if isinstance(access_config, dict) else None
+        if not isinstance(socket_path, str) or not Path(socket_path).is_absolute():
+            raise HTTPException(503, "Steward operations are unavailable: configured CME socket is missing")
+        return SimpleNamespace(control_socket=socket_path, diagnostics_socket=socket_path)
     try:
         from r3a_runtime.config import load_settings
         return load_settings(config_path)
@@ -153,14 +160,143 @@ async def _steward_settings(request: Request):
         raise HTTPException(503, f"R3A runtime configuration unavailable: {type(exc).__name__}") from exc
 
 
+async def _steward_principal(request: Request, action: str = "steward.r3a.read_or_submit"):
+    access = getattr(app.state, "steward_access", None)
+    if not access:
+        raise HTTPException(503, "Steward operations are unavailable: shared AP3 session is missing")
+    principal = await access.authenticated_principal(request, action)
+    return principal
+
+
+class StewardConversationCreate(BaseModel):
+    resident_id: str = Field(min_length=1, max_length=256)
+    client_conversation_id: str
+
+
+class StewardConversationMessage(BaseModel):
+    client_message_id: str
+    text: str = Field(min_length=1, max_length=2000)
+
+
+async def _website_control_request(request: Request, principal: dict, operation: str,
+                                   payload: dict, idempotency_key: str | None = None):
+    settings = await _steward_settings(request)
+    from r3a_runtime.control import control_request
+    try:
+        result = await control_request(settings.control_socket, operation,
+                                       {**payload, "principal_id": principal["principal_id"]},
+                                       idempotency_key=idempotency_key, timeout=8.0)
+        return {**result, "resource_contract": result.get("contract"),
+                "contract": "r3a.steward-workspace-web.v1"}
+    except RuntimeError as exc:
+        if str(exc).startswith("PermissionError:"):
+            raise HTTPException(403, "Steward operation denied") from exc
+        if "previous Grace turn is still processing" in str(exc):
+            raise HTTPException(409, "Grace is still processing the previous turn") from exc
+        if str(exc).startswith(("ValueError:", "LookupError:")):
+            raise HTTPException(422, "Steward request is invalid or unavailable") from exc
+        raise HTTPException(503, "Managed CME operation is unavailable") from exc
+    except Exception as exc:
+        raise HTTPException(503, f"Managed CME operation unavailable: {type(exc).__name__}") from exc
+
+
+@app.get("/api/v1/steward/residents")
+async def steward_residents(request: Request):
+    principal = await _steward_principal(request)
+    return await _website_control_request(request, principal, "steward.residents.discover", {},
+                                          f"website-residents:{principal['principal_id']}:{uuid.uuid4()}")
+
+
+@app.get("/api/v1/steward/conversations")
+async def steward_conversations(request: Request, resident_id: str):
+    if not resident_id or len(resident_id) > 256:
+        raise HTTPException(422, "resident_id is invalid")
+    principal = await _steward_principal(request)
+    return await _website_control_request(request, principal, "steward.conversation.list",
+                                          {"resident_id": resident_id})
+
+
+@app.post("/api/v1/steward/conversations", status_code=201)
+async def steward_create_conversation(body: StewardConversationCreate, request: Request):
+    principal = await _steward_principal(request)
+    try:
+        uuid.UUID(body.client_conversation_id)
+    except ValueError as exc:
+        raise HTTPException(422, "client_conversation_id must be a UUID") from exc
+    return await _website_control_request(
+        request, principal, "steward.conversation.create",
+        {"resident_id": body.resident_id,
+         "client_conversation_id": body.client_conversation_id},
+        f"website-conversation:{principal['principal_id']}:{body.client_conversation_id}")
+
+
+@app.get("/api/v1/steward/conversations/{conversation_id}/messages")
+async def steward_conversation_messages(conversation_id: str, request: Request):
+    principal = await _steward_principal(request)
+    try:
+        uuid.UUID(conversation_id)
+    except ValueError as exc:
+        raise HTTPException(422, "conversation_id must be a UUID") from exc
+    return await _website_control_request(request, principal, "steward.conversation.messages",
+                                          {"conversation_id": conversation_id})
+
+
+@app.post("/api/v1/steward/conversations/{conversation_id}/messages", status_code=202)
+async def steward_send_conversation_message(conversation_id: str, body: StewardConversationMessage,
+                                            request: Request):
+    principal = await _steward_principal(request, "steward.r3a.read_or_submit")
+    try:
+        uuid.UUID(conversation_id)
+        uuid.UUID(body.client_message_id)
+    except ValueError as exc:
+        raise HTTPException(422, "conversation_id and client_message_id must be UUIDs") from exc
+    return await _website_control_request(
+        request, principal, "steward.conversation.send",
+        {"conversation_id": conversation_id, "client_message_id": body.client_message_id,
+         "text": body.text},
+        f"website-message:{conversation_id}:{body.client_message_id}")
+
+
 @app.get("/api/v1/steward/r3a/status")
 async def steward_r3a_status(request: Request):
     settings = await _steward_settings(request)
     from r3a_runtime.control import control_request
     try:
-        return await control_request(settings.diagnostics_socket, "status", timeout=4.0)
+        return await control_request(settings.control_socket, "diagnostics.status", timeout=4.0)
     except Exception as exc:
         raise HTTPException(503, f"R3A diagnostics unavailable: {type(exc).__name__}") from exc
+
+
+@app.get("/api/v1/steward/about")
+async def steward_about(request: Request):
+    """Read-only, authenticated version and health projection for Settings/About."""
+    settings = await _steward_settings(request)
+    from r3a_runtime.control import control_request
+    try:
+        runtime = await control_request(settings.control_socket, "diagnostics.status", timeout=4.0)
+    except Exception as exc:
+        raise HTTPException(503, f"Managed runtime status unavailable: {type(exc).__name__}") from exc
+    modules = [{key: module.get(key) for key in
+                ("module_id", "module_version", "lifecycle_state", "health", "observed_at", "freshness")}
+               for module in runtime.get("modules", []) if isinstance(module, dict)]
+    processes = {item.get("component_id"): {
+        "state": item.get("state"), "health": item.get("health"),
+        "freshness": item.get("freshness"), "heartbeat_at": item.get("heartbeat_at")}
+        for item in runtime.get("processes", []) if isinstance(item, dict)}
+    grace = next((module for module in modules if module["module_id"] == "resident.grace"
+                  and module["lifecycle_state"] == "ACTIVE"), None)
+    return {"contract": "r3a.website-about.v1", "contract_version": "1.0.0",
+            "observed_at": runtime.get("observed_at"),
+            "integration_source_revision": os.environ.get("R3A_INTEGRATION_SOURCE_REVISION") or WEBSITE_BUILD_COMMIT,
+            "deployed_runtime_revision": runtime.get("implementation_revision"),
+            "website_build_revision": WEBSITE_BUILD_COMMIT,
+            "website_version": WEBSITE_BUILD_VERSION or "unknown",
+            "ring0": processes.get("ring0", {"health": "unknown"}),
+            "cme": processes.get("cme", {"health": "unknown"}),
+            "grace": {"module_id": "resident.grace",
+                      "version": grace.get("module_version") if grace else None,
+                      "health": grace.get("health") if grace else "unavailable"},
+            "modules": modules, "freshness": runtime.get("source_freshness", "unknown")}
 
 
 @app.get("/api/v1/steward/r3a/events")
@@ -168,7 +304,7 @@ async def steward_r3a_events(request: Request):
     settings = await _steward_settings(request)
     from r3a_runtime.control import control_request
     try:
-        return await control_request(settings.diagnostics_socket, "events", timeout=4.0)
+        return await control_request(settings.control_socket, "diagnostics.events", timeout=4.0)
     except Exception as exc:
         raise HTTPException(503, f"R3A event history unavailable: {type(exc).__name__}") from exc
 
@@ -179,8 +315,8 @@ async def steward_r3a_configuration(request: Request):
     from r3a_runtime.control import control_request
     try:
         current, history = await asyncio.gather(
-            control_request(settings.diagnostics_socket, "status", timeout=4.0),
-            control_request(settings.diagnostics_socket, "events", timeout=4.0),
+            control_request(settings.control_socket, "diagnostics.status", timeout=4.0),
+            control_request(settings.control_socket, "diagnostics.events", timeout=4.0),
         )
     except Exception as exc:
         raise HTTPException(503, f"R3A configuration diagnostics unavailable: {type(exc).__name__}") from exc

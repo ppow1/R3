@@ -27,6 +27,7 @@ import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from fastapi import HTTPException
 
 from fastapi.testclient import TestClient
 
@@ -132,6 +133,15 @@ class StewardWebsiteApiTests(unittest.TestCase):
             response = self.client.get("/api/v1/steward/r3a/status")
         self.assertEqual(response.status_code, 503)
 
+    def test_shared_ap3_configuration_supplies_cme_socket_without_secondary_runtime_config(self):
+        self.access.config = {"cme": {"control_socket": "/run/r3a/control.sock"}}
+        with patch.dict(os.environ, {}, clear=True), \
+                patch("r3a_runtime.control.control_request", new_callable=AsyncMock,
+                      return_value={"observed_at": "2026-11-09T12:00:00Z"}) as control:
+            response = self.client.get("/api/v1/steward/r3a/status")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(control.await_args.args[:2], ("/run/r3a/control.sock", "diagnostics.status"))
+
     def test_temporary_bearer_does_not_replace_shared_session(self):
         app.state.steward_access = None
         with patch.dict(os.environ, {"R3A_CONFIG": "/tmp/r3a.json"}), \
@@ -165,6 +175,28 @@ class StewardWebsiteApiTests(unittest.TestCase):
         self.assertFalse(body["history_complete"])
         self.assertFalse(body["write_available"])
 
+    def test_authenticated_about_view_uses_dynamic_managed_module_diagnostics(self):
+        runtime = {"observed_at": "2026-11-09T12:00:00Z", "source_freshness": "fresh",
+                   "implementation_revision": "release-sha", "processes": [
+                       {"component_id": "ring0", "state": "RUNNING", "health": "healthy", "freshness": "fresh"},
+                       {"component_id": "cme", "state": "RUNNING", "health": "healthy", "freshness": "fresh"}],
+                   "modules": [{"module_id": "resident.grace", "module_version": "1.2.12",
+                                "lifecycle_state": "ACTIVE", "health": "healthy"},
+                               {"module_id": "r3a.knowledge", "module_version": "1.1.0",
+                                "lifecycle_state": "ACTIVE", "health": "healthy"}]}
+        with patch.dict(os.environ, {"R3A_CONFIG": "/tmp/r3a.json"}), \
+                patch("r3a_runtime.config.load_settings", return_value=self.settings), \
+                patch("r3a_runtime.control.control_request", new_callable=AsyncMock,
+                      return_value=runtime):
+            response = self.client.get("/api/v1/steward/about")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["contract"], "r3a.website-about.v1")
+        self.assertEqual(body["deployed_runtime_revision"], "release-sha")
+        self.assertEqual(body["grace"]["version"], "1.2.12")
+        self.assertEqual([row["module_id"] for row in body["modules"]],
+                         ["resident.grace", "r3a.knowledge"])
+
     def test_objective_is_forwarded_to_cme_with_idempotency(self):
         result = {"activity_id": "activity-1", "state": "QUEUED", "correlation_id": "cme-correlation-1"}
         with patch.dict(os.environ, {"R3A_CONFIG": "/tmp/r3a.json"}), \
@@ -185,6 +217,47 @@ class StewardWebsiteApiTests(unittest.TestCase):
         self.assertEqual(response.json()["correlation_id"], "cme-correlation-1")
         self.assertEqual(request.await_args.args[1], "grace.objective.submit")
         self.assertEqual(request.await_args.kwargs["idempotency_key"], "website-request-1")
+
+    def test_resident_discovery_forwards_only_the_authenticated_principal_to_cme(self):
+        result = {"contract": "r3a.resident-directory-view.v1", "residents": [],
+                  "freshness": "current"}
+        with patch.dict(os.environ, {"R3A_CONFIG": "/tmp/r3a.json"}), \
+                patch("r3a_runtime.config.load_settings", return_value=self.settings), \
+                patch("r3a_runtime.control.control_request", new_callable=AsyncMock,
+                      return_value=result) as control:
+            response = self.client.get("/api/v1/steward/residents")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(control.await_args.args[1], "steward.residents.discover")
+        self.assertEqual(control.await_args.args[2]["principal_id"], "steward:test")
+
+    def test_conversation_routes_use_durable_cme_contract_and_idempotency(self):
+        conversation_id = "a1a1b9f9-fbd3-4cb9-9e77-25bfe8e2800e"
+        client_conversation_id = "bd295347-7a57-4d63-98ae-cd06ce34f446"
+        message_id = "c06f41fd-75bc-4f21-af89-8116f15e4a0e"
+        with patch.dict(os.environ, {"R3A_CONFIG": "/tmp/r3a.json"}), \
+                patch("r3a_runtime.config.load_settings", return_value=self.settings), \
+                patch("r3a_runtime.control.control_request", new_callable=AsyncMock,
+                      side_effect=[{"contract": "r3a.steward-conversation.v1",
+                                    "conversation": {"conversation_id": conversation_id}},
+                                   {"contract": "r3a.steward-conversation.v1",
+                                    "message": {"message_id": message_id, "delivery_state": "processing"}}]) as control:
+            created = self.client.post("/api/v1/steward/conversations", json={
+                "resident_id": "resident.grace", "client_conversation_id": client_conversation_id},
+                headers={"Origin": "http://testserver"})
+            sent = self.client.post(f"/api/v1/steward/conversations/{conversation_id}/messages", json={
+                "client_message_id": message_id, "text": "Please introduce yourself."},
+                headers={"Origin": "http://testserver"})
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(sent.status_code, 202)
+        self.assertEqual(control.await_args_list[0].args[1], "steward.conversation.create")
+        self.assertEqual(control.await_args_list[1].args[1], "steward.conversation.send")
+        self.assertEqual(control.await_args_list[1].kwargs["idempotency_key"],
+                         f"website-message:{conversation_id}:{message_id}")
+
+    def test_conversation_api_denies_missing_authenticated_session(self):
+        self.access.authenticated_principal.side_effect = HTTPException(401, "session required")
+        response = self.client.get("/api/v1/steward/residents")
+        self.assertEqual(response.status_code, 401)
 
 
 if __name__ == "__main__":

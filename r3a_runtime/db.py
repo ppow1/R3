@@ -1156,12 +1156,14 @@ class Store:
             raise ValueError("event content must contain 1 to 4000 characters")
         if not idempotency_key.strip() or len(idempotency_key) > 200:
             raise ValueError("idempotency_key must contain 1 to 200 characters")
-        if event_kind not in {"objective", "notification"}:
-            raise ValueError("event_kind must be objective or notification")
+        if event_kind not in {"objective", "notification", "conversation"}:
+            raise ValueError("event_kind must be objective, notification, or conversation")
         if (event_kind == "notification") != (notification_envelope is not None):
             raise ValueError("notification event kind requires exactly one versioned notification envelope")
         if notification_envelope is not None:
             notification_envelope = validate_notification_envelope(notification_envelope)
+        if event_kind == "conversation" and (notification_envelope is not None or engineering_assignment is not None):
+            raise ValueError("conversation turns cannot carry notification or Engineering assignments")
         if event_kind != "objective" and depends_on_activity_ids:
             raise ValueError("only objectives may depend on other activities")
         if task_class not in {"objective_reasoning", "vision"}:
@@ -1200,7 +1202,7 @@ class Store:
             if acceptance_criteria:
                 raise ValueError("Engineering assignments use their own typed acceptance criteria")
             acceptance_criteria = []
-        elif notification_envelope is None:
+        elif notification_envelope is None and event_kind != "conversation":
             acceptance_criteria = validate_required_criteria(acceptance_criteria)
         else:
             acceptance_criteria = []
@@ -1285,7 +1287,8 @@ class Store:
                     prior_input.pop("requested_activity_id", None)
                 prior_input.pop("authorized_capability", None)
                 prior_input.pop("correlation_id", None)
-                if (existing["activity_type"] != "grace.objective"
+                expected_activity_type = "grace.conversation" if event_kind == "conversation" else "grace.objective"
+                if (existing["activity_type"] != expected_activity_type
                         or not same_notification_input(prior_input, event_input)
                         or (requested_activity_id and str(existing["activity_id"]) != str(selected_activity_id))):
                     raise ValueError("idempotency key already belongs to a different request")
@@ -1313,12 +1316,14 @@ class Store:
             await conn.execute(
                 "INSERT INTO r3a.activities(activity_id,activity_type,idempotency_key,machine_id,machine_version,state,"
                 "available_at,recovery_policy,config_revision,input) "
-                "VALUES (%s,'grace.objective',%s,'activity.generic',1,%s,clock_timestamp(),'idempotent',%s,%s)",
-                (activity_id, idempotency_key, state, config["revision_id"] if config else None,
+                "VALUES (%s,%s,%s,'activity.generic',1,%s,clock_timestamp(),'idempotent',%s,%s)",
+                (activity_id, "grace.conversation" if event_kind == "conversation" else "grace.objective",
+                 idempotency_key, state, config["revision_id"] if config else None,
                  json.dumps(durable_input)),
             )
-            event_type = ("grace.notification.received" if event_kind == "notification"
-                          else "grace.objective.received")
+            event_type = ("grace.notification.received" if event_kind == "notification" else
+                          "steward.conversation.turn.received" if event_kind == "conversation" else
+                          "grace.objective.received")
             initial_reason = ("Grace objective parked awaiting prerequisite activities"
                               if state == "WAITING" else
                               "Grace objective has an unfulfillable prerequisite"
@@ -1948,6 +1953,211 @@ class Store:
     async def rows(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         async with self.pool.connection() as conn:
             return await (await conn.execute(sql, params)).fetchall()
+
+    async def create_steward_conversation(self, principal_id: str, resident_id: str,
+                                          resident_display_name: str,
+                                          directory_snapshot_sha256: str,
+                                          directory_invocation_id: str,
+                                          client_conversation_id: str) -> dict[str, Any]:
+        """Create an idempotent conversation owned by an authenticated AP3 principal."""
+        owner = principal_id.strip()
+        if (not owner or len(owner) > 256 or not resident_id.strip()
+                or re.fullmatch(r"[0-9a-f]{64}", directory_snapshot_sha256) is None
+                or not directory_invocation_id):
+            raise ValueError("canonical principal and resident identities are required")
+        client_id = uuid.UUID(client_conversation_id)
+        conversation_id = uuid.uuid5(uuid.NAMESPACE_URL,
+                                     f"r3a.steward.conversation:{owner}:{client_id}")
+        async with self.pool.connection() as conn, conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                               (f"steward-conversation:{owner}:{client_id}",))
+            inserted = await conn.execute(
+                "INSERT INTO r3a.steward_conversations(conversation_id,owner_principal_id,resident_id,resident_display_name,"
+                "directory_snapshot_sha256,directory_invocation_id,client_conversation_id) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(owner_principal_id,client_conversation_id) DO NOTHING",
+                (conversation_id, owner, resident_id, resident_display_name, directory_snapshot_sha256,
+                 directory_invocation_id, client_id))
+            row = await (await conn.execute(
+                "SELECT conversation_id,owner_principal_id,resident_id,resident_display_name,directory_snapshot_sha256,"
+                "directory_invocation_id,title,created_at,updated_at "
+                "FROM r3a.steward_conversations WHERE owner_principal_id=%s AND client_conversation_id=%s",
+                (owner, client_id))).fetchone()
+            if row["resident_id"] != resident_id:
+                raise PermissionError("idempotent conversation key is already bound to another resident")
+            created = inserted.rowcount == 1
+            if created:
+                await self._event(conn, "steward.conversation.created", "steward_conversation",
+                                  str(row["conversation_id"]), None, None, None, "created",
+                                  "authenticated conversation created",
+                                  {"owner_principal_id": owner, "resident_id": resident_id,
+                                   "directory_snapshot_sha256": directory_snapshot_sha256,
+                                   "directory_invocation_id": directory_invocation_id,
+                                   "client_conversation_id": str(client_id)})
+            return {**row, "conversation_id": str(row["conversation_id"]),
+                    "created": created,
+                    "created_at": row["created_at"].isoformat(),
+                    "updated_at": row["updated_at"].isoformat()}
+
+    async def list_steward_conversations(self, principal_id: str, resident_id: str) -> list[dict[str, Any]]:
+        rows = await self.rows(
+            "SELECT c.conversation_id,c.resident_id,c.resident_display_name,c.title,c.created_at,c.updated_at,"
+            "count(m.message_id) AS message_count FROM r3a.steward_conversations c "
+            "LEFT JOIN r3a.steward_conversation_messages m USING(conversation_id) "
+            "WHERE c.owner_principal_id=%s AND c.resident_id=%s "
+            "GROUP BY c.conversation_id ORDER BY c.updated_at DESC LIMIT 100",
+            (principal_id, resident_id))
+        return [{**row, "conversation_id": str(row["conversation_id"]),
+                 "created_at": row["created_at"].isoformat(),
+                 "updated_at": row["updated_at"].isoformat()} for row in rows]
+
+    async def accept_steward_message(self, principal_id: str, conversation_id: str,
+                                     message_id: str, body: str) -> dict[str, Any]:
+        """Durably accept one user turn and return its earlier transcript for CME scheduling."""
+        conversation_uuid, message_uuid = uuid.UUID(conversation_id), uuid.UUID(message_id)
+        text = body.strip()
+        if not text or len(text) > 2000:
+            raise ValueError("message text must contain 1 to 2000 characters")
+        async with self.pool.connection() as conn, conn.transaction():
+            conversation = await (await conn.execute(
+                "SELECT resident_id FROM r3a.steward_conversations WHERE conversation_id=%s "
+                "AND owner_principal_id=%s FOR UPDATE", (conversation_uuid, principal_id))).fetchone()
+            if conversation is None:
+                raise PermissionError("conversation is unavailable to this Steward principal")
+            existing = await (await conn.execute(
+                "SELECT message_id,sender_kind,body,delivery_state,activity_id,created_at FROM r3a.steward_conversation_messages "
+                "WHERE conversation_id=%s AND message_id=%s FOR UPDATE",
+                (conversation_uuid, message_uuid))).fetchone()
+            if existing:
+                if existing["body"] != text or existing["sender_kind"] != "steward":
+                    raise ValueError("message id was already used for different content")
+                transcript = await (await conn.execute(
+                    "SELECT sender_kind,body FROM r3a.steward_conversation_messages "
+                    "WHERE conversation_id=%s AND sequence_no < (SELECT sequence_no FROM r3a.steward_conversation_messages WHERE message_id=%s) "
+                    "ORDER BY sequence_no DESC LIMIT 20", (conversation_uuid, message_uuid))).fetchall()
+                return {"message_id": str(existing["message_id"]), "activity_id": str(existing["activity_id"])
+                        if existing["activity_id"] else None, "duplicate": True,
+                        "resident_id": conversation["resident_id"],
+                        "transcript": [{"role": "assistant" if item["sender_kind"] == "resident" else "user",
+                                        "content": item["body"]} for item in reversed(transcript)]}
+            pending = await (await conn.execute(
+                "SELECT m.message_id FROM r3a.steward_conversation_messages m "
+                "LEFT JOIN r3a.activities a ON a.activity_id=m.activity_id "
+                "WHERE m.conversation_id=%s AND m.sender_kind='steward' "
+                "AND m.delivery_state IN ('accepted','processing') "
+                "AND (a.activity_id IS NULL OR a.state NOT IN ('COMPLETED','BLOCKED')) LIMIT 1",
+                (conversation_uuid,))).fetchone()
+            if pending:
+                raise RuntimeError("the previous Grace turn is still processing")
+            history = await (await conn.execute(
+                "SELECT sender_kind,body FROM r3a.steward_conversation_messages "
+                "WHERE conversation_id=%s ORDER BY sequence_no DESC LIMIT 20", (conversation_uuid,))).fetchall()
+            await conn.execute(
+                "INSERT INTO r3a.steward_conversation_messages(message_id,conversation_id,sender_kind,sender_id,body,delivery_state) "
+                "VALUES (%s,%s,'steward',%s,%s,'accepted')",
+                (message_uuid, conversation_uuid, principal_id, text))
+            await conn.execute("UPDATE r3a.steward_conversations SET updated_at=clock_timestamp() WHERE conversation_id=%s",
+                               (conversation_uuid,))
+            await self._event(conn, "steward.conversation.message.accepted", "steward_conversation",
+                              str(conversation_uuid), None, None, None, "message_accepted",
+                              "authenticated Steward message durably accepted",
+                              {"owner_principal_id": principal_id, "message_id": str(message_uuid),
+                               "body_sha256": hashlib.sha256(text.encode()).hexdigest()})
+            return {"message_id": str(message_uuid), "activity_id": None, "duplicate": False,
+                    "resident_id": conversation["resident_id"],
+                    "transcript": [{"role": "assistant" if item["sender_kind"] == "resident" else "user",
+                                    "content": item["body"]} for item in reversed(history)]}
+
+    async def link_steward_message_activity(self, principal_id: str, message_id: str,
+                                            activity_id: str) -> None:
+        async with self.pool.connection() as conn, conn.transaction():
+            row = await conn.execute(
+                "UPDATE r3a.steward_conversation_messages m SET activity_id=%s,delivery_state='processing' "
+                "FROM r3a.steward_conversations c WHERE m.conversation_id=c.conversation_id "
+                "AND c.owner_principal_id=%s AND m.message_id=%s AND (m.activity_id IS NULL OR m.activity_id=%s)",
+                (uuid.UUID(activity_id), principal_id, uuid.UUID(message_id), uuid.UUID(activity_id)))
+            if row.rowcount != 1:
+                existing = await (await conn.execute(
+                    "SELECT activity_id FROM r3a.steward_conversation_messages WHERE message_id=%s",
+                    (uuid.UUID(message_id),))).fetchone()
+                if not existing or str(existing["activity_id"]) != activity_id:
+                    raise PermissionError("message activity could not be bound to its owner")
+
+    async def get_steward_conversation_messages(self, principal_id: str,
+                                               conversation_id: str) -> list[dict[str, Any]]:
+        conversation_uuid = uuid.UUID(conversation_id)
+        async with self.pool.connection() as conn, conn.transaction():
+            rows = await (await conn.execute(
+                "SELECT m.message_id,m.sender_kind,m.sender_id,m.body,m.delivery_state,m.activity_id,m.created_at,c.resident_id,"
+                "a.state AS activity_state,a.result,a.exception,c.resident_display_name FROM r3a.steward_conversation_messages m "
+                "JOIN r3a.steward_conversations c USING(conversation_id) "
+                "LEFT JOIN r3a.activities a ON a.activity_id=m.activity_id "
+                "WHERE c.conversation_id=%s AND c.owner_principal_id=%s ORDER BY m.sequence_no",
+                (conversation_uuid, principal_id))).fetchall()
+            persisted_resident_replies = {
+                str(row["activity_id"]) for row in rows
+                if row["sender_kind"] == "resident" and row["activity_id"] is not None
+            }
+            projected = []
+            for row in rows:
+                state = row["delivery_state"]
+                assistant_projection = None
+                if row["sender_kind"] == "steward" and row["activity_state"] == "COMPLETED":
+                    result = row["result"] if isinstance(row["result"], dict) else {}
+                    decision = result.get("decision") if isinstance(result.get("decision"), dict) else {}
+                    response_text = decision.get("assessment") or result.get("model_content")
+                    assistant_id = uuid.uuid5(uuid.NAMESPACE_URL,
+                                               f"r3a.steward.reply:{row['message_id']}")
+                    if isinstance(response_text, str) and response_text:
+                        await conn.execute(
+                            "INSERT INTO r3a.steward_conversation_messages(message_id,conversation_id,sender_kind,sender_id,body,delivery_state,activity_id) "
+                            "VALUES (%s,%s,'resident',%s,%s,'completed',%s) ON CONFLICT(message_id) DO NOTHING",
+                            (assistant_id, conversation_uuid, row["resident_id"], response_text, row["activity_id"]))
+                        state = "completed"
+                elif row["sender_kind"] == "steward" and row["activity_state"] == "BLOCKED":
+                    state = "blocked"
+                    error = row["exception"] if isinstance(row["exception"], dict) else {}
+                    failure = str(error.get("reason") or "Grace could not complete this turn.")[:500]
+                    assistant_id = uuid.uuid5(uuid.NAMESPACE_URL,
+                                               f"r3a.steward.reply:{row['message_id']}")
+                    await conn.execute(
+                        "INSERT INTO r3a.steward_conversation_messages(message_id,conversation_id,sender_kind,sender_id,body,delivery_state,activity_id) "
+                        "VALUES (%s,%s,'resident',%s,%s,'blocked',%s) ON CONFLICT(message_id) DO NOTHING",
+                        (assistant_id, conversation_uuid, row["resident_id"], failure, row["activity_id"]))
+                else:
+                    response_text = None
+                if row["sender_kind"] == "steward" and row["activity_state"] == "COMPLETED" \
+                        and str(row["activity_id"]) not in persisted_resident_replies \
+                        and isinstance(response_text, str) and response_text:
+                    assistant_projection = {"message_id": str(assistant_id),
+                                            "sender": {"kind": "resident", "id": row["resident_id"],
+                                                       "display_name": row["resident_display_name"]},
+                                            "text": response_text, "delivery_state": "completed",
+                                            "activity_id": str(row["activity_id"]),
+                                            "created_at": row["created_at"].isoformat()}
+                elif row["sender_kind"] == "steward" and row["activity_state"] == "BLOCKED" \
+                        and str(row["activity_id"]) not in persisted_resident_replies:
+                    assistant_projection = {"message_id": str(assistant_id),
+                                            "sender": {"kind": "resident", "id": row["resident_id"],
+                                                       "display_name": row["resident_display_name"]},
+                                            "text": failure, "delivery_state": "blocked",
+                                            "activity_id": str(row["activity_id"]),
+                                            "created_at": row["created_at"].isoformat()}
+                projected.append({"message_id": str(row["message_id"]),
+                                  "sender": {"kind": "resident" if row["sender_kind"] == "resident" else "steward",
+                                             "id": row["sender_id"],
+                                             "display_name": row["sender_id"] if row["sender_kind"] == "resident" else None},
+                                  "text": row["body"], "delivery_state": state,
+                                  "activity_id": str(row["activity_id"]) if row["activity_id"] else None,
+                                  "created_at": row["created_at"].isoformat()})
+                if assistant_projection is not None:
+                    projected.append(assistant_projection)
+            if not rows:
+                exists = await (await conn.execute(
+                    "SELECT 1 FROM r3a.steward_conversations WHERE conversation_id=%s AND owner_principal_id=%s",
+                    (conversation_uuid, principal_id))).fetchone()
+                if not exists:
+                    raise PermissionError("conversation is unavailable to this Steward principal")
+            return projected
 
     async def snapshot(self, *, include_events: bool = True) -> dict[str, Any]:
         async with self.pool.connection() as conn:

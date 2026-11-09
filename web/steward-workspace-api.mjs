@@ -233,10 +233,16 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
         messageList.appendChild(item);
       }
       if (!messageList.childNodes.length) setText(messageList, 'This conversation has no messages yet.');
+      const processing = (result.messages || []).some(message => message.sender?.kind === 'steward' && message.delivery_state === 'processing');
       setText(status, `History loaded from service · ${result.freshness || 'freshness unknown'}`);
       status.dataset.state = result.freshness || 'unknown';
-      composer.disabled = false;
-      sendButton.disabled = false;
+      composer.disabled = processing;
+      sendButton.disabled = processing;
+      if (processing) {
+        setText(status, 'Grace is working on this turn through managed CME…');
+        setTimeout(() => { if (selectedConversation === conversationId) loadMessages(conversationId); }, 1500);
+      }
+      return result.messages || [];
     } catch (error) { unavailable(error); setText(messageList, 'History unavailable; no local transcript is shown.'); }
   }
 
@@ -330,7 +336,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
       setText(status, `Message accepted by service · ${result.message.delivery_state || 'state unknown'}${result.correlation_id ? ` · correlation ${result.correlation_id}` : ''}`);
       await loadMessages(selectedConversation);
     } catch (error) { unavailable(error); }
-    finally { sendButton.disabled = !selectedConversation; }
+    finally { sendButton.disabled = !selectedConversation || composer.disabled; }
   });
   root.getElementById('nav-chat')?.addEventListener('click', () => loadResidents());
   root.addEventListener?.('r3:steward-session-established', () => {
