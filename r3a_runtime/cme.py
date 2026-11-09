@@ -1011,9 +1011,13 @@ class CME:
                 authorized = entry["resident_id"] == self.module_id
                 if not authorized:
                     try:
+                        # A resident is chat-selectable only when the configured office
+                        # route and both sides of the durable handoff grant are present.
+                        self.settings.model_role_for_office(str(entry.get("office_role", "")))
+                        await self.store.require_capability(self.module_id, "resident.delegate")
                         await self.store.require_capability(entry["resident_id"], "resident.objective.execute")
                         authorized = True
-                    except PermissionError:
+                    except (PermissionError, LookupError, ValueError):
                         pass
                 if authorized:
                     residents.append({"resident_id": entry["resident_id"],

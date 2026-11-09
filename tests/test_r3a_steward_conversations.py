@@ -83,6 +83,31 @@ class ConversationControlTests(unittest.TestCase):
         self.assertEqual(cme._authorize_capability.await_args_list[0].args[0], "resident.delegate")
         self.assertEqual(cme._authorize_capability.await_args_list[1].args[0], "resident.objective.execute")
 
+    def test_resident_discovery_hides_route_or_grant_ineligible_residents(self):
+        cme = self.cme()
+        cme.settings.model_role_for_office = lambda office: (
+            SimpleNamespace(role_id="role.eng", route_id="route.eng")
+            if office == "engineering_manager" else (_ for _ in ()).throw(ValueError("unconfigured")))
+        cme._invoke_directory_for_principal = AsyncMock(return_value={
+            "outcome": "SUCCEEDED", "invocation_id": "directory-invocation",
+            "authorization": {"audit_event_id": "directory-auth"},
+            "output": {"schema_id": "r3a.institutional-directory.v1",
+                       "source": {"availability": "measured", "freshness": "fresh",
+                                  "snapshot_sha256": "a" * 64},
+                       "residents": [
+                           {"resident_id": "resident.vicky", "display_name": "Vicky",
+                            "office_id": "office.eng", "office_role": "engineering_manager"},
+                           {"resident_id": "resident.helen", "display_name": "Helen",
+                            "office_id": "office.hr", "office_role": "human_resources_manager"}]}})
+        cme.store.require_capability = AsyncMock()
+        result = asyncio.run(CME._control_request(cme, "steward.residents.discover",
+                                                  {"principal_id": "portal:steward-7"}, "discovery-key"))
+        self.assertEqual([item["resident_id"] for item in result["residents"]], ["resident.vicky"])
+        self.assertEqual(cme.store.require_capability.await_args_list[0].args,
+                         ("resident.grace", "resident.delegate"))
+        self.assertEqual(cme.store.require_capability.await_args_list[1].args,
+                         ("resident.vicky", "resident.objective.execute"))
+
 
 if __name__ == "__main__":
     unittest.main()
