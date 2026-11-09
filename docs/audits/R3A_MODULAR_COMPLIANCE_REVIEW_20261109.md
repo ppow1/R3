@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/audits/R3A_MODULAR_COMPLIANCE_REVIEW_20261109.md
 Component: R3A-INDEPENDENT-MODULAR-AUDIT
-File Revision: 1.0.0
+File Revision: 1.1.0
 Created: 2026-11-09T23:28:20Z
 Created By: Codex GPT-6, acting as independent Auditor
 Purpose: Record evidence-backed modular compliance and chat architecture review at the stated baseline.
@@ -11,10 +11,11 @@ Observability: Findings cite requirement, source, evidence boundary, status, and
 Dependencies: Approved R3A charter/roadmap/contracts; baseline commit 9a41d7e9647d37c2b7dc6f2aca3be3f5f82ccfe9; Coordinator handoff.
 Authority: Steward directive — R3A Independent Auditor / Reviewer V2, 2026-11-09
 Changed: 2026-11-09T23:28:20Z | R3A-AUDIT-V2 | Codex GPT-6 | Initial independent compliance review.
+Changed: 2026-11-09T23:37:38Z | R3A-AUDIT-V2 | Codex GPT-6 | Add Coordinator 722a102 source review and focused test results; preserve original baseline finding.
 Supersedes: None
 Contracts: MOD-001–MOD-010; STM-001–STM-007; capability and Website consumer contracts.
-Tests: N/A; no tests or runtime operations performed.
-History/Predecessor: New file; initial revision in this branch.
+Tests: `node --test tests/test_steward_workspace_api.mjs` at 722a102: 14 passed. Python pytest blocked at collection because psycopg_pool is unavailable; existing venvs lack pytest. No runtime tests.
+History/Predecessor: Revision 1.0.0 in commit cfbeca794a184dc2fbd2bcfb0827bf7677650fdf.
 -->
 # R3A modular compliance review — 2026-11-09
 
@@ -40,6 +41,8 @@ The source hierarchy used for this review is:
 
 The Website-wide functional requirements in GitHub Issue #51 were issued after the original roadmap baseline. They are assessed as later Steward requirements, not retroactively applied to earlier work. The 2026-11-09 Coordinator handoff and integration inventory are evidence, not specifications.
 
+The proposed [Modularity Compliance Specification](R3A_MODULARITY_COMPLIANCE_SPEC_PROPOSAL_20261109.md) and [Interface Contract Gap Analysis](R3A_INTERFACE_CONTRACT_GAP_ANALYSIS_20261109.md) are now the Auditor's cross-cutting proposal for Steward review; neither silently amends approved authority.
+
 The previous-auditor branch requested by the Steward was inspected locally. Its ref resolves to `db9ba0e` (`Test Grace continuation from durable checkpoint`), shared with `engineering/r3a-phase0-20261105`; it contains no auditor-specific review or deliverables. No distinct prior audit report or GitHub auditor branch evidence was identified in the available local refs. The valid 2026-11-07 modularity audit and 2026-11-09 handoff were reused and checked against current source.
 
 ## C. Architectural baseline
@@ -52,12 +55,13 @@ The required principle is independently developed and replaceable modules integr
 
 | ID | Result | Requirement and observed evidence | Owner / correction |
 |---|---|---|---|
-| CHAT-01 | **FAIL** | Website resident roster is not independent of chat execution eligibility. In `r3a_runtime/cme.py`, `steward.residents.discover` obtains a fresh directory snapshot, then adds a row only when directory `resident_id == self.module_id` or an office route plus CME `resident.delegate` and target `resident.objective.execute` checks pass (around lines 990–1030). `web/steward-workspace-api.mjs` additionally skips residents with `authorized === false` (around lines 262–283). Issue #51 requires a dynamic roster; the Workspace Web API v1 defines resident discovery from the institutional directory. Handoff section “Observed roster behavior and failure” records this as the current integrated behavior. | Coordinator V2 / Website #51. Return authorized directory rows independently from execution readiness; represent separate evidence-backed onboarding/readiness/authorization/chat-availability fields. Do not call directory measurement availability onboarding state. Keep create/send fail-closed in CME. |
-| CHAT-02 | **FAIL** | Execution profile does not identify the registered runtime module or an authoritative directory-principal-to-module binding. Handoff’s source/registry inspection reports `_resolve_resident_execution_profile` includes directory principal, office, route, config revision and directory evidence, but no source module ID/binding reference; the active Grace module is `resident.grace`, while the directory principal is `resident:grace`. These strings are not authoritative proof of identity equivalence. | Coordinator / CME with authoritative identity/profile owner. Resolve through an existing approved source or procedure before deriving execution identity. No new HR operation is presumed necessary. No identity/grant changes by Auditor. |
+| CHAT-01 | **FAIL at baseline; PASS for correction in source commit `722a102`** | At baseline `9a41d7e`, `steward.residents.discover` filtered directory rows through execution identity/route/grants and the Website hid unauthorized rows. In `722a102`, CME appends each well-formed row from its measured/fresh directory snapshot without grant checks or module-ID comparison; the Website renders each row and disables it if `chat_available` is false. The changed code introduces no hardcoded resident identity. This resolves the specific roster visibility coupling. | Coordinator V2 delivered the roster correction. Keep roster membership distinct from chat authorization. |
+| CHAT-02 | **FAIL remains** | Execution profile still lacks an authoritative registered-module binding reference. The API's new static `chat_status` reports the binding unavailable, but `_resolve_resident_execution_profile` still carries resident principal, office, route, config revision and directory evidence without module ID/binding reference. Handoff distinguishes `resident:grace` from `resident.grace@1.2.12`. `steward.conversation.create` also exempts `resident_id == self.module_id` from delegation/target grant checks; no source evidence establishes this equality as the authoritative primary-resident binding. | Coordinator/CME and identity authority: resolve the binding through an existing authoritative source and define the primary-resident authorization path. Do not infer from display names or IDs; do not create grants. |
 | CHAT-03 | **PASS (boundary only)** | Website sends conversation requests through authenticated Website routes; `r3_app.py` forwards canonical CME control operations. The CME send path submits `resident.objective.submit` with `event_kind="conversation"`; no direct model invocation is present in the inspected Website path. | Keep this boundary and verify live request/activity/model lineage during acceptance. |
 | CHAT-04 | **PASS (fail closed in source)** | Conversation creation re-reads a fresh, measured authoritative directory and rejects absent residents. For a target other than the configured primary resident it checks office routing and both delegation and target execution grants. Message sending is tied to CME persistence and activity submission. | Keep enforcement in CME after roster display is decoupled. The present checks do not establish correct generic identity binding or usable chat. |
 | CHAT-05 | **NOT VERIFIED** | Durable conversation/message schema and idempotency implementation exist (`017_steward_conversations.sql`, CME store APIs, client-generated IDs). Handoff reports live PostgreSQL conversation/message counts are both zero. No real Website conversation, inference result, or persisted transcript was observed. | Coordinator / Website #51 and Autonomy #43: provide authenticated browser evidence, actual CME activity/model request and result references, and history after refresh/restart. |
 | CHAT-06 | **BLOCKED** | Handoff records fresh directory discovery for one resident (`resident:grace`) and active module `resident.grace@1.2.12`, but no authoritative binding and no effective `resident.delegate` / `resident.objective.execute` grants. Conversation creation correctly fails closed; there are no messages. | Identity/authority owners supply or identify an existing authoritative binding and scoped authorization; Coordinator then performs live acceptance. No grants or identities issued by Auditor. |
+| CHAT-07 | **PARTIAL** | In `722a102`, `onboarding_status="unknown"`, `authorization_status="not_evaluated"`, `execution_status="unavailable"`, `chat_available=false`, and `chat_status="governed_execution_binding_unavailable"` are assigned to every row. The values avoid inferring onboarding or granting authority, but are constants rather than per-resident current observations. The Website therefore cannot enable an authorized generic resident through this path. | Coordinator V2/CME: expose evidence-backed readiness dimensions or explicit unknown/unavailable reason; only show chat selectable after governed readiness, without granting from discovery. |
 
 ### Independent R/3 reference
 
@@ -65,7 +69,7 @@ The handoff inspected existing R/3 release `r3-unified-8ab4b2ab1669`: configured
 
 ### Chat acceptance still required
 
-The design can be completed without another architectural redesign: directory discovery returns the authorized dynamic directory roster; each row reports only evidence-supported availability dimensions; conversation create/send independently revalidates current directory membership, binding, route, and grants in CME. Grace is the first demonstration, while data flow and routing remain resident-generic. Accept only after an authenticated browser can display roster rows, create/send a durable conversation to authorized Grace, receive a real CME-governed inference response, and retrieve the transcript after refresh/restart, with denial evidence for unauthorized targets. HTTP status or passing isolated tests alone is insufficient.
+The roster separation itself is source-level compliant at `722a102`. End-to-end readiness remains incomplete: discovery reports all residents unavailable, execution-profile binding is unresolved, and the primary equality authorization exemption needs an authoritative justification. Focused Node workspace tests passed 14/14 at `722a102`. Python conversation tests could not collect because `psycopg_pool` is absent from system Python; available local virtual environments lack pytest. The tests that ran do not exercise DOM roster rendering. No authenticated browser, live inference, database persistence, or restart acceptance was performed. Grace remains first demonstration and data flow/routing must remain generic. Acceptance requires the authenticated Website roster, authorized create/send through CME, real inference and transcript recovery, plus denial evidence for unauthorized targets.
 
 ## E. Module and workstream review
 
