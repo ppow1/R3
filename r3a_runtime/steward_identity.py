@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/steward_identity.py
 Component: R3A-AP3-IDENTITY
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-09T17:31:32Z
 Created By: R3 Integration
 Purpose: Verify independent R3A Steward credentials and implement governed identity association/enrollment.
@@ -10,6 +10,7 @@ Execution Model: Replaceable r3a.identity-provider.v1 adapter and local operator
 Observability: Privacy-safe institutional lifecycle events; credentials and challenge values are excluded.
 Dependencies: AP3 StewardAccess; AP0 migration 018_steward_identity.sql; Python hashlib.scrypt; psycopg.
 Authority: Approved R3A Authentication Independence Plan; AP3/R3A-010; Issue #49.
+Changed: 2026-11-09T21:00:00Z | R3A-STEWARD-BOOTSTRAP | R3A Coordinator | Add audited HR-independent bootstrap for verified human Steward provenance; keep resident association requirements unchanged.
 Changed: 2026-11-09T17:54:09Z | R3A-AUTH-COOKIE-ISOLATION | Codex GPT-6 | Harden native-origin validation for HTTPS and dedicated home.arpa hostnames.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-session.v1; r3a.steward-principal.v1.
@@ -181,6 +182,75 @@ class PostgresStewardIdentityRepository:
                      record["source_subject_id"], record["source_revision"], json.dumps(provenance), datetime.now(timezone.utc)))
                 self._event(conn, "steward.identity.associated", record["principal_id"], record["approved_by"],
                             {"association_id": association_id, "provenance": provenance})
+            return {"principal_id": record["principal_id"], "state": "pending_enrollment", "idempotent": "false"}
+        except ValueError:
+            raise
+        except Exception as exc:
+            if "UniqueViolation" in type(exc).__name__:
+                raise ValueError("identity_association_conflict") from None
+            raise AccessUnavailable("identity_store_unavailable") from exc
+
+    def bootstrap_steward(self, record: dict[str, Any]) -> dict[str, str]:
+        """Associate the first human Steward from verified non-secret R3 metadata.
+
+        This is a one-time bootstrap path, not the resident HR association path. It
+        deliberately accepts no HR fields and cannot create credentials or grants.
+        The local operator must establish the source assertions through the approved
+        read-only administrative procedure before invoking it.
+        """
+        required = {"association_id", "principal_id", "login_name", "source_system",
+                    "source_subject_id", "source_revision", "active", "verified",
+                    "steward_eligible", "source_role", "source_principal_id",
+                    "email_verified", "approved_by", "approval_reference"}
+        if not isinstance(record, dict) or set(record) != required:
+            raise ValueError("bootstrap_record_invalid")
+        if any(record[k] is not True for k in ("active", "verified", "steward_eligible", "email_verified")):
+            raise ValueError("identity_source_not_eligible")
+        if record["source_system"] != "r3.account-authority":
+            raise ValueError("bootstrap_source_invalid")
+        for key in ("principal_id", "source_principal_id", "source_role", "source_system", "source_subject_id", "source_revision",
+                    "approved_by", "approval_reference"):
+            if not isinstance(record[key], str) or not record[key].strip() or len(record[key]) > 256:
+                raise ValueError("bootstrap_record_invalid")
+        if record["source_role"] != "steward" or record["source_principal_id"] != record["principal_id"]:
+            raise ValueError("bootstrap_source_not_steward")
+        if not re.fullmatch(r"sha256:[a-f0-9]{64}", record["source_revision"]):
+            raise ValueError("bootstrap_record_invalid")
+        if not record["approval_reference"].startswith("steward-directive:"):
+            raise ValueError("bootstrap_authorization_invalid")
+        if not _PRINCIPAL_RE.fullmatch(record["principal_id"]):
+            raise ValueError("bootstrap_record_invalid")
+        if record["approved_by"] != record["principal_id"]:
+            raise ValueError("bootstrap_authorization_invalid")
+        try:
+            association_id = str(uuid.UUID(record["association_id"]))
+            uuid.UUID(record["source_subject_id"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("bootstrap_record_invalid") from exc
+        login = normalize_login(record["login_name"])
+        provenance = {k: record[k] for k in ("source_system", "source_subject_id", "source_revision",
+                       "active", "verified", "steward_eligible", "source_role", "source_principal_id",
+                       "email_verified", "approved_by", "approval_reference")}
+        try:
+            with self._connect() as conn, conn.transaction():
+                prior = conn.execute("SELECT principal_id,login_name,state,source_system,source_subject_id,source_revision,provenance "
+                                     "FROM r3a.steward_accounts WHERE association_id=%s",
+                                     (association_id,)).fetchone()
+                if prior:
+                    if (prior["principal_id"] == record["principal_id"] and prior["login_name"] == login
+                            and prior["source_system"] == record["source_system"]
+                            and prior["source_subject_id"] == record["source_subject_id"]
+                            and prior["source_revision"] == record["source_revision"]
+                            and prior["provenance"] == provenance):
+                        return {"principal_id": prior["principal_id"], "state": prior["state"], "idempotent": "true"}
+                    raise ValueError("association_id_conflict")
+                conn.execute(
+                    "INSERT INTO r3a.steward_accounts(principal_id,login_name,issuer,state,association_id,source_system,"
+                    "source_subject_id,source_revision,provenance,associated_at) VALUES (%s,%s,%s,'pending_enrollment',%s,%s,%s,%s,%s::jsonb,%s)",
+                    (record["principal_id"], login, IDENTITY_ISSUER, association_id, record["source_system"],
+                     record["source_subject_id"], record["source_revision"], json.dumps(provenance), datetime.now(timezone.utc)))
+                self._event(conn, "steward.identity.bootstrap_associated", record["principal_id"],
+                            record["approved_by"], {"association_id": association_id, "provenance": provenance})
             return {"principal_id": record["principal_id"], "state": "pending_enrollment", "idempotent": "false"}
         except ValueError:
             raise

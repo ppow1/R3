@@ -2,10 +2,10 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/steward_identity_cli.py
 Component: R3A-AP3-IDENTITY-OPERATOR
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-09T17:31:32Z
 Created By: R3 Integration
-Purpose: Provide local audited association, challenge, disable, and revocation actions.
+Purpose: Provide local audited resident association and initial Steward bootstrap, challenge, disable, and revocation actions.
 Execution Model: Explicit operator invocation against the least-privilege AP0 identity-operator role.
 Observability: Bounded JSON result codes; one-time challenge is printed only for approved out-of-band delivery.
 Authority: Approved R3A Authentication Independence Plan; AP3/R3A-010; Issue #49.
@@ -14,6 +14,7 @@ Supersedes: None.
 Dependencies: R3A_STEWARD_ADMIN_DSN; r3a-steward-identity CLI contract.
 Contracts: R3A native Steward identity lifecycle v1.
 Tests: tests/test_r3a_native_identity.py.
+Changed: 2026-11-09T21:00:00Z | R3A-STEWARD-BOOTSTRAP | R3A Coordinator | Add owner-only bootstrap evidence file handling for the initial human Steward.
 History/Predecessor: Initial implementation in Remote Access commit 16b6230d5b48bb9bd1872f687f43678faeb296d7.
 """
 from __future__ import annotations
@@ -32,6 +33,8 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     associate = commands.add_parser("associate", help="record an approved non-secret identity association")
     associate.add_argument("--record", required=True, help="0600 JSON association evidence file")
+    bootstrap = commands.add_parser("bootstrap-steward", help="associate the initial Steward from verified non-secret R3 metadata")
+    bootstrap.add_argument("--record", required=True, help="owner-only JSON bootstrap evidence file")
     challenge = commands.add_parser("challenge", help="issue one single-use enrollment or recovery challenge")
     challenge.add_argument("--principal-id", required=True)
     challenge.add_argument("--actor", required=True)
@@ -54,6 +57,15 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error("association record permissions must be 0600 or stricter")
             record = json.loads(path.read_text(encoding="utf-8"))
             result = repository.associate(record)
+            print(json.dumps({"state": result["state"], "principal_id": result["principal_id"],
+                              "idempotent": result["idempotent"]}, sort_keys=True))
+        elif args.command == "bootstrap-steward":
+            path = Path(args.record)
+            stat = path.stat()
+            if stat.st_mode & 0o077 or stat.st_uid != os.getuid():
+                parser.error("bootstrap record must be owned by the operator and mode 0600 or stricter")
+            record = json.loads(path.read_text(encoding="utf-8"))
+            result = repository.bootstrap_steward(record)
             print(json.dumps({"state": result["state"], "principal_id": result["principal_id"],
                               "idempotent": result["idempotent"]}, sort_keys=True))
         elif args.command == "challenge":

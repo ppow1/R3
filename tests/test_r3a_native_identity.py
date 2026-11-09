@@ -23,6 +23,8 @@ import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from contextlib import nullcontext
+from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import httpx
@@ -193,6 +195,53 @@ class NativeIdentityTests(unittest.IsolatedAsyncioTestCase):
                 "active": False, "verified": True, "steward_eligible": True, "approved_by": "steward",
                 "approval_reference": "approval-ref", "hr_source": "hr", "hr_subject_reference": "hr-ref",
                 "hr_revision": "hr-rev"})
+
+    async def test_initial_steward_bootstrap_is_hr_independent_but_requires_verified_steward_source(self):
+        repo = PostgresStewardIdentityRepository("postgresql://placeholder")
+        record = {"association_id": "a70a6f85-e71e-4eb0-ae35-28c72d3d9b4b",
+                  "principal_id": "steward:test-bootstrap", "login_name": "steward@example.test",
+                  "source_system": "r3.account-authority", "source_subject_id": "6ebd8a1c-7a50-4f37-a5a6-4706106f87ce",
+                  "source_revision": "sha256:" + "a" * 64, "active": True, "verified": True,
+                  "steward_eligible": True, "source_role": "steward",
+                  "source_principal_id": "steward:test-bootstrap", "email_verified": True,
+                  "approved_by": "steward:test-bootstrap",
+                  "approval_reference": "steward-directive:initial-account-provisioning"}
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.transaction.return_value = nullcontext()
+        conn.execute.return_value.fetchone.return_value = None
+        with patch.object(repo, "_connect", return_value=conn):
+            result = repo.bootstrap_steward(record)
+        self.assertEqual({"principal_id": "steward:test-bootstrap", "state": "pending_enrollment",
+                          "idempotent": "false"}, result)
+        insert = next(call.args[0] for call in conn.execute.call_args_list
+                      if call.args and call.args[0].startswith("INSERT INTO r3a.steward_accounts"))
+        self.assertIn("pending_enrollment", insert)
+        event = next(call for call in conn.execute.call_args_list
+                     if len(call.args) > 1 and "steward.identity.bootstrap_associated" in call.args[1])
+        self.assertNotIn("password", repr(event).lower())
+
+        record["source_role"] = "resident"
+        with patch.object(repo, "_connect") as connect, self.assertRaisesRegex(ValueError, "bootstrap_source_not_steward"):
+            repo.bootstrap_steward(record)
+        connect.assert_not_called()
+
+    async def test_bootstrap_rejects_inactive_or_unverified_identity_without_hr_fallback(self):
+        repo = PostgresStewardIdentityRepository("postgresql://placeholder")
+        base = {"association_id": "a70a6f85-e71e-4eb0-ae35-28c72d3d9b4b",
+                "principal_id": "steward:test-bootstrap", "login_name": "steward@example.test",
+                "source_system": "r3.account-authority", "source_subject_id": "6ebd8a1c-7a50-4f37-a5a6-4706106f87ce",
+                "source_revision": "sha256:" + "a" * 64, "active": True, "verified": True,
+                "steward_eligible": True, "source_role": "steward",
+                "source_principal_id": "steward:test-bootstrap", "email_verified": True,
+                "approved_by": "steward:test-bootstrap",
+                "approval_reference": "steward-directive:initial-account-provisioning"}
+        for field, value, error in (("active", False, "identity_source_not_eligible"),
+                                    ("email_verified", False, "identity_source_not_eligible"),
+                                    ("approved_by", "operator:local", "bootstrap_authorization_invalid")):
+            with patch.object(repo, "_connect") as connect, self.assertRaisesRegex(ValueError, error):
+                repo.bootstrap_steward({**base, field: value})
+            connect.assert_not_called()
 
     async def test_native_configuration_rejects_public_origin_and_legacy_provider(self):
         os.environ["R3A_TEST_STEWARD_DSN"] = "postgresql://placeholder"
