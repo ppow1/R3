@@ -265,7 +265,20 @@ def validate_invocation_request(request: Any, descriptor: dict[str, Any]) -> dic
         if request["activity_id"] is not None or request["attempt_id"] is not None or request["work_order"] is not None or request.get("budget_reservation") is not None:
             raise CapabilityContractError("Steward operation cannot be attached to resident activity work")
     elif request["activity_id"] is None or request["attempt_id"] is None:
-        raise CapabilityContractError("activity_id and attempt_id are required outside direct Steward operations")
+        caller = request["caller"]
+        # A direct, authenticated principal may make a read-only request without
+        # manufacturing resident activity lineage. CME still applies the normal
+        # capability grant check and writes an invocation/audit record. Resident,
+        # service, and effectful calls retain their durable activity requirements.
+        direct_principal_read = (
+            descriptor["effect_class"] == "read"
+            and isinstance(caller.get("principal_id"), str)
+            and bool(caller["principal_id"].strip())
+            and caller.get("resident_id") is None
+            and caller.get("service_id") is None
+        )
+        if not direct_principal_read:
+            raise CapabilityContractError("activity_id and attempt_id are required outside direct Steward operations")
     caller = request["caller"]
     for field, caller_key in (("allowed_principals", "principal_id"),
                               ("allowed_residents", "resident_id"),

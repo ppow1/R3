@@ -5,7 +5,7 @@ Status: coordinator implementation on `integration/r3a-unified-20261109`; manage
 ## Authority and flow
 
 - AP3 validates the existing `rv_account_session` portal session, required Steward role, expiration/revocation, and same-origin mutation requests. It supplies the session's canonical `principal_id`; callers cannot choose an owner identity.
-- CME reads residents only through the configured `institutional.directory.discover` capability invocation, using normal CME grant checks and the registered provider. The response is restricted to directory records with the primary resident execution path or an active `resident.objective.execute` grant.
+- CME reads residents only through the configured `institutional.directory.discover` capability invocation, using normal CME grant checks and the registered provider. An authenticated-principal read has no resident activity lineage; CME records the invocation and audit decision directly and still requires an active grant for that canonical principal. The response is restricted to directory records with the primary resident execution path or an active `resident.objective.execute` grant.
 - CME owns conversation records and messages in PostgreSQL schema `r3a`; each user turn is linked to one idempotent CME activity. CME resolves each selected resident through the authoritative directory and existing execution-profile/model-route contracts.
 - The Website never invokes a model endpoint or stores institutional conversation data locally. Its browser client uses the existing `r3a.steward-workspace-web.v1` contract and same-origin opaque cookie.
 
