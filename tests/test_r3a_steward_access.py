@@ -2,7 +2,7 @@
 R3 CONTROLLED TEST SOURCE
 File: tests/test_r3a_steward_access.py
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.2.2
+File Revision: 1.2.3
 Created: 2026-11-07T21:37:42Z
 Created By: Codex GPT-6
 Purpose: Verify Steward assertion validation, opaque sessions, revocation, CSRF origin policy, and CME identity delegation.
@@ -27,6 +27,7 @@ Changed: 2026-11-08T00:01:13Z | AP3-M1/#51 | Codex GPT-6 | Verify /api/v1 cookie
 Changed: 2026-11-08T13:45:00Z | AP3-M1/#51 | Codex GPT-6 | Verify existing R3 portal session binding to the shared revocable AP3 session.
 Changed: 2026-11-09T16:32:39Z | R3A-AUTH-INDEPENDENCE-001 | Codex GPT-6 | Use the R3A-only cookie namespace in session tests and guard published examples against R3 cookie collisions.
 Changed: 2026-11-09T17:06:17Z | R3A-AUTH-INDEPENDENCE-SECURE-LAN | Codex GPT-6 | Assert the target R3A configuration requires Secure cookies for LAN authentication.
+Changed: 2026-11-09T19:23:00Z | AP3-R3A-010-LAN-IP | Codex GPT-6 | Verify the native session cookie is limited to the R3A path and is not sent to R3 authentication routes.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1; r3a.capability-invocation.v1.
 Tests: python -m unittest tests.test_r3a_steward_access.
@@ -46,7 +47,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 
 from r3a_runtime.steward_access import (
     AccessUnavailable, HmacIngressIdentityProvider, IdentityAssertion, R3AccountSessionIdentityProvider,
@@ -213,6 +214,10 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
         async def website_mutation(principal=Depends(require_steward_principal)):
             return principal
 
+        @app.get("/api/v1/auth/session")
+        async def r3_account_route(request: Request):
+            return {"r3a_cookie_received": "r3a_steward_session" in request.cookies}
+
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                      base_url="http://testserver") as client:
             response = await client.post("/api/v1/steward/session",
@@ -229,6 +234,9 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(1, len(replacement.calls))
             self.assertEqual("steward:replacement",
                              next(iter(self.store.sessions.values()))["principal_id"])
+            r3_session = await client.get("/api/v1/auth/session")
+            self.assertEqual(200, r3_session.status_code)
+            self.assertFalse(r3_session.json()["r3a_cookie_received"])
             website_identity = await client.get("/api/v1/steward/r3a/private")
             self.assertEqual(200, website_identity.status_code)
             self.assertEqual("steward:replacement", website_identity.json()["principal_id"])

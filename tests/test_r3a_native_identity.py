@@ -136,6 +136,7 @@ class NativeIdentityTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual("no-store", status.headers["cache-control"])
             logout = await client.delete("/api/v1/steward/session", headers={"Origin": "https://192.168.1.155:8311"})
             self.assertEqual(200, logout.status_code)
+            self.assertIn("path=/api/v1/steward", logout.headers["set-cookie"].lower())
             denied = await client.get("/api/v1/steward/session")
             self.assertEqual(401, denied.status_code)
 
