@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.16.0
+File Revision: 1.17.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -47,6 +47,7 @@ Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Bind manifest-d
 Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | R3A Coordinator | Reload external module manifests through lifecycle manager and refresh provider health independently.
 Changed: 2026-11-08 | R3A-CONTEXT-RECOVERY | R3A Coordinator | Apply the larger bounded frame to generic resident execution while preserving provider IPC bounds.
 Changed: 2026-11-08 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Reconcile absent processes from superseded primary-resident versions through durable module lifecycle transitions.
+Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Consume versioned read-provider activity-intake envelopes through CME authorization and durable idempotent activity persistence.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; module.lifecycle v2; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py; tests/test_r3a_telemetry_providers.py; tests/test_r3a_capability_contracts.py; tests/test_r3a_engineering.py.
@@ -93,6 +94,10 @@ from .protocol import (MAX_RESIDENT_EXECUTION_FRAME_BYTES, PROTOCOL_MAJOR, PROTO
                        request as module_request)
 from .provider_runtime import ProviderProcessManager
 from .grace_module import validate_resident_profile
+
+
+ACTIVITY_INTAKE_SCHEMA = json.loads(
+    (Path(__file__).with_name("schemas") / "activity-intake.v1.schema.json").read_text(encoding="utf-8"))
 
 
 @dataclass
@@ -960,6 +965,60 @@ class CME:
             if request.get("work_order") is not None:
                 raise ValueError("work-order invocations must be submitted by the AP2 Engineering adapter")
             return await self.invoke_capability(request)
+        if operation == "activity.intake.accept":
+            operation_id = payload.get("operation_id")
+            contract_version = payload.get("operation_contract_version", "1.0.0")
+            arguments = payload.get("input")
+            if (not isinstance(operation_id, str) or not operation_id
+                    or not isinstance(contract_version, str) or not isinstance(arguments, dict)
+                    or not isinstance(idempotency_key, str) or not idempotency_key.strip()
+                    or len(idempotency_key) > 512):
+                raise ValueError("activity.intake.accept requires operation_id, operation_contract_version, and input")
+            registered = self.settings.capability_registry.resolve(operation_id, contract_version)
+            descriptor = registered.descriptor
+            if descriptor["effect_class"] not in {"read", "steward_read"}:
+                raise PermissionError("activity intake may only invoke a read-only source provider")
+            if descriptor["output_schema"].get("$id") != "r3a.activity-intake.v1":
+                raise ValueError("source operation output schema must be r3a.activity-intake.v1")
+            validate_json(arguments, descriptor["input_schema"], path="$.input")
+            invocation_id = str(uuid.uuid5(uuid.NAMESPACE_URL,
+                                           f"r3a.activity-intake:{idempotency_key}"))
+            invocation = {
+                "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+                "invocation_id": invocation_id, "operation_id": operation_id,
+                "operation_contract_version": contract_version,
+                "caller": {"principal_id": self.module_id, "resident_id": self.module_id,
+                           "service_id": None},
+                "target": {}, "input": arguments, "activity_id": None, "attempt_id": None,
+                "correlation_id": invocation_id, "work_order": None,
+                "evidence_purpose": "Read a configured source and create one durable activity intake",
+                "idempotency_key": idempotency_key,
+                "deadline": (datetime.now(timezone.utc)
+                             + timedelta(seconds=descriptor["execution"]["timeout_seconds"])).isoformat(),
+                "config_revision": self.settings.source_digest,
+            }
+            invocation_result = await self.invoke_capability(invocation)
+            if invocation_result["outcome"] != "SUCCEEDED":
+                raise RuntimeError("authorized source provider did not produce an activity intake")
+            intake = invocation_result["output"]
+            validate_json(intake, ACTIVITY_INTAKE_SCHEMA, path="$.activity_intake")
+            provider = descriptor["provider"]
+            provenance = intake["provenance"]
+            if (provenance["module_id"] != provider["provider_id"]
+                    or provenance["module_version"] != provider["provider_version"]
+                    or provenance["artifact_sha256"] != provider["artifact_sha256"]
+                    or provenance["configuration_revision"] != self.settings.source_digest):
+                raise CapabilityContractError("activity intake provenance does not match the registered provider/runtime")
+            configured_source_id = registered.configuration.get("source_id")
+            if (configured_source_id is not None
+                    and intake["source"]["source_id"] != configured_source_id):
+                raise CapabilityContractError("activity intake source identity does not match provider configuration")
+            if intake["source"]["idempotency_key"] != idempotency_key:
+                raise CapabilityContractError("activity intake idempotency key does not match the authorized invocation")
+            accepted = await self.store.submit_activity_intake(intake, invocation_result)
+            return {**accepted, "source_invocation_id": invocation_id,
+                    "source_authorization": invocation_result["authorization"],
+                    "source_provider": invocation_result["provider"]}
         if operation == "notification.ingest":
             source_id = str(payload.get("source_id", ""))
             source_event_id = str(payload.get("source_event_id", ""))
@@ -1309,8 +1368,12 @@ class CME:
         notification = event_input.get("notification")
         if notification is not None:
             notification = validate_notification_envelope(notification)
+        activity_intake = event_input.get("activity_intake")
+        if activity_intake is not None:
+            validate_json(activity_intake, ACTIVITY_INTAKE_SCHEMA, path="$.activity_intake")
         acceptance_criteria = (validate_required_criteria(acceptance_contract.get("criteria"))
-                               if engineering_assignment is None and notification is None else [])
+                               if engineering_assignment is None and notification is None
+                               and activity_intake is None else [])
         if engineering_assignment is not None:
             engineering_assignment = validate_engineering_assignment(engineering_assignment)
         saved = activity.get("checkpoint") or {}
@@ -1448,6 +1511,24 @@ class CME:
         available_residents = [entry for entry in available_residents
                                if resident_counts[entry["resident_id"]] == 1]
         required_evidence_refs = list(saved.get("required_evidence_refs", []))
+        if activity_intake is not None:
+            source_payload = {
+                "source": activity_intake["source"],
+                "activity_input": activity_intake["activity"]["input"],
+                "source_evidence": activity_intake["activity"]["evidence"],
+            }
+            content = json.dumps(source_payload, sort_keys=True, separators=(",", ":"),
+                                 ensure_ascii=False)
+            intake_source_id = f"activity-intake:{activity_intake['intake_id']}"
+            if not any(item.get("source_id") == intake_source_id for item in evidence):
+                evidence.append({"source_id": intake_source_id,
+                                 "source_path": activity_intake["source"]["payload_ref"],
+                                 "content": content,
+                                 "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                                 "source": (f"{activity_intake['provenance']['module_id']}@"
+                                            f"{activity_intake['provenance']['module_version']}"),
+                                 "source_payload_sha256": activity_intake["source"]["payload_sha256"]})
+            required_evidence_refs = sorted(set(required_evidence_refs + [intake_source_id]))
         if notification is not None:
             notification_source = f"notification:{notification['source_id']}:{notification['source_event_id']}"
             source_content = json.dumps(notification, sort_keys=True, separators=(",", ":"),
@@ -1759,6 +1840,7 @@ class CME:
             provider_context = {
                 "invocation_id": checked["invocation_id"], "idempotency_key": persistence_key,
                 "operation_id": descriptor["operation_id"],
+                "provider": descriptor["provider"],
                 "activity_id": checked["activity_id"], "attempt_id": checked["attempt_id"],
                 "correlation_id": checked["correlation_id"], "target": checked["target"],
                 "work_order": order, "effect_class": descriptor["effect_class"],

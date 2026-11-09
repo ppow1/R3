@@ -6,8 +6,8 @@
   "required": ["contract_id", "contract_version", "intake_id", "source", "correlation_id", "activity", "provenance", "lifecycle_projection"],
   "additionalProperties": false,
   "properties": {
-    "contract_id": {"const": "r3a.activity-intake.v1"},
-    "contract_version": {"const": "1.0.0"},
+    "contract_id": {"type": "string", "const": "r3a.activity-intake.v1"},
+    "contract_version": {"type": "string", "const": "1.0.0"},
     "intake_id": {"type": "string", "minLength": 1, "maxLength": 160},
     "parent_activity_id": {"type": ["string", "null"], "maxLength": 64},
     "correlation_id": {"type": "string", "minLength": 1, "maxLength": 128},

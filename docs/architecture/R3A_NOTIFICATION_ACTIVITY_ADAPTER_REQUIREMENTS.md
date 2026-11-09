@@ -4,17 +4,17 @@ File: docs/architecture/R3A_NOTIFICATION_ACTIVITY_ADAPTER_REQUIREMENTS.md
 Component: R3A-AP1-NOTIFICATION-ACTIVITY-ADAPTER
 File Revision: 1.0.0
 Created: 2026-11-08
-Purpose: Publish typed notification adapter requirements for the proposed generic activity-intake boundary.
+Purpose: Document the notification module binding to the reusable generic activity-intake boundary.
 Authority: Issue #48; R3A Baseline 1.0, AP1, R3A-019.
-Dependencies: Existing r3a.notification-intake.v1 and r3a.capability-operation.v1; proposed r3a.activity-intake.v1 from the modularity audit.
-Tests: tests/test_r3a_notification_source_plugin.py.
-Status: Source operation implementation is ready; generic activity-intake contract is still proposed and must be agreed by the coordinator before core integration.
+Dependencies: Existing r3a.notification-intake.v1 and r3a.capability-operation.v1; r3a.activity-intake.v1 and the CME activity-intake consumer.
+Tests: tests/test_r3a_notification_source_plugin.py; tests/test_r3a_activity_intake_consumer.py.
+Status: Source adapter and generic CME consumer are integrated in the unified candidate; managed source configuration, grant, invocation and restart recovery remain unverified.
 -->
 # Notification Source Adapter Requirements
 
 ## Boundary ownership
 
-The modularity audit proposes `r3a.activity-intake.v1` as a reusable CME boundary. It is not yet an agreed or merged contract. This branch does not define its schema, generic persistence methods, or another core dispatch path. The notification adapter is packaged as a standard configured `r3a.capability-operation.v1` provider and returns the already established `r3a.notification-intake` version `1.0.0` envelope. CME remains responsible for authorization, deduplication, generic activity/event persistence, and lifecycle. The existing N1 command/control behavior remains available until an agreed generic boundary is integrated.
+`r3a.activity-intake.v1` is the shared CME boundary. `notification.source.read` remains the domain source operation and returns the established N1 envelope. A side-by-side `notification.activity-intake.prepare` read operation uses the notification module's pure adapter projection and returns the shared activity-intake envelope. CME's `activity.intake.accept` control operation invokes only registered read-only operations, uses the configured resident principal for the canonical grant check, validates operation and source-provider provenance, checks the source-bound idempotency key, and persists the envelope through the generic activity/event ledger. CME does not branch on notification-specific source or objective fields. Legacy N1 ingestion remains available during rollout and deduplicates a prior activity for the same source event.
 
 ## Typed notification operation
 
@@ -55,18 +55,18 @@ When the coordinator agrees the generic contract, its adapter binding must accep
 6. Replay of the same source event resolves to the same durable activity and delivery identities. A different source event under the same key is rejected.
 7. The adapter remains input/evidence only. It cannot decide whether the event needs follow-up or acknowledge it on Grace’s behalf.
 
-These are adapter conformance requirements, not a definition of `r3a.activity-intake.v1`. Fields such as generic parent activity, accepted activity ID, task envelope, and generic persistence call shape must come from the coordinator-approved shared contract. The adapter must not guess them.
+These are adapter conformance requirements around the published shared schema and callable CME boundary. The adapter remains read-only and does not choose execution authority. The current CME consumer accepts `grace.objective` with `objective_reasoning` or `vision` task class and routes it through configured Grace roles.
 
 The source event's `subject_id` must not be used as a generic parent activity ID unless it is confirmed to identify that activity type. The source adapter can state the event subject and correlation; CME/intake owns the meaning and assignment of parent activity lineage.
 
 ## Test separation
 
-`tests/test_r3a_notification_source_plugin.py` verifies source-domain behavior without invoking CME scheduling: manifest/operation registration, exact output envelope, source allowlisting, read-only SQL, digest/provenance, source outage, malformed/unknown input, and stable replay identity. A compatibility test projects the audit-proposed generic source/idempotency/correlation/payload/evidence/provenance requirements from the unchanged N1 envelope and verifies it leaves parent activity and task-class ownership to CME. That projection exists in test assertions only; this branch defines no generic intake type, schema, dispatcher, or persistence call. `tests/test_r3a_notifications.py` and `tests/test_r3a_notification_delivery.py` continue to verify N1 and N2 lifecycle behavior. Generic intake integration tests belong beside the agreed shared boundary and should exercise deduplication, parent/correlation lineage, restart, grant denial, and durable lifecycle using a real CME event when that boundary is available.
+`tests/test_r3a_notification_source_plugin.py` verifies source-domain behavior without scheduling: registration, source allowlisting, read-only SQL, digest/provenance and source outage. `tests/test_r3a_activity_intake_consumer.py` verifies the versioned module manifest, generic CME authorization/invocation handoff, provider provenance, source-bound idempotency, bounded persistence, duplicate replay and authorization rejection. The activity-intake contract, existing N1 and N2 tests continue to validate schema and lifecycle behavior. These are fixture/unit checks; managed source access and restart recovery still require configured source access and grant.
 
 ## Generic boundary status
 
-The latest #43 modularity audit and the coordinator's current modular-foundation work still label generic activity intake as a future slice. No authoritative `r3a.activity-intake.v1` schema, invocation type, or callable boundary is published in the coordinator worktree. The source provider is compatible at the established capability-operation/N1-envelope seam; end-to-end generic intake compatibility cannot yet be executed. This workstream continues independently and waits only for the shared contract before adding the boundary binding.
+The schema is `r3a_runtime/schemas/activity-intake.v1.schema.json`; CME invokes it through `activity.intake.accept` using a registered read operation, version, typed input, and source-bound idempotency key. Provider output must declare the schema ID `r3a.activity-intake.v1`. The existing N1 source operation and new `notification.activity-intake.prepare` adapter operation are side by side; no notification-specific CME dispatch was added to the generic consumer.
 
 ## Activation limit
 
-The plugin is configured and tested locally against a synthetic event-ledger connection. No source DSN is configured for this worktree and no managed runtime or website was changed. A live source read and generic activity-intake invocation remain unverified. The coordinator should first agree the generic boundary and tell #48 which combined integration revision owns it; the source provider can then be bound through ordinary `capability_operations` configuration without a notification-specific CME branch.
+The provider and consumer are source-integrated and fixture-tested. No source DSN or live read grant is available in managed bootstrap, so no real event has been submitted through `activity.intake.accept` and notification activation is not claimed. The operation can be installed through ordinary `capability_operations` configuration; CME still requires the actual `notification.source.read` grant before invoking it.

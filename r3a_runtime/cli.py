@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cli.py
 Component: R3A-OPERATOR-CLI
-File Revision: 1.5.0
+File Revision: 1.6.0
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Expose operator-invoked AP0 diagnostics, CME controls and isolated backup actions.
@@ -21,6 +21,7 @@ Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Support explicit a
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Permit configured objective-reasoning or vision task class on durable objective intake.
 Changed: 2026-11-07 | R3A-AP1-N1 | Codex GPT-6 | Add idempotent, source-bound institution-event notification intake.
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Expose generic registered provider install, activation, deactivation, replacement and status operations through CME control.
+Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Expose authorized generic activity-intake acceptance through registered read-only providers.
 Supersedes: None.
 Contracts: AP0-007/008/010/013; R3A-019; AP0-M1 D8/D9; r3a.model-route-decision.v1; r3a.model-readiness.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; no model inference in this slice.
@@ -92,6 +93,10 @@ async def _run(args: argparse.Namespace, settings: Settings) -> Any:
         payload = {"source_id": args.source_id, "source_event_id": args.source_event_id}
         operation = "notification.ingest"
         args.idempotency_key = f"notification:{args.source_id}:{args.source_event_id}"
+    elif args.command == "activity-intake-accept":
+        payload = {"operation_id": args.operation_id,
+                   "operation_contract_version": args.operation_contract_version,
+                   "input": json.loads(args.input_json)}
     elif args.command == "model-readiness-refresh":
         payload = {"role_id": args.role_id}
     elif args.command == "config-reload":
@@ -126,6 +131,14 @@ def main() -> None:
                                        help="Import one configured durable institution event for Grace")
     notification.add_argument("--source-id", default="r3a.institution-events")
     notification.add_argument("--source-event-id", required=True)
+    intake = commands.add_parser("activity-intake-accept",
+                                 help="Invoke an authorized read-only activity source and persist its generic intake")
+    intake.add_argument("--operation-id", required=True)
+    intake.add_argument("--operation-contract-version", default="1.0.0")
+    intake.add_argument("--input-json", required=True,
+                        help="JSON object validated against the registered source operation")
+    intake.add_argument("--idempotency-key", required=True,
+                        help="Stable source-bound key; CME checks it against the returned intake")
     readiness = commands.add_parser("model-readiness-refresh",
                                     help="Ask CME to perform a configured model-provider readiness check")
     readiness.add_argument("--role-id", required=True)

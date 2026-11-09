@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.13.0
+File Revision: 1.14.0
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -31,6 +31,7 @@ Changed: 2026-11-07T05:52:05Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist stabl
 Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist authorization decision and audit identities as separate provenance fields.
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Add grant validation for explicit-principal Steward access modes.
 Changed: 2026-11-07T13:20:00Z | R3A-AP2-CAPABILITY-INTEGRATION | Codex GPT-6 | Store canonical invocation authorization in a nonreserved evidence column and verify durable SQL recovery against isolated PostgreSQL.
+Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Persist validated generic activity-intake source lineage and evidence through the existing durable activity/event ledger.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Persist typed Engineering assignments in durable Grace inbox intake without relaxing AP1 acceptance criteria.
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Park objective dependencies durably, requeue after prerequisite completion, and expose bounded lineage evidence.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Snapshot the configured escalation policy on each durable objective so continuation uses its original budget and allowed routes.
@@ -71,9 +72,13 @@ from .authorization import AuthorizationDecision
 from .module_contracts import is_legacy_manifest_promotion
 from .engineering import (EngineeringProposal, EngineeringWorkOrder, VerificationResult,
                           proposal_digest, validate_completion, validate_engineering_assignment)
+from .capability_contracts import CapabilityContractError, validate_json
 
 
 IMPLEMENTATION_REVISION = os.environ.get("R3A_IMPLEMENTATION_REVISION", "working-tree")
+MAX_ACTIVITY_INTAKE_BYTES = 512 * 1024
+ACTIVITY_INTAKE_SCHEMA = json.loads(
+    (Path(__file__).with_name("schemas") / "activity-intake.v1.schema.json").read_text(encoding="utf-8"))
 
 
 class InvalidTransition(RuntimeError):
@@ -1386,6 +1391,119 @@ class Store:
         return await self.submit_grace_objective(
             objective, stable_key, event_kind="notification", notification_envelope=envelope,
             acceptance_criteria=[])
+
+    async def submit_activity_intake(self, intake: dict[str, Any],
+                                     invocation_result: dict[str, Any]) -> dict[str, Any]:
+        """Persist a CME-authorized, source-independent activity intake in the durable activity ledger."""
+        validate_json(intake, ACTIVITY_INTAKE_SCHEMA, path="$.activity_intake")
+        if len(json.dumps(intake, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > MAX_ACTIVITY_INTAKE_BYTES:
+            raise CapabilityContractError("activity intake exceeds the 512 KiB durable envelope limit")
+        if intake["activity"]["activity_type"] != "grace.objective":
+            raise CapabilityContractError("this CME intake consumer currently accepts grace.objective activities only")
+        task_class = intake["activity"]["task_class"]
+        if task_class not in {"objective_reasoning", "vision"}:
+            raise CapabilityContractError("activity intake task_class is not eligible for Grace objective execution")
+        if (not isinstance(invocation_result, dict)
+                or invocation_result.get("contract_id") != "r3a.capability-invocation.v1"
+                or invocation_result.get("outcome") != "SUCCEEDED"
+                or not isinstance(invocation_result.get("provider"), dict)
+                or not isinstance(invocation_result.get("authorization"), dict)
+                or invocation_result["authorization"].get("allowed") is not True):
+            raise PermissionError("activity intake requires a successful authorized CME source invocation")
+        provider = invocation_result["provider"]
+        provenance = intake["provenance"]
+        if (provenance["module_id"] != provider.get("provider_id")
+                or provenance["module_version"] != provider.get("provider_version")
+                or provenance["artifact_sha256"] != provider.get("artifact_sha256")):
+            raise CapabilityContractError("activity intake provenance does not match its source invocation")
+
+        stable_key = intake["source"]["idempotency_key"]
+        correlation_value = intake["correlation_id"]
+        try:
+            correlation_id = uuid.UUID(correlation_value)
+        except ValueError:
+            correlation_id = uuid.uuid5(uuid.NAMESPACE_URL, f"r3a.correlation:{correlation_value}")
+        causation_value = intake["source"].get("causation_id") or intake["source"]["event_id"]
+        try:
+            causation_id = uuid.UUID(causation_value)
+        except ValueError:
+            causation_id = uuid.uuid5(uuid.NAMESPACE_URL, f"r3a.causation:{causation_value}")
+        activity_id = uuid.uuid5(uuid.NAMESPACE_URL, f"r3a.activity-intake:{intake['intake_id']}")
+
+        role = self.settings.model_role_for_task(task_class) if self.settings.model_roles else None
+        route_id = role.route_id if role else self.settings.default_model_route
+        role_id = role.role_id if role else None
+        if role_id and task_class not in role.task_classes:
+            raise CapabilityContractError("configured Grace model role does not allow the intake task class")
+        durable_input = {
+            "objective": intake["activity"]["objective"], "event_kind": "activity_intake",
+            "task_class": task_class, "route_id": route_id if role_id is None else None,
+            "role_id": role_id, "role_config_revision": self.settings.source_digest if role_id else None,
+            "required_capabilities": [], "required_modalities": [],
+            "acceptance_contract": {"contract_id": OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
+                                    "contract_version": OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION,
+                                    "criteria": []},
+            "engineering_assignment": None, "resident_id": self.settings.module_id,
+            "resident_profile": None, "activity_intake": intake,
+        }
+        evidence = {
+            "intake_id": intake["intake_id"], "source": intake["source"],
+            "source_provider": provider, "authorization": invocation_result["authorization"],
+            "source_invocation_id": invocation_result["invocation_id"],
+            "activity_evidence": intake["activity"]["evidence"],
+            "lifecycle_projection": intake["lifecycle_projection"],
+        }
+        async with self.pool.connection() as conn, conn.transaction():
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (stable_key,))
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"activity-intake:{intake['intake_id']}",))
+            existing = await (await conn.execute(
+                "SELECT activity_id,state,activity_type,idempotency_key,input,attempt_count "
+                "FROM r3a.activities WHERE idempotency_key=%s OR activity_id=%s FOR UPDATE",
+                (stable_key, activity_id)
+            )).fetchone()
+            if existing:
+                prior_input = dict(existing["input"] or {})
+                prior_notification = prior_input.get("notification")
+                same_legacy_source = (isinstance(prior_notification, dict)
+                                     and prior_notification.get("source_id") == intake["source"]["source_id"]
+                                     and prior_notification.get("source_event_id") == intake["source"]["event_id"])
+                if (existing["idempotency_key"] != stable_key
+                        or existing["activity_type"] != "grace.objective"
+                        or (prior_input.get("activity_intake") != intake and not same_legacy_source)):
+                    raise ValueError("activity-intake idempotency key is already bound to different source data")
+                return {**existing, "duplicate": True, "intake_id": intake["intake_id"]}
+
+            config = await (await conn.execute(
+                "SELECT revision_id FROM r3a.config_current WHERE singleton=true"
+            )).fetchone()
+            await conn.execute(
+                "INSERT INTO r3a.activities(activity_id,activity_type,idempotency_key,machine_id,machine_version,state,"
+                "available_at,recovery_policy,config_revision,input) "
+                "VALUES (%s,'grace.objective',%s,'activity.generic',1,'QUEUED',clock_timestamp(),'idempotent',%s,%s)",
+                (activity_id, stable_key, config["revision_id"] if config else None,
+                 json.dumps(durable_input)),
+            )
+            event_id = await self._event(
+                conn, intake["lifecycle_projection"]["received"], "activity", str(activity_id),
+                "activity.generic", 1, None, "QUEUED", "authorized source activity accepted by CME",
+                {**evidence, "objective_sha256": hashlib.sha256(
+                    intake["activity"]["objective"].encode("utf-8")).hexdigest()},
+                correlation_id=correlation_id, causation_id=causation_id)
+            accepted = await self._transition_on_conn(
+                conn, "activity", str(activity_id), "activity.generic", 1, "QUEUED",
+                "authorized source activity accepted by CME", evidence,
+                initial=True, correlation_id=correlation_id, causation_id=causation_id)
+            if not accepted:
+                raise InvalidTransition("generic activity intake could not enter QUEUED")
+            await conn.execute("UPDATE r3a.activities SET latest_event_id=%s WHERE activity_id=%s",
+                               (event_id, activity_id))
+            return {"activity_id": activity_id, "state": "QUEUED", "activity_type": "grace.objective",
+                    "idempotency_key": stable_key, "intake_id": intake["intake_id"],
+                    "attempt_count": 0, "duplicate": False, "event_id": event_id,
+                    "correlation_id": correlation_id}
 
     async def enqueue_notification_deliveries(self, notification: dict[str, Any],
                                               directory: dict[str, Any],

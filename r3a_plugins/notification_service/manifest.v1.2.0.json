@@ -43,7 +43,7 @@
     },
     {
       "artifact_ref": "../../r3a_runtime/schemas/activity-intake.v1.schema.json",
-      "artifact_sha256": "d98dcf249ebb61471ada6051bb9831bbedc1454e74e819e35a9755b18cc05b3c"
+      "artifact_sha256": "7a2279c005933c3eea5975303d537d77eafbd5ddc8f8e0086ebb673eec5e666c"
     },
     {
       "artifact_ref": "../../r3a_runtime/timestamp_presentation.py",
@@ -63,7 +63,7 @@
     },
     {
       "artifact_ref": "../../r3a_runtime/capability_contracts.py",
-      "artifact_sha256": "47548e1e5fec1253c3cf0a6c8c954a5c2298daf55c41c9b6de1ea4492dc39a59"
+      "artifact_sha256": "107ea3b45871477ab24038114d4f00b1bf92d4b78b2ca4882c859635800780c3"
     }
   ]
 }
