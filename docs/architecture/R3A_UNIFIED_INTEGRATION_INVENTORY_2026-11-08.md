@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_UNIFIED_INTEGRATION_INVENTORY_2026-11-08.md
 Component: R3A-UNIFIED-INTEGRATION-CUTOFF
-File Revision: 1.0.5
+File Revision: 1.0.6
 Created: 2026-11-08T21:40:00-05:00
 Created By: R3A Coordinator
 Purpose: Record reproducible pushed-commit cutoffs, module contracts, dependencies, managed compatibility and blockers for the eleven R3A workstreams.
@@ -17,6 +17,7 @@ Changed: 2026-11-08 | R3A-UNIFIED-004 | Record stale prior Grace lifecycle rows 
 Changed: 2026-11-08 | R3A-UNIFIED-005 | Record managed stale lifecycle reconciliation and post-release Knowledge acceptance.
 Changed: 2026-11-08 | R3A-UNIFIED-006 | Integrate Bitwarden provider source and record credential-gated readiness.
 Changed: 2026-11-08 | R3A-UNIFIED-007 | Reconcile the Bitwarden inventory row with the unified source cutoff.
+Changed: 2026-11-08 | R3A-UNIFIED-008 | Replace superseded next steps with current integration blockers and handoffs.
 Supersedes: None.
 Contracts: r3a.capability-operation.v1; r3a.module-manifest.v1; PostgreSQL activity/module lifecycle records.
 Tests: See per-workstream evidence; focused integration tests recorded below.
@@ -56,23 +57,29 @@ The prior managed 80B Grace health objective remains durable and completed (acti
 | 10. AP1 Knowledge | `engineering/r3a-knowledge-governed-ingestion-20261108` `5b84e756cd18eb4110f3c3479620d25840e202bd`. Knowledge 1.2.0 package, then configured integration provider 1.2.1; read operation is `r3a.capability-operation.v1`; proposal list/decide operations declare `steward_read`/`steward_write`; migration `010_governed_knowledge.sql`; package SHA-256 `6031f828b66f6b59a689004e81ba5e543eb4fd006555001c8c6d6ecf3faeb335`. | Read reuses active `resident.grace` → `institution.knowledge.read` grant. Managed configuration uses an allowlisted database DSN environment name and bounded configured sources, including the repository's `module.v2.json`. Proposal operations remain excluded: Steward effects and canonical principal/grants are not verified. Migration 009 source is reconciled with the managed checksum; migration 010 is additive and applied. | Provider 1.2.1 is selected/ACTIVE alongside 1.2.0 and 1.1.0, all healthy. Managed authorized CME reads retrieved both configured source citations and recovered after restart. 27 isolated package/contract tests passed. Keep 1.2.0 and 1.1.0 available for rollback; proposal operations remain BLOCKED pending the shared Steward contract. |
 | 11. Autonomy | `engineering/r3a-phase0-20261105` `db9ba0e96eb02049a44729d982cc8522a0066937`. Grace execution/recovery and approved-context pin checkpoint round-trip; resident Grace 1.2.11 in managed config. | Uses CME durable activity, provider results, 80B route and configured grants. No HR/Vicky binding. Existing two large activities require bounded context/evidence recovery, not reset. No separate migration. | 121 focused source tests, fixture/restart-boundary only. Managed live health objective completed; legacy objectives stay BLOCKED and untouched. Rollback: current Grace 1.2.11/config and durable checkpoints. |
 
-## Initial compatibility decisions
+## Current compatibility decisions
 
-1. Keep telemetry 2.0.0 and the existing four working providers. Do not replace Knowledge 1.1.0 until a 1.2.0 read-provider activation and actual authorized query pass.
-2. Add the Modular Plugins resource-monitor package by module paths only; keep invocation blocked until the host identity and `infrastructure.resource-inventory.read` grant are confirmed.
-3. Stage Knowledge 1.2.0 read as a separate provider version. Do not load its Steward proposal operations until the reusable effect contract and canonical Steward principal are available; `steward:pat` is not accepted as directory evidence.
-4. Stage Character Architecture's module/package independently. Do not apply its migrations or inject context until HR identity and approved-active revision are verified.
-5. Keep notifications and Website in the candidate only behind their exact contracts; no source DSN, recipient binding, authenticated session or authorized proxy owner is currently evidenced.
-6. Keep the Bitwarden source integrated in the candidate, but do not activate or test retrieval without the machine executable, authorized credentials and configured consumer binding.
-7. Do not merge dirty Engineering or Live Modular worktrees. Ask their owners to push a clean release SHA before including their uncommitted v1.1 changes.
+1. Keep Grace 1.2.11, Directory 1.1.1, Telemetry 2.0.0 and all working providers available. Knowledge 1.2.1 is selected for the configured read and remains alongside 1.2.0/1.1.0 for rollback; a rollback activation itself is not yet exercised.
+2. Resource monitor providers are ACTIVE/healthy and restored across restart. Invocation remains blocked because the managed principal has no `infrastructure.resource-inventory.read` grant; do not self-assign it.
+3. Knowledge 1.2.1 has a configured separate source for the module lifecycle state-machine definition. Steward proposal operations remain disabled until canonical Steward principal, generic effects and grants are available. Seven real proposals remain pending; do not synthesize decisions.
+4. Character Architecture context v2 remains fail-closed. Do not apply its migrations or inject character context until the authenticated HR association, approved active revision, directory binding and authorization are verified.
+5. Notification intake is blocked on a versioned source trigger/cursor or authenticated ingress, a CME generic intake-binding/effect contract, source DSN/grant and recipient delivery binding. `foundation.observe` stays separate. Website and AP3 are not activated; they require the shared authenticated session/API contract, pinned runtime dependencies and authorized private HTTPS route.
+6. Bitwarden 1.1.2 source and 11 focused tests are integrated in candidate HEAD `7d4c292`; it is not activated. Live retrieval requires `bws`, authorized machine-account provisioning, an assigned principal/secret reference and configured consumer binding.
+7. Engineering's clean pushed cutoff remains the existing 1.0.0 provider. Do not include its uncommitted v1.1 changes or dirty Live Modular changes; accept them only after a pushed versioned release and compatibility review.
 
 ## Next integration actions
 
-- Finish the provision script ordering correction, commit/push this cutoff, and keep Ring 0/CME/PG health monitored.
-- Restore the existing Knowledge 1.1.0 provider after the startup transient; then integrate and test Knowledge 1.2.0 read with the existing Grace grant and both versions available for rollback.
-- Add Modular Plugins resource-monitor artifacts, validate their immutable manifests/config examples, and stage provider activation without granting invocation.
-- Reconcile managed DB migration 009 into the candidate tree and identify additive module migration ordering before activating Knowledge/Character migration sets.
-- Continue owner-specific contract handoffs through #56; no Steward identity, proxy access, credentials or grants are to be invented.
+1. **Notifications (#48 / Coordinator):** #48 owns a versioned bounded poll/claim cursor or authenticated ingress contract. Once pushed, Coordinator adds/validates the generic CME source binding and explicit `activity.intake.accept` effect, then verifies idempotent durable intake. Current #48 `notification.source.read` only reads one caller-supplied event UUID; no source DSN/grant is configured.
+2. **Telemetry (#46):** module owner publishes a versioned bounded/selectable response with truncation metadata and evidence digests, plus validated Camrui config. Coordinator will replace only the telemetry module after compatibility/health checks and retain rollback; Grace's prior large telemetry objective remains blocked and unchanged.
+3. **Website / Remote Access (#51/#49):** owners agree on the existing session/principal and CME API contract and publish a deployable package lock/release. Proxy owner must authorize the private HTTPS mount. Until then do not expose the route or claim authenticated website acceptance.
+4. **HR / Character Architecture (#56 / HR source owner):** provide the authenticated revision-checked HR association operation with server-resolved provenance, then supply verified directory principal/office binding and active approved dossier revision for Grace, followed by Vicky/Helen. No inferred mappings or record/grant mutation.
+5. **Resource inventory (#46 / grant authority):** identify the grant owner and authorize the exact read scope before invoking host diagnostics/disk/software providers. Their ACTIVE health is not invocation acceptance.
+6. **Module upgrades:** accept clean pushed Engineering/Live Modular releases through their manifests, immutable digests and lifecycle contracts; retain the current provider versions and activity/evidence history for rollback.
+7. Recheck Ring0/CME and PostgreSQL health before and after each managed activation. Keep website, HR, notifications, Bitwarden and resident-inference acceptance distinct from source integration and isolated tests.
+
+## Current unified candidate and managed boundary — 2026-11-08 22:24 EST
+
+Candidate branch `integration/r3a-unified-20261109` is pushed at `7d4c292e6367bb7786c80d0077c37d8be1576036`. Its Bitwarden addition is source-only; it was not deployed and did not require a service restart. The active managed Ring0 source release remains `156f9967bd2933779e16966805863bc5292c3a0f`, with systemd service active, Ring0 PID 46196, CME PID 46204, `NRestarts=0`, and `WorkingDirectory=/home/admin1/r3a-workstreams/coordinator`. PostgreSQL remains primary and durable. Grace 1.2.11, Directory 1.1.1, Telemetry 2.0.0, Knowledge 1.1.0/1.2.0/1.2.1 and the three resource-monitor providers are healthy. Observer queue is one `QUEUED`, 394,256 `COMPLETED`; Knowledge 1.2.1 live authorized read after reconciliation is invocation `a866044c-8613-491e-9305-b974ce2da3be`, audit `fe0c5a56-6e5d-4d50-b9f0-7db98bd37179`. Runtime health is not evidence that the newer candidate HEAD is deployed.
 
 ## Managed integration update — 2026-11-08 22:09 EST
 
