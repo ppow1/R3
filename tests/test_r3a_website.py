@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_website.py
 Component: R3A-WEBSITE-API-TESTS
-File Revision: 1.0.6
+File Revision: 1.0.7
 Created: 2026-11-07T21:59:13Z
 Created By: Codex GPT-6
 Purpose: Verify shared-session gating, versioned objective forwarding, and website client assets.
@@ -17,6 +17,7 @@ Changed: 2026-11-07T23:55:00Z | R3A-010 | Codex GPT-6 | Verify shared AP3 sessio
 Changed: 2026-11-08T13:30:00Z | R3A-WEB-IDENTITY | Verify running identity metadata and accessible rail identity markup.
 Changed: 2026-11-08T14:30:00Z | R3A-010/#49/#51 | Verify same-host configured R3 portal login discovery and reject cross-host links.
 Changed: 2026-11-09T18:10:00Z | AP3/R3A-010 | Verify native R3A login page, HTTPS-only submission, and no R3 portal discovery in native mode.
+Changed: 2026-11-09T19:57:00Z | AP3/R3A-010-LIVE-LOGIN | Verify native-mode base routing, no R3 portal UI, and workspace return after login.
 Supersedes: None.
 Contracts: r3a.steward-session.v1; r3a.grace-objective-submission.v1; R3A AP0 diagnostic socket.
 Tests: python -m unittest tests.test_r3a_website.
@@ -66,6 +67,7 @@ class StewardWebsiteApiTests(unittest.TestCase):
         self.assertIn("/api/v1/steward/session", script.text)
         self.assertIn("window.location.replace('/steward')", script.text)
         self.assertIn("window.location.protocol !== 'https:'", script.text)
+        self.assertIn("resumeExistingSession();", script.text)
         self.assertNotIn("localStorage", script.text)
         with patch.dict(os.environ, {"R3_WEBSITE_AUTH_MODE": "r3a-native",
                                     "R3_STEWARD_PORTAL_LOGIN_URL": "http://testserver:8303/login"}):
@@ -128,15 +130,29 @@ class StewardWebsiteApiTests(unittest.TestCase):
         self.assertNotIn("roadmap_repository", response.json())
         self.assertNotIn("roadmap_api_base", response.json())
 
-    def test_steward_login_ui_uses_existing_portal_without_collecting_credentials(self):
-        response = self.client.get("/")
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('id="steward-portal-login"', response.text)
-        self.assertIn("R3 portal in the new tab", response.text)
-        self.assertNotIn('type="password"', response.text)
+    def test_native_mode_base_url_routes_to_independent_login_and_workspace_has_no_r3_login(self):
+        with patch.dict(os.environ, {"R3_WEBSITE_AUTH_MODE": "r3a-native",
+                                    "R3_STEWARD_PORTAL_LOGIN_URL": "http://testserver:8303/login"}):
+            response = self.client.get("/", follow_redirects=False)
+            self.assertEqual(response.status_code, 302)
+            self.assertEqual(response.headers["location"], "/login")
+            self.assertEqual(response.headers["cache-control"], "no-store")
+            login = self.client.get(response.headers["location"])
+            self.assertEqual(login.status_code, 200)
+            self.assertIn("R3A Steward sign in", login.text)
+            workspace = self.client.get("/steward")
+        self.assertEqual(workspace.status_code, 200)
+        self.assertIn('id="chat-message-list"', workspace.text)
+        self.assertIn("Sign in with the independent R3A Steward identity", workspace.text)
+        for legacy_copy in ("Sign in through the existing R3 account portal",
+                            "Open existing R3 account sign-in",
+                            "R3 portal session not authenticated"):
+            self.assertNotIn(legacy_copy, workspace.text)
+        self.assertIn("window.location.assign('/login')", workspace.text)
 
     def test_estate_home_contains_keyboard_and_touch_identity_control(self):
-        response = self.client.get("/")
+        with patch.dict(os.environ, {"R3_WEBSITE_AUTH_MODE": "legacy"}):
+            response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
         self.assertIn('id="rail-brand" type="button"', response.text)
         self.assertIn('aria-describedby="website-identity-tooltip"', response.text)

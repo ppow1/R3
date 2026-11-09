@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/runbooks/R3A_LAN_HTTPS_DEPLOYMENT.md
 Component: R3A-AP3-WEBSITE-TRANSPORT
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-09T19:23:00Z
 Created By: Codex GPT-6
 Purpose: Describe the LAN-only TLS route for the independently authenticated R3A Website.
@@ -11,6 +11,7 @@ Observability: Nginx configuration check, listener inspection, HTTPS probes and 
 Dependencies: R3A native Steward auth; certificate with IP SAN 192.168.1.155; #49 and #51.
 Authority: Steward directive AP3/R3A-010, 2026-11-09; no public ingress or firewall change.
 Changed: 2026-11-09T19:23:00Z | AP3-R3A-010-LAN-IP | Codex GPT-6 | Establish reproducible HTTPS transport and rollback procedure for the approved LAN IP.
+Changed: 2026-11-09T19:57:00Z | AP3-R3A-010-LIVE-LOGIN | R3A Coordinator | Require native login at the base URL and verify native workspace routing after authentication.
 Supersedes: None.
 Contracts: R3A Steward Website Session Contract; R3A native identity runbook.
 Tests: `nginx -t`; managed HTTPS probes; R3A auth regression suite.
@@ -27,7 +28,7 @@ The approved Website origin is `https://192.168.1.155:8311`. Nginx binds only to
 3. Confirm the Website process is healthy on loopback port 18311 and no process listens on 0.0.0.0:8311.
 4. Install `deploy/nginx/r3a-website-lan-https.conf` as `/etc/nginx/conf.d/r3a-website-lan-https.conf`, root-owned mode 0644.
 5. Run `sudo nginx -t`; reload Nginx only if the check succeeds.
-6. Verify `/login`, `/steward`, and `/api/v1/steward/health` return 200 with normal TLS certificate validation. Verify anonymous `/api/v1/steward/session` and `/api/v1/steward/residents` return 401.
+6. Verify `/` redirects to `/login` with `Cache-Control: no-store`; the login page displays R3A native sign-in; `/steward` serves the R3A workspace with no R3 account-login copy; and `/api/v1/steward/health` returns 200 with normal TLS certificate validation. Verify anonymous `/api/v1/steward/session` and `/api/v1/steward/residents` return 401.
 
 ## Rollback
 

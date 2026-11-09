@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.19
+# File Revision: 1.0.20
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Serve visual estate UI and authenticated, canonical R3A Steward API adapters
@@ -25,6 +25,7 @@
 # Changed: 2026-11-08T13:30:00Z | R3A-WEB-IDENTITY | Codex GPT-6 | Expose startup-captured build/version/environment identity for the Steward website.
 # Changed: 2026-11-08T14:30:00Z | R3A-010/#49/#51 | Codex GPT-6 | Publish an externally configured, same-host existing portal login URL in website identity metadata.
 # Changed: 2026-11-09T18:10:00Z | AP3/R3A-010 | R3A Coordinator | Add a same-origin native R3A login entry and suppress R3 portal discovery in native mode.
+# Changed: 2026-11-09T19:57:00Z | AP3/R3A-010-LIVE-LOGIN | R3A Coordinator | Route the R3A origin to native login and return authenticated users to the integrated workspace.
 # Dependencies: web/steward-login.html; web/steward-login.js; independent AP3 native identity configuration.
 
 """R3 first vertical slice: shared read-only capabilities, not UI-owned logic.
@@ -52,7 +53,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 from fastapi import FastAPI, HTTPException, Body, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 ROOT = Path(os.environ.get("R3_REPO", Path(__file__).resolve().parent)).resolve()
@@ -439,6 +440,12 @@ VISUAL_NAME = "Riverview3_Visual_Concept_Library/backgrounds/R3_modern_estate_cl
 
 @app.get("/")
 def visual_home():
+    if os.environ.get("R3_WEBSITE_AUTH_MODE", "legacy").strip().lower() == "r3a-native":
+        return RedirectResponse("/login", status_code=302, headers={
+            "Cache-Control": "no-store",
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
+        })
     page = ROOT / "web" / "index.html"
     if not page.is_file():
         raise HTTPException(404, "Visual prototype not installed")
@@ -464,16 +471,19 @@ def resident_avatar_module():
 
 @app.get("/steward")
 def steward_access_page():
-    """Serve the same-origin mobile-friendly Steward access interface."""
-    page = ROOT / "web" / "steward.html"
+    """Serve the integrated Website workspace in native mode, else legacy AP3 access UI."""
+    native_mode = os.environ.get("R3_WEBSITE_AUTH_MODE", "legacy").strip().lower() == "r3a-native"
+    page = ROOT / "web" / ("index.html" if native_mode else "steward.html")
     if not page.is_file():
         raise HTTPException(404, "Steward access interface unavailable")
-    return FileResponse(page, media_type="text/html", headers={
+    headers = {
         "Cache-Control": "no-store",
         "Referrer-Policy": "no-referrer",
         "X-Content-Type-Options": "nosniff",
-        "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
-    })
+    }
+    if not native_mode:
+        headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    return FileResponse(page, media_type="text/html", headers=headers)
 
 
 @app.get("/login")

@@ -11,6 +11,7 @@ Observability: Renders only generic state; never serializes credentials or chall
 Dependencies: r3a.steward-login-request.v1; POST /api/v1/steward/session.
 Authority: AP3/R3A-010; Steward-approved R3A authentication independence.
 Changed: 2026-11-09T18:10:00Z | AP3/R3A-010 | R3A Coordinator | Implement native login, enrollment, recovery, and safe local return.
+Changed: 2026-11-09T19:57:00Z | AP3/R3A-010-LIVE-LOGIN | R3A Coordinator | Resume an existing native session when the base Website routes through login.
 Supersedes: None.
 Contracts: r3a.steward-login-request.v1; r3a.steward-session.v1.
 Tests: tests/test_r3a_website.py; browser acceptance pending trusted HTTPS and Steward enrollment.
@@ -23,6 +24,21 @@ const challenge = document.getElementById('challenge');
 const challengeField = document.getElementById('challenge-field');
 const submit = document.getElementById('submit');
 const status = document.getElementById('status');
+
+async function resumeExistingSession() {
+  try {
+    const response = await fetch('/api/v1/steward/session', {
+      credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'}
+    });
+    if (!response.ok) return;
+    const body = await response.json();
+    if (body.contract === 'r3a.steward-session.v1' && body.state === 'authenticated') {
+      window.location.replace('/steward');
+    }
+  } catch { /* A new login remains available when no current session can be read. */ }
+}
+
+resumeExistingSession();
 
 function syncIntent() {
   const governed = intent.value !== 'login';
