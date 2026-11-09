@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_UNIFIED_INTEGRATION_INVENTORY_2026-11-08.md
 Component: R3A-UNIFIED-INTEGRATION-CUTOFF
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-08T21:40:00-05:00
 Created By: R3A Coordinator
 Purpose: Record reproducible pushed-commit cutoffs, module contracts, dependencies, managed compatibility and blockers for the eleven R3A workstreams.
@@ -14,6 +14,7 @@ Changed: 2026-11-08 | R3A-UNIFIED-001 | Record pushed source cutoffs and managed
 Changed: 2026-11-08 | R3A-UNIFIED-002 | Record module activation, Knowledge live/restart acceptance, and current blockers.
 Changed: 2026-11-08 | R3A-UNIFIED-003 | Add configured module lifecycle source and record Knowledge 1.2.1 recovery acceptance.
 Changed: 2026-11-08 | R3A-UNIFIED-004 | Record stale prior Grace lifecycle rows and generic reconciliation follow-up.
+Changed: 2026-11-08 | R3A-UNIFIED-005 | Record managed stale lifecycle reconciliation and post-release Knowledge acceptance.
 Supersedes: None.
 Contracts: r3a.capability-operation.v1; r3a.module-manifest.v1; PostgreSQL activity/module lifecycle records.
 Tests: See per-workstream evidence; focused integration tests recorded below.
@@ -99,3 +100,9 @@ The prior update's note that Knowledge 1.1.0 restoration had not been verified i
 ### Lifecycle diagnostic reconciliation follow-up
 
 The current managed CME and provider workers are healthy, but PostgreSQL retains five prior Grace lifecycle rows whose recorded state no longer matches a live process: `resident.grace@1.1.0`, `1.1.2`, `1.1.3`, and `1.2.7` remain `ACTIVE/healthy` with recorded PIDs `3749406`, `3766261`, `3770466`, and `1118767`, all absent from the OS process table; `resident.grace@1.2.9` remains `STOPPING` without a PID. The configured `resident.grace@1.2.11` worker is live/healthy (PID 40129 at the check). These are stale registry observations, not live resident processes or a reason to delete their event history. No direct database state edits were made. Coordinator follow-up: add lifecycle reconciliation through the existing generic module/runtime contract, with exact process identity checks and durable transition events; preserve dynamically directory-bound resident recovery semantics.
+
+### Managed reconciliation result — 2026-11-08 22:17 EST
+
+Release `156f9967bd2933779e16966805863bc5292c3a0f` deployed to `r3a-ap0-m1-ring0.service`. On startup, CME checked only superseded versions of its configured primary resident; any recorded PID had to match the same-user process command identity before being left untouched. It did not find a matching live worker for the five records above, so all moved through module.lifecycle v2 to durable `FAILED/unavailable` with reason `superseded_resident_process_absent`, their prior state and recorded PID retained in details, and `resume_on_start=false`. The current Grace 1.2.11 worker remained ACTIVE/healthy (PID 46296); directory-bound resident recovery semantics were not changed. No rows/events were deleted and no direct SQL state edit was made.
+
+Ring0/CME returned healthy after restart with systemd restart count zero. Grace, Directory 1.1.1, Telemetry 2.0.0, Knowledge 1.1.0/1.2.0/1.2.1 and the three resource-monitor providers restored ACTIVE/healthy. The observer state was one QUEUED and 394,256 COMPLETED. Post-release canonical Knowledge read `a866044c-8613-491e-9305-b974ce2da3be` SUCCEEDED as Grace on provider 1.2.1, allowed by the existing grant with audit event `fe0c5a56-6e5d-4d50-b9f0-7db98bd37179`; both configured source evidence digests were returned and persisted. Focused lifecycle/module/contract tests: 30 passed; systemd verification and `git diff --check` passed.
