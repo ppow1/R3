@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_UNIFIED_INTEGRATION_INVENTORY_2026-11-08.md
 Component: R3A-UNIFIED-INTEGRATION-CUTOFF
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-08T21:40:00-05:00
 Created By: R3A Coordinator
 Purpose: Record reproducible pushed-commit cutoffs, module contracts, dependencies, managed compatibility and blockers for the eleven R3A workstreams.
@@ -13,6 +13,7 @@ Authority: Steward directive, R3A Unified Integration and Deployment, 2026-11-08
 Changed: 2026-11-08 | R3A-UNIFIED-001 | Record pushed source cutoffs and managed recovery evidence.
 Changed: 2026-11-08 | R3A-UNIFIED-002 | Record module activation, Knowledge live/restart acceptance, and current blockers.
 Changed: 2026-11-08 | R3A-UNIFIED-003 | Add configured module lifecycle source and record Knowledge 1.2.1 recovery acceptance.
+Changed: 2026-11-08 | R3A-UNIFIED-004 | Record stale prior Grace lifecycle rows and generic reconciliation follow-up.
 Supersedes: None.
 Contracts: r3a.capability-operation.v1; r3a.module-manifest.v1; PostgreSQL activity/module lifecycle records.
 Tests: See per-workstream evidence; focused integration tests recorded below.
@@ -94,3 +95,7 @@ Resource monitor managed lifecycle evidence:
 Post-restart observer state is one queued `foundation.observe` activity and 394,000 completed activities. The durable completed history remains intact; this is not a large pending backlog. Knowledge 1.1.0/1.2.0/1.2.1 and the newly activated resource providers did not displace Grace, Directory, Telemetry, or existing activity data.
 
 The prior update's note that Knowledge 1.1.0 restoration had not been verified is superseded by this restart observation. Knowledge 1.2.1 recovery and canonical selection are verified across restart; an actual version rollback has not yet been invoked. The notification trigger/ingress and separate activity-intake authorization contracts are now recorded on #48; no source grant or DSN is configured. Website/authenticated Steward UX, HR association and Vicky/Helen identities remain blocked on the exact workstream contracts already listed above.
+
+### Lifecycle diagnostic reconciliation follow-up
+
+The current managed CME and provider workers are healthy, but PostgreSQL retains five prior Grace lifecycle rows whose recorded state no longer matches a live process: `resident.grace@1.1.0`, `1.1.2`, `1.1.3`, and `1.2.7` remain `ACTIVE/healthy` with recorded PIDs `3749406`, `3766261`, `3770466`, and `1118767`, all absent from the OS process table; `resident.grace@1.2.9` remains `STOPPING` without a PID. The configured `resident.grace@1.2.11` worker is live/healthy (PID 40129 at the check). These are stale registry observations, not live resident processes or a reason to delete their event history. No direct database state edits were made. Coordinator follow-up: add lifecycle reconciliation through the existing generic module/runtime contract, with exact process identity checks and durable transition events; preserve dynamically directory-bound resident recovery semantics.
