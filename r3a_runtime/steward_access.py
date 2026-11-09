@@ -2,13 +2,13 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/steward_access.py
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.2.0
+File Revision: 1.3.0
 Created: 2026-11-07T21:37:42Z
 Created By: Codex GPT-6
-Purpose: Verify Steward identity through a replaceable institutional adapter, manage revocable durable sessions, and audit portal operations.
+Purpose: Verify Steward identity through a replaceable R3A identity adapter, manage revocable durable sessions, and audit operations; legacy R3 bindings remain compatibility-only.
 Execution Model: FastAPI router over a PostgreSQL session/audit store and the existing CME control socket.
 Observability: Versioned structured audit events with request correlation and session provenance; secret values are excluded.
-Dependencies: FastAPI, psycopg, r3a_runtime.control; existing R3 account portal or trusted ingress; CME; Bitwarden provider for HMAC ingress binding.
+Dependencies: FastAPI, psycopg, r3a_runtime.control; R3A-native identity store or legacy compatibility adapters; CME; Bitwarden provider for legacy HMAC ingress.
 Authority: AP3-M1 / R3A-010, R3A-013; Issue #49; Roadmap Baseline 1.0; no exception.
 Changed: 2026-11-07T21:37:42Z | AP3-M1 | Codex GPT-6 | Implement ingress-asserted identity, PostgreSQL sessions, CME authorization delegation, and freshness-aware endpoints.
 Changed: 2026-11-07T21:44:36Z | AP3-M1 | Codex GPT-6 | Preserve authentication factor provenance and mount the touch-friendly Steward access interface.
@@ -24,6 +24,8 @@ Changed: 2026-11-07T23:53:17Z | AP3-M1/#51 | Codex GPT-6 | Expose a shared FastA
 Changed: 2026-11-07T23:57:23Z | AP3-M1/#51 | Codex GPT-6 | Return unavailable explicitly from Website dependencies when session storage cannot be read.
 Changed: 2026-11-08T00:01:13Z | AP3-M1/#51 | Codex GPT-6 | Share the session cookie across /api/v1, require Origin on Website mutations, and expose generic CME discovery.
 Changed: 2026-11-08T13:45:00Z | AP3-M1/#51 | Codex GPT-6 | Bind the existing R3 account-session authority through the versioned identity-provider contract.
+Changed: 2026-11-09T17:31:32Z | AP3-NATIVE-AUTH | R3 Integration | Add independent native provider binding, credential request validation, auth health and account-active session checks.
+Changed: 2026-11-09T17:54:09Z | R3A-AUTH-COOKIE-ISOLATION | Codex GPT-6 | Require native authentication to use HTTPS and a dedicated private hostname for cookie isolation.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1; r3a.capability-invocation.v1; r3a.secrets.provider.v1; r3a.machine-principal.v1.
 Tests: tests/test_r3a_steward_access.py; tests/test_r3a_capability_contracts.py.
@@ -836,18 +838,24 @@ def load_access_config(path: str | Path) -> dict[str, Any]:
             except ValueError as exc:
                 raise AccessUnavailable("steward_access_origin_must_be_lan_only") from exc
             native_origin_schemes.add(parsed_origin.scheme)
+            host = (parsed_origin.hostname or "").lower()
             try:
-                address = ipaddress.ip_address(parsed_origin.hostname or "")
+                address = ipaddress.ip_address(host)
+                # A shared LAN IP/hostname would send this host's cookies to R3
+                # listeners on other ports. Allow loopback for isolated tests;
+                # the managed R3A origin must have its own local DNS name.
+                private_host = address.is_loopback
             except ValueError:
-                if (parsed_origin.hostname or "").lower() != "localhost":
-                    raise AccessUnavailable("steward_access_origin_must_be_lan_only")
-                address = ipaddress.ip_address("127.0.0.1")
-            if (parsed_origin.scheme not in {"http", "https"} or not (address.is_private or address.is_loopback)
+                # Browser cookies are not port-isolated. A dedicated local hostname avoids
+                # forwarding R3A session cookies to an R3 service on another port.
+                private_host = (host.endswith(".home.arpa")
+                                and all(label and re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+                                        for label in host.split(".")))
+            if (parsed_origin.scheme != "https" or not private_host
                     or parsed_origin.username or parsed_origin.password or parsed_origin.path
                     or parsed_origin.query or parsed_origin.fragment):
                 raise AccessUnavailable("steward_access_origin_must_be_lan_only")
-        if (len(native_origin_schemes) > 1
-                or (native_origin_schemes == {"https"}) != (session.get("secure_cookie") is True)):
+        if len(native_origin_schemes) != 1 or session.get("secure_cookie") is not True:
             raise AccessUnavailable("steward_access_cookie_transport_mismatch")
     if (not isinstance(session.get("cookie_name"), str) or not session["cookie_name"]
             or type(session.get("lifetime_seconds")) is not int or session["lifetime_seconds"] <= 0

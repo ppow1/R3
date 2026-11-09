@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.18
+# File Revision: 1.0.19
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Serve visual estate UI and authenticated, canonical R3A Steward API adapters
@@ -24,6 +24,8 @@
 # Changed: 2026-11-07T23:55:00Z | R3A-010 | Codex GPT-6 | Replace temporary bearer checks with the shared AP3 opaque session and version the objective result.
 # Changed: 2026-11-08T13:30:00Z | R3A-WEB-IDENTITY | Codex GPT-6 | Expose startup-captured build/version/environment identity for the Steward website.
 # Changed: 2026-11-08T14:30:00Z | R3A-010/#49/#51 | Codex GPT-6 | Publish an externally configured, same-host existing portal login URL in website identity metadata.
+# Changed: 2026-11-09T18:10:00Z | AP3/R3A-010 | R3A Coordinator | Add a same-origin native R3A login entry and suppress R3 portal discovery in native mode.
+# Dependencies: web/steward-login.html; web/steward-login.js; independent AP3 native identity configuration.
 
 """R3 first vertical slice: shared read-only capabilities, not UI-owned logic.
 
@@ -96,7 +98,9 @@ def website_identity(request: Request):
     # The browser must visit the existing account portal on the same host so
     # its HttpOnly rv_account_session cookie is shared with this Website. Keep
     # the URL deployment-configured and reject cross-host/open-redirect values.
-    portal_url = os.environ.get("R3_STEWARD_PORTAL_LOGIN_URL", "").strip()
+    portal_url = (os.environ.get("R3_STEWARD_PORTAL_LOGIN_URL", "").strip()
+                  if os.environ.get("R3_WEBSITE_AUTH_MODE", "legacy").strip().lower() != "r3a-native"
+                  else "")
     parsed_portal_url = urllib.parse.urlsplit(portal_url) if portal_url else None
     if (parsed_portal_url and parsed_portal_url.scheme in {"http", "https"}
             and parsed_portal_url.hostname == request.url.hostname
@@ -470,6 +474,29 @@ def steward_access_page():
         "X-Content-Type-Options": "nosniff",
         "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
     })
+
+
+@app.get("/login")
+def native_steward_login_page():
+    """Serve the same-origin R3A credential and governed enrollment form."""
+    page = ROOT / "web" / "steward-login.html"
+    if not page.is_file():
+        raise HTTPException(404, "Steward login interface unavailable")
+    return FileResponse(page, media_type="text/html", headers={
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+    })
+
+
+@app.get("/web/steward-login.js")
+def native_steward_login_script():
+    script = ROOT / "web" / "steward-login.js"
+    if not script.is_file():
+        raise HTTPException(404, "Steward login interface unavailable")
+    return FileResponse(script, media_type="text/javascript", headers={
+        "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"})
 
 
 @app.get("/web/steward.js")

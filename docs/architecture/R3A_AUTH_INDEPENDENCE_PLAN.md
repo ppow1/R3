@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_AUTH_INDEPENDENCE_PLAN.md
 Component: R3A-AP3-AUTH-INDEPENDENCE
-File Revision: 1.1.1
+File Revision: 1.1.2
 Created: 2026-11-09T16:32:39Z
 Created By: Codex GPT-6
 Purpose: Define a bounded integration design for R3A-owned Steward authentication and governed initial identity provisioning.
@@ -14,6 +14,7 @@ Changed: 2026-11-09T16:32:39Z | R3A-AUTH-INDEPENDENCE-001 | Codex GPT-6 | Record
 Changed: 2026-11-09T16:32:39Z | R3A-AUTH-INDEPENDENCE-001 | Codex GPT-6 | Specify the one-time non-secret R3 identity provenance read and prevent ongoing R3 synchronization dependencies.
 Changed: 2026-11-09T17:04:07Z | R3A-AUTH-INDEPENDENCE-APPROVED | Codex GPT-6 | Record Steward approval and distinguish implementation authorization from human enrollment and account activation.
 Changed: 2026-11-09T17:06:17Z | R3A-AUTH-INDEPENDENCE-SECURE-LAN | Codex GPT-6 | Require browser-trusted HTTPS for credential and authenticated Website traffic on the private LAN.
+Changed: 2026-11-09T17:54:09Z | R3A-AUTH-COOKIE-ISOLATION | Codex GPT-6 | Require a dedicated R3A hostname because browsers scope cookies by host, not port.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1; r3a.capability-invocation.v1.
 Tests: Documentation/design review only; implementation and operational acceptance pending.
@@ -35,7 +36,7 @@ The existing `R3AccountSessionIdentityProvider` may remain as a disabled compati
 
 Use the existing R3A PostgreSQL boundary and append-only event ledger, with explicit migrations and a least-privilege R3A service role. Reuse `r3a.steward_sessions` where its schema is sufficient. Add only the minimum R3A-owned principal/account, credential-verifier, enrollment-challenge, and revocation records required by the approved design. Store password verifiers using a reviewed password-hashing scheme; never store or log plaintext credentials. Session tokens remain random opaque values with only digests persisted. The login service must be independently configurable and restartable, and it must not query or proxy to R3.
 
-Use an R3A-only host cookie named `r3a_steward_session`, host-only, `HttpOnly`, `SameSite=Strict`, `Path=/api/v1`, and `Secure`. Credential submission and authenticated Website traffic require a browser-trusted HTTPS origin even while bound to the LAN. LAN-only means private routing and no public ingress; it does not permit sending credentials over plain HTTP. Do not widen network/firewall exposure. Logout revokes the AP3 session; account disablement/revocation invalidates active R3A sessions; expiry is enforced server-side.
+Serve the Website at a dedicated R3A hostname distinct from all R3 hostnames, using a private-LAN name such as `r3a.riverview.home.arpa`. Browser cookies are not isolated by port: host-only cookies for the same host are sent to both R3 and R3A listeners. Therefore a different hostname is required in addition to the R3A-only `r3a_steward_session` name. Set it host-only, `HttpOnly`, `SameSite=Strict`, `Path=/api/v1`, and `Secure`. Credential submission and authenticated Website traffic require a browser-trusted HTTPS origin. The proposed certificate plan is an R3A hostname certificate issued by the institution's trusted private CA and installed in Steward browser trust stores; the LAN route must remain private and the proxy owner must bind only the LAN-facing endpoint. The currently active HTTPS listener has not been verified or authorized for this hostname. LAN-only means private routing and no public ingress; do not widen network/firewall exposure. Logout revokes the AP3 session; account disablement/revocation invalidates active R3A sessions; expiry is enforced server-side.
 
 Authentication establishes a verified canonical R3A principal only. It does not imply CME capability grants. CME continues to authorize each invocation against its canonical grants. Directory discovery remains separate from login and authorization. Login, failed login, logout, expiry, revocation, and account state changes produce privacy-safe structured audit events without password, token, recovery code, or secret values.
 

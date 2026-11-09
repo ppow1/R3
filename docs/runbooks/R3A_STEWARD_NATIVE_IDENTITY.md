@@ -1,3 +1,23 @@
+<!--
+R3 CONTROLLED DOCUMENT
+File: docs/runbooks/R3A_STEWARD_NATIVE_IDENTITY.md
+Component: R3A-AP3-IDENTITY
+File Revision: 1.0.1
+Created: 2026-11-09T17:31:32Z
+Created By: R3 Integration
+Purpose: Document native identity components, least-privilege provisioning, association, enrollment, and rollback.
+Execution Model: AP0-managed migration plus Website/AP3 service configuration and local operator lifecycle commands.
+Observability: Schema migration checksums and privacy-safe identity/session events; no credential values.
+Dependencies: AP0 PostgreSQL; AP3 StewardAccess; approved R3/HR identity provenance; #51 Website; private-LAN TLS owner.
+Authority: Steward-approved R3A Authentication Independence; AP3/R3A-010.
+Changed: 2026-11-09T17:31:32Z | AP3-NATIVE-AUTH | R3 Integration | Document independent native account and enrollment rollout.
+Changed: 2026-11-09T17:54:09Z | R3A-AUTH-COOKIE-ISOLATION | Codex GPT-6 | Require dedicated private DNS hostname and trusted HTTPS for all credential entry.
+Supersedes: None.
+Contracts: r3a.identity-provider.v1; r3a.steward-session.v1; r3a.steward-login-request.v1; r3a.steward-auth-health.v1.
+Tests: tests/test_r3a_native_identity.py; live deployment and browser acceptance pending.
+History/Predecessor: Added by Remote Access commit 16b6230d5b48bb9bd1872f687f43678faeb296d7.
+-->
+
 # R3A native Steward identity deployment and enrollment
 
 This runbook describes the independent `r3a.identity-provider.v1` implementation. It does not operate or change any R3 account service. AP3 remains the only session and CME authorization path.
@@ -5,16 +25,19 @@ This runbook describes the independent `r3a.identity-provider.v1` implementation
 ## Components and configuration
 
 - `r3a_runtime/steward_identity.py`: independent account verification, identity association, governed enrollment/recovery, and account disable/revocation.
-- `r3a_runtime/migrations/010_steward_identity.sql`: ordered after `009_steward_sessions.sql`; creates no default account.
+- `r3a_runtime/migrations/018_steward_identity.sql`: unique after the managed baseline through 017; creates no default account.
 - `r3a_plugins/steward_access.r3a-native.config.example.json`: external AP3 config; set the local R3A origin and keep `public_exposure` false.
+- Website `/login` provides same-origin login, first enrollment, and recovery, then returns to `/steward`; the browser refuses credential submission over HTTP.
 - AP3 serves `GET /api/v1/steward/health`; `503` means the native identity or durable session store is unavailable. A healthy empty database does not imply that an account exists.
 - `r3a-steward-identity`: local operator CLI for association, one-time challenge issuance, and disabling/revoking. Runtime and operator use separate peer-authenticated database roles.
 
-For LAN HTTP only, use a private LAN IP origin, `Secure=false`, and a LAN-bound Website listener/firewall already managed by the Website owner. For HTTPS, use `Secure=true`. The native configuration loader rejects non-private origins and public exposure. This change does not open a firewall or restart a service.
+Native credential entry is HTTPS-only, including on the LAN. Use a dedicated private name such as `r3a.riverview.home.arpa`, with a trusted certificate installed in the Steward browser and a LAN-only route to the Website. Do not reuse the R3 hostname: browser cookies are scoped by host, not port. `r3a_steward_session` must always be `Secure`. The target name currently does not resolve and no certificate/route has been verified; coordinate with the authorized proxy/DNS owner. The loader rejects HTTP origins, public origins, and shared IP origins for native mode. This change does not open a firewall or restart a service.
+
+Coordinator prepared mode-0600 external files at `/home/admin1/.config/r3a-ap3/steward-access.native.json` and `steward-auth-native.env`. The Website unit does not load the native environment file yet. Do not install it until the dedicated HTTPS origin and Website build are ready for a controlled service restart.
 
 ## Database order and least privilege
 
-Apply AP0 migrations in their established order, including `009_steward_sessions.sql` followed by `010_steward_identity.sql`, through the AP0 migration runner. Do not run migration SQL manually against a managed database. The database owner then applies `deploy/postgres/r3a-steward-auth-grants.sql` and configures local peer mappings. `r3a_steward_auth` is the AP3 runtime identity; `r3a_steward_identity_operator` is only for explicit account lifecycle operations. Neither role owns the schema, creates roles, or receives CME grant-management privileges. Supply `R3A_STEWARD_DATABASE_DSN` only to the AP3 process and `R3A_STEWARD_ADMIN_DSN` only to the local operator command.
+Apply `018_steward_identity.sql` through the AP0 checksum-verified migration runner after the currently deployed migrations through 017. This name is unique because the managed database already has `010_governed_knowledge.sql`; do not reuse a numeric prefix or rewrite an applied migration. Do not run migration SQL manually against a managed database. The database owner then applies `deploy/postgres/r3a-steward-auth-grants.sql` and configures local peer mappings. `r3a_steward_auth` is the AP3 runtime identity; `r3a_steward_identity_operator` is only for explicit account lifecycle operations. Neither role owns the schema, creates roles, or receives CME grant-management privileges. Supply `R3A_STEWARD_DATABASE_DSN` only to the AP3 process and `R3A_STEWARD_ADMIN_DSN` only to the local operator command.
 
 The runtime can read account verification fields, update failed-login counters, invoke a constrained database function to consume an enrollment challenge and install a fresh verifier, manage AP3 session rows, and append institutional events. It cannot create identity associations or change account state to disabled/revoked. The operator role can associate, issue challenges, and invoke a constrained disable/revoke function; state revocation updates every active session atomically. Keep both DSNs in local service configuration, not JSON, Git, shell history, or logs.
 

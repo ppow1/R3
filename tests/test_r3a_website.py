@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_website.py
 Component: R3A-WEBSITE-API-TESTS
-File Revision: 1.0.5
+File Revision: 1.0.6
 Created: 2026-11-07T21:59:13Z
 Created By: Codex GPT-6
 Purpose: Verify shared-session gating, versioned objective forwarding, and website client assets.
@@ -16,6 +16,7 @@ Changed: 2026-11-07T23:40:00Z | R3A-007/R3A-010 | Codex GPT-6 | Verify the versi
 Changed: 2026-11-07T23:55:00Z | R3A-010 | Codex GPT-6 | Verify shared AP3 session gating and no browser bearer-token auth.
 Changed: 2026-11-08T13:30:00Z | R3A-WEB-IDENTITY | Verify running identity metadata and accessible rail identity markup.
 Changed: 2026-11-08T14:30:00Z | R3A-010/#49/#51 | Verify same-host configured R3 portal login discovery and reject cross-host links.
+Changed: 2026-11-09T18:10:00Z | AP3/R3A-010 | Verify native R3A login page, HTTPS-only submission, and no R3 portal discovery in native mode.
 Supersedes: None.
 Contracts: r3a.steward-session.v1; r3a.grace-objective-submission.v1; R3A AP0 diagnostic socket.
 Tests: python -m unittest tests.test_r3a_website.
@@ -52,6 +53,24 @@ class StewardWebsiteApiTests(unittest.TestCase):
         response = self.client.get("/web/steward-workspace-api.mjs")
         self.assertEqual(response.status_code, 200)
         self.assertIn("r3a.steward-workspace-web.v1", response.text)
+
+    def test_native_login_is_same_origin_nostore_and_never_discovers_r3_portal_in_native_mode(self):
+        page = self.client.get("/login")
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(page.headers["Cache-Control"], "no-store")
+        self.assertEqual(page.headers["Referrer-Policy"], "no-referrer")
+        self.assertIn("R3A Steward sign in", page.text)
+        self.assertIn('id="challenge"', page.text)
+        script = self.client.get("/web/steward-login.js")
+        self.assertEqual(script.status_code, 200)
+        self.assertIn("/api/v1/steward/session", script.text)
+        self.assertIn("window.location.replace('/steward')", script.text)
+        self.assertIn("window.location.protocol !== 'https:'", script.text)
+        self.assertNotIn("localStorage", script.text)
+        with patch.dict(os.environ, {"R3_WEBSITE_AUTH_MODE": "r3a-native",
+                                    "R3_STEWARD_PORTAL_LOGIN_URL": "http://testserver:8303/login"}):
+            identity = self.client.get("/api/v1/website/identity")
+        self.assertNotIn("account_portal_login_url", identity.json())
 
     def test_roadmap_module_is_served_and_panel_has_live_provenance_labels(self):
         module = self.client.get("/web/roadmap-status.mjs")

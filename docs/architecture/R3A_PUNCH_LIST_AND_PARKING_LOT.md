@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_PUNCH_LIST_AND_PARKING_LOT.md
 Component: R3A-PUNCH-LIST
-File Revision: 1.0.4
+File Revision: 1.0.5
 Created: 2026-11-06T03:39:05Z
 Created By: Codex GPT-6
 Purpose: Track R3A requirements, dependencies, acceptance and intentionally unresolved decisions.
@@ -17,6 +17,7 @@ Changed: 2026-11-06T05:18:48Z | AP0-M1-PLAN | Codex GPT-6 | Link AP0-M1 decision
 Changed: 2026-11-09T16:32:39Z | R3A-AUTH-INDEPENDENCE-001 | Codex GPT-6 | Clarify R3A-owned authentication acceptance for R3A-010 and record identity provisioning approval dependency.
 Changed: 2026-11-09T17:04:07Z | R3A-AUTH-INDEPENDENCE-APPROVED | Codex GPT-6 | Record approved identity association/enrollment design while retaining live identity verification and Steward participation gates.
 Changed: 2026-11-09T17:06:17Z | R3A-AUTH-INDEPENDENCE-SECURE-LAN | Codex GPT-6 | Require trusted HTTPS for private-LAN authentication and sessions.
+Changed: 2026-11-09T17:54:09Z | R3A-AUTH-COOKIE-ISOLATION | Codex GPT-6 | Require a dedicated R3A hostname to prevent cross-port cookie transmission to R3.
 Supersedes: None; supplements rather than closes docs/PUNCH_LIST.md and docs/PARKING_LOT.md.
 Contracts: R3A Architecture Charter; State Machine and Diagnostic Contract; Bounded Testing and Acceptance Policy.
 Tests: Not run; documentation only.
@@ -39,7 +40,7 @@ History/Predecessor: Git blob 287cb3cd599a4f746adf3a30365a78cc13d3d8e5 at baseli
 | R3A-007 | P0 | Expose actual state, transitions, timing, progress and exceptions. | R3A-003/004; AP0-M1 plan D8; diagnostic contract. | HMI/diagnostic API matches durable records and explicitly marks unknown, stale and unavailable readings. | PLANNED |
 | R3A-008 | P0 | Recover CME/process interruptions and preserve recoverable work. | R3A-002/003/004; AP0-M1 plan D4; module recovery declaration. | Restart produces a durable recovery decision; recoverable work remains open and resumable; no false completion or silent termination. | PLANNED |
 | R3A-009 | P0 | Validate AP0 with bounded evidence. | Acceptance policy; isolated runtime and data. | Contract, failure/restart and operational acceptance evidence is captured for the exact revision; production R/3 remains untouched. | PLANNED |
-| R3A-010 | P1 | Provide secure Steward operations in AP3 through R3A-owned authentication/session services; may proceed alongside AP1/AP2 where dependencies permit. | AP0 actual diagnostics/API; R3A-owned AP3 auth/gateway and privacy decisions. | R3A login is served by R3A and returns to R3A; valid canonical Steward principal receives an R3A-only session; R3A auth remains functional without R3 live services; R3/R3A cookies and sessions do not collide; authorized operations use CME grants; expiry, logout, revocation, and anonymous denial are verified. Remote/mobile scope remains LAN-only until separately authorized. | PLANNED — AP3 |
+| R3A-010 | P1 | Provide secure Steward operations in AP3 through R3A-owned authentication/session services; may proceed alongside AP1/AP2 where dependencies permit. | AP0 actual diagnostics/API; R3A-owned AP3 auth/gateway and privacy decisions. | R3A login is served by R3A and returns to R3A; a dedicated R3A hostname uses trusted HTTPS; valid canonical Steward principal receives an R3A-only host session; R3A auth remains functional without R3 live services; authorized operations use CME grants; expiry, logout, revocation, and anonymous denial are verified. Remote/mobile scope remains LAN-only until separately authorized. | PLANNED — AP3 |
 | R3A-011 | P1 | Deliver genuine Engineering execution led operationally by Grace. | AP0; AP1 Grace autonomy/continuity; capability, work-order and evidence contracts. | Real authorized objectives continue through interruption to independently verified deliverable or explicit evidence-backed block. | PLANNED — AP2 |
 | R3A-012 | P1 | Support auditable escalated reasoning. | AP0 activity/evidence continuity; AP1 continuation; AP2 work/evidence contracts; provider/privacy policy. | Escalation and return preserve activity identity, evidence, authorization and failure recovery. | PLANNED — AP2 |
 | R3A-013 | P1 | Integrate Bitwarden secrets management; reserve future TOTP/YubiKey support. | AP3 auth/provider and machine identity decisions. | Secret values are obtained through approved Bitwarden integration and never committed or emitted in diagnostics; future factors have an approved compatible path. | PLANNED — AP3 |

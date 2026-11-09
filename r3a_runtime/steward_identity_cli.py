@@ -2,12 +2,19 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/steward_identity_cli.py
 Component: R3A-AP3-IDENTITY-OPERATOR
-File Revision: 1.0.0
+File Revision: 1.0.1
+Created: 2026-11-09T17:31:32Z
+Created By: R3 Integration
 Purpose: Provide local audited association, challenge, disable, and revocation actions.
 Execution Model: Explicit operator invocation against the least-privilege AP0 identity-operator role.
 Observability: Bounded JSON result codes; one-time challenge is printed only for approved out-of-band delivery.
 Authority: Approved R3A Authentication Independence Plan; AP3/R3A-010; Issue #49.
+Changed: 2026-11-09T17:54:09Z | R3A-NATIVE-AUTH-INTEGRATION | Codex GPT-6 | Integrate the owner-reviewed native identity operator CLI.
+Supersedes: None.
+Dependencies: R3A_STEWARD_ADMIN_DSN; r3a-steward-identity CLI contract.
+Contracts: R3A native Steward identity lifecycle v1.
 Tests: tests/test_r3a_native_identity.py.
+History/Predecessor: Initial implementation in Remote Access commit 16b6230d5b48bb9bd1872f687f43678faeb296d7.
 """
 from __future__ import annotations
 

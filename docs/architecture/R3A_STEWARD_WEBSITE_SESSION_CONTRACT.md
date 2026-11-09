@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: docs/architecture/R3A_STEWARD_WEBSITE_SESSION_CONTRACT.md
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.0.5
+File Revision: 1.0.6
 Created: 2026-11-07T23:43:25Z
 Created By: Codex GPT-6
 Purpose: Publish the versioned Steward principal/session contract and integration instructions for website clients.
@@ -16,6 +16,7 @@ Changed: 2026-11-07T23:55:00Z | AP3-M1/#51 | Codex GPT-6 | Document shared cooki
 Changed: 2026-11-09T16:32:39Z | R3A-AUTH-INDEPENDENCE-001 | Codex GPT-6 | Define R3A-owned authentication target, login routing, and session-cookie namespace; demote R3 adapter to legacy compatibility.
 Changed: 2026-11-09T17:06:17Z | R3A-AUTH-INDEPENDENCE-SECURE-LAN | Codex GPT-6 | Require trusted HTTPS for login and authenticated Website traffic over LAN.
 Changed: 2026-11-09T17:20:00Z | AP3-NATIVE-AUTH-INTEGRATION | Codex GPT-6 | Integrate native login/enrollment API contracts while requiring trusted HTTPS and R3A-origin return.
+Changed: 2026-11-09T17:54:09Z | R3A-AUTH-COOKIE-ISOLATION | Codex GPT-6 | Require a dedicated R3A hostname to isolate cookies across R3 and R3A sites.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1.
 Tests: tests/test_r3a_steward_access.py validates provider replacement and session responses.
@@ -55,4 +56,6 @@ The current contract has no refresh endpoint. When a session expires, check `GET
 
 Identity association, enrollment, and recovery follow the approved [R3A Authentication Independence Plan](R3A_AUTH_INDEPENDENCE_PLAN.md). Do not import R3 password hashes, sessions, reset tokens, factors, or recovery secrets. Do not create identity records from unverified claims. No credential is created until the accountable Steward completes fresh enrollment after authoritative association.
 
-For #51, render a same-origin login form that submits credentials directly to `POST /api/v1/steward/session` with `credentials: "same-origin"`, `cache: "no-store"`, JSON content type, and the browser's exact `Origin`. Do not put passwords or challenges in local/session storage, URL parameters, logs, analytics, or response UI. Clear the fields after submission; on success remain on the dedicated R3A host at `/steward`, then fetch `GET /session`. Enrollment/recovery use the same endpoint and do not redirect to R3. Use the shared cookie for protected Website routes and generic CME invocation. Migration 010 adds account/verifier/challenge state after 009; source-level tests are not a live authenticated runtime trace.
+For #51, render a same-origin login form that submits credentials directly to `POST /api/v1/steward/session` with `credentials: "same-origin"`, `cache: "no-store"`, JSON content type, and the browser's exact `Origin`. Do not put passwords or challenges in local/session storage, URL parameters, logs, analytics, or response UI. Clear the fields after submission; on success remain on the dedicated R3A host at `/steward`, then fetch `GET /session`. Enrollment/recovery use the same endpoint and do not redirect to R3. Use the shared cookie for protected Website routes and generic CME invocation. Migration 018 adds account/verifier/challenge state after the current managed baseline through 017. It is uniquely named because 010 is already used by governed knowledge; source-level tests are not a live authenticated runtime trace.
+
+The integration branch serves `/login` and `/web/steward-login.js`. The deployment must set `R3_WEBSITE_AUTH_MODE=r3a-native`, mount the independent AP3 config, and expose the site only on its dedicated browser-trusted HTTPS hostname before inviting credential entry. The client refuses to submit over HTTP. `/login` is a public authentication surface; all resident, conversation, and institutional routes remain protected by the shared AP3 session.

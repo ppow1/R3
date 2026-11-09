@@ -1,5 +1,20 @@
--- Apply as the authorized R3A AP0 database owner after migration 010.
--- Configure peer-authenticated local-socket mappings separately; no password is created here.
+-- R3 CONTROLLED DATABASE GRANTS
+-- File: deploy/postgres/r3a-steward-auth-grants.sql
+-- Component: R3A-AP3-IDENTITY
+-- File Revision: 1.0.0
+-- Created: 2026-11-09T17:31:32Z
+-- Created By: R3 Integration
+-- Purpose: Grant least-privilege database access to native R3A Steward runtime/operator roles.
+-- Execution Model: Apply as the authorized R3A AP0 database owner after migration 018_steward_identity.sql; configure peer mappings separately.
+-- Observability: Role grants are inspectable with PostgreSQL privilege catalog queries.
+-- Dependencies: r3a.steward_accounts, r3a.steward_enrollment_challenges, r3a.steward_sessions, institution_events, migration 018_steward_identity.sql.
+-- Authority: Steward-approved R3A authentication implementation; AP3/R3A-010.
+-- Security: Creates no passwords, identities, sessions, or grants; no credential values.
+-- Changed: 2026-11-09T17:31:32Z | AP3-NATIVE-AUTH | R3 Integration | Define split least-privilege auth and identity-operator role grants.
+-- Supersedes: None.
+-- Contracts: AP3 native identity storage contract v1.
+-- Tests: PostgreSQL 16 isolated migration/role integration reported by Remote Access; managed grants pending.
+-- History/Predecessor: Added by Remote Access commit 16b6230d5b48bb9bd1872f687f43678faeb296d7.
 DO $$ BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='r3a_steward_auth') THEN
     CREATE ROLE r3a_steward_auth LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;

@@ -12,8 +12,8 @@
     "cookie_name": "r3a_steward_session",
     "lifetime_seconds": 28800,
     "connect_timeout_seconds": 3,
-    "secure_cookie": false,
-    "allowed_origins": ["http://192.168.1.155:8311"]
+    "secure_cookie": true,
+    "allowed_origins": ["https://r3a.riverview.home.arpa"]
   },
   "cme": {
     "control_socket": "/run/r3a/cme-control.sock",

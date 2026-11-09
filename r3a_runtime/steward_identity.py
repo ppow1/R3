@@ -2,14 +2,19 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/steward_identity.py
 Component: R3A-AP3-IDENTITY
-File Revision: 1.0.0
+File Revision: 1.0.1
+Created: 2026-11-09T17:31:32Z
+Created By: R3 Integration
 Purpose: Verify independent R3A Steward credentials and implement governed identity association/enrollment.
 Execution Model: Replaceable r3a.identity-provider.v1 adapter and local operator repository over AP0 PostgreSQL.
 Observability: Privacy-safe institutional lifecycle events; credentials and challenge values are excluded.
-Dependencies: AP3 StewardAccess; AP0 migration 010; Python hashlib.scrypt; psycopg.
+Dependencies: AP3 StewardAccess; AP0 migration 018_steward_identity.sql; Python hashlib.scrypt; psycopg.
 Authority: Approved R3A Authentication Independence Plan; AP3/R3A-010; Issue #49.
+Changed: 2026-11-09T17:54:09Z | R3A-AUTH-COOKIE-ISOLATION | Codex GPT-6 | Harden native-origin validation for HTTPS and dedicated home.arpa hostnames.
+Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-session.v1; r3a.steward-principal.v1.
 Tests: tests/test_r3a_native_identity.py.
+History/Predecessor: Initial implementation in Remote Access commit 16b6230d5b48bb9bd1872f687f43678faeb296d7; integration commit 969c632e6bf556168f8f3dba013e4e571aba83ac.
 """
 from __future__ import annotations
 

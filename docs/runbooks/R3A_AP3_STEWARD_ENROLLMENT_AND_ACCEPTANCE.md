@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/runbooks/R3A_AP3_STEWARD_ENROLLMENT_AND_ACCEPTANCE.md
 Component: R3A-AP3-AUTH-INDEPENDENCE
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-09T17:04:07Z
 Created By: Codex GPT-6
 Purpose: Guide controlled first-Steward association, independent credential enrollment, deployment verification, and browser acceptance.
@@ -11,6 +11,7 @@ Observability: Release SHA, service health, association operation reference, ses
 Dependencies: Approved R3A Authentication Independence Plan; AP3/R3A-010; Remote Access #49 and Website #51 versioned contracts.
 Authority: Steward approval — R3A Independent Authentication Approval, 2026-11-09; LAN-only operation.
 Changed: 2026-11-09T17:04:07Z | R3A-AUTH-INDEPENDENCE-APPROVED | Codex GPT-6 | Prepare the Steward-controlled enrollment and deployment acceptance procedure.
+Changed: 2026-11-09T17:54:09Z | R3A-AUTH-COOKIE-ISOLATION | Codex GPT-6 | Require a dedicated private-LAN hostname and browser-trusted TLS certificate before enrollment.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1; canonical HR/R3A association contract when published.
 Tests: Procedure only; native authority and browser acceptance are pending implementation.
@@ -18,14 +19,14 @@ History/Predecessor: New file; initial publication recorded in Git.
 -->
 # AP3 first Steward enrollment and acceptance
 
-This runbook is for the first independent R3A Steward account. It is not permission to create credentials without the Steward present. R3A authentication must use browser-trusted HTTPS on a private LAN origin, with no public listener or route. Do not use the legacy R3 login flow or its cookies.
+This runbook is for the first independent R3A Steward account. It is not permission to create credentials without the Steward present. Use a dedicated R3A hostname distinct from all R3 hostnames, browser-trusted HTTPS, and a private LAN route with no public listener or route. Cookies are not isolated by port. Do not use the legacy R3 login flow or its cookies.
 
 ## Preconditions
 
 - A versioned R3A auth provider and Website release have passed focused and integration tests and are deployed through the controlled release process.
 - The provider, Website, and CME use one canonical R3A principal/session contract. The R3 account adapter is disabled and configuration validation rejects it for this deployment.
 - PostgreSQL migrations are additive, checksummed, backed up, and applied with the R3A migration identity. The account/session role has only the minimum table and column rights. No R3 database is queried by the R3A runtime.
-- The R3A login origin is browser-trusted HTTPS and privately routed. The cookie is host-only, `r3a_steward_session`, `Secure`, `HttpOnly`, `SameSite=Strict`, and scoped to `/api/v1`.
+- The R3A login origin is a dedicated, browser-trusted HTTPS hostname and privately routed. A private-CA certificate is installed in the Steward browser trust store. The cookie is host-only, `r3a_steward_session`, `Secure`, `HttpOnly`, `SameSite=Strict`, and scoped to `/api/v1`.
 - An owner-authorized read interface is confirmed for the one-time R3 account metadata lookup. Its allowlisted fields are limited to stable subject ID, active/verified state, Steward eligibility, source revision, and provenance. Password hashes, sessions, factors, reset data, and recovery material are excluded.
 - The HR authority has verified the canonical Steward identity, and CME grants are provisioned separately through the canonical R3A grant authority. Email match alone is insufficient.
 - The Steward is present and controls the browser and chosen R3A credentials. Enrollment/recovery instructions are delivered through the approved channel; no credential or one-time token is placed in logs, issue comments, terminal history, or model context.

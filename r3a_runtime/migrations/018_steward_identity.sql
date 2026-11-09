@@ -1,11 +1,20 @@
 -- R3 CONTROLLED MIGRATION
--- File: r3a_runtime/migrations/010_steward_identity.sql
+-- File: r3a_runtime/migrations/018_steward_identity.sql
 -- Component: R3A-AP3-IDENTITY
 -- File Revision: 1.0.0
+-- Created: 2026-11-09T17:31:32Z
+-- Created By: R3 Integration
 -- Purpose: Store independently associated R3A Steward identities, password verifiers, and single-use enrollment/recovery challenges.
--- Execution Model: Ordered R3A PostgreSQL migration after 009_steward_sessions.sql; apply only through the AP0 migration runner.
+-- Execution Model: Ordered after the current R3A migration baseline through the checksum-verified AP0 migration runner; schema depends on migrations 001 and 009.
+-- Observability: Checksummed schema_migrations record and append-only identity lifecycle events.
+-- Dependencies: r3a schema, institution_events, and steward_sessions from migrations 001 and 009.
 -- Authority: Approved R3A Authentication Independence Plan, AP3/R3A-010, Issue #49.
 -- Security: No R3 account secret/session data; opaque challenge digests only; no default Steward row.
+-- Changed: 2026-11-09T17:31:32Z | AP3-NATIVE-AUTH | R3 Integration | Add independently owned R3A account, challenge, and revocation schema.
+-- Supersedes: None.
+-- Contracts: R3A native Steward identity lifecycle v1.
+-- Tests: PostgreSQL 16 isolated migration/role integration reported by Remote Access; managed migration pending.
+-- History/Predecessor: Added by Remote Access commit 16b6230d5b48bb9bd1872f687f43678faeb296d7.
 
 CREATE TABLE r3a.steward_accounts (
     principal_id text PRIMARY KEY,

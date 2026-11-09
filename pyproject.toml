@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: pyproject.toml
 # Component: R3A-AP0-PACKAGING
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-06 UTC (exact time not independently captured)
 # Created By: Codex GPT-6
 # Purpose: Define the isolated AP0 Python runtime package and pinned dependency bounds.
@@ -10,6 +10,7 @@
 # Dependencies: Python >=3.12; psycopg 3 connection pool and binary PostgreSQL protocol support.
 # Authority: AP0-M1 implementation authorization in GitHub Issue #42.
 # Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Finalize AP0 package metadata and provenance.
+# Changed: 2026-11-09T17:31:32Z | AP3-NATIVE-AUTH | R3 Integration | Add the local native identity operator CLI entry point.
 # Supersedes: None.
 # Contracts: AP0-001–013; AP0-M1 D1–D9.
 # Tests: Fresh venv installation and isolated live runtime.
