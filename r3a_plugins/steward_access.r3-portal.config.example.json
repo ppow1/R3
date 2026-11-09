@@ -1,0 +1,29 @@
+{
+  "schema_id": "r3a.steward-access.config.v1",
+  "schema_version": 1,
+  "enabled": true,
+  "session_dsn_env": "R3A_STEWARD_DATABASE_DSN",
+  "identity": {
+    "provider": "r3.account-session",
+    "issuer": "r3-account-portal",
+    "session_url": "http://127.0.0.1:8767/api/v1/auth/session",
+    "required_role": "steward",
+    "request_timeout_seconds": 5
+  },
+  "session": {
+    "cookie_name": "r3_steward_session",
+    "lifetime_seconds": 28800,
+    "connect_timeout_seconds": 3,
+    "secure_cookie": false,
+    "allowed_origins": ["http://192.168.1.155:8311"]
+  },
+  "cme": {
+    "control_socket": "/run/r3a/cme-control.sock",
+    "request_timeout_seconds": 20,
+    "health_stale_after_seconds": 30
+  },
+  "remote_transport": {
+    "state": "unavailable",
+    "public_exposure": false
+  }
+}
