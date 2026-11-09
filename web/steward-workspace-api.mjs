@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: web/steward-workspace-api.js
 Component: R3A-STEWARD-WORKSPACE-CLIENT
-File Revision: 1.0.8
+File Revision: 1.0.9
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Same-origin client for versioned resident conversation and notification contracts
@@ -18,6 +18,7 @@ Changed: 2026-11-08 | #51 | Gate creation on current resident selection and expo
 Changed: 2026-11-09 | R3A-WEBSITE-WIDE-AUTH | R3A Coordinator | Inherit global Website authentication, redirect expired sessions, and remove chat sign-in/session activation controls.
 Changed: 2026-11-09 | R3A-LOGIN-REDIRECT-LOOP | R3A Coordinator | Recheck only the canonical session after operation 401; preserve authenticated Website navigation on scoped denials.
 Changed: 2026-11-09 | R3A-STEWARD-CHAT-ROSTER | R3A Coordinator | Render all dynamic roster rows and disable chat when the current response does not establish availability.
+Changed: 2026-11-09 | R3A-STEWARD-CHAT-READINESS | R3A Coordinator | Show the evidence-backed route or authorization reason for disabled roster entries.
 Tests: tests/test_steward_workspace_api.mjs uses mocked fetch only as a labeled development test
 */
 
@@ -82,6 +83,13 @@ export function residentProgressLabel(displayName) {
     ? displayName.trim()
     : 'Selected resident';
   return `${name} is working on this turn through managed CME…`;
+}
+
+export function residentChatStatusLabel(resident) {
+  if (resident?.chat_available === true) return 'chat available';
+  if (resident?.chat_status === 'required_execution_grant_missing') return 'chat unavailable · execution authorization missing';
+  if (resident?.chat_status === 'office_role_route_unavailable') return 'chat unavailable · no configured office route';
+  return 'chat unavailable · eligibility not confirmed';
 }
 
 export class StewardWorkspaceApi {
@@ -278,7 +286,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
         else unavailableCount += 1;
         residentNames.set(resident.resident_id, resident.display_name || resident.resident_id);
         const onboarding = resident.onboarding_status || 'unknown';
-        const readiness = chatAvailable ? 'chat available' : 'chat unavailable';
+        const readiness = residentChatStatusLabel(resident);
         const option = new Option(`${resident.display_name || resident.resident_id} · ${readiness} · onboarding ${onboarding}`, resident.resident_id);
         option.disabled = !chatAvailable;
         residentSelect.add(option);

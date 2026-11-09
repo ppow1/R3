@@ -84,8 +84,11 @@ class ConversationControlTests(unittest.TestCase):
         self.assertEqual(cme._authorize_capability.await_args_list[0].args[0], "resident.delegate")
         self.assertEqual(cme._authorize_capability.await_args_list[1].args[0], "resident.objective.execute")
 
-    def test_resident_discovery_preserves_roster_and_separates_chat_readiness(self):
+    def test_resident_discovery_preserves_roster_and_uses_configured_route_and_grants(self):
         cme = self.cme()
+        cme.settings.model_role_for_office = lambda office: (
+            SimpleNamespace(role_id="role.eng", route_id="route.eng")
+            if office == "engineering_manager" else (_ for _ in ()).throw(ValueError("unconfigured")))
         cme._invoke_directory_for_principal = AsyncMock(return_value={
             "outcome": "SUCCEEDED", "invocation_id": "directory-invocation",
             "authorization": {"audit_event_id": "directory-auth"},
@@ -102,13 +105,44 @@ class ConversationControlTests(unittest.TestCase):
                                                   {"principal_id": "portal:steward-7"}, "discovery-key"))
         self.assertEqual([item["resident_id"] for item in result["residents"]],
                          ["resident.vicky", "resident.helen"])
-        self.assertTrue(all(item["chat_available"] is False for item in result["residents"]))
+        self.assertTrue(result["residents"][0]["chat_available"])
+        self.assertFalse(result["residents"][1]["chat_available"])
         self.assertTrue(all(item["onboarding_status"] == "unknown" for item in result["residents"]))
-        self.assertTrue(all(item["authorization_status"] == "not_evaluated"
-                            for item in result["residents"]))
-        self.assertTrue(all(item["chat_status"] == "governed_execution_binding_unavailable"
-                            for item in result["residents"]))
-        cme.store.require_capability.assert_not_awaited()
+        self.assertEqual(result["residents"][0]["authorization_status"], "authorized")
+        self.assertEqual(result["residents"][0]["chat_status"], "available")
+        self.assertEqual(result["residents"][1]["execution_status"], "unavailable")
+        self.assertEqual(result["residents"][1]["chat_status"], "office_role_route_unavailable")
+        self.assertEqual(cme.store.require_capability.await_args_list[0].args,
+                         ("resident.grace", "resident.delegate"))
+        self.assertEqual(cme.store.require_capability.await_args_list[1].args,
+                         ("resident.vicky", "resident.objective.execute"))
+
+    def test_directory_principal_route_is_independent_of_configured_module_id(self):
+        cme = self.cme()
+        cme.settings.model_role_for_office = lambda _office: SimpleNamespace(
+            role_id="resident.primary", route_id="octominer1-primary-80b")
+        cme._invoke_directory_for_principal = AsyncMock(return_value={
+            "outcome": "SUCCEEDED", "invocation_id": "directory-invocation",
+            "authorization": {"audit_event_id": "directory-auth"},
+            "output": {"schema_id": "r3a.institutional-directory.v1",
+                       "source": {"availability": "measured", "freshness": "fresh",
+                                  "snapshot_sha256": "a" * 64},
+                       "residents": [{"resident_id": "resident:grace", "display_name": "Grace",
+                                      "office_id": "office:grace", "office_role": "Director of Operations"}]}})
+        cme.store.require_capability = AsyncMock(side_effect=PermissionError("grant missing"))
+        result = asyncio.run(CME._control_request(cme, "steward.residents.discover",
+                                                  {"principal_id": "portal:steward-7"}, "grace-discovery"))
+        self.assertEqual(len(result["residents"]), 1)
+        grace = result["residents"][0]
+        self.assertEqual(grace["resident_id"], "resident:grace")
+        self.assertEqual(grace["execution_status"], "configured")
+        self.assertEqual(grace["authorization_status"], "denied")
+        self.assertFalse(grace["chat_available"])
+        self.assertEqual(grace["chat_status"], "required_execution_grant_missing")
+        self.assertEqual(cme.store.require_capability.await_args_list[0].args,
+                         ("resident.grace", "resident.delegate"))
+        self.assertEqual(cme.store.require_capability.await_args_list[1].args,
+                         ("resident:grace", "resident.objective.execute"))
 
 
 if __name__ == "__main__":

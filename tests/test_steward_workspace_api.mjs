@@ -20,7 +20,7 @@ History/Predecessor: New file; initial publication recorded in Git.
 // Mock fetch never supplies live institutional data.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp, notificationPresentation, residentProgressLabel} from '../web/steward-workspace-api.mjs';
+import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp, notificationPresentation, residentProgressLabel, residentChatStatusLabel} from '../web/steward-workspace-api.mjs';
 
 function response(status, payload, headers = {}) {
   return {
@@ -114,6 +114,13 @@ test('resident progress presentation uses the dynamically selected resident name
   assert.equal(residentProgressLabel('Grace'), 'Grace is working on this turn through managed CME…');
   assert.equal(residentProgressLabel('Vicky'), 'Vicky is working on this turn through managed CME…');
   assert.equal(residentProgressLabel('  '), 'Selected resident is working on this turn through managed CME…');
+});
+
+test('resident roster labels chat eligibility from CME readiness evidence', () => {
+  assert.equal(residentChatStatusLabel({chat_available: true}), 'chat available');
+  assert.equal(residentChatStatusLabel({chat_available: false, chat_status: 'required_execution_grant_missing'}), 'chat unavailable · execution authorization missing');
+  assert.equal(residentChatStatusLabel({chat_available: false, chat_status: 'office_role_route_unavailable'}), 'chat unavailable · no configured office route');
+  assert.equal(residentChatStatusLabel({chat_available: false}), 'chat unavailable · eligibility not confirmed');
 });
 
 test('notification acknowledgment uses the #48 delivery route and idempotency key', async () => {
