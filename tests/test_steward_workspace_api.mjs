@@ -46,18 +46,18 @@ test('conversation discovery uses same-origin session and versioned contract hea
   assert.equal('Authorization' in call[1].headers, false);
 });
 
-test('desktop and mobile consume the shared opaque cookie session lifecycle', async () => {
+test('workspace client cannot manually activate a second session and can revoke the website session', async () => {
   const requests = [];
   const api = new StewardWorkspaceApi(async (...args) => {
     requests.push(args);
-    const state = args[1].method === 'POST' ? 'authenticated' : args[1].method === 'DELETE' ? 'revoked' : 'authenticated';
+    const state = args[1].method === 'DELETE' ? 'revoked' : 'authenticated';
     return response(200, {contract: 'r3a.steward-session.v1', state, correlation_id: 'session-correlation'});
   });
-  assert.equal((await api.startSession()).state, 'authenticated');
+  assert.equal(api.startSession, undefined);
   assert.equal((await api.session()).state, 'authenticated');
   assert.equal((await api.endSession()).state, 'revoked');
-  assert.deepEqual(requests.map(request => request[0]), Array(3).fill('/api/v1/steward/session'));
-  assert.deepEqual(requests.map(request => request[1].method), ['POST', 'GET', 'DELETE']);
+  assert.deepEqual(requests.map(request => request[0]), Array(2).fill('/api/v1/steward/session'));
+  assert.deepEqual(requests.map(request => request[1].method), ['GET', 'DELETE']);
   assert.ok(requests.every(request => request[1].credentials === 'same-origin' && request[1].cache === 'no-store'));
   assert.ok(requests.every(request => !('Authorization' in request[1].headers)));
 });

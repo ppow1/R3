@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: web/steward-workspace-api.js
 Component: R3A-STEWARD-WORKSPACE-CLIENT
-File Revision: 1.0.5
+File Revision: 1.0.6
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Same-origin client for versioned resident conversation and notification contracts
@@ -15,6 +15,7 @@ Changed: 2026-11-08 | R3A-007/R3A-010 | Show exact unmounted API state and rende
 Changed: 2026-11-08 | #48/#51 | Render canonical notification details, recipient lifecycle, service deep links, and cursor-paged history.
 Changed: 2026-11-08 | #49/#51 | Refresh directory on shared session establishment and clear resident conversation view on revocation/401.
 Changed: 2026-11-08 | #51 | Gate creation on current resident selection and expose request progress accessibly.
+Changed: 2026-11-09 | R3A-WEBSITE-WIDE-AUTH | R3A Coordinator | Inherit global Website authentication, redirect expired sessions, and remove chat sign-in/session activation controls.
 Tests: tests/test_steward_workspace_api.mjs uses mocked fetch only as a labeled development test
 */
 
@@ -99,6 +100,7 @@ export class StewardWorkspaceApi {
     if (!response.ok) {
       const code = payload.error?.code || payload.code || (response.status === 401 ? 'session_required' : 'request_failed');
       const message = payload.error?.message || payload.detail || `Workspace request failed (${response.status})`;
+      if (response.status === 401) globalThis.window?.r3aRequireWebsiteLogin?.();
       throw new WorkspaceApiError(message, {status: response.status, code, correlationId});
     }
     if (contract && payload.contract !== contract) {
@@ -108,7 +110,6 @@ export class StewardWorkspaceApi {
   }
 
   session({signal} = {}) { return this.request('/api/v1/steward/session', {signal, contract: 'r3a.steward-session.v1'}); }
-  startSession({signal} = {}) { return this.request('/api/v1/steward/session', {method: 'POST', signal, contract: 'r3a.steward-session.v1'}); }
   endSession({signal} = {}) { return this.request('/api/v1/steward/session', {method: 'DELETE', signal, contract: 'r3a.steward-session.v1'}); }
   accessStatus({signal} = {}) { return this.request('/api/v1/steward/status', {signal, contract: 'r3a.steward-access-status.v1'}); }
   capabilityDiscovery({signal} = {}) { return this.request('/api/v1/steward/capabilities', {signal, contract: 'r3a.steward-capability-discovery.v1'}); }
@@ -193,7 +194,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   const unavailable = error => {
     const message = error instanceof WorkspaceApiError ? error.message : 'Resident conversation service unavailable';
     const missing = error?.status === 404 ? 'Authoritative resident directory and conversation APIs are not mounted on this website service. ' : '';
-    setText(status, `${error?.status === 401 ? 'Sign in through the Steward session service. ' : missing}${message}${error?.correlationId ? ` · correlation ${error.correlationId}` : ''}`);
+    setText(status, `${error?.status === 401 ? 'Website session expired; returning to institutional sign in. ' : missing}${message}${error?.correlationId ? ` · correlation ${error.correlationId}` : ''}`);
     status.dataset.state = error?.status === 401 ? 'unauthenticated' : 'unavailable';
     if (error?.status === 401) {
       directoryAvailable = false;
@@ -203,19 +204,12 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
       pendingMessage = null;
       composer.value = '';
       residentSelect.disabled = true;
-      residentSelect.replaceChildren(new Option('Sign in to load residents', ''));
+      residentSelect.replaceChildren(new Option('Website session required', ''));
       conversationList.replaceChildren();
       messageList.replaceChildren();
       composer.disabled = true;
       sendButton.disabled = true;
       syncNewConversationButton();
-      const signIn = root.createElement('button');
-      signIn.type = 'button';
-      signIn.className = 'chat-sign-in';
-      signIn.textContent = 'Open Steward sign-in';
-      signIn.setAttribute('aria-label', 'Open the shared Steward session panel to sign in');
-      signIn.addEventListener('click', () => root.getElementById('nav-steward')?.click());
-      status.appendChild(signIn);
     }
   };
 
@@ -290,7 +284,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     } catch (error) {
       loaded = false;
       directoryAvailable = false;
-      residentSelect.replaceChildren(new Option(error?.status === 401 ? 'Sign in to load residents' : 'Resident directory unavailable', ''));
+      residentSelect.replaceChildren(new Option('Resident directory unavailable', ''));
       residentSelect.disabled = true;
       syncNewConversationButton();
       unavailable(error);
@@ -351,7 +345,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     loaded = false; directoryAvailable = false; selectedResident = ''; selectedConversation = '';
     pendingConversationId = null; pendingMessage = null; composer.value = '';
     authorizedResidentIds.clear(); residentSelect.disabled = true;
-    residentSelect.replaceChildren(new Option('Sign in to load residents', ''));
+    residentSelect.replaceChildren(new Option('Website session required', ''));
     conversationList.replaceChildren(); messageList.replaceChildren();
     composer.disabled = true; sendButton.disabled = true; syncNewConversationButton();
     setText(status, 'Steward session revoked · conversation data cleared from this view.'); status.dataset.state = 'unauthenticated';
@@ -360,6 +354,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     if (selectedResident && directoryAvailable) loadConversations();
     else { loaded = false; loadResidents(); }
   });
+  if (root.documentElement?.dataset.r3aAuthVerified === 'true') loadResidents();
 }
 
 export function mountNotificationInbox({api = new StewardWorkspaceApi(), root = document} = {}) {

@@ -87,7 +87,7 @@ class StewardWebsiteApiTests(unittest.TestCase):
         workspace = self.client.get("/web/steward-workspace-api.mjs")
         self.assertIn("r3:steward-session-established", workspace.text)
         self.assertIn("r3:steward-session-revoked", workspace.text)
-        self.assertIn("new CustomEvent('r3:steward-session-established')", page.text)
+        self.assertIn("new CustomEvent('r3:steward-session-established'", page.text)
         self.assertIn("issue reports are not proof of CME execution", module.text)
 
     def test_website_identity_reports_running_build_version_environment_and_port(self):
@@ -143,12 +143,32 @@ class StewardWebsiteApiTests(unittest.TestCase):
             workspace = self.client.get("/steward")
         self.assertEqual(workspace.status_code, 200)
         self.assertIn('id="chat-message-list"', workspace.text)
-        self.assertIn("Sign in with the independent R3A Steward identity", workspace.text)
+        self.assertIn('id="nav-chat"', workspace.text)
+        self.assertIn('id="nav-engineering"', workspace.text)
+        self.assertIn('id="profile-settings"', workspace.text)
+        self.assertIn('id="website-signout"', workspace.text)
+        self.assertIn("Verifying R3A Website session", workspace.text)
+        self.assertIn("/api/v1/steward/session", workspace.text)
+        self.assertNotIn('id="steward-connect"', workspace.text)
+        self.assertNotIn('id="steward-disconnect"', workspace.text)
+        self.assertNotIn("Open Steward sign-in", workspace.text)
+        self.assertNotIn("chat-sign-in", workspace.text)
         for legacy_copy in ("Sign in through the existing R3 account portal",
                             "Open existing R3 account sign-in",
                             "R3 portal session not authenticated"):
             self.assertNotIn(legacy_copy, workspace.text)
-        self.assertIn("window.location.assign('/login')", workspace.text)
+        self.assertIn("window.r3aRequireWebsiteLogin", workspace.text)
+
+    def test_nonpublic_website_apis_require_the_same_authenticated_session(self):
+        self.access.authenticated_principal.side_effect = HTTPException(401, "Steward session unavailable")
+        for path in ("/api/v1/engineering/branches", "/api/v1/engineering/worktrees", "/api/v1/snapshot"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(response.headers.get("Cache-Control"), "no-store")
+        response = self.client.post("/api/v1/snapshot", json={})
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.headers.get("Cache-Control"), "no-store")
 
     def test_estate_home_contains_keyboard_and_touch_identity_control(self):
         with patch.dict(os.environ, {"R3_WEBSITE_AUTH_MODE": "legacy"}):

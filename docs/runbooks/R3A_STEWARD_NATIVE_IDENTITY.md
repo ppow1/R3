@@ -11,8 +11,9 @@ Observability: Schema migration checksums and privacy-safe identity/session even
 Dependencies: AP0 PostgreSQL; AP3 StewardAccess; approved R3/HR identity provenance; #51 Website; private-LAN TLS owner.
 Authority: Steward-approved R3A Authentication Independence; AP3/R3A-010.
 Changed: 2026-11-09T17:31:32Z | AP3-NATIVE-AUTH | R3 Integration | Document independent native account and enrollment rollout.
-Changed: 2026-11-09T17:54:09Z | R3A-AUTH-COOKIE-ISOLATION | Codex GPT-6 | Require dedicated private DNS hostname and trusted HTTPS for all credential entry.
+Changed: 2026-11-09T17:54:09Z | R3A-AUTH-COOKIE-ISOLATION | Codex GPT-6 | Require trusted HTTPS for all credential entry.
 Changed: 2026-11-09T19:23:00Z | AP3-R3A-010-LAN-IP | Codex GPT-6 | Use the approved LAN IP and existing IP-SAN certificate; constrain cookie path to the R3A Steward API.
+Changed: 2026-11-09T20:25:00Z | R3A-WEBSITE-SESSION | R3A Coordinator | Correct native environment activation and document single Website-wide session/enrollment path.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-session.v1; r3a.steward-login-request.v1; r3a.steward-auth-health.v1.
 Tests: tests/test_r3a_native_identity.py; live deployment and browser acceptance pending.
@@ -34,7 +35,7 @@ This runbook describes the independent `r3a.identity-provider.v1` implementation
 
 Native credential entry is HTTPS-only, including on the LAN. The approved origin is `https://192.168.1.155:8311`, using the existing certificate with IP SAN `192.168.1.155` and a LAN-only route to the Website. No custom DNS is required. Browsers scope cookies by host, not port, so `r3a_steward_session` is `Secure`, host-only, and restricted to `Path=/api/v1/steward`; R3 authentication and chat routes do not receive it. The loader rejects HTTP origins, public origins, and non-private IP origins for native mode. Do not open a firewall or public ingress.
 
-Coordinator prepared mode-0600 external files at `/home/admin1/.config/r3a-ap3/steward-access.native.json` and `steward-auth-native.env`. The Website unit does not load the native environment file yet. Do not install it until the dedicated HTTPS origin and Website build are ready for a controlled service restart.
+The Website unit loads `/home/admin1/.config/r3a-ap3/steward-auth-native.env` through its systemd drop-in and uses `/home/admin1/.config/r3a-ap3/steward-access.native.json` for AP3 configuration. Keep both outside Git with restrictive permissions. The approved origin is `https://192.168.1.155:8311`; no custom hostname is needed. The complete Website uses one native session: `/steward` verifies the AP3 session before showing modules, and all protected Website APIs validate that same session.
 
 ## Database order and least privilege
 
@@ -74,4 +75,4 @@ Coordinator #56 owns migration application, role/socket provisioning, and manage
 
 ## Current evidence boundary
 
-Source and simulated regression coverage do not prove deployment, an imported identity association, or browser authentication. Interactive enrollment remains a Steward-operated step after the source owners provide the exact permitted metadata interface and the Coordinator activates migration/roles/config. No credential or account is fabricated while waiting for those owner-operated actions.
+The local private procedure is in [R3A_AP3_STEWARD_ENROLLMENT_AND_ACCEPTANCE.md](R3A_AP3_STEWARD_ENROLLMENT_AND_ACCEPTANCE.md). Source and simulated regression coverage do not prove an imported identity association or browser authentication. Interactive enrollment remains a Steward-operated step after the source owners provide the exact permitted metadata interface and verified association. No credential, principal, or challenge is fabricated while waiting for those owner-operated actions.

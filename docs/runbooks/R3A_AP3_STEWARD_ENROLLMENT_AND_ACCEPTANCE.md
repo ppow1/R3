@@ -19,19 +19,31 @@ History/Predecessor: New file; initial publication recorded in Git.
 -->
 # AP3 first Steward enrollment and acceptance
 
-This runbook is for the first independent R3A Steward account. It is not permission to create credentials without the Steward present. Use a dedicated R3A hostname distinct from all R3 hostnames, browser-trusted HTTPS, and a private LAN route with no public listener or route. Cookies are not isolated by port. Do not use the legacy R3 login flow or its cookies.
+This runbook is for the first independent R3A Steward account. It is not permission to create credentials without the Steward present. Use `https://192.168.1.155:8311` with the installed certificate whose IP SAN is `192.168.1.155`, trusted by the Steward's browser, and the existing private LAN route. No custom DNS is required. Cookies are host-scoped rather than port-scoped, so the R3A cookie is Secure, HttpOnly, SameSite=Strict, host-only, and restricted to `/api/v1/steward`. Do not use the legacy R3 login flow or its cookies.
 
 ## Preconditions
 
 - A versioned R3A auth provider and Website release have passed focused and integration tests and are deployed through the controlled release process.
 - The provider, Website, and CME use one canonical R3A principal/session contract. The R3 account adapter is disabled and configuration validation rejects it for this deployment.
 - PostgreSQL migrations are additive, checksummed, backed up, and applied with the R3A migration identity. The account/session role has only the minimum table and column rights. No R3 database is queried by the R3A runtime.
-- The R3A login origin is a dedicated, browser-trusted HTTPS hostname and privately routed. A private-CA certificate is installed in the Steward browser trust store. The cookie is host-only, `r3a_steward_session`, `Secure`, `HttpOnly`, `SameSite=Strict`, and scoped to `/api/v1`.
+- The R3A login origin is the browser-trusted private-LAN IP URL `https://192.168.1.155:8311`. The installed certificate has the matching IP SAN. The cookie is host-only, `r3a_steward_session`, `Secure`, `HttpOnly`, `SameSite=Strict`, and scoped to `/api/v1/steward`.
 - An owner-authorized read interface is confirmed for the one-time R3 account metadata lookup. Its allowlisted fields are limited to stable subject ID, active/verified state, Steward eligibility, source revision, and provenance. Password hashes, sessions, factors, reset data, and recovery material are excluded.
 - The HR authority has verified the canonical Steward identity, and CME grants are provisioned separately through the canonical R3A grant authority. Email match alone is insufficient.
 - The Steward is present and controls the browser and chosen R3A credentials. Enrollment/recovery instructions are delivered through the approved channel; no credential or one-time token is placed in logs, issue comments, terminal history, or model context.
 
 If any precondition is missing, stop account activation and record the specific owner/action. Continue unrelated R3A work.
+
+## Private first-enrollment procedure
+
+The Website login is one institutional entry point. When the approved association and pending R3A principal exist, the local identity operator issues one short-lived challenge and delivers it directly to the Steward. The challenge and new password must never be pasted into GitHub, chat, a ticket, a command argument, or an application log.
+
+1. The accountable HR and R3 identity owners complete the approved non-secret, revision-checked association through their authorized interfaces. The operator writes the association evidence to a local access-controlled file with permissions `0600`; it contains no credentials or protected HR fields.
+2. In a private local operator terminal, record the association with `r3a-steward-identity associate --record /secure/path/association.json`. Confirm only the returned state and association operation reference. Remove the local evidence file according to the source owners' retention rule.
+3. Issue the single-use challenge with `r3a-steward-identity challenge --principal-id <verified-r3a-principal> --actor <verified-operator> --purpose initial_enrollment`. The token appears once in that private terminal. Deliver it directly through the approved Steward-controlled out-of-band channel; do not capture terminal output in logs or shell history.
+4. The Steward opens `https://192.168.1.155:8311/login`, selects the first-enrollment option, enters the challenge and a fresh R3A password directly in the browser, and submits. The page remains on the R3A origin and opens the complete Website after the native session is established.
+5. The Steward confirms navigation among Website modules, resident chat inheritance of the same session, and the single Website sign-out. The operator verifies only non-secret principal/session state and safe audit references. Login creates no CME grants.
+
+The association input and challenge must not be created until source identity, revision, eligibility, and actor provenance are verified. At the current checkpoint those authoritative association inputs are still missing, so there is no pending principal or challenge to deliver. Once they are supplied through the authorized HR/R3 path, the steps above are directly executable without another architecture decision.
 
 ## Association and enrollment
 

@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.20
+# File Revision: 1.0.21
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Serve visual estate UI and authenticated, canonical R3A Steward API adapters
@@ -26,6 +26,7 @@
 # Changed: 2026-11-08T14:30:00Z | R3A-010/#49/#51 | Codex GPT-6 | Publish an externally configured, same-host existing portal login URL in website identity metadata.
 # Changed: 2026-11-09T18:10:00Z | AP3/R3A-010 | R3A Coordinator | Add a same-origin native R3A login entry and suppress R3 portal discovery in native mode.
 # Changed: 2026-11-09T19:57:00Z | AP3/R3A-010-LIVE-LOGIN | R3A Coordinator | Route the R3A origin to native login and return authenticated users to the integrated workspace.
+# Changed: 2026-11-09T20:25:00Z | R3A-WEBSITE-WIDE-AUTH | R3A Coordinator | Enforce the shared Website session on engineering inventory and snapshot APIs.
 # Dependencies: web/steward-login.html; web/steward-login.js; independent AP3 native identity configuration.
 
 """R3 first vertical slice: shared read-only capabilities, not UI-owned logic.
@@ -365,7 +366,9 @@ async def submit_grace_objective(request: GraceObjectiveRequest, http_request: R
 async def steward_no_store_headers(request, call_next):
     response = await call_next(request)
     if (request.url.path.startswith("/api/v1/steward/")
-            or request.url.path.startswith("/api/v1/notifications")):
+            or request.url.path.startswith("/api/v1/notifications")
+            or request.url.path.startswith("/api/v1/engineering/")
+            or request.url.path.startswith("/api/v1/snapshot")):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -393,16 +396,19 @@ def health():
     return {"service": "r3", "status": "running", "repository_present": (ROOT / ".git").exists(),
             "artwork_directory_present": ART.is_dir()}
 
-@app.get("/api/v1/engineering/branches")
-def branches():
+def _branch_inventory():
     lines = git("for-each-ref", "--format=%(refname:short)%09%(objectname)%09%(committerdate:iso8601)", "refs/heads/")
     return {"repository": "R3", "branches": [
         {"name": parts[0], "commit": parts[1], "last_commit_at": parts[2]}
         for line in lines.splitlines() if len(parts := line.split("\t")) == 3
     ], "activity_note": "Commit recency does not establish an active worker"}
 
-@app.get("/api/v1/engineering/worktrees")
-def worktrees():
+@app.get("/api/v1/engineering/branches")
+async def branches(request: Request):
+    await _steward_principal(request)
+    return _branch_inventory()
+
+def _worktree_inventory():
     raw = git("worktree", "list", "--porcelain")
     entries = []
     for block in raw.split("\n\n"):
@@ -411,6 +417,11 @@ def worktrees():
             entries.append({"path": fields["worktree"], "commit": fields.get("HEAD"),
                             "branch": fields.get("branch"), "locked": "locked" in block})
     return {"worktrees": entries, "activity_note": "A checked-out worktree is not proof of active execution"}
+
+@app.get("/api/v1/engineering/worktrees")
+async def worktrees(request: Request):
+    await _steward_principal(request)
+    return _worktree_inventory()
 
 LATEST_BROWSER_CAPTURE = None
 
@@ -579,8 +590,8 @@ def _base_snapshot():
             "background_rendering": "cover",
         },
         "engineering": {
-            "branches": branches()["branches"],
-            "worktrees": worktrees()["worktrees"],
+            "branches": _branch_inventory()["branches"],
+            "worktrees": _worktree_inventory()["worktrees"],
         },
         "privacy": {
             "credentials": "excluded",
@@ -633,17 +644,19 @@ def _validate_browser_capture(payload):
 
 
 @app.get("/api/v1/snapshot")
-def snapshot():
+async def snapshot(request: Request):
     """Return a bounded read-only snapshot, including the latest browser capture if available."""
+    await _steward_principal(request)
     result = _base_snapshot()
     result["browser"] = LATEST_BROWSER_CAPTURE or {"status": "not captured"}
     return result
 
 
 @app.post("/api/v1/snapshot")
-def capture_snapshot(browser: dict = Body(...)):
+async def capture_snapshot(request: Request, browser: dict = Body(...)):
     """Accept one bounded browser geometry capture and expose it through the snapshot API."""
     global LATEST_BROWSER_CAPTURE
+    await _steward_principal(request, "steward.website.snapshot.write")
     LATEST_BROWSER_CAPTURE = _validate_browser_capture(browser)
     result = _base_snapshot()
     result["browser"] = LATEST_BROWSER_CAPTURE
