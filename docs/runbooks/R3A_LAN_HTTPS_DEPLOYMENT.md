@@ -35,4 +35,4 @@ Remove `/etc/nginx/conf.d/r3a-website-lan-https.conf`, run `sudo nginx -t`, then
 
 ## Current deployment evidence
 
-At Coordinator integration commit `3a3603d`, the LAN HTTPS listener is active. The installed certificate validates for `192.168.1.155` and `curl` reports TLS verify result 0. `/login`, native auth health return 200; anonymous session and resident routes return 401. This verifies the managed host trust store and server-side transport. It does not establish Steward browser trust on a separate client or prove an interactive login.
+At Coordinator integration commit `76a3b879e9ffc62ac07750c316c3044858ebde9b`, the LAN HTTPS listener is active. The installed certificate validates for `192.168.1.155` and `curl` reports TLS verify result 0. `/login`, `/steward`, Website health, and native auth health return 200; anonymous session and resident routes return 401. The test host's new Chrome profile rejects the private CA (`net_error=-202`), so actual Steward-browser trust still needs confirmation on the client. This verifies the managed host trust store and server-side transport, not an interactive login.
