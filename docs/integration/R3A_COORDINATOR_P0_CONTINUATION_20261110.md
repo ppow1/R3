@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/integration/R3A_COORDINATOR_P0_CONTINUATION_20261110.md
 Component: R3A-COORDINATOR-INTEGRATION-EVIDENCE
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-10 UTC
 Created By: R3A Coordinator
 Purpose: Record current P0 executor-binding gate and independently testable integration staging evidence.
@@ -11,6 +11,7 @@ Observability: Exact source/config revisions, test commands, outcomes, and exter
 Dependencies: AD-024; R3A module manifest v1.1; resident module binding v1; Issues #43, #51, #56.
 Authority: Steward directive in Issue #51 comment 6770756773 and architecture compliance directive 2026-11-10.
 Changed: 2026-11-10 | #51 | Coordinator | Record current P0 gate and staged Website/HR tests.
+Changed: 2026-11-10 | #51 | Coordinator | Record conflict-free merge simulations for exact Website/HR candidate SHAs.
 Supersedes: None.
 Contracts: r3a.module-manifest.v1@1.1.0; r3a.resident.module-binding@1.0.0; r3a.resident.executor@1.0.0.
 Tests: Focused existing regressions and exact Website/HR candidate tests listed below.
@@ -47,6 +48,7 @@ These runs are Coordinator-side staging only. They are not independent approval,
 
 - Website candidate `ad9fd9a02e24fa0e841dcbde99407e02f0499721`: `node --test tests/test_steward_workspace_api.mjs` — **20 passed**; `pytest -q tests/test_r3a_website.py tests/test_r3a_steward_conversations.py` — **29 passed**.
 - HR candidate `07064263e2d35f664e8ac6b56de617c538bc4774`: `pytest -q tests/test_r3a_resident_onboarding.py tests/test_r3a_hr_association.py` — **19 passed**.
+- Read-only merge simulations against Coordinator `1dd57e17e81531feaa77099e5d6aecc1debb2b7e` completed without conflicts: Website produced merge tree `c920b5a3551665b54972c1863d0f3d22bb8d8179` (merge base `b1b38130e796adfe02c7343f71764e9ab0513f6b`); HR produced merge tree `ef69a1c85f03b0b51eff6bac031ce521e1f93161` (merge base `d592d1d9e09e05dafb52fac4c598bcf92445fef6`). These are staging results only; independent review remains mandatory before integration.
 - Both exact candidates and test outcomes were sent to Auditor #56 in comment `6770914396` for independent architectural/authority review. Neither candidate is integrated pending that review.
 
 ## Next actions
