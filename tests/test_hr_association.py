@@ -175,6 +175,40 @@ class HRAssociationTests(unittest.TestCase):
         self.assertEqual(self._record()[1], 2)
         self.assertEqual(self.resolver_calls, [])
 
+    def test_vicky_legacy_hr_row_cannot_create_directory_association(self):
+        store = HRStore(self.database)
+        try:
+            store.put(ResidentHRRecord("r3:vicky", "Vicky", "Engineering Manager",
+                                       status="onboarding"))
+        finally:
+            store.close()
+        gateway = FakeGateway()
+        resolver_calls = []
+        def resolver(ref):
+            resolver_calls.append(ref)
+            raise AssertionError("onboarding HR row must be rejected before directory resolution")
+        register_hr_governed_tools(gateway, self.database,
+                                   directory_evidence_resolver=resolver)
+        operation = gateway.capabilities["associate_authority_principal_with_provenance"]
+        params = {"scope_ref": "r3:vicky", "expected_revision": 1,
+                  "evidence_ref": "opaque-reference-required-from-authority",
+                  "idempotency_key": "test-only-vicky-onboarding"}
+        context = SimpleNamespace(principal_id="steward:test", grant_id="grant:test-vicky",
+                                  correlation_id="corr:test-vicky", resource_id="r3:hr",
+                                  action="hr.save", operation="write", scope_ref="r3:vicky")
+        with self.assertRaisesRegex(ValueError, "personnel_decision_not_active"):
+            operation.executor(params, context)
+        self.assertEqual(resolver_calls, [])
+        store = HRStore(self.database)
+        try:
+            self.assertEqual(store.get("r3:vicky")[1], 1)
+            self.assertEqual(store._db.execute(
+                "SELECT COUNT(*) FROM hr_authority_associations").fetchone()[0], 0)
+            self.assertEqual(store._db.execute(
+                "SELECT COUNT(*) FROM hr_association_events").fetchone()[0], 0)
+        finally:
+            store.close()
+
     def test_idempotent_replay_returns_same_refs_and_changed_content_conflicts(self):
         first = self.operation.executor(self.params, self.context)
         calls = len(self.resolver_calls)
