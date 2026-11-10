@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/audits/R3A_NEXT_INTEGRATION_QUEUE_20261109.md
 Component: R3A-AUDIT-INTEGRATION-QUEUE
-File Revision: 1.0.6
+File Revision: 1.0.7
 Created: 2026-11-10T01:26:06Z
 Created By: Codex GPT-6, Independent Auditor V2
 Purpose: Record independently approved source candidates and their integration gates for Coordinator V2.
@@ -17,6 +17,7 @@ Changed: 2026-11-10T10:30:00Z | R3A-AUDIT-ACTIVE-PRIORITY | Codex GPT-6 | Refres
 Changed: 2026-11-10T16:30:00Z | R3A-AUDIT-ACTIVE-PRIORITY | Codex GPT-6 | Re-review #59 merged head 2cc3fe3; disposition Website/HR candidates; record missing #43 role-binding fix.
 Changed: 2026-11-10T18:15:00Z | R3A-AUDIT-ACTIVE-PRIORITY | Codex GPT-6 | Add reviewed #43/#46 generic executor-role candidates; update current #51/#58 rework and #59 baseline gates.
 Changed: 2026-11-10T18:45:00Z | R3A-AUDIT-ACTIVE-PRIORITY | Codex GPT-6 | Verify PR #59 combines cleanly with current Coordinator and passes combined-tree regression suites.
+Changed: 2026-11-10T19:10:00Z | R3A-AUDIT-BACKLOG-CONTINUATION | Codex GPT-6 | Record Knowledge 1.2.0 source review as blocked on isolated current-Coordinator loader/lifecycle and live invocation evidence.
 Supersedes: None
 Contracts: R3A integration policy; AD-024; approved module, authorization, state and Website contracts.
 Tests: N/A; queue record only. Candidate tests are in the linked compliance matrix.
@@ -40,6 +41,7 @@ Current active review dispositions: **#46 de60bc14 PASS and queued; #43 935515e 
 - **#43 executor-role binding P0 / SHA `935515e1fe0de9f9b26e9d43cac182045db56526`: PASS source.** Issue #43 comment 6771679125. Use the current-base #46 Q-01 SHA for integration rather than duplicate stale-base replay. Managed HR/directory and authorization acceptance remain Coordinator-owned.
 - **Website #51 / SHA `134518a4308bc767f5dbc7ea7a25418d1f51b5d1`: FAIL.** Generic toolbar still hardcodes “Assign work to Grace” at `web/steward-workspace-api.mjs:450`. Website owner must neutralize/remove and add non-Grace mounted-client regression. Comment 6771679555.
 - **HR #58 / SHA `97d75c92a6925d8b8efb63cf9d45f0c186288c6f`: FAIL.** Mutable packet owner/authority metadata permits reassignment of Security-owned grants; cyclic local `$ref` raises `RecursionError`. HR owner to fix service and shared validator with regressions. Focused tests 51 passed/1 disposable-PostgreSQL skip; comment 6771680557.
+- **Knowledge #47 / SHA `5b84e756cd18eb4110f3c3479620d25840e202bd`: BLOCKED.** Source/package review passes (27 focused tests; full candidate tree 221 passed; checksum verified), but isolated current-Coordinator loader/lifecycle and a real authorized CME retrieval with durable evidence are missing. The Nov 10 screenshot triage rule is a newer #47 requirement not present in this earlier SHA. Owner evidence request: comment 6771953450.
 - **Notification artifact pin:** #48 has no corrected pushed SHA. Reproduced expected `107ea3b45871477ab24038114d4f00b1bf92d4b78b2ca4882c859635800780c3` versus actual `8f6584602d6b6a9c2e8e3f01694c75da721b40a0f1b8f64b91ec9bf587da5480` on current PR head `2cc3fe3`; historical baseline also failed with then-source hash `41cd92f...`. Notifications #48 owner to correct the pin and report SHA.
 - **Website live acceptance:** source rejection above does not replace the separate authenticated browser gate; browser send/receive, resident isolation, refresh persistence, and real service startup/outage behavior remain Coordinator/Website acceptance work after correction/integration.
 
