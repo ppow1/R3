@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_activity_checkpoint_persistence.py
 Component: R3A-ACTIVITY-CHECKPOINT-PERSISTENCE-REGRESSION
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-10
 Created By: Codex GPT-6
 Purpose: Verify generic handler checkpoints persist through PostgreSQL progress updates and lease recovery.
@@ -13,6 +13,7 @@ Authority: Steward corrective directive, Autonomy / CME Issue #43.
 Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GPT-6 | Exercise atomic progress/checkpoint persistence and recovery against PostgreSQL.
 Changed: 2026-11-10 | R3A-EXECUTOR-ROLE-P0 | Coordinator | Verify durable v1.1 role promotion preserves primary-module registration and lifecycle state.
 Changed: 2026-11-10T20:10:03Z | R3A-GENERIC-OBJECTIVE-CONTINUATION | R3A Coordinator | Verify PostgreSQL parks and resumes objective-waiting handler activities after child completion.
+Changed: 2026-11-10 | R3A-FS01-NOTIFICATION-ACK | R3A Coordinator | Verify notification acknowledgment requires a cited final disposition and shares the PostgreSQL completion transaction.
 Supersedes: None.
 Contracts: r3a.activity-handler.v1; r3a.activity-handler.objective-submission@1.0.0; activity.generic v1; existing CME activity/module ledgers.
 Tests: Set R3A_CHECKPOINT_TEST_DSN to a disposable test database and run this module.
@@ -291,3 +292,68 @@ class ActivityCheckpointPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pending_action, resumed["checkpoint"]["pending_action"])
         self.assertEqual(str(child_id), resumed["checkpoint"]["awaiting_objective"]["activity_id"])
         self.assertEqual(str(child_id), resumed["progress"]["objective_activity_id"])
+
+    async def test_notification_ack_requires_cited_final_and_commits_with_resolution(self):
+        source_id = "r3a.institution-events"
+        source_event_id, correlation_id = uuid.uuid4(), uuid.uuid4()
+        source_key = f"notification:{source_id}:{source_event_id}"
+
+        async def create_running_notification():
+            activity_id, attempt_id, lease_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+            resource_id = f"notification-ack-test-{uuid.uuid4()}"
+            envelope = {"source_id": source_id, "source_event_id": str(source_event_id),
+                        "event_id": str(source_event_id), "correlation_id": str(correlation_id),
+                        "payload_ref": f"r3a.institution_events/{source_event_id}"}
+            activity_input = {"correlation_id": str(correlation_id), "notification": envelope}
+            async with self.store.pool.connection() as conn, conn.transaction():
+                await conn.execute(
+                    "INSERT INTO r3a.resource_registry(resource_id,contract_version,owner,capacity,allocated,health,observed_at) "
+                    "VALUES (%s,'1.0.0','notification-ack-test',1,1,'available',clock_timestamp())",
+                    (resource_id,))
+                await conn.execute(
+                    "INSERT INTO r3a.activities(activity_id,activity_type,idempotency_key,machine_id,machine_version,state,"
+                    "available_at,attempt_id,attempt_count,lease_owner,lease_until,recovery_policy,input) "
+                    "VALUES (%s,'grace.objective',%s,'activity.generic',1,'RUNNING',clock_timestamp(),%s,1,"
+                    "'notification-ack-test',clock_timestamp()+interval '1 hour','idempotent',%s)",
+                    (activity_id, f"notification-ack:{activity_id}", attempt_id, json.dumps(activity_input)))
+                await conn.execute(
+                    "INSERT INTO r3a.resource_leases(lease_id,resource_id,activity_id,units,lease_until) "
+                    "VALUES (%s,%s,%s,1,clock_timestamp()+interval '1 hour')",
+                    (lease_id, resource_id, activity_id))
+            if not await self.store.transition("activity", str(activity_id), "activity.generic", 1,
+                                               "RUNNING", "notification acknowledgement test starts",
+                                               initial=True, correlation_id=correlation_id):
+                self.fail("notification activity could not enter RUNNING")
+            return {"activity_id": str(activity_id), "attempt_id": str(attempt_id),
+                    "lease_id": str(lease_id), "resource_id": resource_id,
+                    "input": activity_input}
+
+        invalid = await create_running_notification()
+        invalid_result = {"decision": {"status": "healthy", "assessment": "Incomplete source review.",
+                                        "recommended_action": "Review again.", "evidence_refs": []}}
+        with self.assertRaisesRegex(ValueError, "exact source event"):
+            await self.store.finish_activity(invalid, invalid_result)
+        invalid_row = (await self.store.rows(
+            "SELECT state FROM r3a.activities WHERE activity_id=%s", (invalid["activity_id"],)))[0]
+        invalid_events = await self.store.rows(
+            "SELECT event_type FROM r3a.institution_events WHERE subject_type='activity' AND subject_id=%s "
+            "AND event_type IN ('grace.notification.acknowledged','grace.notification.resolved')",
+            (invalid["activity_id"],))
+        self.assertEqual("RUNNING", invalid_row["state"])
+        self.assertEqual([], invalid_events)
+
+        valid = await create_running_notification()
+        valid_result = {"decision": {"status": "healthy", "assessment": "Reviewed the source event.",
+                                      "recommended_action": "No follow-up is required.",
+                                      "evidence_refs": [source_key]}}
+        await self.store.finish_activity(valid, valid_result)
+        valid_row = (await self.store.rows(
+            "SELECT state FROM r3a.activities WHERE activity_id=%s", (valid["activity_id"],)))[0]
+        valid_events = await self.store.rows(
+            "SELECT event_type FROM r3a.institution_events WHERE subject_type='activity' AND subject_id=%s "
+            "AND event_type IN ('activity.completed','grace.notification.acknowledged',"
+            "'grace.notification.resolved') ORDER BY persisted_at,event_id",
+            (valid["activity_id"],))
+        self.assertEqual("COMPLETED", valid_row["state"])
+        self.assertEqual(["activity.completed", "grace.notification.acknowledged",
+                          "grace.notification.resolved"], [row["event_type"] for row in valid_events])

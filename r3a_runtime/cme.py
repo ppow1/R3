@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.22.0
+File Revision: 1.22.1
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -31,6 +31,7 @@ Changed: 2026-11-10T15:20:26Z | R3A-MODULAR-EXECUTOR-ROLE | Codex GPT-6 | Publis
 Changed: 2026-11-10T18:08:17Z | R3A-CORE-SOCKET-FS02 | Coordinator | Fail closed when the registered Knowledge provider is unavailable; remove CME's direct file retrieval fallback.
 Changed: 2026-11-10 | R3A-CORE-SOCKET-FS03 | Coordinator | Add versioned generic handler action continuation through CME authorization, durable invocation and resume.
 Changed: 2026-11-10T20:10:03Z | R3A-GENERIC-OBJECTIVE-CONTINUATION | Codex GPT-6 | Add CME-authorized resident objective actions with durable handler parking, replay, timeout and result continuation.
+Changed: 2026-11-10 | R3A-FS01-NOTIFICATION-ACK | R3A Coordinator | Remove the legacy notification ingest route and defer acknowledgment to validated durable completion.
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Dispatch generic versioned Steward read/write effects through existing authorization, invocation, and provider paths.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
@@ -100,7 +101,7 @@ from .engineering import (CapabilityOperationRef, CriterionResult, EngineeringPr
                           proposal_digest, validate_completion, validate_engineering_assignment)
 from .engineering_verifier import verify_workspace_artifact
 from .diagnostics import make_server
-from .notifications import INSTITUTION_EVENT_SOURCE, validate_notification_envelope
+from .notifications import validate_notification_envelope
 from .acceptance import (AcceptanceCriteriaRequired, OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
                          OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, evidence_fingerprint,
                          validate_acceptance, validate_required_criteria)
@@ -295,11 +296,6 @@ class CME:
                                              metadata={"description": "Read PostgreSQL version and readiness"})
         await self.store.register_capability("institution.knowledge.read", "R3A-CME", "read_only",
                                              metadata={"description": "Read explicitly allowlisted institutional knowledge sources"})
-        if any(source.enabled for source in getattr(self.settings, "notification_sources", ())):
-            await self.store.register_capability(
-                "notification.source.read", "R3A-CME", "read_only",
-                metadata={"description": "Read one identified event from the configured durable institution-event source",
-                          "source_id": INSTITUTION_EVENT_SOURCE})
         for discovery in self.settings.capability_registry.discover():
             descriptor = discovery["descriptor"]
             operation = self.settings.capability_registry.resolve(
@@ -1720,34 +1716,6 @@ class CME:
             return {**accepted, "source_invocation_id": invocation_id,
                     "source_authorization": invocation_result["authorization"],
                     "source_provider": invocation_result["provider"]}
-        if operation == "notification.ingest":
-            source_id = str(payload.get("source_id", ""))
-            source_event_id = str(payload.get("source_event_id", ""))
-            source = next((item for item in getattr(self.settings, "notification_sources", ())
-                           if item.source_id == source_id and item.enabled
-                           and item.adapter == "institution_events.v1"), None)
-            if source is None:
-                raise PermissionError("notification source is not enabled by bootstrap configuration")
-            stable_key = f"notification:{source_id}:{source_event_id}"
-            if idempotency_key != stable_key:
-                raise ValueError("notification intake requires a source-bound idempotency key")
-            authorization = await self._authorize_capability(
-                "notification.source.read", request_id=idempotency_key,
-                context={"source_id": source_id, "source_event_id": source_event_id},
-                resident_id=self.module_id)
-            try:
-                result = await self.store.ingest_institution_event_notification(
-                    source_id, source_event_id, idempotency_key)
-            except Exception as exc:
-                try:
-                    await self.store.record_notification_intake_failure(
-                        source_id, source_event_id, idempotency_key, exc)
-                except Exception:
-                    # If the database is unavailable, the control response remains the truthful failure.
-                    pass
-                raise
-            result["source_authorization"] = authorization
-            return result
         if operation == "model.readiness.refresh":
             role_id = str(payload["role_id"])
             role = next((entry for entry in self.settings.model_roles if entry.role_id == role_id), None)
@@ -1895,11 +1863,6 @@ class CME:
             self.store.settings = new_settings
             self.authorization_provider = new_provider
             revision = await self.store.activate_config()
-            if any(source.enabled for source in new_settings.notification_sources):
-                await self.store.register_capability(
-                    "notification.source.read", "R3A-CME", "read_only",
-                    metadata={"description": "Read one identified event from the configured durable institution-event source",
-                              "source_id": INSTITUTION_EVENT_SOURCE})
             await self.store.register_resource("foundation.observer", new_settings.worker_concurrency,
                                                owner="R3A-CME")
             for role in new_settings.model_roles:
@@ -3581,8 +3544,6 @@ class CME:
                     try:
                         result = await self._module_call("execute", context,
                             timeout=context["model_route"]["timeout_seconds"] + 15)
-                        if context.get("notification") is not None:
-                            await self.store.acknowledge_notification(activity)
                     except Exception as exc:
                         pending = next((item for item in reversed(escalation_requests)
                                         if item.get("status") == "REQUESTED"
@@ -4117,6 +4078,10 @@ class CME:
             if not isinstance(decision.get("assessment"), str) or not decision["assessment"].strip():
                 return [{"code": "notification_disposition_missing",
                          "message": "Provide an evidence-grounded notification disposition."}]
+            if (not isinstance(decision.get("recommended_action"), str)
+                    or not decision["recommended_action"].strip()):
+                return [{"code": "notification_recommended_action_missing",
+                         "message": "State the recommended action in the notification disposition."}]
             return []
         answer_issues = _knowledge_answer_issues(context["objective"], evidence, decision)
         if answer_issues:

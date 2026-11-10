@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cli.py
 Component: R3A-OPERATOR-CLI
-File Revision: 1.6.1
+File Revision: 1.6.2
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Expose operator-invoked AP0 diagnostics, CME controls and isolated backup actions.
@@ -23,6 +23,7 @@ Changed: 2026-11-07 | R3A-AP1-N1 | Codex GPT-6 | Add idempotent, source-bound in
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Expose generic registered provider install, activation, deactivation, replacement and status operations through CME control.
 Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Expose authorized generic activity-intake acceptance through registered read-only providers.
 Changed: 2026-11-10T00:34:18Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Add exact grant-ID revocation to the existing local CME operator CLI.
+Changed: 2026-11-10 | R3A-FS01-NOTIFICATION-ACK | R3A Coordinator | Remove notification-specific intake CLI and retain generic registered activity-intake acceptance.
 Supersedes: None.
 Contracts: AP0-007/008/010/013; R3A-019; AP0-M1 D8/D9; r3a.model-route-decision.v1; r3a.model-readiness.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; no model inference in this slice.
@@ -92,10 +93,6 @@ async def _run(args: argparse.Namespace, settings: Settings) -> Any:
             payload["route_id"] = args.route_id
         if args.role_id:
             payload["role_id"] = args.role_id
-    elif args.command == "notification-ingest":
-        payload = {"source_id": args.source_id, "source_event_id": args.source_event_id}
-        operation = "notification.ingest"
-        args.idempotency_key = f"notification:{args.source_id}:{args.source_event_id}"
     elif args.command == "activity-intake-accept":
         payload = {"operation_id": args.operation_id,
                    "operation_contract_version": args.operation_contract_version,
@@ -130,10 +127,6 @@ def main() -> None:
                            help="Versioned, machine-checkable completion criteria as a JSON array")
     objective.add_argument("--requested-activity-id", help="Optional caller-generated UUID for pre-scoping an institutional grant")
     objective.add_argument("--idempotency-key", required=True)
-    notification = commands.add_parser("notification-ingest",
-                                       help="Import one configured durable institution event for Grace")
-    notification.add_argument("--source-id", default="r3a.institution-events")
-    notification.add_argument("--source-event-id", required=True)
     intake = commands.add_parser("activity-intake-accept",
                                  help="Invoke an authorized read-only activity source and persist its generic intake")
     intake.add_argument("--operation-id", required=True)

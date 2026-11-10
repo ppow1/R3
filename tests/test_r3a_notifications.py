@@ -101,81 +101,102 @@ class NotificationConfigurationTests(unittest.TestCase):
 
 
 class NotificationIntakeTests(unittest.IsolatedAsyncioTestCase):
-    async def test_source_outage_and_malformed_event_fail_without_queue_submission(self):
-        source = SimpleNamespace(source_id=INSTITUTION_EVENT_SOURCE, enabled=True,
-                                 adapter="institution_events.v1", event_types=())
-        store = Store.__new__(Store)
-        store.settings = SimpleNamespace(notification_sources=(source,))
-        store.rows = AsyncMock(side_effect=OSError("source ledger unavailable"))
-        store.submit_grace_objective = AsyncMock()
-        with self.assertRaisesRegex(OSError, "source ledger unavailable"):
-            await store.ingest_institution_event_notification(
-                INSTITUTION_EVENT_SOURCE, str(uuid.uuid4()),
-                f"notification:{INSTITUTION_EVENT_SOURCE}:{uuid.uuid4()}")
-        store.submit_grace_objective.assert_not_awaited()
-
-        malformed_id = str(uuid.uuid4())
-        malformed = {"event_id": uuid.UUID(malformed_id), "event_type": "process.state_transition",
-                     "schema_version": 1, "subject_type": "process", "subject_id": "cme",
-                     "persisted_at": datetime.now(timezone.utc), "correlation_id": uuid.uuid4()}
-        store.rows = AsyncMock(return_value=[malformed])
-        with self.assertRaises(KeyError):
-            await store.ingest_institution_event_notification(
-                INSTITUTION_EVENT_SOURCE, malformed_id,
-                f"notification:{INSTITUTION_EVENT_SOURCE}:{malformed_id}")
-        store.submit_grace_objective.assert_not_awaited()
-
-    async def test_source_failure_is_recorded_after_authorization_when_store_is_writable(self):
+    async def test_legacy_notification_ingest_control_route_is_removed(self):
         with TemporaryDirectory() as temporary:
             cme = CME(notification_settings(Path(temporary)))
-            cme._authorize_capability = AsyncMock(return_value={"audit_event_id": "read-audit"})
-            cme.store = SimpleNamespace(
-                ingest_institution_event_notification=AsyncMock(side_effect=OSError("event read timed out")),
-                record_notification_intake_failure=AsyncMock())
             event_id = str(uuid.uuid4())
-            with self.assertRaisesRegex(OSError, "event read timed out"):
+            with self.assertRaisesRegex(ValueError, "Unsupported CME control operation"):
                 await cme._control_request(
                     "notification.ingest",
                     {"source_id": INSTITUTION_EVENT_SOURCE, "source_event_id": event_id},
                     f"notification:{INSTITUTION_EVENT_SOURCE}:{event_id}")
-            cme.store.record_notification_intake_failure.assert_awaited_once()
-            self.assertIsInstance(cme.store.record_notification_intake_failure.await_args.args[-1], OSError)
+            self.assertFalse(hasattr(Store, "ingest_institution_event_notification"))
 
-    async def test_grant_denial_stops_before_source_import_and_grace_routing(self):
-        with TemporaryDirectory() as temporary:
-            settings = notification_settings(Path(temporary))
-            cme = CME(settings)
-            cme._authorize_capability = AsyncMock(side_effect=PermissionError("read grant missing"))
-            cme.store = SimpleNamespace(ingest_institution_event_notification=AsyncMock())
-            event_id = str(uuid.uuid4())
-            with self.assertRaisesRegex(PermissionError, "read grant missing"):
-                await cme._control_request(
-                    "notification.ingest",
-                    {"source_id": INSTITUTION_EVENT_SOURCE, "source_event_id": event_id},
-                    f"notification:{INSTITUTION_EVENT_SOURCE}:{event_id}")
-            cme._authorize_capability.assert_awaited_once()
-            cme.store.ingest_institution_event_notification.assert_not_awaited()
+    async def test_acknowledgment_is_validated_and_atomic_with_completion(self):
+        source_id, source_event_id = INSTITUTION_EVENT_SOURCE, str(uuid.uuid4())
+        activity = {"activity_id": str(uuid.uuid4()), "attempt_id": str(uuid.uuid4()),
+                    "lease_id": str(uuid.uuid4()), "resource_id": "institution.reasoning",
+                    "input": {"correlation_id": str(uuid.uuid4()), "notification": {
+                        "source_id": source_id, "source_event_id": source_event_id,
+                        "event_id": source_event_id,
+                        "correlation_id": str(uuid.uuid4()),
+                        "payload_ref": f"r3a.institution_events/{source_event_id}"}}}
+        source_key = f"notification:{source_id}:{source_event_id}"
+        valid = {"decision": {"status": "healthy", "assessment": "Reviewed the source event.",
+                              "recommended_action": "No further action is required.",
+                              "evidence_refs": [source_key]}}
+        invalid_results = [
+            {"action": "invoke_capability", "capability": "in_progress"},
+            {"decision": {"status": "healthy", "assessment": "Looks good.",
+                           "recommended_action": "No action.", "evidence_refs": []}},
+            {"decision": {"status": "blocked", "assessment": "The source was unavailable.",
+                           "recommended_action": "Retry.", "evidence_refs": [source_key]}},
+            {"decision": {"status": "healthy", "assessment": "Reviewed.",
+                           "evidence_refs": [source_key]}},
+        ]
+        for result in invalid_results:
+            with self.subTest(result=result), self.assertRaises(ValueError):
+                Store._validated_notification_disposition(activity, result)
+        self.assertIs(Store._validated_notification_disposition(activity, valid),
+                      activity["input"]["notification"])
 
-    async def test_granted_import_uses_exact_source_bound_key_and_audit(self):
-        with TemporaryDirectory() as temporary:
-            settings = notification_settings(Path(temporary))
-            cme = CME(settings)
-            cme._authorize_capability = AsyncMock(return_value={"audit_event_id": "audit-1"})
-            result = {"activity_id": "activity-1", "duplicate": False}
-            cme.store = SimpleNamespace(
-                ingest_institution_event_notification=AsyncMock(return_value=result))
-            event_id = str(uuid.uuid4())
-            key = f"notification:{INSTITUTION_EVENT_SOURCE}:{event_id}"
-            response = await cme._control_request(
-                "notification.ingest",
-                {"source_id": INSTITUTION_EVENT_SOURCE, "source_event_id": event_id}, key)
-            self.assertEqual(response["source_authorization"]["audit_event_id"], "audit-1")
-            cme.store.ingest_institution_event_notification.assert_awaited_once_with(
-                INSTITUTION_EVENT_SOURCE, event_id, key)
-            with self.assertRaisesRegex(ValueError, "source-bound idempotency key"):
-                await cme._control_request("notification.ingest",
-                                           {"source_id": INSTITUTION_EVENT_SOURCE,
-                                            "source_event_id": event_id}, "unbound-key")
+        class AsyncContext:
+            def __init__(self, value):
+                self.value = value
+
+            async def __aenter__(self):
+                return self.value
+
+            async def __aexit__(self, *_args):
+                return False
+
+        class Cursor:
+            rowcount = 1
+
+            async def fetchone(self):
+                return None
+
+        class Connection:
+            async def execute(self, *_args):
+                return Cursor()
+
+            def transaction(self):
+                return AsyncContext(self)
+
+        class Pool:
+            def __init__(self):
+                self.opened = 0
+
+            def connection(self):
+                self.opened += 1
+                return AsyncContext(Connection())
+
+        store = Store.__new__(Store)
+        store.pool = Pool()
+        store.settings = SimpleNamespace(observer_interval_seconds=10)
+        event_types = []
+
+        async def record_event(_conn, event_type, *_args, **_kwargs):
+            event_types.append(event_type)
+            return uuid.uuid4()
+
+        store._event = AsyncMock(side_effect=record_event)
+        store._transition_on_conn = AsyncMock(return_value=True)
+        store._schedule_observer_activity_on_conn = AsyncMock()
+        for result in invalid_results:
+            with self.subTest(invalid_finish=result), self.assertRaises(ValueError):
+                await store.finish_activity(activity, result)
+        self.assertEqual(store.pool.opened, 0)
+        self.assertEqual(event_types, [])
+
+        await store.finish_activity(activity, valid)
+        self.assertEqual(event_types,
+                         ["activity.completed", "grace.notification.acknowledged",
+                          "grace.notification.resolved"])
+        self.assertEqual(store.pool.opened, 1)
+        ack_args = store._event.await_args_list[1].args
+        self.assertEqual(ack_args[1], "grace.notification.acknowledged")
+        self.assertEqual(ack_args[6:8], ("COMPLETED", "COMPLETED"))
 
     async def test_completed_notification_requires_its_evidence_and_disposition(self):
         with TemporaryDirectory() as temporary:
@@ -187,11 +208,17 @@ class NotificationIntakeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(cme._final_evidence_issues(
                 context, evidence,
                 {"status": "healthy", "assessment": "Resolved from source evidence.",
+                 "recommended_action": "No further action is required.",
                  "evidence_refs": [source_id]}), [])
             missing = cme._final_evidence_issues(
                 context, evidence,
                 {"status": "healthy", "assessment": "Resolved.", "evidence_refs": []})
             self.assertEqual(missing[0]["code"], "evidence_citations_missing")
+            missing_action = cme._final_evidence_issues(
+                context, evidence,
+                {"status": "healthy", "assessment": "Resolved.",
+                 "evidence_refs": [source_id]})
+            self.assertEqual(missing_action[0]["code"], "notification_recommended_action_missing")
 
     async def test_resolved_and_blocked_are_distinct_correlated_durable_events(self):
         store = Store.__new__(Store)

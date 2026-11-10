@@ -2,7 +2,7 @@
 R3 CONTROLLED TEST SOURCE
 File: tests/test_r3a_notification_handler_process.py
 Component: R3A-NOTIFICATION-HANDLER-PROCESS-REGRESSION
-File Revision: 1.1.0
+File Revision: 1.2.0
 Created: 2026-11-10
 Created By: Codex GPT-6
 Purpose: Exercise the registered notification handler through CME dispatch and a real provider child process.
@@ -11,6 +11,7 @@ Observability: Assert source provenance/idempotency, handler evidence/checkpoint
 Dependencies: r3a_runtime.cme; r3a_runtime.capability_worker; notification activity-intake manifest.
 Authority: Issue #48; generic module lifecycle and activity-handler contracts.
 Changed: 2026-11-10T20:10:03Z | R3A-GENERIC-OBJECTIVE-CONTINUATION | R3A Coordinator | Exercise the notification objective action and durable disposition continuation in the provider child process.
+Changed: 2026-11-10 | R3A-FS01-NOTIFICATION-ACK | R3A Coordinator | Reject intermediate, uncited and failed child dispositions in the real registered provider process.
 Supersedes: None.
 Contracts: r3a.activity-handler@1.1.0; r3a.activity-handler.objective-submission@1.0.0; r3a.module-manifest.v1@1.2.0; AP0-M1.
 Tests: pytest -q tests/test_r3a_notification_handler_process.py.
@@ -149,22 +150,61 @@ def test_registered_handler_executes_through_cme_and_provider_process():
             cme._authorization_decision = AsyncMock(return_value=SimpleNamespace(
                 decision_id="decision", audit_event_id="audit", policy_revision="policy"))
             cme._registered_module_call = process_backed_call
-            cme._dispatch_registered_handler_action = AsyncMock(return_value={
-                "contract_id": "r3a.activity-handler.continuation", "contract_version": "1.0.0",
-                "action_id": "notification.review." + hashlib.sha256(
-                    f"{source_id}:{event_id}".encode()).hexdigest(),
-                "outcome": "succeeded", "invocation": {"activity_id": child_activity_id,
-                    "state": "COMPLETED", "result": {"decision": {
-                        "status": "healthy", "assessment": "The event was reviewed against source evidence.",
-                        "recommended_action": "No further action is indicated.",
-                        "evidence_refs": [source_key]}}}, "evidence": [], "error": None})
-            handler = await cme._registered_handler("notification.event.review")
-            await cme._run_registered_activity(activity, handler)
+            action_id = "notification.review." + hashlib.sha256(
+                f"{source_id}:{event_id}".encode()).hexdigest()
+            def continuation(state, result=None, *, outcome="succeeded", error=None,
+                             invocation_id=None):
+                return {"contract_id": "r3a.activity-handler.continuation",
+                        "contract_version": "1.0.0", "action_id": action_id,
+                        "outcome": outcome,
+                        "invocation": {"activity_id": invocation_id or str(uuid.uuid4()),
+                                       "state": state, "result": result},
+                        "evidence": [], "error": error}
 
-            cme.store.finish_activity.assert_awaited_once()
-            cme.store.block_activity.assert_not_awaited()
-            cme.store.record_progress.assert_awaited()
-            result = cme.store.finish_activity.await_args.args[1]["result"]
+            continuations = [
+                continuation("COMPLETED", {"action": "invoke_capability", "decision": None}),
+                continuation("COMPLETED", {"decision": {
+                    "status": "healthy", "assessment": "Reviewed without source citation.",
+                    "recommended_action": "No action.", "evidence_refs": []}}),
+                continuation("BLOCKED", None, outcome="failed",
+                             error={"type": "TimeoutError", "message": "resident objective timed out"}),
+                continuation("COMPLETED", {"decision": {
+                    "status": "healthy", "assessment": "The event was reviewed against source evidence.",
+                    "recommended_action": "No further action is indicated.",
+                    "evidence_refs": [source_key]}}, invocation_id=child_activity_id),
+            ]
+            cme._dispatch_registered_handler_action = AsyncMock(side_effect=continuations)
+            handler = await cme._registered_handler("notification.event.review")
+            observed = []
+            for index, expected in enumerate(("reject", "reject", "blocked", "completed")):
+                case_activity = {**activity, "activity_id": str(uuid.uuid4()),
+                                 "attempt_id": str(uuid.uuid4()), "checkpoint": {}}
+                cme.store.finish_activity.reset_mock()
+                cme.store.block_activity.reset_mock()
+                if expected == "reject":
+                    try:
+                        await cme._run_registered_activity(case_activity, handler)
+                    except RuntimeError as exc:
+                        observed.append((expected, str(exc)))
+                    else:
+                        raise AssertionError("provider accepted an intermediate or uncited resident response")
+                    cme.store.finish_activity.assert_not_awaited()
+                    cme.store.block_activity.assert_not_awaited()
+                else:
+                    await cme._run_registered_activity(case_activity, handler)
+                    if expected == "blocked":
+                        cme.store.block_activity.assert_awaited_once()
+                        cme.store.finish_activity.assert_not_awaited()
+                        result_value = cme.store.block_activity.await_args.args[2]["result"]
+                        assert result_value["lifecycle_evidence"]["acknowledged"] is None
+                    else:
+                        cme.store.finish_activity.assert_awaited_once()
+                        cme.store.block_activity.assert_not_awaited()
+                        result_value = cme.store.finish_activity.await_args.args[1]["result"]
+                        observed.append((expected, result_value))
+                assert cme._dispatch_registered_handler_action.await_count == index + 1
+
+            result = observed[-1][1]
             checked = validate_activity_handler_payload(handler["handler"], "result", result)
             assert checked["outcome"] == "completed"
             assert checked["checkpoint"]["source_event_id"] == event_id
@@ -178,10 +218,10 @@ def test_registered_handler_executes_through_cme_and_provider_process():
                 "blocked": "grace.notification.blocked",
                 "acknowledged": "grace.notification.acknowledged",
                 "resolved": "grace.notification.resolved"}
-            action = recorded_calls[0]
+            action = recorded_calls[-2]
             assert action["execution_principal"] == "resident.grace"
             assert action["input"]["notification"]["source_event_id"] == event_id
-            resumed = recorded_calls[1]
+            resumed = recorded_calls[-1]
             assert resumed["continuation"]["action_id"] == cme._dispatch_registered_handler_action.await_args.args[3]["action"]["action_id"]
         finally:
             if process.is_alive():
