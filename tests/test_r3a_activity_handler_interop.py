@@ -290,27 +290,58 @@ def test_cme_resolves_two_authoritative_resident_bindings_to_one_registered_exec
                     SimpleNamespace(route_id="route.alpha"), associations[resident_id])
 
             cme = object.__new__(CME)
-            cme.settings = SimpleNamespace(resident_module_bindings=tuple(bindings),
-                                           source_path=config_path, source_digest="c" * 64)
-            cme.store = SimpleNamespace(rows=AsyncMock(return_value=[registry_row]))
+            cme.settings = SimpleNamespace(
+                resident_module_bindings=tuple(bindings), source_path=config_path,
+                source_digest="c" * 64,
+                capability_registry=SimpleNamespace(
+                    discover=Mock(side_effect=lambda **kwargs:
+                        [{"descriptor": {**sample["operation"],
+                                         "lifecycle": {"desired_state": "enabled"}}}]
+                        if kwargs.get("include_versions") else []),
+                    resolve_provider=Mock(return_value=SimpleNamespace(
+                        descriptor={"operation_id": sample["operation"]["operation_id"],
+                                    "provider": sample["operation"]["provider"]}))))
+            cme.store = SimpleNamespace(rows=AsyncMock(return_value=[registry_row]),
+                                        record_progress=AsyncMock(), finish_activity=AsyncMock())
             cme.module_id = "resident.grace"
+            cme.module_version = "0.0.0"
             cme._resolve_resident_execution_profile = AsyncMock(
                 side_effect=lambda resident_id, **_kwargs: profiles[resident_id])
             cme._authorization_decision = AsyncMock(return_value=SimpleNamespace(
                 decision_id="decision", audit_event_id="audit", policy_revision="policy"))
+            cme.provider_runtime = SimpleNamespace(invoke=AsyncMock(return_value={
+                "action": "final", "decision": {"status": "healthy"}}))
             resolved = []
             for index, resident_id in enumerate(associations, start=1):
                 activity = {"activity_id": f"00000000-0000-4000-8000-00000000010{index}",
                             "attempt_id": f"00000000-0000-4000-8000-00000000020{index}",
                             "idempotency_key": f"resident:{resident_id}",
-                            "input": {"resident_id": resident_id}}
+                            "activity_type": "resident.review",
+                            "input": {"resident_id": resident_id,
+                                      "objective": "Inspect the assigned request.",
+                                      "correlation_id": f"correlation:{resident_id}"}}
                 resolved.append(await cme._resolve_resident_executor(activity))
+                await cme._run_bound_resident_activity(activity, resolved[-1])
             assert [item["execution_profile"]["resident_id"] for item in resolved] == [
                 "resident.alpha", "resident.beta"]
             assert [item["binding_revision"] for item in resolved] == [
                 "binding-resident.alpha", "binding-resident.beta"]
             assert [item["module_id"] for item in resolved] == [module["module_id"]] * 2
+            calls = cme.provider_runtime.invoke.await_args_list
+            assert len(calls) == 2
+            assert {call.args[1]["request"]["payload"]["resident_id"] for call in calls} == {
+                "resident.alpha", "resident.beta"}
+            assert cme.store.finish_activity.await_count == 2
             assert cme._authorization_decision.await_count == 2
+
+            cme._authorization_decision.side_effect = PermissionError("resident execution grant missing")
+            with pytest.raises(PermissionError, match="resident execution grant missing"):
+                await cme._resolve_resident_executor({
+                    "activity_id": "00000000-0000-4000-8000-000000000111",
+                    "attempt_id": "00000000-0000-4000-8000-000000000211",
+                    "idempotency_key": "resident:resident.alpha",
+                    "input": {"resident_id": "resident.alpha"}})
+            assert cme.provider_runtime.invoke.await_count == 2
 
     asyncio.run(run())
 
