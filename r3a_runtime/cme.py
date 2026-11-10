@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.20.1
+File Revision: 1.20.2
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -21,6 +21,7 @@ Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Normalize type
 Changed: 2026-11-09 | R3A-STEWARD-CHAT-ROSTER | R3A Coordinator | Preserve directory roster rows and evaluate chat readiness through configured office routes and existing execution grants.
 Changed: 2026-11-10T00:14:15Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Separate direct Steward conversation authorization from resident-to-resident delegation while retaining target execution authorization.
 Changed: 2026-11-10T00:34:18Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Expose exact-grant revocation through the existing private CME operator control path.
+Changed: 2026-11-10 | #51 | R3A Coordinator | Exclude unavailable optional tools and apply conversation-specific completion validation.
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Dispatch generic versioned Steward read/write effects through existing authorization, invocation, and provider paths.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
@@ -141,6 +142,18 @@ def _requires_runtime_evidence(objective: str) -> bool:
                      "module", "pid", "heartbeat", "operational"}
     objective_terms = set(re.findall(r"[a-z0-9_]+", objective.casefold()))
     return bool(runtime_terms & objective_terms)
+
+
+def _conversation_response_issue(event_kind: str, decision: Any) -> str | None:
+    """Validate a chat reply without imposing objective evidence-citation rules."""
+    if event_kind != "conversation":
+        return None
+    if not isinstance(decision, dict) or decision.get("status") not in {"healthy", "degraded"}:
+        return "Grace did not return a completed conversation decision"
+    response = decision.get("assessment")
+    if not isinstance(response, str) or not response.strip():
+        return "Grace returned an empty conversation response"
+    return None
 
 
 def _knowledge_answer_issues(objective: str, evidence: list[dict[str, Any]],
@@ -2147,14 +2160,19 @@ class CME:
         if registry is None:
             return tuple(tools)
         discoveries = registry.discover()
-        overridden = {item["descriptor"]["operation_id"] for item in discoveries
-                      if item["descriptor"]["effect_class"] == "read"}
+        read_discoveries = [item for item in discoveries
+                            if item["descriptor"]["effect_class"] == "read"]
+        # A registered provider owns this operation even while unavailable. Do not
+        # fall back to a parallel local projection or let an unrelated failed
+        # optional provider prevent resident execution altogether.
+        overridden = {item["descriptor"]["operation_id"] for item in read_discoveries}
         tools = [tool for tool in tools if tool["capability_id"] not in overridden]
-        for discovery in discoveries:
+        for discovery in read_discoveries:
+            if discovery["registry_observation"].get("state") != "ACTIVE":
+                continue
             operation = registry.resolve(
                 discovery["descriptor"]["operation_id"], discovery["descriptor"]["contract_version"])
-            if operation.descriptor["effect_class"] == "read":
-                tools.append(operation.resident_tool_projection())
+            tools.append(operation.resident_tool_projection())
         return tuple(tools)
 
     @staticmethod
@@ -3132,7 +3150,8 @@ class CME:
                     if observations.get("action") != "final":
                         raise RuntimeError("Grace returned an unsupported resident action")
                     candidate_decision = observations.get("decision") or {}
-                    if candidate_decision.get("status") == "healthy":
+                    is_conversation = context.get("event_kind") == "conversation"
+                    if candidate_decision.get("status") == "healthy" and not is_conversation:
                         final_issues = self._final_evidence_issues(context, evidence, candidate_decision)
                         if final_issues:
                             fingerprint = evidence_fingerprint(evidence)
@@ -3187,10 +3206,20 @@ class CME:
                 result = await self._module_call("execute", context, timeout=5.0)
                 observations = result["result"]
             decision = observations.get("decision", {}) if isinstance(observations, dict) else {}
+            is_conversation = context.get("event_kind") == "conversation"
             answer_issues = (_knowledge_answer_issues(context["objective"], context["evidence"], decision)
-                             if activity["activity_type"] == "grace.objective" else [])
+                             if activity["activity_type"] == "grace.objective" and not is_conversation else [])
             if activity["activity_type"] != "grace.objective":
                 await self.store.finish_activity(activity, observations)
+            elif is_conversation:
+                response_issue = _conversation_response_issue("conversation", decision)
+                if response_issue:
+                    await self.store.block_activity(
+                        activity, response_issue,
+                        {"validation": "r3a.steward-conversation-response.v1",
+                         "decision": decision, "model": observations.get("model")})
+                else:
+                    await self.store.finish_activity(activity, observations)
             elif decision.get("status") != "healthy":
                 await self.store.block_activity(activity,
                     "Grace did not conclude the objective with a fully supported answer",

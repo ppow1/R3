@@ -20,7 +20,7 @@ History/Predecessor: New file; initial publication recorded in Git.
 // Mock fetch never supplies live institutional data.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp, notificationPresentation, residentProgressLabel, residentChatStatusLabel} from '../web/steward-workspace-api.mjs';
+import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp, notificationPresentation, residentProgressLabel, residentChatStatusLabel, conversationHistoryLoadingLabel, conversationPollState} from '../web/steward-workspace-api.mjs';
 
 function response(status, payload, headers = {}) {
   return {
@@ -114,6 +114,15 @@ test('resident progress presentation uses the dynamically selected resident name
   assert.equal(residentProgressLabel('Grace'), 'Grace is working on this turn through managed CME…');
   assert.equal(residentProgressLabel('Vicky'), 'Vicky is working on this turn through managed CME…');
   assert.equal(residentProgressLabel('  '), 'Selected resident is working on this turn through managed CME…');
+});
+
+test('history polling keeps loaded messages visible and stops with an explicit timeout state', () => {
+  assert.equal(conversationHistoryLoadingLabel(true), 'Loading durable conversation history…');
+  assert.equal(conversationHistoryLoadingLabel(false), null);
+  assert.equal(conversationPollState(20).continuePolling, true);
+  const timeout = conversationPollState(21);
+  assert.equal(timeout.continuePolling, false);
+  assert.match(timeout.message, /Automatic refresh is paused/);
 });
 
 test('resident roster labels chat eligibility from CME readiness evidence', () => {

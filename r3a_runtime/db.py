@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.14.1
+File Revision: 1.14.2
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -33,6 +33,7 @@ Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Add grant validation for explicit-p
 Changed: 2026-11-07T13:20:00Z | R3A-AP2-CAPABILITY-INTEGRATION | Codex GPT-6 | Store canonical invocation authorization in a nonreserved evidence column and verify durable SQL recovery against isolated PostgreSQL.
 Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Persist validated generic activity-intake source lineage and evidence through the existing durable activity/event ledger.
 Changed: 2026-11-10T00:34:18Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Add exact-grant revocation to the existing CME grant store with durable audit evidence.
+Changed: 2026-11-10 | #51 | Bound retry recovery for failed conversation activities.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Persist typed Engineering assignments in durable Grace inbox intake without relaxing AP1 acceptance criteria.
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Park objective dependencies durably, requeue after prerequisite completion, and expose bounded lineage evidence.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Snapshot the configured escalation policy on each durable objective so continuation uses its original budget and allowed routes.
@@ -78,6 +79,7 @@ from .capability_contracts import CapabilityContractError, validate_json
 
 IMPLEMENTATION_REVISION = os.environ.get("R3A_IMPLEMENTATION_REVISION", "working-tree")
 MAX_ACTIVITY_INTAKE_BYTES = 512 * 1024
+MAX_CONVERSATION_ATTEMPTS = 8
 ACTIVITY_INTAKE_SCHEMA = json.loads(
     (Path(__file__).with_name("schemas") / "activity-intake.v1.schema.json").read_text(encoding="utf-8"))
 
@@ -88,6 +90,20 @@ class InvalidTransition(RuntimeError):
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def activity_failure_outcome(recovery_policy: str, event_kind: str,
+                             attempt_count: int) -> tuple[str, dict[str, Any]]:
+    """Bound chat recovery while retaining the configured policy for other work."""
+    safe = recovery_policy == "idempotent"
+    exhausted = event_kind == "conversation" and attempt_count >= MAX_CONVERSATION_ATTEMPTS
+    if exhausted:
+        safe = False
+    details: dict[str, Any] = {"safe_to_resume": safe}
+    if exhausted:
+        details.update({"retry_limit_reached": True,
+                        "retry_limit": MAX_CONVERSATION_ATTEMPTS})
+    return ("RECOVERING" if safe else "BLOCKED"), details
 
 
 def _concurrent_index_spec(sql: str) -> tuple[str, str, str]:
@@ -1959,12 +1975,17 @@ class Store:
                             retry_seconds: float) -> None:
         async with self.pool.connection() as conn, conn.transaction():
             row = await (await conn.execute(
-                "SELECT recovery_policy FROM r3a.activities WHERE activity_id=%s FOR UPDATE",
+                "SELECT recovery_policy,attempt_count,input FROM r3a.activities WHERE activity_id=%s FOR UPDATE",
                 (activity["activity_id"],),
             )).fetchone()
-            safe = row and row["recovery_policy"] == "idempotent"
-            next_state = "RECOVERING" if safe else "BLOCKED"
-            details = {"type": type(exc).__name__, "message": str(exc)[:2000], "safe_to_resume": bool(safe)}
+            safe = bool(row and row["recovery_policy"] == "idempotent")
+            event_input = row["input"] if row and isinstance(row["input"], dict) else {}
+            next_state, retry_details = activity_failure_outcome(
+                row["recovery_policy"] if row else "", event_input.get("event_kind", "objective"),
+                int(row["attempt_count"] or 0) if row else 0)
+            safe = retry_details["safe_to_resume"]
+            details = {"type": type(exc).__name__, "message": str(exc)[:2000],
+                       **retry_details}
             await conn.execute(
                 "UPDATE r3a.activities SET state=%s,available_at=clock_timestamp()+(%s * interval '1 second'),"
                 "lease_owner=NULL,lease_until=NULL,exception=%s,updated_at=clock_timestamp() "

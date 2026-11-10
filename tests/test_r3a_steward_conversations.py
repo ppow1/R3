@@ -24,7 +24,8 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from r3a_runtime.cme import CME
+from r3a_runtime.cme import CME, _conversation_response_issue
+from r3a_runtime.db import activity_failure_outcome
 
 
 class ConversationControlTests(unittest.TestCase):
@@ -76,6 +77,40 @@ class ConversationControlTests(unittest.TestCase):
         self.assertIn("Continue our discussion.", submit_call.args[0])
         self.assertEqual(observed[1][0], "resident.objective.submit")
         cme.store.link_steward_message_activity.assert_awaited_once()
+
+    def test_resident_tool_projection_skips_failed_optional_providers(self):
+        cme = self.cme()
+        failed = {"descriptor": {"operation_id": "institution.knowledge.read",
+                                  "contract_version": "1.0.0", "effect_class": "read"},
+                  "registry_observation": {"state": "FAILED"}}
+        active = {"descriptor": {"operation_id": "institutional.directory.discover",
+                                  "contract_version": "1.0.0", "effect_class": "read"},
+                  "registry_observation": {"state": "ACTIVE"}}
+        operation = SimpleNamespace(resident_tool_projection=lambda: {
+            "capability_id": "institutional.directory.discover", "name": "directory_discover"})
+        registry = SimpleNamespace(discover=lambda: (failed, active),
+                                   resolve=lambda operation_id, version: operation)
+        cme.settings.capability_registry = registry
+        tools = cme._resident_tools()
+        self.assertNotIn("institution.knowledge.read", {tool["capability_id"] for tool in tools})
+        self.assertIn("institutional.directory.discover", {tool["capability_id"] for tool in tools})
+
+    def test_conversation_final_response_does_not_require_objective_citations(self):
+        self.assertIsNone(_conversation_response_issue("conversation", {
+            "status": "healthy", "assessment": "Hello. How can I help?", "evidence_refs": []}))
+        self.assertIsNone(_conversation_response_issue("objective", {
+            "status": "healthy", "assessment": "Result", "evidence_refs": []}))
+        self.assertIsNotNone(_conversation_response_issue("conversation", {
+            "status": "healthy", "assessment": "  ", "evidence_refs": []}))
+        self.assertIsNotNone(_conversation_response_issue("conversation", {
+            "status": "blocked", "assessment": "Cannot answer", "evidence_refs": []}))
+
+    def test_conversation_retries_are_bounded_and_report_blocked_failure(self):
+        self.assertEqual(activity_failure_outcome("idempotent", "conversation", 7)[0], "RECOVERING")
+        state, details = activity_failure_outcome("idempotent", "conversation", 8)
+        self.assertEqual(state, "BLOCKED")
+        self.assertTrue(details["retry_limit_reached"])
+        self.assertEqual(activity_failure_outcome("idempotent", "objective", 50)[0], "RECOVERING")
 
     def test_directory_bound_vicky_uses_cme_delegation_route(self):
         cme = self.cme()

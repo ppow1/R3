@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: web/steward-workspace-api.js
 Component: R3A-STEWARD-WORKSPACE-CLIENT
-File Revision: 1.0.9
+File Revision: 1.0.10
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Same-origin client for versioned resident conversation and notification contracts
@@ -19,6 +19,7 @@ Changed: 2026-11-09 | R3A-WEBSITE-WIDE-AUTH | R3A Coordinator | Inherit global W
 Changed: 2026-11-09 | R3A-LOGIN-REDIRECT-LOOP | R3A Coordinator | Recheck only the canonical session after operation 401; preserve authenticated Website navigation on scoped denials.
 Changed: 2026-11-09 | R3A-STEWARD-CHAT-ROSTER | R3A Coordinator | Render all dynamic roster rows and disable chat when the current response does not establish availability.
 Changed: 2026-11-09 | R3A-STEWARD-CHAT-READINESS | R3A Coordinator | Show the evidence-backed route or authorization reason for disabled roster entries.
+Changed: 2026-11-10 | #51 | Keep loaded history visible during polling and pause refresh after a bounded wait.
 Tests: tests/test_steward_workspace_api.mjs uses mocked fetch only as a labeled development test
 */
 
@@ -83,6 +84,20 @@ export function residentProgressLabel(displayName) {
     ? displayName.trim()
     : 'Selected resident';
   return `${name} is working on this turn through managed CME…`;
+}
+
+export function conversationHistoryLoadingLabel(isInitialLoad) {
+  return isInitialLoad ? 'Loading durable conversation history…' : null;
+}
+
+export function conversationPollState(polls, maxPolls = 20) {
+  const continuePolling = Number.isInteger(polls) && polls <= maxPolls;
+  return {
+    continuePolling,
+    message: continuePolling
+      ? 'Resident is working on this turn through managed CME…'
+      : 'This turn is still processing. Automatic refresh is paused; reload the conversation to check again.',
+  };
 }
 
 export function residentChatStatusLabel(resident) {
@@ -203,6 +218,8 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   let pendingConversationId = null;
   let pendingMessage = null;
   const newConversationButton = root.getElementById('chat-new');
+  const processingPolls = new Map();
+  const maxProcessingPolls = 20;
   function syncNewConversationButton() {
     newConversationButton.disabled = !directoryAvailable || !selectedResident || !chatAvailableResidentIds.has(selectedResident) || creatingConversation;
     newConversationButton.setAttribute('aria-busy', String(creatingConversation));
@@ -220,8 +237,10 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   };
 
   async function loadMessages(conversationId) {
+    const changingConversation = selectedConversation !== conversationId;
     selectedConversation = conversationId;
-    setText(messageList, 'Loading durable conversation history…');
+    const loadingLabel = conversationHistoryLoadingLabel(changingConversation || !messageList.childNodes.length);
+    if (loadingLabel) setText(messageList, loadingLabel);
     try {
       const result = await api.messages(conversationId);
       messageList.replaceChildren();
@@ -234,13 +253,28 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
       }
       if (!messageList.childNodes.length) setText(messageList, 'This conversation has no messages yet.');
       const processing = (result.messages || []).some(message => message.sender?.kind === 'steward' && message.delivery_state === 'processing');
-      setText(status, `History loaded from service · ${result.freshness || 'freshness unknown'}`);
-      status.dataset.state = result.freshness || 'unknown';
+      const failed = (result.messages || []).some(message => message.sender?.kind === 'steward' && message.delivery_state === 'blocked');
       composer.disabled = processing;
       sendButton.disabled = processing;
       if (processing) {
-        setText(status, residentProgressLabel(residentNames.get(selectedResident)));
-        setTimeout(() => { if (selectedConversation === conversationId) loadMessages(conversationId); }, 1500);
+        const polls = (processingPolls.get(conversationId) || 0) + 1;
+        processingPolls.set(conversationId, polls);
+        const pollState = conversationPollState(polls, maxProcessingPolls);
+        if (pollState.continuePolling) {
+          setText(status, residentProgressLabel(residentNames.get(selectedResident)));
+          setTimeout(() => { if (selectedConversation === conversationId) loadMessages(conversationId); }, 1500);
+        } else {
+          setText(status, pollState.message);
+          status.dataset.state = 'processing-timeout';
+        }
+      } else if (failed) {
+        processingPolls.delete(conversationId);
+        setText(status, 'Grace could not complete this turn. The service returned an explicit blocked result.');
+        status.dataset.state = 'blocked';
+      } else {
+        processingPolls.delete(conversationId);
+        setText(status, `History loaded from service · ${result.freshness || 'freshness unknown'}`);
+        status.dataset.state = result.freshness || 'unknown';
       }
       return result.messages || [];
     } catch (error) { unavailable(error); setText(messageList, 'History unavailable; no local transcript is shown.'); }
