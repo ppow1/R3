@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/module_extensions.py
 Component: R3A-MODULE-EXTENSION-CONTRACTS
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-10T01:09:23Z
 Created By: Codex GPT-6
 Purpose: Validate resident-executor bindings and durable activity-handler declarations.
@@ -12,10 +12,11 @@ Dependencies: Python standard library; capability contract JSON Schema validator
 Authority: AD-024; Modular Plugins #46. Bindings and registration grant no authority.
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Add generic resident and durable handler contract validation.
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Resolve resident bindings against the active registry artifact and declared execution range.
+Changed: 2026-11-10T01:26:34Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Validate configured binding targets against declared executor roles and immutable digests.
 Supersedes: None
 Contracts: r3a.resident.module-binding.v1; r3a.resident.execution-profile@1.0.0; r3a.activity-handler.v1; r3a.activity-intake.v1.
 Tests: tests/test_r3a_module_extensions.py
-History/Predecessor: Prior revision at commit 67aa6c181e237b97acee975b297e44e7e14aa440, blob 99b02ed5a14cd3a6c050ab4f695cc7f5bdc3d496.
+History/Predecessor: Prior revision at commit 6eb7718, blob a1c351df83d9c6b6d1e377be7a15315b7c72dd9f.
 """
 from __future__ import annotations
 
@@ -241,7 +242,25 @@ def resolve_resident_binding(bindings: Iterable[dict[str, Any]], resident_id: st
             or manifest.get("artifact_digest") != binding["artifact_digest"]
             or not _SHA256.fullmatch(str(manifest.get("artifact_digest", "")))):
         raise ModuleExtensionError("bound resident executor artifact does not match registry identity")
-    declaration = validate_resident_executor_declaration(manifest.get("resident_executor"))
+    validate_resident_binding_target(binding, manifest)
+    return {"binding": binding, "module": module, "module_id": binding["module_id"],
+            "module_version": binding["module_version"], "artifact_digest": binding["artifact_digest"],
+            "binding_revision": binding["binding_revision"],
+            "configuration_ref": binding["configuration_ref"],
+            "configuration_revision": binding["configuration_revision"]}
+
+
+def validate_resident_binding_target(binding: dict[str, Any], module_manifest: dict[str, Any], *,
+                                     execution_contract_minor: int = 0) -> dict[str, Any]:
+    """Validate that binding metadata names a module manifest declaring that role."""
+    binding = validate_resident_binding(binding)
+    if (not isinstance(module_manifest, dict)
+            or module_manifest.get("module_id") != binding["module_id"]
+            or module_manifest.get("module_version") != binding["module_version"]
+            or module_manifest.get("artifact_digest") != binding["artifact_digest"]
+            or not _SHA256.fullmatch(str(module_manifest.get("artifact_digest", "")))):
+        raise ModuleExtensionError("resident binding does not match the declared module version and artifact")
+    declaration = validate_resident_executor_declaration(module_manifest.get("resident_executor"))
     supported = declaration["execution_contract_range"]
     requested = binding["execution_contract_range"]
     if (not compatible_contract_range(supported, contract_id="r3a.resident.execution", major=1,
@@ -251,11 +270,31 @@ def resolve_resident_binding(bindings: Iterable[dict[str, Any]], resident_id: st
             or requested["min_minor"] < supported["min_minor"]
             or requested["max_minor"] > supported["max_minor"]):
         raise ModuleExtensionError("resident executor contract range is incompatible with registered module")
-    return {"binding": binding, "module": module, "module_id": binding["module_id"],
-            "module_version": binding["module_version"], "artifact_digest": binding["artifact_digest"],
-            "binding_revision": binding["binding_revision"],
-            "configuration_ref": binding["configuration_ref"],
-            "configuration_revision": binding["configuration_revision"]}
+    return declaration
+
+
+def validate_resident_binding_targets(bindings: Iterable[dict[str, Any]],
+                                      modules: Iterable[dict[str, Any]], *,
+                                      execution_contract_minor: int = 0) -> tuple[dict[str, Any], ...]:
+    """Ensure each configured binding names one declared role and pinned artifact."""
+    declarations: dict[tuple[str, str], dict[str, Any]] = {}
+    for module in modules:
+        if not isinstance(module, dict):
+            continue
+        key = (str(module.get("module_id", "")), str(module.get("module_version", "")))
+        if key in declarations and declarations[key] != module:
+            raise ModuleExtensionError("module registry contains conflicting declarations for one version")
+        declarations[key] = module
+    validated = []
+    for raw in bindings:
+        binding = validate_resident_binding(raw)
+        target = declarations.get((binding["module_id"], binding["module_version"]))
+        if target is None:
+            raise ModuleExtensionError("resident binding references an unregistered module version")
+        validate_resident_binding_target(binding, target,
+                                         execution_contract_minor=execution_contract_minor)
+        validated.append(binding)
+    return tuple(validated)
 
 
 def compatible_contract_range(value: dict[str, Any], *, contract_id: str,

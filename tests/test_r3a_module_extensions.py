@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_module_extensions.py
 Component: TEST-R3A-MODULE-EXTENSION-CONTRACTS
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-10T01:09:23Z
 Created By: Codex GPT-6
 Purpose: Permanently verify generic resident and durable activity-handler module declarations.
@@ -12,20 +12,24 @@ Dependencies: r3a_runtime.module_extensions and capability contract validation.
 Authority: AD-024; Modular Plugins #46; fixture acceptance only.
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Add extensible executor and handler contract tests.
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify authoritative binding resolution against active role declarations and pinned artifacts.
+Changed: 2026-11-10T01:26:34Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify bootstrap binding registration and fail-closed role/digest matching.
 Supersedes: None
 Contracts: r3a.resident.module-binding.v1; r3a.resident.executor@1.0.0; r3a.activity-handler.v1.
 Tests: python3 -m pytest -q tests/test_r3a_module_extensions.py
-History/Predecessor: Prior revision at commit 67aa6c181e237b97acee975b297e44e7e14aa440, blob 01b2744f1e57284807e5ce48d756d9639f6705b3.
+History/Predecessor: Prior revision at commit 6eb7718, blob cfef25e4e3aadb15a37808cdd2cf59075f278389.
 """
 from __future__ import annotations
 
 import copy
 import hashlib
 import json
+import shutil
+from pathlib import Path
 
 import pytest
 
 from r3a_runtime.capability_contracts import CapabilityContractError, validate_module_manifest
+from r3a_runtime.config import ConfigurationError, load_settings, sanitized_config
 from r3a_runtime.module_extensions import (
     ModuleExtensionError,
     resolve_activity_handler,
@@ -37,14 +41,14 @@ from r3a_runtime.module_extensions import (
 )
 
 
-def resident_binding(resident_id: str, module_id: str, *, digest: str = "a" * 64,
+def resident_binding(resident_id: str, module_id: str, *, version: str = "1.0.0", digest: str = "a" * 64,
                      association_id: str | None = None) -> dict:
     return {
         "contract_id": "r3a.resident.module-binding",
         "contract_version": "1.0.0",
         "resident_id": resident_id,
         "module_id": module_id,
-        "module_version": "1.0.0",
+        "module_version": version,
         "artifact_digest": digest,
         "execution_contract_range": {"contract_id": "r3a.resident.execution", "major": 1,
                                      "min_minor": 0, "max_minor": 2},
@@ -83,6 +87,74 @@ HANDLER = {
     "recovery": {"mode": "checkpointed", "idempotency_contract": "stable-input-key.v1",
                  "checkpoint_contract": "example.inventory-checkpoint.v1"},
 }
+
+
+def bootstrap_config(tmp_path: Path, *, include_binding: bool = True) -> Path:
+    root = Path(__file__).resolve().parents[1]
+    plugin_source = root / "r3a_plugins/octominer_telemetry"
+    plugin_root = tmp_path / "octominer"
+    shutil.copytree(plugin_source, plugin_root)
+    manifest_path = plugin_root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    operation = manifest["operation"]
+    manifest["module_manifest"] = {
+        "contract_id": "r3a.module-manifest.v1", "contract_version": "1.0.0",
+        "module_id": operation["provider"]["provider_id"],
+        "module_version": operation["provider"]["provider_version"], "owner": "fixture-owner",
+        "binding": {"contract_id": "r3a.capability-provider.v1", "protocol_major": 1,
+                    "protocol_min_minor": 0, "protocol_max_minor": 0,
+                    "entrypoint": operation["provider"]["entrypoint"]},
+        "dependencies": [],
+        "configuration": {"schema_ref": manifest["configuration_schema"]["schema_id"],
+                           "configuration_ref": "capability_operations[].configuration"},
+        "capability_refs": [operation["operation_id"]], "resource_refs": [],
+        "state_namespace": "r3a.octominer-telemetry",
+        "migration_contract": "r3a.stateless-provider.v1",
+        "recovery_policy": "operation-contract.v1",
+        "artifact": {"artifact_ref": manifest["artifact_ref"],
+                     "artifact_sha256": manifest["artifact_sha256"]},
+        "resident_executor": {"contract_id": "r3a.resident.executor",
+                              "contract_version": "1.0.0",
+                              "execution_contract_range": {
+                                  "contract_id": "r3a.resident.execution", "major": 1,
+                                  "min_minor": 0, "max_minor": 2}},
+    }
+    if include_binding:
+        manifest["module_manifest"]["activity_handler"] = copy.deepcopy(HANDLER)
+        manifest["module_manifest"]["capability_refs"].append("inventory.read")
+    manifest_path.write_text(json.dumps(manifest))
+    config_file = plugin_root / "config.example.json"
+    source = root / "r3a_runtime/observer_module.py"
+    data = tmp_path / "state"
+    value = {
+        "schema_version": 1, "instance_id": "r3a_extension_fixture",
+        "paths": {"data_dir": str(data), "postgres_socket_dir": str(data / "pg"),
+                  "control_socket": str(data / "control.sock"),
+                  "diagnostics_socket": str(data / "diagnostics.sock"),
+                  "module_socket": str(data / "module.sock"),
+                  "machine_catalog_dir": str(root / "r3a_runtime/state_machines")},
+        "postgres": {"database": "r3a_extension_fixture", "user": "r3a_runtime",
+                     "socket_dir": str(data / "pg"), "port": 55432},
+        "module": {"module_id": "foundation.observer", "version": "1.0.0",
+                   "contract_id": "r3a.resident-module", "protocol_major": 1,
+                   "protocol_minor": 0,
+                   "capabilities": [operation["operation_id"], "inventory.read"],
+                   "owner": "R3A", "entrypoint": "r3a_runtime.observer_module",
+                   "source": str(source), "sha256": hashlib.sha256(source.read_bytes()).hexdigest()},
+        "timing": {"observer_interval_seconds": 1, "scheduler_interval_seconds": 1,
+                   "lease_seconds": 30, "heartbeat_interval_seconds": 5,
+                   "heartbeat_stale_after_seconds": 15, "diagnostic_stale_after_seconds": 30,
+                   "restart_initial_seconds": 1, "restart_max_seconds": 5,
+                   "worker_concurrency": 2},
+        "capability_operations": [{"manifest": str(manifest_path), "configuration": str(config_file)}],
+    }
+    if include_binding:
+        value["resident_module_bindings"] = [resident_binding(
+            "resident:alpha", "r3a.octominer-telemetry", version="2.0.0",
+            digest=manifest["artifact_sha256"])]
+    bootstrap = tmp_path / "bootstrap.json"
+    bootstrap.write_text(json.dumps(value))
+    return bootstrap
 
 
 def registered_module(module_id: str, *, version: str = "1.0.0", digest: str = "c" * 64,
@@ -124,6 +196,40 @@ def module_manifest(*, module_id="executor.orbit", version="1.0.0", digest="a" *
 
 
 class TestResidentBinding:
+    def test_settings_load_validates_binding_against_discovered_executor_and_handler(self, tmp_path):
+        settings = load_settings(bootstrap_config(tmp_path))
+        assert settings.resident_module_bindings[0]["resident_id"] == "resident:alpha"
+        assert sanitized_config(settings)["resident_module_bindings"] == list(settings.resident_module_bindings)
+        operation = settings.capability_registry.resolve("infrastructure.octominer.telemetry.read")
+        assert operation.legacy_manifest["module_manifest"]["activity_handler"]["handler_id"] == "example.inventory-handler"
+
+    def test_settings_loader_rejects_binding_to_missing_module_or_wrong_digest(self, tmp_path):
+        path = bootstrap_config(tmp_path)
+        value = json.loads(path.read_text())
+        value["resident_module_bindings"][0]["module_id"] = "executor.not-registered"
+        path.write_text(json.dumps(value))
+        with pytest.raises(ConfigurationError, match="unregistered module"):
+            load_settings(path)
+        value["resident_module_bindings"][0]["module_id"] = "r3a.octominer-telemetry"
+        value["resident_module_bindings"][0]["artifact_digest"] = "f" * 64
+        path.write_text(json.dumps(value))
+        with pytest.raises(ConfigurationError, match="does not match"):
+            load_settings(path)
+
+    def test_settings_loader_rejects_binding_without_declared_executor_role(self, tmp_path):
+        path = bootstrap_config(tmp_path, include_binding=False)
+        value = json.loads(path.read_text())
+        manifest_path = Path(value["capability_operations"][0]["manifest"])
+        manifest = json.loads(manifest_path.read_text())
+        manifest["module_manifest"].pop("resident_executor")
+        manifest_path.write_text(json.dumps(manifest))
+        value["resident_module_bindings"] = [resident_binding(
+            "resident:alpha", "r3a.octominer-telemetry", version="2.0.0",
+            digest=manifest["artifact_sha256"])]
+        path.write_text(json.dumps(value))
+        with pytest.raises(ConfigurationError, match="unregistered module"):
+            load_settings(path)
+
     def test_two_independent_unlisted_residents_bind_generic_executor_metadata(self):
         declaration = module_manifest()
         operation = provider_operation()
