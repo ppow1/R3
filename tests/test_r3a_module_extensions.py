@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_module_extensions.py
 Component: TEST-R3A-MODULE-EXTENSION-CONTRACTS
-File Revision: 1.0.4
+File Revision: 1.0.5
 Created: 2026-11-10T01:09:23Z
 Created By: Codex GPT-6
 Purpose: Permanently verify generic resident and durable activity-handler module declarations.
@@ -14,10 +14,11 @@ Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Add exten
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify authoritative binding resolution against active role declarations and pinned artifacts.
 Changed: 2026-11-10T01:26:34Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify bootstrap binding registration and fail-closed role/digest matching.
 Changed: 2026-11-10T02:02:46Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Test v1.0/v1.1 manifest schema selection and fail-closed unsupported versions.
+Changed: 2026-11-10T15:24:00Z | R3A-MODULAR-EXECUTOR-ROLE | Codex GPT-6 | Verify primary-module role registration, pinned bindings, dual residents, and legacy manifest promotion.
 Supersedes: None
 Contracts: r3a.resident.module-binding.v1; r3a.resident.executor@1.0.0; r3a.activity-handler.v1.
 Tests: python3 -m pytest -q tests/test_r3a_module_extensions.py
-History/Predecessor: Prior revision at commit 76a9ad352e892f22cb0ee5a684a6cc358e5155b3, blob aa03f95ca2828d714538dabb65067bd691a8af31; immediate predecessor recorded in Git.
+History/Predecessor: Prior revision at commit 76a9ad352e892f22cb0ee5a684a6cc358e5155b3, blob aa03f95ca2828d714538dabb65067bd691a8af31; immediate predecessor blob 4a49d5cf1fd7be2660306f8fac719998c2c1c57a at base c62bb28d026e1c1cad99c90583f0debae067f2a1.
 """
 from __future__ import annotations
 
@@ -25,7 +26,9 @@ import copy
 import hashlib
 import json
 import shutil
+import asyncio
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -231,6 +234,110 @@ class TestResidentBinding:
         path.write_text(json.dumps(value))
         with pytest.raises(ConfigurationError, match="unregistered module"):
             load_settings(path)
+
+    def test_top_level_module_registers_generic_executor_role_for_two_bound_residents(self, tmp_path):
+        path = bootstrap_config(tmp_path, include_binding=False)
+        value = json.loads(path.read_text())
+        role = {"contract_id": "r3a.resident.executor", "contract_version": "1.0.0",
+                "execution_contract_range": {"contract_id": "r3a.resident.execution",
+                                              "major": 1, "min_minor": 0, "max_minor": 2}}
+        value["module"]["resident_executor"] = role
+        value["resident_module_bindings"] = [
+            resident_binding("resident:alpha", value["module"]["module_id"],
+                             digest=value["module"]["sha256"]),
+            resident_binding("resident:beta", value["module"]["module_id"],
+                             digest=value["module"]["sha256"]),
+        ]
+        path.write_text(json.dumps(value))
+
+        settings = load_settings(path)
+        assert settings.module_resident_executor == role
+        assert sanitized_config(settings)["module"]["resident_executor"] == role
+        assert [item["resident_id"] for item in settings.resident_module_bindings] == [
+            "resident:alpha", "resident:beta"]
+
+        from r3a_runtime.cme import CME
+        cme = object.__new__(CME)
+        cme.settings = settings
+        module_manifest = cme.manifest()
+        assert module_manifest["manifest_contract"] == "r3a.module-manifest.v1@1.1.0"
+        assert module_manifest["resident_executor"] == role
+        assert module_manifest["artifact_digest"] == settings.module_digest
+        registry = [{"module_id": settings.module_id, "module_version": settings.module_version,
+                     "lifecycle_state": "ACTIVE", "manifest": module_manifest}]
+        for binding in settings.resident_module_bindings:
+            resolved = resolve_resident_binding(
+                settings.resident_module_bindings, binding["resident_id"],
+                binding["identity_association"], registry)
+            assert resolved["module_id"] == settings.module_id
+            assert resolved["artifact_digest"] == settings.module_digest
+            assert "authorized" not in resolved
+
+    @pytest.mark.parametrize("mutate", [
+        lambda module: module["resident_executor"].update(contract_version="2.0.0"),
+        lambda module: module["resident_executor"].update(unreviewed=True),
+    ])
+    def test_top_level_module_rejects_invalid_executor_contract(self, tmp_path, mutate):
+        path = bootstrap_config(tmp_path, include_binding=False)
+        value = json.loads(path.read_text())
+        value["module"]["resident_executor"] = {
+            "contract_id": "r3a.resident.executor", "contract_version": "1.0.0",
+            "execution_contract_range": {"contract_id": "r3a.resident.execution",
+                                          "major": 1, "min_minor": 0, "max_minor": 2}}
+        mutate(value["module"])
+        path.write_text(json.dumps(value))
+        with pytest.raises(ConfigurationError, match="module.resident_executor is invalid"):
+            load_settings(path)
+
+    def test_top_level_module_binding_rejects_wrong_artifact_digest(self, tmp_path):
+        path = bootstrap_config(tmp_path, include_binding=False)
+        value = json.loads(path.read_text())
+        value["module"]["resident_executor"] = {
+            "contract_id": "r3a.resident.executor", "contract_version": "1.0.0",
+            "execution_contract_range": {"contract_id": "r3a.resident.execution",
+                                          "major": 1, "min_minor": 0, "max_minor": 2}}
+        value["resident_module_bindings"] = [resident_binding(
+            "resident:alpha", "foundation.observer", digest="f" * 64)]
+        path.write_text(json.dumps(value))
+        with pytest.raises(ConfigurationError, match="does not match"):
+            load_settings(path)
+
+    def test_legacy_top_level_module_projection_does_not_gain_executor_metadata(self, tmp_path):
+        path = bootstrap_config(tmp_path, include_binding=False)
+        settings = load_settings(path)
+        assert settings.module_resident_executor is None
+        from r3a_runtime.cme import CME
+        cme = object.__new__(CME)
+        cme.settings = settings
+        manifest = cme.manifest()
+        assert "manifest_contract" not in manifest
+        assert "resident_executor" not in manifest
+
+    def test_cme_promotes_only_a_compatible_legacy_primary_manifest(self, tmp_path):
+        path = bootstrap_config(tmp_path, include_binding=False)
+        value = json.loads(path.read_text())
+        value["module"]["resident_executor"] = {
+            "contract_id": "r3a.resident.executor", "contract_version": "1.0.0",
+            "execution_contract_range": {"contract_id": "r3a.resident.execution",
+                                          "major": 1, "min_minor": 0, "max_minor": 2}}
+        path.write_text(json.dumps(value))
+        settings = load_settings(path)
+        from r3a_runtime.cme import CME
+        cme = object.__new__(CME)
+        cme.settings = settings
+        cme.module_version = settings.module_version
+        from types import SimpleNamespace
+        cme.store = SimpleNamespace(
+            rows=AsyncMock(), register_module=AsyncMock(), module_state=AsyncMock())
+        prior = cme.manifest()
+        prior.pop("manifest_contract")
+        prior.pop("resident_executor")
+        cme.store.rows.return_value = [{"manifest": prior, "lifecycle_state": "ACTIVE",
+                                        "health": "healthy", "diagnostic": {"source": "existing"}}]
+        asyncio.run(cme._ensure_registered_module())
+        cme.store.register_module.assert_awaited_once_with(
+            cme.manifest(), "ACTIVE", "healthy", {"source": "existing"})
+        cme.store.module_state.assert_not_awaited()
 
     def test_two_independent_unlisted_residents_bind_generic_executor_metadata(self):
         declaration = module_manifest()

@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/module_contracts.py
 Component: R3A-MODULE-CONTRACTS
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-08
 Created By: R3A Coordinator
 Purpose: Validate reusable semantic version and dependency graph rules for modules.
@@ -12,10 +12,11 @@ Dependencies: Python standard library.
 Authority: Steward Directive — Coordinator Next Integration Cycle.
 Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | Add dependency range and cycle validation.
 Changed: 2026-11-10T02:02:46Z | R3A-MODULAR-PLUGINS-46 | Accept the versioned v1.1 module-manifest promotion while preserving v1.0 compatibility.
+Changed: 2026-11-10T15:20:26Z | R3A-MODULAR-EXECUTOR-ROLE | Permit only additive v1.1 resident-executor metadata promotion for an unchanged legacy module version.
 Supersedes: None.
 Contracts: r3a.module-manifest.v1@1.0.0 and @1.1.0.
 Tests: tests/test_r3a_module_contracts.py.
-History/Predecessor: New file.
+History/Predecessor: Immediate predecessor blob 891d4c159166ca11ff5914507a8a7fe27c6794c0 at base c62bb28d026e1c1cad99c90583f0debae067f2a1; file introduced in modular integration.
 """
 from __future__ import annotations
 
@@ -104,7 +105,9 @@ def validate_dependency_graph(configured_versions: dict[str, set[str]],
 
 
 def is_legacy_manifest_promotion(previous: dict, current: dict) -> bool:
-    """Permit only synthesized-default metadata to become an explicit v1 manifest."""
+    """Permit only known compatibility promotions to an explicit versioned manifest."""
+    if _is_additive_executor_role_promotion(previous, current):
+        return True
     if (previous.get("manifest_contract") is not None
             or current.get("manifest_contract") not in {
                 "r3a.module-manifest.v1@1.0.0", "r3a.module-manifest.v1@1.1.0"}
@@ -118,3 +121,19 @@ def is_legacy_manifest_promotion(previous: dict, current: dict) -> bool:
                      "artifact_digest", "dependencies", "configuration_schema", "capability_refs",
                      "resource_refs", "state_namespace")
     return all(previous.get(field) == current.get(field) for field in stable_fields)
+
+
+def _is_additive_executor_role_promotion(previous: dict, current: dict) -> bool:
+    """Allow the v1.1 executor role to be added without changing an installed module artifact."""
+    if (previous.get("manifest_contract") is not None
+            or "resident_executor" in previous
+            or current.get("manifest_contract") != "r3a.module-manifest.v1@1.1.0"
+            or set(current) - set(previous) != {"manifest_contract", "resident_executor"}
+            or set(previous) - set(current)):
+        return False
+    try:
+        from .module_extensions import validate_resident_executor_declaration
+        validate_resident_executor_declaration(current["resident_executor"])
+    except (ImportError, KeyError, TypeError, ValueError):
+        return False
+    return all(previous[key] == current[key] for key in previous)
