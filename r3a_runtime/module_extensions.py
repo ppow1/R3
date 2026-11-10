@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/module_extensions.py
 Component: R3A-MODULE-EXTENSION-CONTRACTS
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-10T01:09:23Z
 Created By: Codex GPT-6
 Purpose: Validate resident-executor bindings and durable activity-handler declarations.
@@ -11,10 +11,11 @@ Observability: Stable fail-closed diagnostics identify invalid metadata and comp
 Dependencies: Python standard library; capability contract JSON Schema validator.
 Authority: AD-024; Modular Plugins #46. Bindings and registration grant no authority.
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Add generic resident and durable handler contract validation.
+Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Resolve resident bindings against the active registry artifact and declared execution range.
 Supersedes: None
 Contracts: r3a.resident.module-binding.v1; r3a.resident.execution-profile@1.0.0; r3a.activity-handler.v1; r3a.activity-intake.v1.
 Tests: tests/test_r3a_module_extensions.py
-History/Predecessor: New file; initial publication recorded in Git.
+History/Predecessor: Prior revision at commit 67aa6c181e237b97acee975b297e44e7e14aa440, blob 99b02ed5a14cd3a6c050ab4f695cc7f5bdc3d496.
 """
 from __future__ import annotations
 
@@ -211,6 +212,50 @@ def validate_resident_executor_declaration(value: Any) -> dict[str, Any]:
             or version_range["max_minor"] < version_range["min_minor"]):
         raise ModuleExtensionError("resident executor contract range is invalid or incompatible")
     return dict(value)
+
+
+def resolve_resident_binding(bindings: Iterable[dict[str, Any]], resident_id: str,
+                             identity_association: dict[str, str],
+                             modules: Iterable[dict[str, Any]], *,
+                             execution_contract_minor: int = 0) -> dict[str, Any]:
+    """Resolve one authoritative identity to one active, declared executor version."""
+    checked = [validate_resident_binding(item) for item in bindings
+               if isinstance(item, dict) and item.get("resident_id") == resident_id]
+    if len(checked) != 1:
+        raise ModuleExtensionError("resident module binding is missing or ambiguous")
+    binding = checked[0]
+    if binding["identity_association"] != identity_association:
+        raise ModuleExtensionError("resident identity/HR association is invalid or stale")
+    module_rows = [item for item in modules if isinstance(item, dict)
+                   and item.get("module_id") == binding["module_id"]
+                   and item.get("module_version") == binding["module_version"]]
+    if len(module_rows) != 1:
+        raise ModuleExtensionError("bound resident executor is missing or ambiguous in the module registry")
+    module = module_rows[0]
+    if module.get("lifecycle_state") != "ACTIVE":
+        raise ModuleExtensionError("bound resident executor is not active")
+    manifest = module.get("manifest")
+    if (not isinstance(manifest, dict)
+            or manifest.get("module_id") != binding["module_id"]
+            or manifest.get("module_version") != binding["module_version"]
+            or manifest.get("artifact_digest") != binding["artifact_digest"]
+            or not _SHA256.fullmatch(str(manifest.get("artifact_digest", "")))):
+        raise ModuleExtensionError("bound resident executor artifact does not match registry identity")
+    declaration = validate_resident_executor_declaration(manifest.get("resident_executor"))
+    supported = declaration["execution_contract_range"]
+    requested = binding["execution_contract_range"]
+    if (not compatible_contract_range(supported, contract_id="r3a.resident.execution", major=1,
+                                      minor=execution_contract_minor)
+            or not compatible_contract_range(requested, contract_id="r3a.resident.execution",
+                                             major=1, minor=execution_contract_minor)
+            or requested["min_minor"] < supported["min_minor"]
+            or requested["max_minor"] > supported["max_minor"]):
+        raise ModuleExtensionError("resident executor contract range is incompatible with registered module")
+    return {"binding": binding, "module": module, "module_id": binding["module_id"],
+            "module_version": binding["module_version"], "artifact_digest": binding["artifact_digest"],
+            "binding_revision": binding["binding_revision"],
+            "configuration_ref": binding["configuration_ref"],
+            "configuration_revision": binding["configuration_revision"]}
 
 
 def compatible_contract_range(value: dict[str, Any], *, contract_id: str,

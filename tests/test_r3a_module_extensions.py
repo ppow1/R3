@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_module_extensions.py
 Component: TEST-R3A-MODULE-EXTENSION-CONTRACTS
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-10T01:09:23Z
 Created By: Codex GPT-6
 Purpose: Permanently verify generic resident and durable activity-handler module declarations.
@@ -11,10 +11,11 @@ Observability: Contract errors and registry-resolution outcomes are asserted dir
 Dependencies: r3a_runtime.module_extensions and capability contract validation.
 Authority: AD-024; Modular Plugins #46; fixture acceptance only.
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Add extensible executor and handler contract tests.
+Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify authoritative binding resolution against active role declarations and pinned artifacts.
 Supersedes: None
 Contracts: r3a.resident.module-binding.v1; r3a.resident.executor@1.0.0; r3a.activity-handler.v1.
 Tests: python3 -m pytest -q tests/test_r3a_module_extensions.py
-History/Predecessor: New file; initial publication recorded in Git.
+History/Predecessor: Prior revision at commit 67aa6c181e237b97acee975b297e44e7e14aa440, blob 01b2744f1e57284807e5ce48d756d9639f6705b3.
 """
 from __future__ import annotations
 
@@ -28,6 +29,7 @@ from r3a_runtime.capability_contracts import CapabilityContractError, validate_m
 from r3a_runtime.module_extensions import (
     ModuleExtensionError,
     resolve_activity_handler,
+    resolve_resident_binding,
     validate_activity_handler,
     validate_executor_configuration,
     validate_resident_binding,
@@ -84,10 +86,13 @@ HANDLER = {
 
 
 def registered_module(module_id: str, *, version: str = "1.0.0", digest: str = "c" * 64,
-                      lifecycle: str = "ACTIVE", handler: dict | None = None) -> dict:
+                      lifecycle: str = "ACTIVE", handler: dict | None = None,
+                      executor: dict | None = None) -> dict:
     manifest = {"module_id": module_id, "module_version": version, "artifact_digest": digest}
     if handler is not None:
         manifest["activity_handler"] = handler
+    if executor is not None:
+        manifest["resident_executor"] = executor
     return {"module_id": module_id, "module_version": version,
             "lifecycle_state": lifecycle, "manifest": manifest}
 
@@ -173,6 +178,24 @@ class TestResidentBinding:
         value = resident_binding("resident:alpha", "executor.orbit")
         with pytest.raises(ModuleExtensionError, match="duplicate"):
             validate_resident_bindings([value, copy.deepcopy(value)])
+
+    def test_binding_resolution_requires_authoritative_association_active_module_and_pinned_role(self):
+        binding = resident_binding("resident:alpha", "executor.orbit")
+        executor = module_manifest()["resident_executor"]
+        active = registered_module("executor.orbit", digest="a" * 64, executor=executor)
+        resolved = resolve_resident_binding([binding], "resident:alpha",
+                                            binding["identity_association"], [active])
+        assert resolved["artifact_digest"] == "a" * 64
+        assert "authorized" not in resolved
+        for association, modules in (
+                ({**binding["identity_association"], "record_revision": "old"}, [active]),
+                (binding["identity_association"], [{**active, "lifecycle_state": "STOPPED"}]),
+                (binding["identity_association"], [registered_module(
+                    "executor.orbit", digest="c" * 64, executor=executor)]),
+                (binding["identity_association"], [registered_module(
+                    "executor.orbit", digest="a" * 64)])):
+            with pytest.raises(ModuleExtensionError):
+                resolve_resident_binding([binding], "resident:alpha", association, modules)
 
     def test_configuration_digest_and_schema_are_enforced(self, tmp_path):
         config = {"feature": "independent-executor"}
