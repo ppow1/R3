@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_capability_integration_demo.py
 Component: R3A-CAPABILITY-INTEGRATION-REGRESSION
-File Revision: 1.0.5
+File Revision: 1.0.6
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Verify canonical CME invocation, idempotent recovery, and independently gated completion.
@@ -15,6 +15,7 @@ Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Exercise AP0-M1
 Changed: 2026-11-10T01:35:58Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify generic executor and activity-handler declarations survive registration, replacement, activation, and deactivation.
 Changed: 2026-11-10T01:38:38Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Exercise an actual provider worker startup failure during replacement and assert the old process remains effective.
 Changed: 2026-11-10T01:38:38Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify process loss after activation is durably diagnosed and blocks further discovery/invocation.
+Changed: 2026-11-10T01:38:38Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify handler discovery selects only the replacement module version after lifecycle transition.
 Supersedes: None.
 Contracts: r3a.capability-invocation.v1; r3a.engineering-work-order.v1; r3a.verification-result.v1; module.lifecycle v2.
 Tests: This test module.
@@ -63,6 +64,7 @@ from r3a_runtime.engineering import (CapabilityOperationRef, CriterionResult, En
                                     VerificationResult, validate_completion)
 from r3a_runtime.db import utcnow
 from r3a_runtime.provider_runtime import ProviderProcessManager, _module_environment
+from r3a_runtime.module_extensions import resolve_activity_handler
 from r3a_runtime.capability_worker import CapabilityWorker
 from tests.test_r3a_modular_autonomy import make_config
 
@@ -503,6 +505,16 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                                 active.descriptor["provider"]["artifact_sha256"])
             self.assertEqual("infrastructure.octominer.telemetry.read",
                              registry.resolve("infrastructure.octominer.telemetry.read").descriptor["operation_id"])
+            handler_rows = [
+                {"module_id": module_id, "module_version": version,
+                 "lifecycle_state": row["lifecycle_state"], "manifest": row["manifest"]}
+                for (module_id, version), row in store.modules.items()]
+            discovered_handler = resolve_activity_handler(
+                handler_rows, "fixture.engineering.reconcile")
+            self.assertEqual("r3a.isolated_workspace", discovered_handler["module_id"])
+            self.assertEqual("1.0.1", discovered_handler["module_version"])
+            self.assertEqual(active.descriptor["provider"]["artifact_sha256"],
+                             discovered_handler["artifact_digest"])
             replacement_context = {**context, "invocation_id": "replacement-implementation"}
             replacement_result = await runtime.invoke(
                 active, {"path": "artifacts/replacement.txt", "content": "new implementation\n"},
