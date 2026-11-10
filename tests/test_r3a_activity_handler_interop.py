@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_activity_handler_interop.py
 Component: R3A-ACTIVITY-HANDLER-INTEROPERABILITY-TESTS
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-10T02:02:46Z
 Created By: Codex GPT-6
 Purpose: Validate the shared v1.1 module/handler fixture and provide CME dispatch tests for Autonomy #43 to consume.
@@ -12,10 +12,11 @@ Dependencies: r3a_runtime.capability_contracts; r3a_runtime.module_extensions; C
 Authority: AD-024; the fixture's required capabilities are not grants.
 Changed: 2026-11-10T02:02:46Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Add shared module-manifest/handler contract and CME interoperability regressions.
 Changed: 2026-11-10T02:07:18Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Avoid installing collection-time database stubs that leak across the full test suite.
+Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT-6 | Exercise CME discovery and resident bindings from the shared v1.1 manifest projection.
 Supersedes: None.
 Contracts: r3a.module-manifest.v1@1.0.0 and @1.1.0; r3a.activity-handler.v1@1.0.0.
 Tests: python3 -m pytest -q tests/test_r3a_activity_handler_interop.py
-History/Predecessor: Immediate predecessor blob 045e1633c734cbd2dd3ec41039e9314c064c7c93; CME tests are skipped until the #43 dispatcher and runtime dependencies are present in the integration tree.
+History/Predecessor: Immediate predecessor blob 045e1633c734cbd2dd3ec41039e9314c064c7c93; CME dispatch and resident binding tests now run against the reconciled integration tree.
 """
 from __future__ import annotations
 
@@ -24,9 +25,11 @@ import hashlib
 import importlib.util
 import json
 import asyncio
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -51,8 +54,13 @@ def validated_fixture(value: dict | None = None) -> tuple[dict, dict]:
     sample = copy.deepcopy(value if value is not None else fixture())
     module = validate_module_manifest(sample["module_manifest"], sample["operation"],
                                       sample["source_manifest"])
-    row = copy.deepcopy(sample["registry_row"])
-    row["manifest"]["activity_handler"] = module["activity_handler"]
+    registered = SimpleNamespace(
+        descriptor={"provider": sample["operation"]["provider"]},
+        legacy_manifest={"module_manifest": sample["module_manifest"],
+                         "configuration_schema": sample["source_manifest"]["configuration_schema"]})
+    projection = ProviderProcessManager._manifest(object.__new__(ProviderProcessManager), registered)
+    row = {"module_id": module["module_id"], "module_version": module["module_version"],
+           "lifecycle_state": "ACTIVE", "manifest": projection}
     return sample, row
 
 
@@ -161,22 +169,40 @@ def test_cme_dispatches_shared_fixture_and_records_authorized_result():
         from r3a_runtime.cme import CME
 
         sample, row = validated_fixture()
-        resolved = resolve_activity_handler([row], "billing.invoice.review")
-        decision = SimpleNamespace(decision_id="decision-1", audit_event_id="audit-1", policy_revision="policy-1")
+        registry_row = {
+            "module_id": row["module_id"], "module_version": row["module_version"],
+            "manifest": row["manifest"], "lifecycle_state": "ACTIVE"}
         cme = object.__new__(CME)
-        cme.store = SimpleNamespace(record_progress=AsyncMock(), finish_activity=AsyncMock(), block_activity=AsyncMock())
-        cme.settings = SimpleNamespace(lease_seconds=30)
+        cme.store = SimpleNamespace(rows=AsyncMock(side_effect=[[registry_row], [registry_row]]),
+                                    record_progress=AsyncMock(), finish_activity=AsyncMock(),
+                                    block_activity=AsyncMock())
+        resolved = await cme._registered_handler("billing.invoice.review")
+        decision = SimpleNamespace(decision_id="decision-1", audit_event_id="audit-1", policy_revision="policy-1")
+        operation_descriptor = {"operation_id": sample["operation"]["operation_id"],
+                                "provider": sample["operation"]["provider"],
+                                "lifecycle": {"desired_state": "enabled"}}
+        provider_operation = SimpleNamespace(descriptor=operation_descriptor)
+        cme.settings = SimpleNamespace(
+            lease_seconds=30,
+            capability_registry=SimpleNamespace(
+                discover=Mock(return_value=[{"descriptor": operation_descriptor}]),
+                resolve_provider=Mock(return_value=provider_operation)))
         cme.module_id = "resident.fixture"
+        cme.module_version = "0.0.0"
         cme._authorization_decision = AsyncMock(return_value=decision)
-        cme._registered_module_call = AsyncMock(return_value={"result": sample["expected_result"]})
+        async def provider_invoke(_operation, arguments, *, context):
+            provider = create_provider({"mode": "fixture"})
+            return provider.invoke(arguments, context=context)
+        cme.provider_runtime = SimpleNamespace(invoke=AsyncMock(side_effect=provider_invoke))
 
         await cme._run_registered_activity(_cme_activity(sample), resolved)
 
         cme._authorization_decision.assert_awaited()
-        dispatched = cme._registered_module_call.await_args
-        assert dispatched.args[:3] == ("example.billing-invoice-handler", "1.0.0", "execute")
-        assert dispatched.kwargs["timeout"] == 60.0
-        assert dispatched.args[3]["input"] == sample["activity_request"]
+        dispatched = cme.provider_runtime.invoke.await_args
+        assert dispatched.args[0] is provider_operation
+        assert dispatched.args[1]["input"] == sample["activity_request"]
+        assert dispatched.args[1]["request"]["operation"] == "execute"
+        assert dispatched.kwargs["context"]["handler"]["handler_id"] == resolved["handler"]["handler_id"]
         cme.store.record_progress.assert_awaited()
         cme.store.finish_activity.assert_awaited_once()
         final = cme.store.finish_activity.await_args.args[1]
@@ -193,8 +219,11 @@ def test_cme_authorization_denial_precedes_shared_fixture_dispatch():
         from r3a_runtime.cme import CME
 
         sample, row = validated_fixture()
-        resolved = resolve_activity_handler([row], "billing.invoice.review")
         cme = object.__new__(CME)
+        cme.store = SimpleNamespace(rows=AsyncMock(return_value=[{
+            "module_id": row["module_id"], "module_version": row["module_version"],
+            "manifest": row["manifest"], "lifecycle_state": "ACTIVE"}]))
+        resolved = await cme._registered_handler("billing.invoice.review")
         cme.store = SimpleNamespace(record_progress=AsyncMock(), finish_activity=AsyncMock(), block_activity=AsyncMock())
         cme.settings = SimpleNamespace(lease_seconds=30)
         cme.module_id = "resident.fixture"
@@ -204,5 +233,142 @@ def test_cme_authorization_denial_precedes_shared_fixture_dispatch():
             await cme._run_registered_activity(_cme_activity(sample), resolved)
         cme._registered_module_call.assert_not_awaited()
         cme.store.finish_activity.assert_not_awaited()
+
+    asyncio.run(run())
+
+
+def test_cme_resolves_two_authoritative_resident_bindings_to_one_registered_executor():
+    async def run():
+        from r3a_runtime.cme import CME
+
+        sample = fixture()
+        sample["module_manifest"]["resident_executor"] = {
+            "contract_id": "r3a.resident.executor", "contract_version": "1.0.0",
+            "execution_contract_range": {"contract_id": "r3a.resident.execution", "major": 1,
+                                         "min_minor": 0, "max_minor": 0}}
+        module = validate_module_manifest(sample["module_manifest"], sample["operation"],
+                                          sample["source_manifest"])
+        registered = SimpleNamespace(
+            descriptor={"provider": sample["operation"]["provider"]},
+            legacy_manifest={"module_manifest": sample["module_manifest"],
+                             "configuration_schema": sample["source_manifest"]["configuration_schema"]})
+        projection = ProviderProcessManager._manifest(object.__new__(ProviderProcessManager), registered)
+        registry_row = {"module_id": module["module_id"], "module_version": module["module_version"],
+                        "lifecycle_state": "ACTIVE", "manifest": projection}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config_path = root / "bootstrap.json"
+            config_path.write_text("{}", encoding="utf-8")
+            bindings = []
+            associations = {}
+            for resident_id in ("resident.alpha", "resident.beta"):
+                executor_config = root / f"{resident_id}.json"
+                executor_config.write_text('{"resident_model_route_id":"route.alpha"}', encoding="utf-8")
+                association = {"authority": "hr.directory", "record_id": resident_id,
+                               "record_revision": f"directory-{resident_id}"}
+                associations[resident_id] = association
+                bindings.append({
+                    "contract_id": "r3a.resident.module-binding", "contract_version": "1.0.0",
+                    "resident_id": resident_id, "module_id": module["module_id"],
+                    "module_version": module["module_version"],
+                    "artifact_digest": module["artifact"]["artifact_sha256"],
+                    "execution_contract_range": {"contract_id": "r3a.resident.execution", "major": 1,
+                                                 "min_minor": 0, "max_minor": 0},
+                    "binding_revision": f"binding-{resident_id}",
+                    "configuration_ref": executor_config.name,
+                    "configuration_revision": hashlib.sha256(executor_config.read_bytes()).hexdigest(),
+                    "identity_association": association})
+            profiles = {}
+            for resident_id in associations:
+                profiles[resident_id] = ({
+                    "contract_id": "r3a.resident.execution-profile", "contract_version": "1.0.0",
+                    "resident_id": resident_id, "display_name": resident_id,
+                    "office_id": f"office-{resident_id}", "office_role": "reviewer",
+                    "directory_evidence": {"source_id": "hr.directory", "snapshot_sha256": "a" * 64,
+                                            "observed_at": datetime.now(timezone.utc).isoformat()},
+                    "model_route_id": "route.alpha", "config_revision": "c" * 64},
+                    SimpleNamespace(route_id="route.alpha"), associations[resident_id])
+
+            cme = object.__new__(CME)
+            cme.settings = SimpleNamespace(resident_module_bindings=tuple(bindings),
+                                           source_path=config_path, source_digest="c" * 64)
+            cme.store = SimpleNamespace(rows=AsyncMock(return_value=[registry_row]))
+            cme.module_id = "resident.grace"
+            cme._resolve_resident_execution_profile = AsyncMock(
+                side_effect=lambda resident_id, **_kwargs: profiles[resident_id])
+            cme._authorization_decision = AsyncMock(return_value=SimpleNamespace(
+                decision_id="decision", audit_event_id="audit", policy_revision="policy"))
+            resolved = []
+            for index, resident_id in enumerate(associations, start=1):
+                activity = {"activity_id": f"00000000-0000-4000-8000-00000000010{index}",
+                            "attempt_id": f"00000000-0000-4000-8000-00000000020{index}",
+                            "idempotency_key": f"resident:{resident_id}",
+                            "input": {"resident_id": resident_id}}
+                resolved.append(await cme._resolve_resident_executor(activity))
+            assert [item["execution_profile"]["resident_id"] for item in resolved] == [
+                "resident.alpha", "resident.beta"]
+            assert [item["binding_revision"] for item in resolved] == [
+                "binding-resident.alpha", "binding-resident.beta"]
+            assert [item["module_id"] for item in resolved] == [module["module_id"]] * 2
+            assert cme._authorization_decision.await_count == 2
+
+    asyncio.run(run())
+
+
+def test_cme_rejects_stale_directory_association_before_authorization():
+    async def run():
+        from r3a_runtime.cme import CME
+
+        sample = fixture()
+        sample["module_manifest"]["resident_executor"] = {
+            "contract_id": "r3a.resident.executor", "contract_version": "1.0.0",
+            "execution_contract_range": {"contract_id": "r3a.resident.execution", "major": 1,
+                                         "min_minor": 0, "max_minor": 0}}
+        module = validate_module_manifest(sample["module_manifest"], sample["operation"],
+                                          sample["source_manifest"])
+        registered = SimpleNamespace(
+            descriptor={"provider": sample["operation"]["provider"]},
+            legacy_manifest={"module_manifest": sample["module_manifest"],
+                             "configuration_schema": sample["source_manifest"]["configuration_schema"]})
+        projection = ProviderProcessManager._manifest(object.__new__(ProviderProcessManager), registered)
+        association = {"authority": "hr.directory", "record_id": "resident.alpha",
+                       "record_revision": "directory-current"}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config_path = root / "bootstrap.json"
+            config_path.write_text("{}", encoding="utf-8")
+            executor_config = root / "executor.json"
+            executor_config.write_text("{}", encoding="utf-8")
+            binding = {"contract_id": "r3a.resident.module-binding", "contract_version": "1.0.0",
+                       "resident_id": "resident.alpha", "module_id": module["module_id"],
+                       "module_version": module["module_version"],
+                       "artifact_digest": module["artifact"]["artifact_sha256"],
+                       "execution_contract_range": {"contract_id": "r3a.resident.execution", "major": 1,
+                                                    "min_minor": 0, "max_minor": 0},
+                       "binding_revision": "binding-alpha", "configuration_ref": "executor.json",
+                       "configuration_revision": hashlib.sha256(executor_config.read_bytes()).hexdigest(),
+                       "identity_association": {**association, "record_revision": "directory-stale"}}
+            profile = ({"contract_id": "r3a.resident.execution-profile", "contract_version": "1.0.0",
+                        "resident_id": "resident.alpha", "display_name": "Alpha", "office_id": "office-a",
+                        "office_role": "reviewer", "directory_evidence": {
+                            "source_id": "hr.directory", "snapshot_sha256": "a" * 64,
+                            "observed_at": datetime.now(timezone.utc).isoformat()},
+                        "model_route_id": "route.alpha", "config_revision": "c" * 64},
+                       SimpleNamespace(route_id="route.alpha"), association)
+            cme = object.__new__(CME)
+            cme.settings = SimpleNamespace(resident_module_bindings=(binding,), source_path=config_path,
+                                           source_digest="c" * 64)
+            cme.store = SimpleNamespace(rows=AsyncMock(return_value=[{
+                "module_id": module["module_id"], "module_version": module["module_version"],
+                "manifest": projection, "lifecycle_state": "ACTIVE"}]))
+            cme.module_id = "resident.grace"
+            cme._resolve_resident_execution_profile = AsyncMock(return_value=profile)
+            cme._authorization_decision = AsyncMock()
+            activity = {"activity_id": "00000000-0000-4000-8000-000000000301",
+                        "attempt_id": "00000000-0000-4000-8000-000000000302",
+                        "idempotency_key": "resident:alpha", "input": {"resident_id": "resident.alpha"}}
+            with pytest.raises(ModuleExtensionError, match="identity/HR association"):
+                await cme._resolve_resident_executor(activity)
+            cme._authorization_decision.assert_not_awaited()
 
     asyncio.run(run())

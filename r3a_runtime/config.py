@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/config.py
 Component: R3A-BOOTSTRAP-CONFIG
-File Revision: 1.9.0
+File Revision: 1.9.1
 Created: 2026-11-06T15:04:00Z
 Created By: Codex GPT-6
 Purpose: Strictly validate external R3A AP0-M1 bootstrap and operating settings.
@@ -26,6 +26,7 @@ Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Preserve immuta
 Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | R3A Coordinator | Resolve module dependency ranges and reject missing providers or cycles.
 Changed: 2026-11-08 | R3A-CONTEXT-RECOVERY | R3A Coordinator | Configure route context windows while preserving legacy configuration digests.
 Changed: 2026-11-10T01:26:34Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Load and validate external resident-to-module bindings against declared executor roles and preserve them in durable configuration projections.
+Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT-6 | Accept stable module identifiers and arbitrary dotted executor entrypoints without resident-specific allowlists.
 Supersedes: None.
 Contracts: AP0-001/008/009; R3A-019; Issue #46; AP0-M1 D7; r3a_runtime.contracts; hints/file-provenance.md.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_context_recovery.py; tests/test_r3a_octominer_plugin.py.
@@ -437,6 +438,8 @@ def load_settings(path: str | Path) -> Settings:
         raise ConfigurationError("module must be an object")
     _keys(module, {"module_id", "version", "contract_id", "protocol_major", "protocol_minor", "capabilities", "owner", "entrypoint", "source", "sha256"}, "module")
     module_id = _text(module["module_id"], "module.module_id")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}", module_id):
+        raise ConfigurationError("module.module_id is not a stable module identifier")
     module_version = _text(module["version"], "module.version")
     if not all(part.isdigit() for part in module_version.split(".")) or len(module_version.split(".")) != 3:
         raise ConfigurationError("module.version must be semantic major.minor.patch numbers")
@@ -455,10 +458,8 @@ def load_settings(path: str | Path) -> Settings:
         raise ConfigurationError("module.capabilities contains an invalid capability identifier")
     module_owner = _text(module["owner"], "module.owner")
     entrypoint = _text(module["entrypoint"], "module.entrypoint")
-    if entrypoint not in {"r3a_runtime.observer_module", "r3a_runtime.grace_module"}:
-        raise ConfigurationError("module.entrypoint is not supported by this R3A installation")
-    if (entrypoint == "r3a_runtime.observer_module") != (module_id == "foundation.observer"):
-        raise ConfigurationError("module_id must match its supported module entrypoint")
+    if not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+", entrypoint):
+        raise ConfigurationError("module.entrypoint must be a dotted Python module path")
     module_source = _absolute_path(module["source"], "module.source")
     module_digest = _text(module["sha256"], "module.sha256").lower()
     if len(module_digest) != 64 or any(c not in "0123456789abcdef" for c in module_digest):
