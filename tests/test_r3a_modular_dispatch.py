@@ -2,13 +2,13 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_modular_dispatch.py
 Component: TEST-R3A-MODULAR-DISPATCH
-File Revision: 1.0.7
+File Revision: 1.2.0
 Created: 2026-11-10T00:50:00Z
 Created By: Codex GPT-6
 Purpose: Verify generic resident binding and activity-handler contract resolution and fail-closed behavior.
 Execution Model: Python unittest fixtures.
 Observability: Assertions identify contract validation and resolution failures.
-Dependencies: r3a_runtime.modular_dispatch.
+Dependencies: r3a_runtime.modular_dispatch; shared #46 v1.1.0 handler interop fixture and r3a_runtime.module_extensions.
 Authority: AD-024 and Steward Directive Issue #43.
 Changed: 2026-11-10T00:50:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Add resident and handler resolver fixture coverage.
 Changed: 2026-11-10T00:51:55Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Verify CME handler grant denial occurs before worker execution.
@@ -17,6 +17,12 @@ Changed: 2026-11-10T01:00:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Verif
 Changed: 2026-11-10T01:15:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Declare fixture handler capabilities through the module manifest as required by CME.
 Changed: 2026-11-10T01:20:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Verify generic durable intake replay, conflict rejection, authorization, provider provenance, and lineage.
 Changed: 2026-11-10T01:25:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Verify resident execution grants are checked before authoritative lookup or dispatch.
+Changed: 2026-11-10T02:00:00Z | R3A-AD024-INTEROP | Codex GPT-6 | Exercise CME resolution and payload validation with the shared #46 handler declaration.
+Changed: 2026-11-10T02:15:00Z | R3A-AD024-INTEROP | Codex GPT-6 | Verify shared registry discovery, authorized non-Grace handler dispatch, durable progress/checkpoint, and typed result rejection.
+Changed: 2026-11-10T02:20:00Z | R3A-AD024-INTEROP | Codex GPT-6 | Exercise shared request schema, artifact digest, and activity contract version rejection.
+Changed: 2026-11-10T02:35:00Z | R3A-AD024-INTEROP | Codex GPT-6 | Consume the same canonical JSON manifest/registry/activity fixture used by Modular Plugins #46.
+Changed: 2026-11-10T02:40:00Z | R3A-AD024-INTEROP | Codex GPT-6 | Register the shared role metadata through CME module.install before active-registry discovery.
+Changed: 2026-11-10T02:20:00Z | R3A-AD024-INTEROP | Codex GPT-6 | Preserve Grace routing when a valid #46 handler declaration targets another activity type.
 Supersedes: None
 Contracts: r3a.resident.module-binding.v1; r3a.activity-handler.v1.
 Tests: python -m unittest tests.test_r3a_modular_dispatch
@@ -32,12 +38,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from r3a_runtime.module_extensions import (ModuleExtensionError, resolve_activity_handler,
+                                           validate_activity_handler, validate_activity_handler_payload)
+_INTEROP_FIXTURE_PATH = Path(__file__).parent / "fixtures" / "r3a_activity_handler_interop.v1.json"
+_INTEROP_FIXTURE = json.loads(_INTEROP_FIXTURE_PATH.read_text(encoding="utf-8"))
+HANDLER = _INTEROP_FIXTURE["module_manifest"]["activity_handler"]
 from r3a_runtime.modular_dispatch import (
     DispatchContractError,
     build_resident_execution_profile,
-    resolve_activity_handler,
     resolve_resident_binding,
-    validate_activity_handler,
 )
 
 
@@ -68,19 +77,6 @@ def registered(module, version, digest_char, **extra):
     return {"module_id": module, "module_version": version, "lifecycle_state": "ACTIVE",
             "manifest": manifest}
 
-
-HANDLER = {
-    "contract_id": "r3a.activity-handler", "contract_version": "1.0.0",
-    "handler_id": "example.handler", "handler_version": "1.0.0",
-    "activity_types": ["example.task"],
-    "activity_contract_range": {"contract_id": "r3a.activity-intake", "major": 1,
-                                "min_minor": 0, "max_minor": 0},
-    "request_schema": {"type": "object"}, "result_schema": {"type": "object"},
-    "progress_schema": {"type": "object"}, "checkpoint_schema": {"type": "object"},
-    "required_capabilities": ["example.read"], "state_namespace": "example.handler",
-    "recovery": {"mode": "checkpointed", "idempotency": "stable-key-v1",
-                 "checkpoint": "example.checkpoint.v1"},
-}
 
 
 class ResidentBindingTests(unittest.TestCase):
@@ -149,33 +145,49 @@ class ResidentBindingTests(unittest.TestCase):
 
 
 class ActivityHandlerTests(unittest.TestCase):
-    def test_non_grace_activity_resolves_from_one_active_registered_handler(self):
-        row = registered("example.module", "1.0.0", "c", activity_handler=HANDLER)
-        resolved = resolve_activity_handler([row], "example.task")
-        self.assertEqual(resolved["handler"]["handler_id"], "example.handler")
-        self.assertEqual(resolved["artifact_digest"], "c" * 64)
+    def test_non_grace_activity_resolves_from_shared_active_registry_projection(self):
+        row = copy.deepcopy(_INTEROP_FIXTURE["registry_row"])
+        resolved = resolve_activity_handler([row], "billing.invoice.review")
+        self.assertEqual(resolved["handler"]["handler_id"], "example.billing.invoice-review")
+        self.assertEqual(resolved["artifact_digest"], _INTEROP_FIXTURE["module_manifest"]["artifact"]["artifact_sha256"])
 
-    def test_missing_ambiguous_disabled_incompatible_and_invalid_handlers_deny(self):
-        active = registered("example.module", "1.0.0", "c", activity_handler=HANDLER)
+    def test_missing_ambiguous_disabled_incompatible_digest_and_payloads_deny(self):
+        active = copy.deepcopy(_INTEROP_FIXTURE["registry_row"])
         disabled = {**active, "lifecycle_state": "DISABLED"}
-        incompatible_handler = copy.deepcopy(HANDLER)
-        incompatible_handler["contract_version"] = "2.0.0"
-        incompatible = registered("example.module2", "1.0.0", "d",
-                                  activity_handler=incompatible_handler)
-        for rows in ([], [disabled], [active, active], [incompatible]):
-            with self.subTest(rows=rows), self.assertRaises(DispatchContractError):
-                resolve_activity_handler(rows, "example.task")
-        bad = copy.deepcopy(HANDLER)
-        bad["activity_types"] = ["example.task", "example.task"]
-        with self.assertRaisesRegex(DispatchContractError, "unique"):
-            validate_activity_handler(bad)
+        for rows in ([], [disabled], [active, active]):
+            with self.subTest(rows=rows), self.assertRaises(ModuleExtensionError):
+                resolve_activity_handler(rows, "billing.invoice.review")
+        incompatible = copy.deepcopy(active)
+        incompatible["manifest"]["activity_handler"]["activity_contract_range"]["min_minor"] = 1
+        with self.assertRaises(ModuleExtensionError):
+            resolve_activity_handler([incompatible], "billing.invoice.review", activity_contract_minor=0)
+        invalid_digest = copy.deepcopy(active)
+        invalid_digest["manifest"]["artifact_digest"] = "bad-digest"
+        with self.assertRaisesRegex(ModuleExtensionError, "artifact digest"):
+            resolve_activity_handler([invalid_digest], "billing.invoice.review")
+        handler = _INTEROP_FIXTURE["module_manifest"]["activity_handler"]
+        for kind, payload in (("request", {"invoice_id": ""}),
+                              ("result", {**_INTEROP_FIXTURE["expected_result"], "status": "approved"}),
+                              ("progress", {"phase": "completed", "completed": "one"}),
+                              ("checkpoint", {"cursor": True})):
+            with self.subTest(kind=kind), self.assertRaisesRegex(ModuleExtensionError, "payload is invalid"):
+                validate_activity_handler_payload(handler, kind, payload)
 
-    def test_registry_binding_is_not_authorization(self):
-        row = registered("example.module", "1.0.0", "c", activity_handler=HANDLER)
-        resolved = resolve_activity_handler([row], "example.task")
-        self.assertEqual(resolved["handler"]["required_capabilities"], ["example.read"])
+    def test_registry_resolution_does_not_authorize_handler(self):
+        resolved = resolve_activity_handler([copy.deepcopy(_INTEROP_FIXTURE["registry_row"])],
+                                            "billing.invoice.review")
+        self.assertEqual(resolved["handler"]["required_capabilities"], ["billing.invoice.read"])
         self.assertNotIn("authorized", resolved)
         self.assertNotIn("authorization", resolved)
+
+
+class CMEHandlerDiscoveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unrelated_shared_handler_does_not_capture_grace_activity(self):
+        from r3a_runtime.cme import CME
+
+        cme = object.__new__(CME)
+        cme.store = SimpleNamespace(rows=AsyncMock(return_value=[copy.deepcopy(_INTEROP_FIXTURE["registry_row"])]))
+        self.assertEqual(await CME._registered_handler(cme, "grace.objective"), {})
 
 
 class CMEResidentAuthorizationTests(unittest.IsolatedAsyncioTestCase):
@@ -196,58 +208,89 @@ class CMEResidentAuthorizationTests(unittest.IsolatedAsyncioTestCase):
 
 
 class CMEHandlerExecutionTests(unittest.IsolatedAsyncioTestCase):
-    async def test_missing_capability_grant_denies_before_handler_execution(self):
+    def make_cme(self, *, denied=False):
         from r3a_runtime.cme import CME
 
+        row = copy.deepcopy(_INTEROP_FIXTURE["registry_row"])
+        store = SimpleNamespace(register_module=AsyncMock(), module_state=AsyncMock(), rows=AsyncMock(return_value=[row]),
+                                record_progress=AsyncMock(), finish_activity=AsyncMock(),
+                                block_activity=AsyncMock())
         cme = object.__new__(CME)
-        cme.store = SimpleNamespace(record_progress=AsyncMock(), finish_activity=AsyncMock(),
-                                    block_activity=AsyncMock())
+        cme.store = store
         cme.settings = SimpleNamespace(lease_seconds=30)
-        cme.module_id = "resident.alpha"
-        cme._authorization_decision = AsyncMock(side_effect=PermissionError("grant missing"))
-        cme._registered_module_call = AsyncMock()
-        module = registered("example.module", "1.0.0", "c", entrypoint="fixture.module", capability_refs=["example.read"])
-        resolved = {"module": module, "handler": HANDLER, "module_id": "example.module",
-                    "module_version": "1.0.0", "artifact_digest": "c" * 64}
-        activity = {"activity_id": "00000000-0000-0000-0000-000000000010",
-                    "attempt_id": "00000000-0000-0000-0000-000000000011",
-                    "idempotency_key": "task:one", "activity_type": "example.task",
-                    "input": {"correlation_id": "00000000-0000-0000-0000-000000000012",
-                              "activity_input": {"task": "inspect"}, "resident_id": "resident.alpha"},
-                    "checkpoint": {}}
-        with self.assertRaisesRegex(PermissionError, "grant missing"):
-            await CME._run_registered_activity(cme, activity, resolved)
-        cme._registered_module_call.assert_not_awaited()
-        cme.store.finish_activity.assert_not_awaited()
+        cme.module_id = "resident.fixture"
+        decision = SimpleNamespace(decision_id="decision-1", audit_event_id="audit-1",
+                                   policy_revision="policy-1")
+        if denied:
+            cme._authorization_decision = AsyncMock(side_effect=PermissionError("billing.invoice.read grant missing"))
+        else:
+            cme._authorization_decision = AsyncMock(return_value=decision)
+        cme._registered_module_call = AsyncMock(return_value={"result": copy.deepcopy(
+            _INTEROP_FIXTURE["expected_result"])})
+        return CME, cme, row
 
-    async def test_authorized_handler_progress_checkpoint_and_completion_are_durable(self):
-        from r3a_runtime.cme import CME
+    def activity(self):
+        return {"activity_id": "00000000-0000-4000-8000-000000000101",
+                "attempt_id": "00000000-0000-4000-8000-000000000102",
+                "idempotency_key": "billing-invoice-review-001",
+                "activity_type": "billing.invoice.review",
+                "input": {"correlation_id": "00000000-0000-4000-8000-000000000103",
+                          "activity_input": copy.deepcopy(_INTEROP_FIXTURE["activity_request"]),
+                          "resident_id": "resident.fixture"},
+                "checkpoint": {}}
 
-        cme = object.__new__(CME)
-        cme.store = SimpleNamespace(record_progress=AsyncMock(), finish_activity=AsyncMock(),
-                                    block_activity=AsyncMock())
-        cme.settings = SimpleNamespace(lease_seconds=30)
-        cme.module_id = "resident.alpha"
-        cme._authorization_decision = AsyncMock(return_value=SimpleNamespace(
-            decision_id="decision-1", audit_event_id="audit-1", policy_revision="policy-1"))
-        cme._registered_module_call = AsyncMock(return_value={"result": {
-            "outcome": "completed", "progress": {"phase": "done"},
-            "checkpoint": {"cursor": 7}, "value": "ok"}})
-        module = registered("example.module", "1.0.0", "c", entrypoint="fixture.module", capability_refs=["example.read"])
-        resolved = {"module": module, "handler": HANDLER, "module_id": "example.module",
-                    "module_version": "1.0.0", "artifact_digest": "c" * 64}
-        activity = {"activity_id": "00000000-0000-0000-0000-000000000020",
-                    "attempt_id": "00000000-0000-0000-0000-000000000021",
-                    "idempotency_key": "task:two", "activity_type": "example.task",
-                    "input": {"correlation_id": "00000000-0000-0000-0000-000000000022",
-                              "activity_input": {"task": "inspect"}, "resident_id": "resident.alpha"},
-                    "checkpoint": {}}
-        await CME._run_registered_activity(cme, activity, resolved)
+    async def test_cme_installs_discovers_shared_handler_and_routes_authorized_activity(self):
+        CME, cme, row = self.make_cme()
+        manifest = copy.deepcopy(row["manifest"])
+        artifact = Path(__file__).with_name("r3a_activity_handler_interop_provider.py").resolve()
+        manifest["artifact_ref"] = str(artifact)
+        manifest["entrypoint"] = "tests.r3a_activity_handler_interop_provider"
+        installed = await cme._control_request("module.install", {"manifest": manifest}, "install-shared-46")
+        self.assertTrue(installed["installed"])
+        cme.store.register_module.assert_awaited_once()
+        row["manifest"] = manifest
+        row["lifecycle_state"] = "ACTIVE"
+        cme.store.rows.return_value = [row]
+        resolved = await CME._registered_handler(cme, "billing.invoice.review")
+        await CME._run_registered_activity(cme, self.activity(), resolved)
+        dispatched = cme._registered_module_call.await_args
+        self.assertEqual(dispatched.args[:3], ("example.billing-invoice-handler", "1.0.0", "execute"))
+        self.assertEqual(dispatched.kwargs["timeout"], 60.0)
+        self.assertEqual(dispatched.args[3]["input"], _INTEROP_FIXTURE["activity_request"])
+        cme._authorization_decision.assert_awaited()
         cme.store.record_progress.assert_awaited()
         cme.store.finish_activity.assert_awaited_once()
         persisted = cme.store.finish_activity.await_args.args[1]
-        self.assertEqual(persisted["handler"]["artifact_digest"], "c" * 64)
+        self.assertEqual(persisted["handler"]["artifact_digest"],
+                         _INTEROP_FIXTURE["module_manifest"]["artifact"]["artifact_sha256"])
         self.assertEqual(persisted["authorization"][0]["audit_event_id"], "audit-1")
+
+    async def test_missing_grant_denies_before_handler_execution(self):
+        _CME, cme, row = self.make_cme(denied=True)
+        resolved = resolve_activity_handler([row], "billing.invoice.review")
+        with self.assertRaisesRegex(PermissionError, "grant missing"):
+            await cme._run_registered_activity(self.activity(), resolved)
+        cme._registered_module_call.assert_not_awaited()
+        cme.store.finish_activity.assert_not_awaited()
+
+    async def test_cme_rejects_invalid_shared_result_payload(self):
+        from r3a_runtime.cme import CME
+
+        row = copy.deepcopy(_INTEROP_FIXTURE["registry_row"])
+        result = copy.deepcopy(_INTEROP_FIXTURE["expected_result"])
+        result["status"] = "approved"
+        cme = object.__new__(CME)
+        cme.store = SimpleNamespace(record_progress=AsyncMock(), finish_activity=AsyncMock(),
+                                    block_activity=AsyncMock())
+        cme.settings = SimpleNamespace(lease_seconds=30)
+        cme.module_id = "resident.fixture"
+        cme._authorization_decision = AsyncMock(return_value=SimpleNamespace(
+            decision_id="decision-1", audit_event_id="audit-1", policy_revision="policy-1"))
+        cme._registered_module_call = AsyncMock(return_value={"result": result})
+        resolved = resolve_activity_handler([row], "billing.invoice.review")
+        with self.assertRaisesRegex(ModuleExtensionError, "result payload is invalid"):
+            await CME._run_registered_activity(cme, self.activity(), resolved)
+        cme.store.finish_activity.assert_not_awaited()
 
     async def test_independently_registered_resident_executor_receives_bound_identity(self):
         from r3a_runtime.cme import CME
@@ -286,7 +329,7 @@ class ActivityIntakeLedgerTests(unittest.IsolatedAsyncioTestCase):
                        "idempotency_key": "queue.alpha:event-1", "occurred_at": "2026-11-09T12:00:00Z",
                        "received_at": "2026-11-09T12:00:01Z", "payload_ref": "queue://event-1",
                        "payload_sha256": "a" * 64, "causation_id": "cause-1"},
-            "activity": {"activity_type": "billing.invoice", "task_class": "operations.review",
+            "activity": {"activity_type": "billing.invoice.review", "task_class": "operations.review",
                          "objective": "Review invoice", "input": {"invoice_id": "inv-1",
                          "resident_id": "resident.beta"}, "evidence": []},
             "provenance": {"module_id": "source.module", "module_version": "1.0.0",
@@ -348,7 +391,7 @@ class ActivityIntakeLedgerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("resident.beta", state["existing"]["input"]["resident_id"])
         event_args = store._event.await_args.args
         self.assertEqual("activity.received", event_args[0])
-        self.assertEqual("billing.invoice", state["existing"]["activity_type"])
+        self.assertEqual("billing.invoice.review", state["existing"]["activity_type"])
         self.assertEqual(1, store._event.await_count)
         conflict = copy.deepcopy(intake)
         conflict["activity"]["objective"] = "Different objective"

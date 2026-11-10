@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.activity-handler.v1",
+  "title": "R3A Durable Activity Handler v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_id", "contract_version", "handler_id", "handler_version", "activity_types", "activity_contract_range", "handler_contract_range", "request_schema", "result_schema", "progress_schema", "checkpoint_schema", "progress_semantics", "checkpoint_semantics", "required_capabilities", "resource_constraints", "state_namespace", "migration_contract", "recovery"],
+  "properties": {
+    "contract_id": {"const": "r3a.activity-handler"},
+    "contract_version": {"const": "1.0.0"},
+    "handler_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$"},
+    "handler_version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+    "activity_types": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$"}},
+    "activity_contract_range": {"$ref": "#/$defs/contractRange", "properties": {"contract_id": {"const": "r3a.activity-intake"}}},
+    "handler_contract_range": {"$ref": "#/$defs/contractRange", "properties": {"contract_id": {"const": "r3a.activity-handler"}}},
+    "request_schema": {"type": "object"},
+    "result_schema": {"type": "object"},
+    "progress_schema": {"type": "object"},
+    "checkpoint_schema": {"type": "object"},
+    "progress_semantics": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "checkpoint_semantics": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "required_capabilities": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 200}},
+    "resource_constraints": {
+      "type": "object", "additionalProperties": false,
+      "required": ["cpu_millis", "memory_bytes", "max_concurrency"],
+      "properties": {
+        "cpu_millis": {"type": "integer", "minimum": 1},
+        "memory_bytes": {"type": "integer", "minimum": 1},
+        "max_concurrency": {"type": "integer", "minimum": 1}
+      }
+    },
+    "state_namespace": {"type": "string", "minLength": 1, "maxLength": 160},
+    "migration_contract": {"type": "string", "minLength": 1, "maxLength": 128},
+    "recovery": {
+      "type": "object", "additionalProperties": false,
+      "required": ["mode", "idempotency_contract", "checkpoint_contract"],
+      "properties": {
+        "mode": {"enum": ["stateless", "checkpointed"]},
+        "idempotency_contract": {"type": "string", "minLength": 1, "maxLength": 128},
+        "checkpoint_contract": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    }
+  },
+  "$defs": {
+    "contractRange": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contract_id", "major", "min_minor", "max_minor"],
+      "properties": {
+        "contract_id": {"type": "string", "minLength": 1},
+        "major": {"type": "integer", "minimum": 1},
+        "min_minor": {"type": "integer", "minimum": 0},
+        "max_minor": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

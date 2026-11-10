@@ -2,13 +2,13 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 2.0.4
+File Revision: 2.0.7
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
 Execution Model: Async PostgreSQL-backed process supervised by Ring 0.
 Observability: Durable process/activity/module/resource/event state and local diagnostics socket.
-Dependencies: PostgreSQL; psycopg 3 pool; r3a_runtime.config/db/protocol/control/diagnostics.
+Dependencies: PostgreSQL; psycopg 3 pool; r3a_runtime.config/db/protocol/control/diagnostics/module_extensions.
 Authority: AP1 / R3A-019 and AP1 Slices 1–2 authorized by Steward; isolated R3A only.
 Changed: 2026-11-06T15:22:00Z | R3A-AP0-M1 | Codex GPT-6 | Implement CME process, scheduler, module worker and control plane.
 Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Reconcile orphaned module processes, record live health and correct replacement status.
@@ -43,6 +43,9 @@ Changed: 2026-11-10T01:00:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Route
 Changed: 2026-11-10T01:05:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Preserve test and compatibility contexts that omit the optional primary resident identifier.
 Changed: 2026-11-10T01:10:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Block invalid registry bindings immediately and authorize handler capabilities as the registered handler module.
 Changed: 2026-11-10T01:15:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Require handler capability declarations to be present in the registered module manifest.
+Changed: 2026-11-10T02:00:00Z | R3A-AD024-INTEROP | Codex GPT-6 | Consume the shared #46 handler metadata and typed payload validators for dispatch.
+Changed: 2026-11-10T02:15:00Z | R3A-AD024-INTEROP | Codex GPT-6 | Fall through to existing resident/Grace routing when valid registered handlers do not claim the activity type.
+Changed: 2026-11-10T02:20:00Z | R3A-AD024-INTEROP | Codex GPT-6 | Pin the shared #46 handler validator as CME's activity contract authority.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py; tests/test_r3a_telemetry_providers.py; tests/test_r3a_capability_contracts.py; tests/test_r3a_engineering.py.
@@ -85,8 +88,9 @@ from .acceptance import (AcceptanceCriteriaRequired, OBJECTIVE_ACCEPTANCE_CONTRA
                          validate_acceptance, validate_required_criteria)
 from .protocol import PROTOCOL_MAJOR, PROTOCOL_MINOR, request as module_request
 from .modular_dispatch import (DispatchContractError, build_resident_execution_profile,
-                               resolve_activity_handler, resolve_resident_binding,
-                               validate_activity_handler)
+                               resolve_resident_binding)
+from .module_extensions import (ModuleExtensionError, resolve_activity_handler,
+                                validate_activity_handler, validate_activity_handler_payload)
 
 
 _RESIDENT_TOOLS = (
@@ -444,15 +448,18 @@ class CME:
         rows = await self.store.rows(
             "SELECT module_id,module_version,manifest,lifecycle_state FROM r3a.module_registry "
             "ORDER BY module_id,module_version")
-        declared = any(isinstance(row.get("manifest"), dict)
-                       and isinstance(row["manifest"].get("activity_handler"), dict)
-                       and activity_type in row["manifest"]["activity_handler"].get("activity_types", [])
-                       for row in rows)
-        active = [row for row in rows if row.get("lifecycle_state") == "ACTIVE"]
-        if not declared:
-            # Activities with no handler declaration may still resolve through a resident binding.
+        matching_declaration = False
+        for row in rows:
+            manifest = row.get("manifest")
+            if not isinstance(manifest, dict) or manifest.get("activity_handler") is None:
+                continue
+            handler = validate_activity_handler(manifest["activity_handler"])
+            if activity_type in handler["activity_types"]:
+                matching_declaration = True
+        if not matching_declaration:
+            # Activities with no compatible declaration may still resolve through resident or Grace paths.
             return {}
-        resolved = resolve_activity_handler(active, activity_type)
+        resolved = resolve_activity_handler(rows, activity_type, activity_contract_minor=0)
         declared_capabilities = set(resolved["module"]["manifest"].get("capability_refs", []))
         if not set(resolved["handler"]["required_capabilities"]).issubset(declared_capabilities):
             raise DispatchContractError("activity handler requires capabilities absent from its registered module manifest")
@@ -532,7 +539,7 @@ class CME:
                                "module_id": resolved["module_id"],
                                "module_version": resolved["module_version"],
                                "artifact_digest": resolved["artifact_digest"]}}
-        validate_json(payload["input"], handler["request_schema"], path="$.input")
+        validate_activity_handler_payload(handler, "request", payload["input"])
         handler_decision = await self._authorization_decision(
             "activity.handler.execute", activity_id=str(activity["activity_id"]),
             attempt_id=str(activity["attempt_id"]),
@@ -568,18 +575,18 @@ class CME:
         result = response.get("result")
         if not isinstance(result, dict):
             raise ValueError("activity handler returned a non-object result")
-        validate_json(result, handler["result_schema"], path="$.result")
+        validate_activity_handler_payload(handler, "result", result)
         progress = result.get("progress")
         if progress is not None:
-            validate_json(progress, handler["progress_schema"], path="$.progress")
+            validate_activity_handler_payload(handler, "progress", progress)
         checkpoint = result.get("checkpoint")
         if checkpoint is not None:
-            validate_json(checkpoint, handler["checkpoint_schema"], path="$.checkpoint")
+            validate_activity_handler_payload(handler, "checkpoint", checkpoint)
             await self.store.record_progress(activity,
                 {"phase": "handler.checkpointed", "at": utcnow().isoformat(),
                  "handler_id": handler["handler_id"]},
                 {"handler": payload["handler"], "handler_checkpoint": checkpoint})
-        outcome = result.get("outcome")
+        outcome = result["outcome"]
         if outcome == "completed":
             await self.store.finish_activity(activity,
                 {"contract_id": "r3a.activity-handler.result", "contract_version": "1.0.0",
@@ -2646,9 +2653,9 @@ class CME:
                                                                   "source_sha256": item.get("source_sha256")}
                                                                  for item in evidence]}
                 await self.store.finish_activity(activity, observations)
-        except DispatchContractError as exc:
+        except (DispatchContractError, ModuleExtensionError) as exc:
             await self.store.block_activity(activity, "registered dispatch contract denied activity",
-                                            {"contract": "r3a.modular-dispatch.v1", "error": str(exc)})
+                                            {"contract": "r3a.activity-handler.v1", "error": str(exc)})
         except AcceptanceCriteriaRequired as exc:
             await self.store.block_activity(
                 activity, "objective acceptance criteria are required",

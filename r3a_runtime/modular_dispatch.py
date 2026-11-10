@@ -2,18 +2,20 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/modular_dispatch.py
 Component: R3A-MODULAR-DISPATCH-CONTRACTS
-File Revision: 1.0.1
+File Revision: 1.0.3
 Created: 2026-11-10T00:49:41Z
 Created By: Codex GPT-6
-Purpose: Validate and resolve generic resident bindings and durable activity handlers from CME registry observations.
+Purpose: Validate and resolve generic resident bindings from CME registry observations.
 Execution Model: Synchronous contract validation used by async CME dispatch.
 Observability: Resolution outcomes include contract identity, registry identity, and explicit denial reasons.
 Dependencies: Existing module registry, resident profile, activity intake, identity/HR authority, and CME authorization.
 Authority: AD-024; Steward Directive Issue #43; bindings and registration do not grant execution authority.
 Changed: 2026-11-10T00:49:41Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Add generic resident binding and activity-handler contract validation.
 Changed: 2026-11-10T01:00:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Resolve authoritative resident bindings and reject missing, stale, inactive, or incompatible registry entries.
+Changed: 2026-11-10T02:00:00Z | R3A-AD024-INTEROP | Codex GPT-6 | Remove private activity-handler shape validation in favor of the shared #46 module_extensions contract helper.
+Changed: 2026-11-10T02:20:00Z | R3A-AD024-INTEROP | Codex GPT-6 | Limit this resolver module to resident binding contracts; handler contracts are owned by #46 module_extensions.
 Supersedes: None
-Contracts: r3a.resident.module-binding.v1; r3a.resident.execution-profile@1.0.0; r3a.activity-handler.v1; r3a.module.v1.
+Contracts: r3a.resident.module-binding.v1; r3a.resident.execution-profile@1.0.0; r3a.module.v1.
 Tests: tests/test_r3a_modular_dispatch.py
 History/Predecessor: New file; initial publication recorded in Git.
 """
@@ -167,73 +169,3 @@ def build_resident_execution_profile(binding: dict[str, Any], directory_snapshot
                                    "snapshot_sha256": source["snapshot_sha256"],
                                    "observed_at": source["observed_at"]},
             "model_route_id": route_id, "config_revision": config_digest}
-
-
-def validate_activity_handler(manifest: Any) -> dict[str, Any]:
-    """Validate handler metadata embedded in an existing registered module manifest."""
-    required = {"contract_id", "contract_version", "handler_id", "handler_version", "activity_types",
-                "activity_contract_range", "request_schema", "result_schema", "progress_schema",
-                "checkpoint_schema", "required_capabilities", "state_namespace", "recovery"}
-    if not isinstance(manifest, dict) or set(manifest) != required:
-        raise DispatchContractError("activity handler manifest does not match r3a.activity-handler.v1")
-    if manifest["contract_id"] != "r3a.activity-handler" or manifest["contract_version"] != "1.0.0":
-        raise DispatchContractError("activity handler contract is incompatible")
-    if not _IDENT.fullmatch(_text(manifest["handler_id"], "handler_id")):
-        raise DispatchContractError("handler_id is invalid")
-    if not _SEMVER.fullmatch(_text(manifest["handler_version"], "handler_version")):
-        raise DispatchContractError("handler_version must be semantic major.minor.patch")
-    activity_types = manifest["activity_types"]
-    if (not isinstance(activity_types, list) or not activity_types
-            or any(not isinstance(item, str) or not _IDENT.fullmatch(item) for item in activity_types)
-            or len(set(activity_types)) != len(activity_types)):
-        raise DispatchContractError("activity_types must be unique stable identifiers")
-    version_range = manifest["activity_contract_range"]
-    if (not isinstance(version_range, dict)
-            or set(version_range) != {"contract_id", "major", "min_minor", "max_minor"}
-            or version_range.get("contract_id") != "r3a.activity-intake"
-            or any(isinstance(version_range.get(k), bool) or not isinstance(version_range.get(k), int)
-                   for k in ("major", "min_minor", "max_minor"))
-            or version_range["major"] != 1 or version_range["min_minor"] < 0
-            or version_range["max_minor"] < version_range["min_minor"]):
-        raise DispatchContractError("activity intake compatibility range is invalid")
-    for key in ("request_schema", "result_schema", "progress_schema", "checkpoint_schema"):
-        if not isinstance(manifest[key], dict):
-            raise DispatchContractError(f"{key} must be a JSON schema object")
-    caps = manifest["required_capabilities"]
-    if not isinstance(caps, list) or any(not isinstance(cap, str) or not cap.strip() for cap in caps):
-        raise DispatchContractError("required_capabilities must be a list of capability IDs")
-    if len(set(caps)) != len(caps):
-        raise DispatchContractError("required_capabilities must be unique")
-    _text(manifest["state_namespace"], "state_namespace")
-    recovery = manifest["recovery"]
-    if (not isinstance(recovery, dict) or set(recovery) != {"mode", "idempotency", "checkpoint"}
-            or recovery.get("mode") not in {"stateless", "checkpointed"}
-            or not isinstance(recovery.get("idempotency"), str)
-            or not isinstance(recovery.get("checkpoint"), str)):
-        raise DispatchContractError("handler recovery declaration is invalid")
-    if recovery["mode"] == "checkpointed" and not recovery["checkpoint"]:
-        raise DispatchContractError("checkpointed handlers must declare a checkpoint contract")
-    return dict(manifest)
-
-
-def resolve_activity_handler(registry: Iterable[dict[str, Any]], activity_type: str) -> dict[str, Any]:
-    """Find exactly one active compatible handler. Authorization remains a separate CME decision."""
-    candidates = []
-    for module in registry:
-        if not isinstance(module, dict) or module.get("lifecycle_state") != "ACTIVE":
-            continue
-        outer = module.get("manifest")
-        handler = outer.get("activity_handler") if isinstance(outer, dict) else None
-        if not isinstance(handler, dict):
-            continue
-        contract = validate_activity_handler(handler)
-        if activity_type in contract["activity_types"]:
-            candidates.append((module, contract))
-    if len(candidates) != 1:
-        raise DispatchContractError("activity handler is missing or ambiguous")
-    module, handler = candidates[0]
-    if not module.get("manifest", {}).get("artifact_digest"):
-        raise DispatchContractError("activity handler has no immutable artifact digest")
-    return {"module": module, "handler": handler,
-            "module_id": module.get("module_id"), "module_version": module.get("module_version"),
-            "artifact_digest": module["manifest"]["artifact_digest"]}
