@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/audits/R3A_DEVELOPMENT_BACKLOG_COMPLIANCE_MATRIX_20261109.md
 Component: R3A-AUDIT-DEVELOPMENT-BACKLOG
-File Revision: 1.0.3
+File Revision: 1.0.5
 Created: 2026-11-10T01:26:06Z
 Created By: Codex GPT-6, Independent Auditor V2
 Purpose: Inventory R3A development deliveries and record evidence-based integration and operational dispositions.
@@ -14,6 +14,8 @@ Changed: 2026-11-10T01:26:06Z | R3A-AUDIT-BACKLOG-V2 | Codex GPT-6 | Record disc
 Changed: 2026-11-10T01:47:05Z | R3A-AUDIT-BACKLOG-V2 | Codex GPT-6 | Reconcile AP1-M1 integration, current #46 head/tests, and Coordinator roster recovery evidence.
 Changed: 2026-11-10T02:35:00Z | R3A-AUDIT-BACKLOG-V2 | Codex GPT-6 | Review #46 manifest v1.1 correction and #43 shared-handler consumer submission; update tests and queue disposition.
 Changed: 2026-11-10T04:00:00Z | R3A-AUDIT-BACKLOG-V2 | Codex GPT-6 | Re-review #43 checkpoint correction; pass source candidate and record isolated PostgreSQL recovery evidence.
+Changed: 2026-11-10T09:45:00Z | R3A-AUDIT-ACTIVE-PRIORITY | Codex GPT-6 | Review #43 Grace tool execution, re-review #59, recheck HR/Website, and reproduce #48 digest regression.
+Changed: 2026-11-10T10:30:00Z | R3A-AUDIT-ACTIVE-PRIORITY | Codex GPT-6 | Verify Grace identity P0 against the explicit principal/executor, grant, discovery, fail-closed, and audit requirements; refresh active queue.
 Supersedes: None
 Contracts: R3A-001–024; AD-024; MOD-001–014; activity, module, resident, authorization, state, Website and acceptance contracts.
 Tests: Focused source candidate tests recorded per row; disposable PostgreSQL test database used for the opt-in persistence regression; no production or managed service tests run by Auditor.
@@ -22,6 +24,22 @@ History/Predecessor: New audit artifact; initial publication recorded in Git.
 # R3A Development Backlog Compliance Matrix — 2026-11-09
 
 **Status:** Initial rolling audit inventory. This matrix records source deliveries separately from integration, deployment, and live acceptance. It is not a deployment authorization.
+
+## Current active-development priority snapshot — 2026-11-10
+
+This snapshot supersedes older queue/status summaries below where candidates or baselines have since advanced. Review priority follows Steward comment [#56/6769145175](https://github.com/ppow1/R3/issues/56#issuecomment-6769145175): review evidence-bearing active deliveries before general backlog; recheck active issues after each review; source PASS is distinct from deployment/live acceptance. Grace P0 source review satisfies the exact identity correction directive; no managed runtime invocation has yet passed post-fix.
+
+| Priority | Workstream / issue | Candidate branch and exact SHA | Review readiness / disposition | Independently verified evidence | Next owner/action |
+|---|---|---|---|---|---|
+| P0 | Grace Autonomy #43 | `engineering/r3a-grace-capability-autonomy-20261110` — `e0b872e079640e8930cb792ee4df13540a5a6037` | **PASS — source ready for integration**; not deployed/live accepted | Current Coordinator source baseline `d592d1d` is ancestor; Coordinator branch head advanced to `8fed745` with ledger documentation only. Candidate preserves `aeac6fc` checkpoint PASS and Modular Plugins `a224a6b`. Focused 74 passed +4 subtests. Full suite 483 passed/10 skipped/1 known #48 digest failure/34 subtests; PostgreSQL checkpoint test skipped without DSN. Source retains public `resident:grace`, validates the selected resident through authoritative directory/conversation, dispatches as configured executor `resident.grace`, checks that module's exact grants, dynamically filters tools, and records both IDs in authorization/invocation audit context. | Coordinator #51 integrate this candidate and reconcile authoritative HR/execution identity association with the Website principal. The new managed ledger shows a real 80B `resident.grace` tool invocation succeeded and the Website `resident:grace` path still fails closed; that validates the old executor grant path, not this candidate's post-integration Website-to-executor binding. After integration, capture authenticated Website tool-aware turn, both identities in audit, provider result/evidence, and persisted completion. No grant change requested. |
+| P0 / deployment gate | Live Modular Integration #46 / PR #59 | `integration/r3a-live-modular-integration-20261110` — `4ec7f542a282208a1ad370b0410e498e92d2f880` | **BLOCKED**; no current defect in the corrected runbook; managed activation not eligible | Focused package/runbook/lifecycle tests 6 passed; full suite 483/10/1 known #48 digest/34 subtests. Runbook now states neither identity grant enables the pre-#43 path and gates activation. Merge-tree against #43 `e0b872e` conflicts in `r3a_runtime/cme.py`, `r3a_runtime/db.py`, `tests/test_r3a_institutional_directory.py`, `tests/test_r3a_telemetry_inbox_demo.py`. Host/resource scope is not enforced. | Coordinator #51 integrate #43 first, reconcile the four files, rerun regressions; then decide the one-activity/config-contained host scope and collect managed install/invocation/authorization/rollback evidence. #46 owner supplies any correction to PR #59 if reconciliation exposes one. |
+| P1 | Modular Plugins #46 | `engineering/r3a-modular-plugins-20261109` — `a224a6b30f1e96b95a65fde6a50d81775f5e5039` | **PASS — source contract reviewed**; included as ancestor of #43 `e0b872e`; not separately queued | Role-free v1.0 provider declarations preserved; resident/handler role declarations v1.1, fail-closed validation and lifecycle contracts independently reviewed earlier. | Coordinator to integrate through the #43 combined candidate; avoid duplicate integration. |
+| P1 | HR Development #58 | `engineering/r3a-hr-vicky-20261110` — `989945deae47979765c859852ce44faa654ed112` | **PASS — original transfer slice only**; newer universal packet scope has no candidate SHA | Exact-SHA focused HR/dossier suite 38 passed. Transfer matrix accounts for all four quarantined PR #57 files; R3A adapter preserves exact grants/provenance and fails closed at absent authority writer. No HR/identity/binding/grant mutation. | HR #58 owner to deliver universal versioned resident onboarding packet/workflow required by comment 6769020176; use same schema for synthetic second resident; report new SHA/tests. PR #57 remains quarantined. |
+| P1 | Website #51 | `engineering/r3a-ap3-website-20261107` — `923a94bbcf9273e2726e5d3e9b0ad75261d64998` | **BLOCKED** pending API-test environment and Coordinator baseline reconciliation | `daf8e6c` merge resolved `web/steward.js`, retained native `/login` and same-origin session controls; current Coordinator merge-tree clean, though `d592d1d` not ancestor. Node tests 19 passed; Website Python suite could not import (`fastapi` absent in available environments). Authenticated chat acceptance not evidenced; deployed identity reported stale `e2fe437...`. | Website owner/CI to run Python API regressions with declared deps and reconcile onto current Coordinator; Coordinator to provide authenticated browser/chat evidence and current deployed build identity. |
+| P1 | Notifications #48 digest correction | `engineering/r3a-ap1-notifications-20261107` — `471c2cf836a0ac3ff5f73f46a1aeae5290b9d7bf` | **BLOCKED — no corrected pushed SHA** | Exact focused test on PR #59 `4ec7f54` reproduces expected `capability_contracts.py` hash `107ea3b...` vs actual `8f65846...`. This was previously shown to fail at original baseline `9a41d7e` with then-source hash `41cd92f...`; not introduced by #43/#46/#59. Managed source/grant/recipient configuration also absent. | Notifications #48 owner to update manifest/provenance/test digest and push SHA. Then Coordinator to provide source DSN/grant/recipient and real delivery/ack trace for operational acceptance. |
+| P1 | Coordinator V2 #51 | Integration branch `integration/r3a-coordinator-v2-20261109` — `8fed74539db211bdcb9a60a2939cf141ebaf57f5` (latest; documentation-only commit over source baseline `d592d1d9e09e05dafb52fac4c598bcf92445fef6`) | **No new source candidate**; active integration/operational work | Coordinator's current six-workstream ledger records real 80B inference and successful read-only knowledge invocation/audit as `resident.grace`; it separately confirms authenticated Website conversation activity uses `resident:grace` and fails current exact-grant check. Provider is ACTIVE/healthy. No source deployment or grants changed. | Coordinator/HR owners to establish the authoritative resident/executor association using existing approved identity contracts, integrate #43, reconcile PR #59, and capture post-integration Website runtime evidence. Do not treat the existing executor-level live invocation as validation of #43's Website identity correction. |
+
+Only #43 `e0b872e` is currently an independently PASSed source integration candidate. #59 remains dependency-blocked; it is not a PASS queue item. The HR, Website and notification entries describe distinct outstanding work, not review-ready replacement commits. Legacy PR #57 remains excluded.
 
 ## Governing baseline and review method
 
@@ -43,7 +61,9 @@ Repository inspection was performed after `git fetch origin --prune`. Candidate 
 
 The Coordinator confirmed in [Issue #51](https://github.com/ppow1/R3/issues/51) that its branch/runtime code is `1deaaaf`, the Website build is `e2fe437`, and the current branch head is `90346ec` (an evidence/incident correction; it did not change runtime source). No release label/build manifest was supplied. The `9a41d7e` unified integration branch is a separate target and remains unchanged.
 
-## Delivery candidate matrix
+## Historical delivery candidate matrix
+
+The counts and dispositions below are the inventory at the earlier general-backlog review point. They do not replace the current active-development snapshot above. Newer deliveries and re-reviews are recorded in that snapshot and the rolling integration queue.
 
 Disposition counts for unique delivered work items: **17 discovered and reviewed — 13 ALREADY INTEGRATED, 2 PASS, 2 FAIL, 0 candidate-BLOCKED, 0 SUPERSEDED.** The five BLOCKED rows after this matrix are open operational/evidence items, not source candidate dispositions.
 
