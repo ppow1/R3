@@ -27,6 +27,7 @@ import sqlite3
 import shutil
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 from r3a_runtime.residents import (
@@ -756,7 +757,7 @@ class ResidentDossierTests(unittest.TestCase):
 
         class HR:
             def read(self, principal, resident_id):
-                return {"resident_id": resident_id, "revision": 4}
+                return {"resident_id": resident_id, "revision": 4, "status": "active"}
             def associate_authority_principal(self, *args, **kwargs):
                 raise AssertionError("non-provenance mutation must never be called")
 
@@ -765,25 +766,33 @@ class ResidentDossierTests(unittest.TestCase):
             resolve_verified_principal=lambda actor: SimpleNamespace(
                 principal_id=actor.principal_id, role="helen"))
         adapter = HRPrincipalAssociationAdapter(HR(), grants,
-            resolve_directory_evidence=lambda actor, evidence_ref: evidence)
+            resolve_directory_evidence=lambda actor, resident_id, evidence_ref: evidence)
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         evidence = {
             "source_id": "riverview_authority.directory",
             "source_contract": "riverview-authority.directory.v1",
             "snapshot_sha256": "b" * 64,
-            "observed_at": "2026-11-08T14:01:26Z",
-            "principal_id": "resident:vicky",
-            "office_id": "office:engineering",
+            "observed_at": now,
+            "hr_resident_id": "r3:fixture",
+            "hr_revision": 4,
+            "hr_source_ref": "hr://record/r3:fixture@4",
+            "principal_id": "resident:fixture",
+            "office_id": "office:fixture",
             "office_role": "Engineering Manager",
+            "office_status": "active",
             "binding_revision": 2,
-            "evidence_refs": ["directory-snapshot://sha256/" + "b" * 64],
-            "verified_at": "2026-11-08T14:02:00Z",
+            "evidence_refs": ["directory-snapshot://sha256/" + "b" * 64,
+                              "evidence://fixture/edge-1"],
+            "verified_at": now,
         }
         with self.assertRaisesRegex(NotImplementedError, "lacks associate_authority_principal_with_provenance"):
             adapter.associate(GovernedActor("human:helen", "session:server-verified"),
-                resident_id="r3:vicky", authority_principal="resident:vicky",
-                expected_hr_revision=4, evidence_ref=evidence["evidence_refs"][0])
+                resident_id="r3:fixture", expected_hr_revision=4,
+                evidence_ref=evidence["evidence_refs"][1],
+                idempotency_key="assoc-idem:fixture:1", correlation_id="assoc-corr:fixture:1")
         self.assertEqual(authority.audits[-1]["outcome"], "allowed")
         self.assertEqual(authority.audits[-1]["action"], "hr.write")
+        self.assertEqual(authority.audits[-1]["correlation_id"], "assoc-corr:fixture:1")
 
     def test_vicky_minimum_configuration_is_available_without_fabricated_biography(self):
         vicky = self.repo.get("r3:vicky")

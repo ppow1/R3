@@ -76,7 +76,8 @@ class R3CapabilityGrantAdapter:
         return self._check(principal, self.CHARACTER_RESOURCE, grant_action,
                            operation, scope, capability=action)
 
-    def authorize_hr(self, principal: Any, action: str, scope: str) -> bool:
+    def authorize_hr(self, principal: Any, action: str, scope: str, *,
+                    correlation_id: str | None = None) -> bool:
         """Authorization callback for existing HRCapability read/write operations."""
         if (not getattr(principal, "principal_id", None)
                 or not getattr(principal, "role", None)
@@ -85,13 +86,15 @@ class R3CapabilityGrantAdapter:
         operation = "write" if action == "hr.write" else "read"
         return self._check(principal, self.HR_RESOURCE, action, operation, scope,
                            capability=("hr.identity.association" if action == "hr.write"
-                                       else "hr.identity.resolve"))
+                                       else "hr.identity.resolve"),
+                           correlation_id=correlation_id)
 
     def _check(self, principal: Any, resource_id: str, action: str,
-               operation: str, scope: str, *, capability: str) -> bool:
+               operation: str, scope: str, *, capability: str,
+               correlation_id: str | None = None) -> bool:
         if not isinstance(scope, str) or not scope.strip():
             return False
-        correlation_id = str(uuid.uuid4())
+        correlation_id = correlation_id or str(uuid.uuid4())
         grant_id = None
         outcome = "denied"
         try:
