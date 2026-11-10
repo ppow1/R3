@@ -371,15 +371,22 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             bootstrap.write_text(json.dumps(config), encoding="utf-8")
             settings = load_settings(bootstrap)
             registry = settings.capability_registry
-            first_registered = registry.resolve_provider("engineering.workspace.apply_patch", "1.0.0")
+            first_registered = registry.resolve_provider(
+                "engineering.workspace.apply_patch",
+                json.loads((engineering_root / "manifest.json").read_text(encoding="utf-8"))[
+                    "provider"]["provider_version"])
+            first_version = first_registered.descriptor["provider"]["provider_version"]
+            major, minor, patch_number = (int(part) for part in first_version.split("."))
+            second_version = f"{major}.{minor}.{patch_number + 1}"
+            failed_version = f"{major}.{minor}.{patch_number + 2}"
             first_registered.legacy_manifest["module_manifest"]["contract_version"] = "1.1.0"
             first_registered.legacy_manifest["module_manifest"].update(copy.deepcopy(module_declaration))
-            registry._operations[("engineering.workspace.apply_patch", "r3a.isolated_workspace", "1.0.0")] = \
+            registry._operations[("engineering.workspace.apply_patch", "r3a.isolated_workspace", first_version)] = \
                 first_registered
             first = first_registered.descriptor
             first_manifest = copy.deepcopy(first_registered.legacy_manifest)
             second = copy.deepcopy(first)
-            second["provider"]["provider_version"] = "1.0.1"
+            second["provider"]["provider_version"] = second_version
             replacement_artifact = (Path(__file__).parents[1] /
                                     "r3a_plugins/engineering_workspace/replacement_test_fixture.py")
             second["provider"]["entrypoint"] = (
@@ -387,7 +394,7 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             second["provider"]["artifact_sha256"] = hashlib.sha256(
                 replacement_artifact.read_bytes()).hexdigest()
             second_manifest = copy.deepcopy(first_manifest)
-            second_manifest["plugin_version"] = "1.0.1"
+            second_manifest["plugin_version"] = second_version
             second_manifest["artifact_ref"] = "replacement_test_fixture.py"
             second_manifest["artifact_sha256"] = second["provider"]["artifact_sha256"]
             second_manifest["supporting_artifacts"] = [{
@@ -395,9 +402,9 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 "artifact_sha256": first["provider"]["artifact_sha256"]
             }]
             second_manifest["provider"].update(second["provider"])
-            second_manifest["operation"]["operation_revision"] = "1.0.1"
+            second_manifest["operation"]["operation_revision"] = second_version
             second_manifest["operation"]["provider"].update(second["provider"])
-            second_manifest["module_manifest"]["module_version"] = "1.0.1"
+            second_manifest["module_manifest"]["module_version"] = second_version
             second_manifest["module_manifest"]["binding"]["entrypoint"] = second["provider"]["entrypoint"]
             second_manifest["module_manifest"]["artifact"] = {
                 "artifact_ref": "replacement_test_fixture.py",
@@ -409,12 +416,12 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 **first_manifest["_pinned_artifact_paths"]}
             registry.register(second, {"workspace_root": str(root)}, legacy_manifest=second_manifest)
             failed_manifest = copy.deepcopy(first_manifest)
-            failed_manifest["plugin_version"] = "1.0.2"
-            failed_manifest["provider"]["provider_version"] = "1.0.2"
+            failed_manifest["plugin_version"] = failed_version
+            failed_manifest["provider"]["provider_version"] = failed_version
             failed_manifest["provider"]["entrypoint"] = (
                 "r3a_plugins.engineering_workspace.provider:missing_factory")
             failed_manifest["operation"]["provider"].update(failed_manifest["provider"])
-            failed_manifest["module_manifest"]["module_version"] = "1.0.2"
+            failed_manifest["module_manifest"]["module_version"] = failed_version
             failed_manifest["module_manifest"]["binding"]["entrypoint"] = (
                 "r3a_plugins.engineering_workspace.provider:missing_factory")
             failed = operation_from_manifest(failed_manifest)
@@ -447,29 +454,29 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             self.assertTrue(telemetry_install["installed"])
             install = await cme._control_request(
                 "capability.module.install",
-                {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.0"},
+                {"operation_id": "engineering.workspace.apply_patch", "provider_version": first_version},
                 "install-engineering-v1")
             self.assertTrue(install["installed"])
             install_new = await cme._control_request(
                 "capability.module.install",
-                {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.1"},
+                {"operation_id": "engineering.workspace.apply_patch", "provider_version": second_version},
                 "install-engineering-v1.0.1")
             self.assertTrue(install_new["installed"])
             expected_executor = module_declaration["resident_executor"]
             expected_handler = module_declaration["activity_handler"]
-            installed_roles = store.modules[("r3a.isolated_workspace", "1.0.0")]["manifest"]
+            installed_roles = store.modules[("r3a.isolated_workspace", first_version)]["manifest"]
             self.assertEqual(expected_executor, installed_roles["resident_executor"])
             self.assertEqual(expected_handler, installed_roles["activity_handler"])
-            replacement_roles = store.modules[("r3a.isolated_workspace", "1.0.1")]["manifest"]
+            replacement_roles = store.modules[("r3a.isolated_workspace", second_version)]["manifest"]
             self.assertEqual(expected_executor, replacement_roles["resident_executor"])
             self.assertEqual(expected_handler, replacement_roles["activity_handler"])
-            installed = await store.rows("lifecycle_state", ("r3a.isolated_workspace", "1.0.0"))
+            installed = await store.rows("lifecycle_state", ("r3a.isolated_workspace", first_version))
             self.assertEqual("INSTALLED", installed[0]["lifecycle_state"])
 
-            old = registry.resolve_provider("engineering.workspace.apply_patch", "1.0.0")
+            old = registry.resolve_provider("engineering.workspace.apply_patch", first_version)
             await cme._control_request(
                 "capability.module.activate",
-                {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.0"},
+                {"operation_id": "engineering.workspace.apply_patch", "provider_version": first_version},
                 "activate-engineering-v1")
             context = {"invocation_id": "lifecycle-fixture", "effect_class": "isolated_write",
                        "target": {"workspace_id": "candidate-1"},
@@ -481,28 +488,28 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 await cme._control_request(
                     "capability.module.replace",
                     {"operation_id": "engineering.workspace.apply_patch",
-                     "old_module_id": "r3a.isolated_workspace", "old_version": "1.0.0",
-                     "new_provider_version": "1.0.2"},
+                     "old_module_id": "r3a.isolated_workspace", "old_version": first_version,
+                     "new_provider_version": failed_version},
                     "replace-engineering-provider-with-failing-candidate")
             selected_after_failure = registry.resolve("engineering.workspace.apply_patch")
-            self.assertEqual("1.0.0", selected_after_failure.descriptor["provider"]["provider_version"])
+            self.assertEqual(first_version, selected_after_failure.descriptor["provider"]["provider_version"])
             failed_candidate = await store.rows(
-                "lifecycle_state", ("r3a.isolated_workspace", "1.0.2"))
+                "lifecycle_state", ("r3a.isolated_workspace", failed_version))
             self.assertEqual("FAILED", failed_candidate[0]["lifecycle_state"])
             prior_after_failure = await store.rows(
-                "lifecycle_state", ("r3a.isolated_workspace", "1.0.0"))
+                "lifecycle_state", ("r3a.isolated_workspace", first_version))
             self.assertEqual("ACTIVE", prior_after_failure[0]["lifecycle_state"])
             self.assertEqual([], store.replacements)
 
             replacement = await cme._control_request(
                 "capability.module.replace",
                 {"operation_id": "engineering.workspace.apply_patch",
-                 "old_module_id": "r3a.isolated_workspace", "old_version": "1.0.0",
-                 "new_provider_version": "1.0.1"},
+                 "old_module_id": "r3a.isolated_workspace", "old_version": first_version,
+                 "new_provider_version": second_version},
                 "replace-engineering-provider")
             self.assertTrue(replacement["replaced"])
             active = registry.resolve("engineering.workspace.apply_patch")
-            self.assertEqual("1.0.1", active.descriptor["provider"]["provider_version"])
+            self.assertEqual(second_version, active.descriptor["provider"]["provider_version"])
             self.assertNotEqual(first["provider"]["artifact_sha256"],
                                 active.descriptor["provider"]["artifact_sha256"])
             self.assertEqual("infrastructure.octominer.telemetry.read",
@@ -514,7 +521,7 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             discovered_handler = resolve_activity_handler(
                 handler_rows, "fixture.engineering.reconcile")
             self.assertEqual("r3a.isolated_workspace", discovered_handler["module_id"])
-            self.assertEqual("1.0.1", discovered_handler["module_version"])
+            self.assertEqual(second_version, discovered_handler["module_version"])
             self.assertEqual(active.descriptor["provider"]["artifact_sha256"],
                              discovered_handler["artifact_digest"])
             replacement_context = {**context, "invocation_id": "replacement-implementation"}
@@ -528,14 +535,14 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 active, {"path": "artifacts/replacement.txt", "content": "new implementation\n"},
                 replacement_context)
             self.assertTrue(replay["replayed"])
-            stopped = await store.rows("lifecycle_state", ("r3a.isolated_workspace", "1.0.0"))
+            stopped = await store.rows("lifecycle_state", ("r3a.isolated_workspace", first_version))
             self.assertEqual("STOPPED", stopped[0]["lifecycle_state"])
-            self.assertEqual([("r3a.isolated_workspace", "1.0.0", "1.0.1")], store.replacements)
+            self.assertEqual([("r3a.isolated_workspace", first_version, second_version)], store.replacements)
             status = await cme._control_request(
                 "capability.module.status",
-                {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.1"},
+                {"operation_id": "engineering.workspace.apply_patch", "provider_version": second_version},
                 "status-engineering-v1.0.1")
-            self.assertEqual("1.0.1", status["provider_version"])
+            self.assertEqual(second_version, status["provider_version"])
             self.assertEqual("ACTIVE", status["module"]["lifecycle_state"])
             self.assertEqual("healthy", status["module"]["health"])
             self.assertEqual("fixture-observation", status["module"]["observed_at"])
@@ -543,14 +550,14 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                              status["module"]["diagnostic"]["observed_contract"]["contract_id"])
             await cme._control_request(
                 "capability.module.deactivate",
-                {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.1"},
+                {"operation_id": "engineering.workspace.apply_patch", "provider_version": second_version},
                 "deactivate-engineering-v1.0.1")
-            stopped_new = await store.rows("lifecycle_state", ("r3a.isolated_workspace", "1.0.1"))
+            stopped_new = await store.rows("lifecycle_state", ("r3a.isolated_workspace", second_version))
             self.assertEqual("STOPPED", stopped_new[0]["lifecycle_state"])
             self.assertEqual(expected_executor,
-                             store.modules[("r3a.isolated_workspace", "1.0.1")]["manifest"]["resident_executor"])
+                             store.modules[("r3a.isolated_workspace", second_version)]["manifest"]["resident_executor"])
             self.assertEqual(expected_handler,
-                             store.modules[("r3a.isolated_workspace", "1.0.1")]["manifest"]["activity_handler"])
+                             store.modules[("r3a.isolated_workspace", second_version)]["manifest"]["activity_handler"])
             replacement_states = [state for key, _previous, state, _health, _diagnostic in store.transitions
                                   if key[0] == "r3a.isolated_workspace"]
             self.assertIn("REPLACING", replacement_states)
@@ -559,13 +566,13 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 registry.resolve("engineering.workspace.apply_patch")
             await cme._control_request(
                 "capability.module.activate",
-                {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.1"},
+                {"operation_id": "engineering.workspace.apply_patch", "provider_version": second_version},
                 "reactivate-engineering-v1.0.1-for-health-failure")
-            active_binding = runtime.processes[("r3a.isolated_workspace", "1.0.1")]
+            active_binding = runtime.processes[("r3a.isolated_workspace", second_version)]
             active_binding.process.terminate()
             await active_binding.process.wait()
             await runtime.check_health()
-            failed_after_start = store.modules[("r3a.isolated_workspace", "1.0.1")]
+            failed_after_start = store.modules[("r3a.isolated_workspace", second_version)]
             self.assertEqual("FAILED", failed_after_start["lifecycle_state"])
             self.assertEqual("unavailable", failed_after_start["health"])
             self.assertEqual("provider process exited", failed_after_start["diagnostic"]["reason"])
