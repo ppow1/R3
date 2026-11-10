@@ -38,6 +38,10 @@ from r3a_runtime.capability_contracts import CapabilityContractError, validate_m
 from r3a_runtime.module_extensions import (
     ModuleExtensionError,
     resolve_activity_handler,
+    validate_activity_handler,
+    validate_activity_handler_action,
+    validate_activity_handler_action_request,
+    validate_activity_handler_continuation,
     validate_activity_handler_payload,
 )
 from r3a_runtime.provider_runtime import ProviderProcessManager
@@ -92,7 +96,7 @@ def test_shared_fixture_validates_as_v11_module_and_matches_runtime_projection()
                                                  kind, payload) == payload
 
 
-@pytest.mark.parametrize("contract_version", ["1.0.1", "1.2.0", "2.0.0", "garbage"])
+@pytest.mark.parametrize("contract_version", ["1.0.1", "1.3.0", "2.0.0", "garbage"])
 def test_shared_fixture_rejects_unknown_manifest_contract_versions(contract_version):
     sample = fixture()
     sample["module_manifest"]["contract_version"] = contract_version
@@ -140,6 +144,147 @@ def test_shared_fixture_rejects_invalid_request_result_progress_and_checkpoint_p
                           ("checkpoint", {"cursor": True})):
         with pytest.raises(ModuleExtensionError, match="payload is invalid"):
             validate_activity_handler_payload(handler, kind, payload)
+
+
+def _v11_handler_fixture():
+    sample, _row = validated_fixture()
+    manifest = sample["module_manifest"]
+    manifest["contract_version"] = "1.2.0"
+    handler = manifest["activity_handler"]
+    handler["contract_version"] = "1.1.0"
+    handler["handler_contract_range"]["max_minor"] = 1
+    return sample
+
+
+def test_v11_action_and_continuation_are_versioned_while_v10_consumer_remains_valid():
+    sample = _v11_handler_fixture()
+    checked = validate_activity_handler(sample["module_manifest"]["activity_handler"])
+    assert checked["contract_version"] == "1.1.0"
+    assert validate_module_manifest(sample["module_manifest"], sample["operation"],
+                                    sample["source_manifest"])["contract_version"] == "1.2.0"
+    assert validate_activity_handler(fixture()["module_manifest"]["activity_handler"])["contract_version"] == "1.0.0"
+    action = {"contract_id": "r3a.activity-handler.action", "contract_version": "1.0.0",
+              "action_id": "read-1", "operation_id": "billing.invoice.read",
+              "operation_contract_version": "1.0.0", "target": {},
+              "input": {"invoice_id": "invoice-fixture-001"},
+              "evidence_purpose": "Read the invoice record", "durable_work": None}
+    assert validate_activity_handler_action(action) == action
+    assert validate_activity_handler_action_request({"outcome": "action_required", "action": action,
+                                                     "checkpoint": {"cursor": 1}})["action"] == action
+    continuation = {"contract_id": "r3a.activity-handler.continuation", "contract_version": "1.0.0",
+                    "action_id": "read-1", "outcome": "succeeded", "invocation": {},
+                    "evidence": [], "error": None}
+    assert validate_activity_handler_continuation(continuation) == continuation
+
+
+def test_v11_handler_action_round_trip_persists_intent_and_receipt_before_resume():
+    async def run():
+        from r3a_runtime.cme import CME
+
+        sample = _v11_handler_fixture()
+        handler = sample["module_manifest"]["activity_handler"]
+        manifest = {"manifest_contract": "r3a.module-manifest.v1@1.2.0",
+                    "module_id": sample["module_manifest"]["module_id"],
+                    "module_version": sample["module_manifest"]["module_version"],
+                    "artifact_digest": sample["module_manifest"]["artifact"]["artifact_sha256"],
+                    "capability_refs": sample["module_manifest"]["capability_refs"],
+                    "activity_handler": handler}
+        resolved = {"handler": handler, "module": {"manifest": manifest},
+                    "module_id": manifest["module_id"], "module_version": manifest["module_version"],
+                    "artifact_digest": manifest["artifact_digest"]}
+        activity = _cme_activity(sample)
+        activity["checkpoint"] = {}
+        cme = object.__new__(CME)
+        cme.settings = SimpleNamespace(source_digest="config-r1")
+        cme.module_id = "cme"
+        cme.store = SimpleNamespace(record_progress=AsyncMock(), finish_activity=AsyncMock(),
+                                    block_activity=AsyncMock())
+        descriptor = {"operation_id": "billing.invoice.read", "contract_version": "1.0.0",
+                     "effect_class": "read", "target_scope_schema": {"type": "object"},
+                     "input_schema": {"type": "object"}}
+        cme.settings.capability_registry = SimpleNamespace(
+            resolve=Mock(return_value=SimpleNamespace(descriptor=descriptor)))
+        action = {"contract_id": "r3a.activity-handler.action", "contract_version": "1.0.0",
+                  "action_id": "read-invoice-1", "operation_id": "billing.invoice.read",
+                  "operation_contract_version": "1.0.0", "target": {},
+                  "input": {"invoice_id": "invoice-fixture-001"},
+                  "evidence_purpose": "Read the invoice record", "durable_work": None}
+        action_result = {"outcome": "action_required", "action": action,
+                         "checkpoint": {"cursor": 1}}
+        complete = {"outcome": "completed", "invoice_id": "invoice-fixture-001",
+                    "status": "validated", "progress": {"phase": "completed", "completed": 1},
+                    "checkpoint": {"cursor": 1}}
+        cme._authorization_decision = AsyncMock(return_value=SimpleNamespace(
+            decision_id="decision", audit_event_id="audit", policy_revision="policy"))
+        cme._registered_module_call = AsyncMock(side_effect=[{"result": action_result}, {"result": complete}])
+        cme.invoke_capability = AsyncMock(return_value={"outcome": "SUCCEEDED", "evidence": [{"ref": "ev-1"}]})
+        decisions = [{"capability_id": "activity.handler.execute", "decision_id": "decision",
+                      "audit_event_id": "audit", "policy_revision": "policy"}]
+
+        await cme._run_registered_activity_with_actions(activity, resolved,
+                                                        {"handler": {"handler_id": handler["handler_id"],
+                                                                      "module_id": manifest["module_id"],
+                                                                      "module_version": manifest["module_version"],
+                                                                      "artifact_digest": manifest["artifact_digest"]}},
+                                                        decisions)
+        assert cme._registered_module_call.await_count == 2
+        resumed_payload = cme._registered_module_call.await_args_list[1].args[3]
+        assert resumed_payload["continuation"]["action_id"] == "read-invoice-1"
+        assert resumed_payload["continuation"]["outcome"] == "succeeded"
+        cme.invoke_capability.assert_awaited_once()
+        request = cme.invoke_capability.await_args.args[0]
+        assert request["operation_id"] == "billing.invoice.read"
+        assert request["caller"]["resident_id"] == "resident.fixture"
+        writes = cme.store.record_progress.await_args_list
+        assert writes[1].args[1]["phase"] == "handler.action.requested"
+        assert writes[1].args[2]["pending_action"]["action"]["action_id"] == "read-invoice-1"
+        assert writes[2].args[1]["phase"] == "handler.action.completed"
+        assert writes[2].args[2]["continuation"]["evidence"] == [{"ref": "ev-1"}]
+        cme.store.finish_activity.assert_awaited_once()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(("raised", "expected"), [
+    ("authorization", "denied"), ("provider_permission", "failed")])
+def test_v11_action_distinguishes_authorization_denial_from_provider_failure(raised, expected):
+    async def run():
+        from r3a_runtime.cme import CapabilityAuthorizationDenied, CME
+
+        sample = _v11_handler_fixture()
+        handler = sample["module_manifest"]["activity_handler"]
+        manifest = {"module_id": sample["module_manifest"]["module_id"],
+                    "module_version": sample["module_manifest"]["module_version"],
+                    "artifact_digest": sample["module_manifest"]["artifact"]["artifact_sha256"],
+                    "capability_refs": sample["module_manifest"]["capability_refs"]}
+        binding = {"handler_id": handler["handler_id"], "handler_version": handler["handler_version"],
+                   "module_id": manifest["module_id"], "module_version": manifest["module_version"],
+                   "artifact_digest": manifest["artifact_digest"]}
+        resolved = {"module": {"manifest": manifest}}
+        activity = _cme_activity(sample)
+        descriptor = {"operation_id": "billing.invoice.read", "contract_version": "1.0.0",
+                      "effect_class": "read", "target_scope_schema": {"type": "object"},
+                      "input_schema": {"type": "object"}}
+        cme = object.__new__(CME)
+        cme.settings = SimpleNamespace(source_digest="config-r1",
+                                       capability_registry=SimpleNamespace(
+                                           resolve=Mock(return_value=SimpleNamespace(descriptor=descriptor))))
+        error = (CapabilityAuthorizationDenied("grant missing") if raised == "authorization"
+                 else PermissionError("provider file permission failure"))
+        cme.invoke_capability = AsyncMock(side_effect=error)
+        action = {"contract_id": "r3a.activity-handler.action", "contract_version": "1.0.0",
+                  "action_id": "read-invoice-2", "operation_id": "billing.invoice.read",
+                  "operation_contract_version": "1.0.0", "target": {},
+                  "input": {"invoice_id": "invoice-fixture-001"},
+                  "evidence_purpose": "Read the invoice record", "durable_work": None}
+        digest = hashlib.sha256(json.dumps(action, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        pending = {"handler": binding, "action": action, "action_sha256": digest,
+                   "attempt_id": activity["attempt_id"], "config_revision": "config-r1"}
+        result = await cme._dispatch_registered_handler_action(activity, resolved, handler, pending)
+        assert result["outcome"] == expected
+        assert cme.invoke_capability.await_args.kwargs["_handler_work_item"] is None
+
+    asyncio.run(run())
 
 
 def _cme_activity(sample: dict) -> dict:

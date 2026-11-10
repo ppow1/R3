@@ -373,7 +373,7 @@ class TestResidentBinding:
                 {"artifact_sha256": "a" * 64,
                  "configuration_schema": {"schema_id": "fixture.config.v1"}})
 
-    @pytest.mark.parametrize("contract_version", ["1.0.1", "1.2.0", "2.0.0", "not-semver"])
+    @pytest.mark.parametrize("contract_version", ["1.0.1", "1.3.0", "2.0.0", "not-semver"])
     def test_module_manifest_unknown_patch_minor_or_major_fails_closed(self, contract_version):
         declaration = module_manifest()
         declaration["contract_version"] = contract_version

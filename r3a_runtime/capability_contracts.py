@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3a_runtime/capability_contracts.py
 # Component: R3A-CAPABILITY-CONTRACTS
-# File Revision: 1.0.2
+# File Revision: 1.0.3
 # Created: Unknown (legacy)
 # Created By: Unknown (legacy)
 # Purpose: Validate typed capability operations, provider manifests, invocations, and module registration metadata.
@@ -10,9 +10,10 @@
 # Dependencies: Python standard library; versioned JSON schemas under r3a_runtime/schemas.
 # Authority: Existing R3A capability-provider architecture; AD-024 permits additive module role metadata.
 # Changed: 2026-11-10T02:02:46Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Select the declared module-manifest minor schema and reject role metadata under v1.0.0.
+# Changed: 2026-11-10 | R3A-CORE-SOCKET-FS03 | Coordinator | Accept module-manifest v1.2 for the backward-compatible activity-handler v1.1 socket.
 # Supersedes: None
-# Contracts: r3a.capability-operation.v1; r3a.capability-invocation.v1; r3a.module-manifest.v1@1.0.0 and @1.1.0; AD-024 role contracts.
-# Tests: tests/test_r3a_capability_contracts.py; tests/test_r3a_module_extensions.py.
+# Contracts: r3a.capability-operation.v1; r3a.capability-invocation.v1; r3a.module-manifest.v1@1.0.0, @1.1.0 and @1.2.0; AD-024 role contracts.
+# Tests: tests/test_r3a_capability_contracts.py; tests/test_r3a_module_extensions.py; tests/test_r3a_activity_handler_interop.py.
 # History/Predecessor: Prior source at integration commit 9a41d7e9647d37c2b7dc6f2aca3be3f5f82ccfe9, blob cedb0e412df130e1db842a8ef116085cc6c8cbc8.
 """Canonical R3A capability contracts, provider interface, and dynamic registry.
 
@@ -248,6 +249,7 @@ def validate_module_manifest(module_manifest: Any, operation: dict[str, Any],
     manifest_schemas = {
         ("r3a.module-manifest.v1", "1.0.0"): "module-manifest.v1.schema.json",
         ("r3a.module-manifest.v1", "1.1.0"): "module-manifest.v1.1.schema.json",
+        ("r3a.module-manifest.v1", "1.2.0"): "module-manifest.v1.2.schema.json",
     }
     schema_name = manifest_schemas.get(contract)
     if schema_name is None:

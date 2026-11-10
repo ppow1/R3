@@ -645,6 +645,58 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="r3a-canonical-read-") as temporary:
             asyncio.run(scenario(Path(temporary)))
 
+    def test_handler_work_item_uses_canonical_authorized_isolated_write_dispatch(self):
+        async def scenario(root: Path):
+            order = work_order()
+            registry = CapabilityRegistry()
+            registry.register(descriptor(), {"workspace_root": str(root)})
+            instance = CME.__new__(CME)
+            instance.settings = SimpleNamespace(capability_registry=registry, source_digest="cfg-demo")
+            instance.store = DurableFixtureStore(order)
+            instance.store.fail_finish_once = False
+            instance._authorize_capability = AsyncMock(return_value={
+                "provider_id": "fixture-grants", "decision_id": "decision-handler-action",
+                "audit_event_id": "audit-handler-action", "policy_revision": "policy-demo",
+                "config_revision": "cfg-demo"})
+            action_id = "handler-action-001"
+            target = {"workspace_id": "candidate-1"}
+            arguments = {"path": "artifacts/handler-result.txt", "content": "handler action"}
+            request = {
+                "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.1.0",
+                "invocation_id": "88888888-8888-4888-8888-888888888888",
+                "operation_id": "engineering.workspace.apply_patch",
+                "operation_contract_version": "1.0.0",
+                "caller": {"principal_id": "resident.grace", "resident_id": "resident.grace",
+                           "service_id": None},
+                "target": target, "input": arguments, "activity_id": ACTIVITY, "attempt_id": ATTEMPT,
+                "correlation_id": CORRELATION, "work_order": {"work_order_id": action_id, "version": 1},
+                "evidence_purpose": "Write one handler-authorized isolated artifact.",
+                "idempotency_key": "handler-action:activity:handler-action-001", "deadline": None,
+                "config_revision": "cfg-demo"}
+            digest = hashlib.sha256(b"canonical-handler-action").hexdigest()
+            item = {"contract_id": "r3a.activity-handler.work-item", "contract_version": "1.0.0",
+                    "work_id": action_id, "record": {"workspace_id": "candidate-1",
+                                                          "allowed_paths": ["artifacts/**"]},
+                    "activity_id": ACTIVITY, "attempt_id": ATTEMPT,
+                    "handler": {"module_id": "example.handler", "module_version": "1.0.0",
+                                "artifact_digest": "a" * 64},
+                    "action_id": action_id, "action_sha256": digest,
+                    "operation_id": "engineering.workspace.apply_patch",
+                    "operation_contract_version": "1.0.0", "target": target, "input": arguments}
+
+            result = await instance.invoke_capability(request, _handler_work_item=item,
+                                                      _handler_action=True)
+            artifact = root / "artifacts/handler-result.txt"
+            self.assertEqual("SUCCEEDED", result["outcome"])
+            self.assertEqual("COMMITTED", result["effect_disposition"])
+            self.assertEqual("handler action", artifact.read_text(encoding="utf-8"))
+            context = instance._authorize_capability.await_args.kwargs["context"]
+            self.assertEqual(action_id, context["work_order_id"])
+            self.assertEqual(target, context["target"])
+
+        with tempfile.TemporaryDirectory(prefix="r3a-handler-work-item-") as temporary:
+            asyncio.run(scenario(Path(temporary)))
+
     def test_cme_dispatch_recovery_artifact_verification_and_gated_completion(self):
         async def scenario(root: Path):
             order = work_order()

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.activity-handler.continuation.v1",
+  "title": "R3A Activity Handler Action Continuation v1",
+  "type": "object",
+  "required": ["contract_id", "contract_version", "action_id", "outcome", "invocation", "evidence", "error"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_id": {"const": "r3a.activity-handler.continuation"},
+    "contract_version": {"const": "1.0.0"},
+    "action_id": {"type": "string", "minLength": 1, "maxLength": 200},
+    "outcome": {"enum": ["succeeded", "denied", "failed"]},
+    "invocation": {"type": ["object", "null"]},
+    "evidence": {"type": "array", "items": {"type": "object"}},
+    "error": {"type": ["object", "null"]}
+  }
+}

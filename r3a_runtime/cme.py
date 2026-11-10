@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.20.9
+File Revision: 1.21.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -29,6 +29,7 @@ Changed: 2026-11-10T14:05:00Z | R3A-GRACE-CAPABILITY-AUTONOMY | Codex GPT-6 | Au
 Changed: 2026-11-10 | R3A-EXECUTOR-ROLE-P0 | Coordinator | Reuse the contracted resident.objective.execute authorization at bound-executor dispatch; remove the ungranted executor-specific capability.
 Changed: 2026-11-10T15:20:26Z | R3A-MODULAR-EXECUTOR-ROLE | Codex GPT-6 | Publish the configured generic executor role and promote compatible registered primary-module metadata.
 Changed: 2026-11-10T18:08:17Z | R3A-CORE-SOCKET-FS02 | Coordinator | Fail closed when the registered Knowledge provider is unavailable; remove CME's direct file retrieval fallback.
+Changed: 2026-11-10 | R3A-CORE-SOCKET-FS03 | Coordinator | Add versioned generic handler action continuation through CME authorization, durable invocation and resume.
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Dispatch generic versioned Steward read/write effects through existing authorization, invocation, and provider paths.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
@@ -108,12 +109,21 @@ from .provider_runtime import ProviderProcessManager
 from .grace_module import validate_resident_profile
 from .module_extensions import (ModuleExtensionError, resolve_activity_handler,
                                 resolve_resident_binding, validate_activity_handler,
+                                validate_activity_handler_action,
+                                validate_activity_handler_action_request,
+                                validate_activity_handler_continuation,
                                 validate_activity_handler_payload,
                                 validate_executor_configuration)
 
 
 ACTIVITY_INTAKE_SCHEMA = json.loads(
     (Path(__file__).with_name("schemas") / "activity-intake.v1.schema.json").read_text(encoding="utf-8"))
+MAX_HANDLER_ACTION_BYTES = 512 * 1024
+MAX_HANDLER_ACTIONS_PER_ACTIVITY = 100
+
+
+class CapabilityAuthorizationDenied(PermissionError):
+    """Canonical authorization denied an invocation before provider dispatch."""
 
 
 _RESIDENT_TOOLS = (
@@ -601,7 +611,8 @@ class CME:
         handler = validate_activity_handler(resolved["handler"])
         module = resolved["module"]
         event_input = activity.get("input") or {}
-        payload = {"contract_id": "r3a.activity-handler.request", "contract_version": "1.0.0",
+        payload = {"contract_id": "r3a.activity-handler.request",
+                   "contract_version": handler["contract_version"],
                    "activity_id": str(activity["activity_id"]), "attempt_id": str(activity["attempt_id"]),
                    "correlation_id": str(event_input.get("correlation_id") or activity["activity_id"]),
                    "activity_type": activity["activity_type"], "idempotency_key": activity["idempotency_key"],
@@ -637,19 +648,25 @@ class CME:
                       "decision_id": handler_decision.decision_id,
                       "audit_event_id": handler_decision.audit_event_id,
                       "policy_revision": handler_decision.policy_revision}]
-        for capability_id in handler["required_capabilities"]:
-            decision = await self._authorization_decision(
-                capability_id, activity_id=str(activity["activity_id"]),
-                attempt_id=str(activity["attempt_id"]),
-                request_id=str(uuid.uuid5(uuid.UUID(str(activity["activity_id"])),
-                                          f"handler-grant:{capability_id}:{activity['attempt_id']}")),
-                context={"dispatcher": "CME", "handler_id": handler["handler_id"],
-                         "module_id": resolved["module_id"], "activity_type": activity["activity_type"]},
-                resident_id=resolved["module_id"])
-            decisions.append({"capability_id": capability_id, "decision_id": decision.decision_id,
-                              "audit_event_id": decision.audit_event_id,
-                              "policy_revision": decision.policy_revision})
+        if handler["contract_version"] == "1.0.0":
+            for capability_id in handler["required_capabilities"]:
+                decision = await self._authorization_decision(
+                    capability_id, activity_id=str(activity["activity_id"]),
+                    attempt_id=str(activity["attempt_id"]),
+                    request_id=str(uuid.uuid5(uuid.UUID(str(activity["activity_id"])),
+                                              f"handler-grant:{capability_id}:{activity['attempt_id']}")),
+                    context={"dispatcher": "CME", "handler_id": handler["handler_id"],
+                             "module_id": resolved["module_id"], "activity_type": activity["activity_type"]},
+                    resident_id=resolved["module_id"])
+                decisions.append({"capability_id": capability_id, "decision_id": decision.decision_id,
+                                  "audit_event_id": decision.audit_event_id,
+                                  "policy_revision": decision.policy_revision})
+        else:
+            payload["declared_action_capabilities"] = list(handler["required_capabilities"])
         payload["authorized_capabilities"] = decisions
+        if handler["contract_version"] == "1.1.0":
+            await self._run_registered_activity_with_actions(activity, resolved, payload, decisions)
+            return
         await self.store.record_progress(
             activity, {"phase": "handler.dispatched", "handler_id": handler["handler_id"],
                        "module_id": resolved["module_id"], "module_version": resolved["module_version"],
@@ -685,6 +702,239 @@ class CME:
                 {"handler": payload["handler"], "authorization": decisions, "result": result})
         else:
             raise ValueError("activity handler result outcome must be completed or blocked")
+
+    async def _run_registered_activity_with_actions(self, activity: dict[str, Any],
+                                                    resolved: dict[str, Any],
+                                                    payload: dict[str, Any],
+                                                    decisions: list[dict[str, Any]]) -> None:
+        """Run the v1.1 request/action/continuation round trip over the registered handler socket."""
+        handler = resolved["handler"]
+        binding = payload["handler"]
+        stored = activity.get("checkpoint") or {}
+        handler_checkpoint = stored.get("handler_checkpoint", {}) if isinstance(stored, dict) else {}
+        continuation = stored.get("continuation") if isinstance(stored, dict) else None
+        pending_action = stored.get("pending_action") if isinstance(stored, dict) else None
+        action_history = list(stored.get("action_history", [])) if isinstance(stored, dict) else []
+        if not isinstance(action_history, list):
+            raise ModuleExtensionError("durable handler action history is malformed")
+        seen_action_ids: set[str] = set()
+        for entry in action_history:
+            if not isinstance(entry, dict) or set(entry) != {"action_id", "action_sha256", "result"}:
+                raise ModuleExtensionError("durable handler action history entry is malformed")
+            action_id, action_digest = entry["action_id"], entry["action_sha256"]
+            if (not isinstance(action_id, str) or not action_id
+                    or not isinstance(action_digest, str) or len(action_digest) != 64
+                    or any(character not in "0123456789abcdef" for character in action_digest)
+                    or action_id in seen_action_ids):
+                raise ModuleExtensionError("durable handler action history identity is invalid")
+            receipt = validate_activity_handler_continuation(entry["result"])
+            if receipt["action_id"] != action_id:
+                raise ModuleExtensionError("durable handler action receipt does not match its action")
+            seen_action_ids.add(action_id)
+        if handler_checkpoint:
+            validate_activity_handler_payload(handler, "checkpoint", handler_checkpoint)
+        if continuation is not None:
+            validate_activity_handler_continuation(continuation)
+        if pending_action is not None:
+            if not isinstance(pending_action, dict) or pending_action.get("handler") != binding:
+                raise ModuleExtensionError("pending handler action belongs to a different module binding")
+            if continuation is not None:
+                raise ModuleExtensionError("durable handler checkpoint contains both pending and completed action state")
+
+        dispatch_started = False
+        while True:
+            if pending_action is not None:
+                action_result = await self._dispatch_registered_handler_action(
+                    activity, resolved, handler, pending_action)
+                continuation = action_result
+                action_history.append({"action_id": pending_action["action"]["action_id"],
+                                       "action_sha256": pending_action["action_sha256"],
+                                       "result": action_result})
+                seen_action_ids.add(pending_action["action"]["action_id"])
+                next_checkpoint = {"handler": binding, "handler_checkpoint": handler_checkpoint,
+                                   "continuation": continuation, "action_history": action_history}
+                _validate_bounded_handler_state(next_checkpoint)
+                await self.store.record_progress(
+                    activity, {"phase": "handler.action.completed", "at": utcnow().isoformat(),
+                               "handler_id": handler["handler_id"],
+                               "action_id": pending_action["action"]["action_id"],
+                               "outcome": action_result["outcome"]}, next_checkpoint)
+                pending_action = None
+
+            if not dispatch_started:
+                await self.store.record_progress(
+                    activity, {"phase": "handler.dispatched", "handler_id": handler["handler_id"],
+                               "module_id": resolved["module_id"],
+                               "module_version": resolved["module_version"],
+                               "at": utcnow().isoformat()},
+                    {"handler": binding, "handler_checkpoint": handler_checkpoint,
+                     "continuation": continuation, "action_history": action_history})
+                dispatch_started = True
+
+            payload["checkpoint"] = handler_checkpoint
+            payload["continuation"] = continuation
+            payload["action_history"] = action_history
+            response = await self._registered_module_call(
+                resolved["module_id"], resolved["module_version"], "execute", payload, timeout=60.0)
+            result = response.get("result")
+            if not isinstance(result, dict):
+                raise ValueError("activity handler returned a non-object result")
+            if result.get("outcome") == "action_required":
+                validate_activity_handler_action_request(result)
+            else:
+                validate_activity_handler_payload(handler, "result", result)
+            progress = result.get("progress")
+            if progress is not None:
+                validate_activity_handler_payload(handler, "progress", progress)
+            next_handler_checkpoint = result.get("checkpoint")
+            if next_handler_checkpoint is not None:
+                validate_activity_handler_payload(handler, "checkpoint", next_handler_checkpoint)
+
+            if result.get("outcome") == "action_required":
+                if len(action_history) >= MAX_HANDLER_ACTIONS_PER_ACTIVITY:
+                    raise ModuleExtensionError("handler activity exceeded the 100 action continuation limit")
+                action = validate_activity_handler_action(result.get("action"))
+                self._validate_registered_handler_action(action, resolved, handler)
+                if next_handler_checkpoint is None:
+                    raise ModuleExtensionError(
+                        "a handler action requires a durable checkpoint before CME dispatch")
+                action_digest = hashlib.sha256(json.dumps(
+                    action, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+                if action["action_id"] in seen_action_ids:
+                    raise ModuleExtensionError("handler action_id was reused within this activity")
+                handler_checkpoint = next_handler_checkpoint
+                pending_action = {"handler": binding, "action": action,
+                                  "action_sha256": action_digest,
+                                  "attempt_id": str(activity["attempt_id"]),
+                                  "config_revision": self.settings.source_digest}
+                checkpoint_value = {"handler": binding, "handler_checkpoint": handler_checkpoint,
+                                    "pending_action": pending_action,
+                                    "action_history": action_history}
+                _validate_bounded_handler_state(checkpoint_value)
+                progress_update = {"phase": "handler.action.requested", "at": utcnow().isoformat(),
+                                   "handler_id": handler["handler_id"],
+                                   "action_id": action["action_id"],
+                                   "operation_id": action["operation_id"],
+                                   "action_sha256": action_digest}
+                if progress is not None:
+                    progress_update["progress"] = progress
+                await self.store.record_progress(activity, progress_update, checkpoint_value)
+                continuation = None
+                continue
+
+            if result.get("outcome") == "completed":
+                final = {"contract_id": "r3a.activity-handler.result", "contract_version": "1.1.0",
+                         "handler": binding, "authorization": decisions, "result": result,
+                         "action_history": action_history}
+                await self.store.finish_activity(activity, final)
+                return
+            if result.get("outcome") == "blocked":
+                await self.store.block_activity(
+                    activity, str(result.get("reason") or "activity handler blocked"),
+                    {"contract_id": "r3a.activity-handler.result", "contract_version": "1.1.0",
+                     "handler": binding, "authorization": decisions, "result": result,
+                     "action_history": action_history})
+                return
+            raise ValueError("activity handler result outcome must be action_required, completed, or blocked")
+
+    def _validate_registered_handler_action(self, action: dict[str, Any],
+                                            resolved: dict[str, Any],
+                                            handler: dict[str, Any]) -> None:
+        if action["operation_id"] not in handler["required_capabilities"]:
+            raise PermissionError("handler action references a capability absent from its declaration")
+        manifest_capabilities = set(resolved["module"]["manifest"].get("capability_refs", []))
+        if action["operation_id"] not in manifest_capabilities:
+            raise PermissionError("handler action references a capability absent from its module manifest")
+        operation = self.settings.capability_registry.resolve(
+            action["operation_id"], action["operation_contract_version"])
+        descriptor = operation.descriptor
+        if descriptor["effect_class"] in {"steward_read", "steward_write"}:
+            raise PermissionError("resident handlers cannot invoke Steward-only capability effects")
+        if descriptor["effect_class"] == "external_write":
+            raise PermissionError("handler continuation does not admit external_write without a budget contract")
+        validate_json(action["target"], descriptor["target_scope_schema"], path="$.action.target")
+        validate_json(action["input"], descriptor["input_schema"], path="$.action.input")
+        durable_work = action.get("durable_work")
+        if descriptor["effect_class"] == "isolated_write":
+            if not isinstance(durable_work, dict):
+                raise PermissionError("isolated_write handler action requires a generic durable work item")
+            if durable_work["work_id"] != action["action_id"]:
+                raise ValueError("durable work item id must equal the stable handler action id")
+        elif durable_work is not None:
+            raise ValueError("read-only and Steward actions cannot attach a durable work item")
+
+    async def _dispatch_registered_handler_action(self, activity: dict[str, Any],
+                                                  resolved: dict[str, Any],
+                                                  handler: dict[str, Any],
+                                                  pending: dict[str, Any]) -> dict[str, Any]:
+        action = validate_activity_handler_action(pending.get("action"))
+        self._validate_registered_handler_action(action, resolved, handler)
+        digest = hashlib.sha256(json.dumps(
+            action, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        if pending.get("action_sha256") != digest:
+            raise ModuleExtensionError("durable handler action digest does not match its request")
+        if pending.get("config_revision") != self.settings.source_digest:
+            raise ModuleExtensionError("durable handler action configuration revision changed before execution")
+        activity_id = str(activity["activity_id"])
+        attempt_id = pending.get("attempt_id")
+        if not isinstance(attempt_id, str) or not attempt_id:
+            raise ModuleExtensionError("durable handler action lacks its originating attempt")
+        correlation_id = str((activity.get("input") or {}).get("correlation_id") or activity_id)
+        binding = pending.get("handler") or {}
+        invocation_id = str(uuid.uuid5(
+            uuid.UUID(activity_id),
+            f"r3a.handler-action:{binding.get('module_id')}:{handler['handler_id']}:{action['action_id']}"))
+        idempotency_key = (f"r3a.handler-action:{activity_id}:{binding.get('module_id')}:"
+                           f"{handler['handler_id']}:{action['action_id']}")
+        durable_work = action.get("durable_work")
+        work_ref = ({"work_order_id": durable_work["work_id"], "version": 1}
+                    if durable_work is not None else None)
+        request = {"contract_id": "r3a.capability-invocation.v1", "contract_version": "1.1.0",
+                   "invocation_id": invocation_id, "operation_id": action["operation_id"],
+                   "operation_contract_version": action["operation_contract_version"],
+                   "caller": {"principal_id": str((activity.get("input") or {}).get("resident_id")
+                                                    or resolved["module_id"]),
+                              "resident_id": str((activity.get("input") or {}).get("resident_id")
+                                                 or resolved["module_id"]),
+                              "service_id": None},
+                   "target": action["target"], "input": action["input"],
+                   "activity_id": activity_id, "attempt_id": attempt_id,
+                   "correlation_id": correlation_id, "work_order": work_ref,
+                   "evidence_purpose": action["evidence_purpose"],
+                   "idempotency_key": idempotency_key, "deadline": None,
+                   "config_revision": pending["config_revision"]}
+        work_context = None
+        if durable_work is not None:
+            work_context = {"contract_id": durable_work["contract_id"],
+                            "contract_version": durable_work["contract_version"],
+                            "work_id": durable_work["work_id"], "record": durable_work["record"],
+                            "activity_id": activity_id, "attempt_id": attempt_id,
+                            "handler": binding, "action_id": action["action_id"],
+                            "action_sha256": digest, "operation_id": action["operation_id"],
+                            "operation_contract_version": action["operation_contract_version"],
+                            "target": action["target"], "input": action["input"]}
+        try:
+            invocation = await self.invoke_capability(request, _handler_work_item=work_context,
+                                                      _handler_action=True)
+            continuation = {"contract_id": "r3a.activity-handler.continuation",
+                            "contract_version": "1.0.0", "action_id": action["action_id"],
+                            "outcome": "succeeded", "invocation": invocation,
+                            "evidence": invocation.get("evidence", []), "error": None}
+        except CapabilityAuthorizationDenied as exc:
+            continuation = {"contract_id": "r3a.activity-handler.continuation",
+                            "contract_version": "1.0.0", "action_id": action["action_id"],
+                            "outcome": "denied", "invocation": None, "evidence": [],
+                            "error": {"type": "PermissionError", "message": str(exc)[:512],
+                                      "authorization_request_id": invocation_id}}
+        except Exception as exc:
+            continuation = {"contract_id": "r3a.activity-handler.continuation",
+                            "contract_version": "1.0.0", "action_id": action["action_id"],
+                            "outcome": "failed", "invocation": None, "evidence": [],
+                            "error": {"type": type(exc).__name__, "message": str(exc)[:512],
+                                      "effect_disposition": "UNKNOWN",
+                                      "reconciliation_ref": idempotency_key}}
+        return validate_activity_handler_continuation(continuation)
+
 
     async def _authorization_decision(self, capability_id: str, *, activity_id: str | None = None,
                                     attempt_id: str | None = None,
@@ -2141,7 +2391,9 @@ class CME:
     async def invoke_capability(self, request: dict[str, Any], *,
                                 work_order: EngineeringWorkOrder | None = None,
                                 _approved_budget_reservation: dict[str, Any] | None = None,
-                                _provider_context: dict[str, Any] | None = None) -> dict[str, Any]:
+                                _provider_context: dict[str, Any] | None = None,
+                                _handler_work_item: dict[str, Any] | None = None,
+                                _handler_action: bool = False) -> dict[str, Any]:
         """Single canonical CME dispatcher for resident and direct Steward operations."""
         if request.get("contract_id") != "r3a.capability-invocation.v1":
             raise CapabilityContractError("CME requires r3a.capability-invocation.v1")
@@ -2149,8 +2401,32 @@ class CME:
             request.get("operation_id", ""), request.get("operation_contract_version", ""))
         descriptor = operation.descriptor
         checked = validate_invocation_request(request, descriptor)
+        if _handler_work_item is not None and not _handler_action:
+            raise PermissionError("durable handler work item is only accepted from the CME handler continuation path")
+        if _handler_action and (work_order is not None or _approved_budget_reservation is not None
+                                or _provider_context is not None):
+            raise PermissionError("handler action cannot combine external CME authority contexts")
         order = None
-        if work_order is None:
+        if _handler_work_item is not None:
+            item = _handler_work_item
+            if descriptor["effect_class"] != "isolated_write" or checked["work_order"] is None:
+                raise PermissionError("handler work item only admits isolated_write operations")
+            expected_work_ref = {"work_order_id": item.get("work_id"), "version": 1}
+            if (item.get("contract_id") != "r3a.activity-handler.work-item"
+                    or item.get("contract_version") != "1.0.0"
+                    or item.get("work_id") != item.get("action_id")
+                    or checked["work_order"] != expected_work_ref
+                    or checked["activity_id"] != item.get("activity_id")
+                    or checked["attempt_id"] != item.get("attempt_id")
+                    or checked["operation_id"] != item.get("operation_id")
+                    or checked["operation_contract_version"] != item.get("operation_contract_version")
+                    or checked["target"] != item.get("target") or checked["input"] != item.get("input")
+                    or checked["config_revision"] != self.settings.source_digest
+                    or not item.get("handler", {}).get("module_id")
+                    or not item.get("action_sha256")):
+                raise PermissionError("handler work item lineage does not match the canonical invocation")
+            order = item["record"]
+        elif work_order is None:
             if checked["work_order"] is not None:
                 raise PermissionError("effectful invocation requires its validated Engineering work order")
             if descriptor["effect_class"] in {"read", "steward_read", "steward_write"}:
@@ -2193,18 +2469,26 @@ class CME:
                 "external_write requires a CME-approved activity budget and internal configured provider context")
         started_at = utcnow().isoformat()
         caller_resident = checked["caller"]["resident_id"] or checked["caller"]["principal_id"]
-        authorization = await self._authorize_capability(
-            descriptor["operation_id"], activity_id=work_order.activity_id if work_order else checked["activity_id"],
-            attempt_id=work_order.attempt_id if work_order else checked["attempt_id"],
-            request_id=checked["invocation_id"], resident_id=caller_resident,
-            context={"dispatcher": "CME", "invocation_id": checked["invocation_id"],
-                     "idempotency_key": checked["idempotency_key"],
-                     "effect_class": descriptor["effect_class"],
-                     "required_grants": descriptor["required_grants"],
-                     "target": checked["target"],
-                     "work_order_id": work_order.work_order_id if work_order else None,
-                     "work_order_version": work_order.work_order_version if work_order else None,
-                     "config_revision": checked["config_revision"]})
+        try:
+            authorization = await self._authorize_capability(
+                descriptor["operation_id"],
+                activity_id=work_order.activity_id if work_order else checked["activity_id"],
+                attempt_id=work_order.attempt_id if work_order else checked["attempt_id"],
+                request_id=checked["invocation_id"], resident_id=caller_resident,
+                context={"dispatcher": "CME", "invocation_id": checked["invocation_id"],
+                         "idempotency_key": checked["idempotency_key"],
+                         "effect_class": descriptor["effect_class"],
+                         "required_grants": descriptor["required_grants"],
+                         "target": checked["target"],
+                         "work_order_id": (work_order.work_order_id if work_order else
+                                           _handler_work_item.get("work_id") if _handler_work_item else None),
+                         "work_order_version": work_order.work_order_version if work_order else
+                                               (1 if _handler_work_item else None),
+                         "config_revision": checked["config_revision"]})
+        except PermissionError as exc:
+            if _handler_action:
+                raise CapabilityAuthorizationDenied(str(exc)) from exc
+            raise
         auth_ref = {"provider_id": authorization["provider_id"], "allowed": True,
                     "decision_id": authorization["decision_id"],
                     "audit_event_id": authorization["audit_event_id"],
@@ -3784,6 +4068,12 @@ async def run(config_path: str) -> None:
     settings = load_settings(config_path)
     cme = CME(settings)
     await cme.run()
+
+
+def _validate_bounded_handler_state(value: dict[str, Any]) -> None:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if len(encoded) > MAX_HANDLER_ACTION_BYTES:
+        raise ModuleExtensionError("durable handler action state exceeds the 512 KiB limit")
 
 
 def main() -> None:

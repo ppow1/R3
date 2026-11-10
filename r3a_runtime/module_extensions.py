@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/module_extensions.py
 Component: R3A-MODULE-EXTENSION-CONTRACTS
-File Revision: 1.0.3
+File Revision: 1.1.0
 Created: 2026-11-10T01:09:23Z
 Created By: Codex GPT-6
 Purpose: Validate resident-executor bindings and durable activity-handler declarations.
@@ -13,9 +13,10 @@ Authority: AD-024; Modular Plugins #46. Bindings and registration grant no autho
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Add generic resident and durable handler contract validation.
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Resolve resident bindings against the active registry artifact and declared execution range.
 Changed: 2026-11-10T01:26:34Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Validate configured binding targets against declared executor roles and immutable digests.
+Changed: 2026-11-10 | R3A-CORE-SOCKET-FS03 | Coordinator | Validate handler v1.1 action requests, continuations and v1.2 module compatibility.
 Supersedes: None
-Contracts: r3a.resident.module-binding.v1; r3a.resident.execution-profile@1.0.0; r3a.activity-handler.v1; r3a.activity-intake.v1.
-Tests: tests/test_r3a_module_extensions.py; tests/test_r3a_module_extension_lifecycle.py
+Contracts: r3a.resident.module-binding.v1; r3a.resident.execution-profile@1.0.0; r3a.activity-handler.v1@1.0.0 and @1.1.0; r3a.activity-intake.v1.
+Tests: tests/test_r3a_module_extensions.py; tests/test_r3a_module_extension_lifecycle.py; tests/test_r3a_activity_handler_interop.py
 History/Predecessor: Prior revision at commit 76a9ad352e892f22cb0ee5a684a6cc358e5155b3, blob 71c045a2c15e879add0c97737af770198c96beab.
 """
 from __future__ import annotations
@@ -37,7 +38,15 @@ class ModuleExtensionError(ValueError):
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _IDENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
 _RESIDENT_BINDING = Path(__file__).with_name("schemas") / "resident-module-binding.v1.schema.json"
-_ACTIVITY_HANDLER = Path(__file__).with_name("schemas") / "activity-handler.v1.schema.json"
+_ACTIVITY_HANDLER_SCHEMAS = {
+    "1.0.0": Path(__file__).with_name("schemas") / "activity-handler.v1.schema.json",
+    "1.1.0": Path(__file__).with_name("schemas") / "activity-handler.v1.1.schema.json",
+}
+_ACTIVITY_HANDLER_ACTION = Path(__file__).with_name("schemas") / "activity-handler-action.v1.schema.json"
+_ACTIVITY_HANDLER_ACTION_REQUEST = (
+    Path(__file__).with_name("schemas") / "activity-handler-action-request.v1.schema.json")
+_ACTIVITY_HANDLER_CONTINUATION = (
+    Path(__file__).with_name("schemas") / "activity-handler-continuation.v1.schema.json")
 
 
 def _validate(value: Any, schema_path: Path, label: str) -> dict[str, Any]:
@@ -109,8 +118,13 @@ def validate_executor_configuration(binding: dict[str, Any], *, configuration_ro
 
 def validate_activity_handler(value: Any) -> dict[str, Any]:
     """Validate generic handler metadata, including schemas and recovery/resource declarations."""
-    handler = _validate(value, _ACTIVITY_HANDLER, "activity handler")
-    if handler["contract_id"] != "r3a.activity-handler" or handler["contract_version"] != "1.0.0":
+    if not isinstance(value, dict):
+        raise ModuleExtensionError("activity handler is invalid: expected an object")
+    schema_path = _ACTIVITY_HANDLER_SCHEMAS.get(value.get("contract_version"))
+    if schema_path is None:
+        raise ModuleExtensionError("activity handler contract version is incompatible")
+    handler = _validate(value, schema_path, "activity handler")
+    if handler["contract_id"] != "r3a.activity-handler":
         raise ModuleExtensionError("activity handler contract is incompatible")
     try:
         semantic_version(handler["handler_version"])
@@ -153,6 +167,21 @@ def validate_activity_handler_payload(handler: Any, kind: str, value: Any) -> An
     except CapabilityContractError as exc:
         raise ModuleExtensionError(f"activity handler {kind} payload is invalid: {exc}") from exc
     return value
+
+
+def validate_activity_handler_action(value: Any) -> dict[str, Any]:
+    """Validate a v1.1 handler's bounded request for one declared CME action."""
+    return _validate(value, _ACTIVITY_HANDLER_ACTION, "activity handler action")
+
+
+def validate_activity_handler_action_request(value: Any) -> dict[str, Any]:
+    """Validate the generic action-required result envelope independent of module result schemas."""
+    return _validate(value, _ACTIVITY_HANDLER_ACTION_REQUEST, "activity handler action request")
+
+
+def validate_activity_handler_continuation(value: Any) -> dict[str, Any]:
+    """Validate the durable action receipt sent back to a handler on resume."""
+    return _validate(value, _ACTIVITY_HANDLER_CONTINUATION, "activity handler continuation")
 
 
 def _validate_schema_declaration(schema: Any, field: str, depth: int = 0) -> None:
@@ -341,8 +370,10 @@ def resolve_activity_handler(registry: Iterable[dict[str, Any]], activity_type: 
                                          contract_id="r3a.activity-intake", major=1,
                                          minor=activity_contract_minor):
             continue
+        handler_contract_minor = semantic_version(handler["contract_version"])[1]
         if not compatible_contract_range(handler["handler_contract_range"],
-                                         contract_id="r3a.activity-handler", major=1, minor=0):
+                                         contract_id="r3a.activity-handler", major=1,
+                                         minor=handler_contract_minor):
             continue
         if not _SHA256.fullmatch(str(manifest.get("artifact_digest", ""))):
             raise ModuleExtensionError("registered handler artifact digest is invalid")
