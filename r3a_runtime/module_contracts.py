@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/module_contracts.py
 Component: R3A-MODULE-CONTRACTS
-File Revision: 1.0.1
+File Revision: 1.0.3
 Created: 2026-11-08
 Created By: R3A Coordinator
 Purpose: Validate reusable semantic version and dependency graph rules for modules.
@@ -12,6 +12,7 @@ Dependencies: Python standard library.
 Authority: Steward Directive — Coordinator Next Integration Cycle.
 Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | Add dependency range and cycle validation.
 Changed: 2026-11-10T02:02:46Z | R3A-MODULAR-PLUGINS-46 | Accept the versioned v1.1 module-manifest promotion while preserving v1.0 compatibility.
+Changed: 2026-11-10T15:16:00Z | R3A-AUTONOMY-EXECUTOR-ROLE-P0 | Permit only additive shared executor-role promotion for an unchanged legacy primary module registration.
 Supersedes: None.
 Contracts: r3a.module-manifest.v1@1.0.0 and @1.1.0.
 Tests: tests/test_r3a_module_contracts.py.
@@ -118,3 +119,28 @@ def is_legacy_manifest_promotion(previous: dict, current: dict) -> bool:
                      "artifact_digest", "dependencies", "configuration_schema", "capability_refs",
                      "resource_refs", "state_namespace")
     return all(previous.get(field) == current.get(field) for field in stable_fields)
+
+
+def is_legacy_resident_executor_promotion(previous: dict, current: dict) -> bool:
+    """Allow an existing primary module to add only its validated shared executor role."""
+    legacy_primary_fields = {
+        "module_id", "module_version", "contract_id", "protocol_major", "protocol_minor",
+        "protocol_min_minor", "protocol_max_minor", "owner", "entrypoint", "dependencies",
+        "configuration_schema", "configuration_ref", "capability_refs", "migration_contract",
+        "artifact_ref", "artifact_digest", "recovery_policy", "resource_refs", "state_namespace",
+    }
+    if (not isinstance(previous, dict) or not isinstance(current, dict)
+            or "manifest_contract" in previous or "manifest_contract" in current
+            or set(previous) != legacy_primary_fields
+            or previous.get("configuration_schema") != "r3a.bootstrap.v1"
+            or previous.get("migration_contract") != "none-v1"
+            or previous.get("recovery_policy") != "idempotent"
+            or set(current) != set(previous) | {"resident_executor"}
+            or any(current.get(key) != value for key, value in previous.items())):
+        return False
+    try:
+        from .module_extensions import validate_resident_executor_declaration
+        validate_resident_executor_declaration(current["resident_executor"])
+    except (ImportError, ValueError, KeyError, TypeError):
+        return False
+    return True

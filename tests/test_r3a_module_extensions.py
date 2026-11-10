@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_module_extensions.py
 Component: TEST-R3A-MODULE-EXTENSION-CONTRACTS
-File Revision: 1.0.4
+File Revision: 1.0.7
 Created: 2026-11-10T01:09:23Z
 Created By: Codex GPT-6
 Purpose: Permanently verify generic resident and durable activity-handler module declarations.
@@ -14,6 +14,7 @@ Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Add exten
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify authoritative binding resolution against active role declarations and pinned artifacts.
 Changed: 2026-11-10T01:26:34Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify bootstrap binding registration and fail-closed role/digest matching.
 Changed: 2026-11-10T02:02:46Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Test v1.0/v1.1 manifest schema selection and fail-closed unsupported versions.
+Changed: 2026-11-10T15:16:00Z | R3A-AUTONOMY-EXECUTOR-ROLE-P0 | Codex GPT-6 | Test top-level runtime-module executor role registration, multi-identity bindings, compatibility, and fail-closed validation.
 Supersedes: None
 Contracts: r3a.resident.module-binding.v1; r3a.resident.executor@1.0.0; r3a.activity-handler.v1.
 Tests: python3 -m pytest -q tests/test_r3a_module_extensions.py
@@ -198,6 +199,66 @@ def module_manifest(*, module_id="executor.orbit", version="1.0.0", digest="a" *
 
 
 class TestResidentBinding:
+    def test_primary_module_role_and_multiple_authoritative_bindings_load_generically(self, tmp_path):
+        path = bootstrap_config(tmp_path, include_binding=False)
+        value = json.loads(path.read_text())
+        declaration = module_manifest(module_id=value["module"]["module_id"],
+                                      version=value["module"]["version"],
+                                      digest=value["module"]["sha256"])["resident_executor"]
+        value["module"]["resident_executor"] = declaration
+        value["resident_module_bindings"] = [
+            resident_binding("resident:alpha", value["module"]["module_id"],
+                             digest=value["module"]["sha256"]),
+            resident_binding("resident:beta", value["module"]["module_id"],
+                             digest=value["module"]["sha256"]),
+        ]
+        path.write_text(json.dumps(value))
+
+        settings = load_settings(path)
+
+        assert [item["resident_id"] for item in settings.resident_module_bindings] == [
+            "resident:alpha", "resident:beta"]
+        assert all(item["module_id"] == value["module"]["module_id"]
+                   for item in settings.resident_module_bindings)
+        assert all(item["identity_association"]["record_id"] != item["module_id"]
+                   for item in settings.resident_module_bindings)
+        assert sanitized_config(settings)["module"]["resident_executor"] == declaration
+
+    def test_binding_to_primary_module_without_declared_role_fails_closed(self, tmp_path):
+        path = bootstrap_config(tmp_path, include_binding=False)
+        value = json.loads(path.read_text())
+        value["resident_module_bindings"] = [resident_binding(
+            "resident:alpha", value["module"]["module_id"], digest=value["module"]["sha256"])]
+        path.write_text(json.dumps(value))
+        with pytest.raises(ConfigurationError, match="unregistered module"):
+            load_settings(path)
+
+    @pytest.mark.parametrize("invalid", [None, {}, {"contract_id": "r3a.resident.executor",
+        "contract_version": "2.0.0", "execution_contract_range": {"contract_id": "r3a.resident.execution",
+        "major": 1, "min_minor": 0, "max_minor": 2}}])
+    def test_top_level_module_rejects_invalid_executor_role_declaration(self, tmp_path, invalid):
+        path = bootstrap_config(tmp_path, include_binding=False)
+        value = json.loads(path.read_text())
+        value["module"]["resident_executor"] = invalid
+        path.write_text(json.dumps(value))
+        with pytest.raises(ConfigurationError, match="module.resident_executor"):
+            load_settings(path)
+
+    def test_cme_primary_registry_manifest_includes_only_configured_role(self, tmp_path):
+        from dataclasses import replace
+        from r3a_runtime.cme import CME
+
+        settings = load_settings(bootstrap_config(tmp_path, include_binding=False))
+        cme = object.__new__(CME)
+        cme.settings = settings
+        cme.module_id = settings.module_id
+        assert "resident_executor" not in cme.manifest()
+        declaration = module_manifest(module_id=settings.module_id,
+                                      version=settings.module_version,
+                                      digest=settings.module_digest)["resident_executor"]
+        cme.settings = replace(settings, module_resident_executor=declaration)
+        assert cme.manifest()["resident_executor"] == declaration
+
     def test_settings_load_validates_binding_against_discovered_executor_and_handler(self, tmp_path):
         settings = load_settings(bootstrap_config(tmp_path))
         assert settings.resident_module_bindings[0]["resident_id"] == "resident:alpha"

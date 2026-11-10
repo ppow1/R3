@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.14.5
+File Revision: 1.14.7
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -27,6 +27,7 @@ Changed: 2026-11-07T04:41:59Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Generaliz
 Changed: 2026-11-07T05:28:24Z | AP2-IMPLEMENTATION | Codex GPT-6 | Allow generic state-machine transition events to preserve caller-supplied correlation and causation lineage.
 Changed: 2026-11-07T05:45:10Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist authorized work orders and guard terminal order completion with independent verifier evidence.
 Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | R3A Coordinator | Audit and persist a safe legacy-to-versioned module manifest promotion.
+Changed: 2026-11-10T15:16:00Z | R3A-AUTONOMY-EXECUTOR-ROLE-P0 | Codex GPT-6 | Persist only the validated additive executor-role promotion on an unchanged primary module version.
 Changed: 2026-11-07T05:52:05Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist stable objective correlation and immutable Grace proposal revisions in existing activity checkpoints/events.
 Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT-6 | Persist generic registered activity-intake types through the existing durable activity ledger.
 Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GPT-6 | Preserve durable checkpoints across progress-only updates and guard them by the active attempt lease.
@@ -74,7 +75,8 @@ from .notification_delivery import (delivery_visible_to, route_notification, tra
                                     validate_delivery_envelope)
 from .contracts import ActivityDependencySet, ReadinessObservation, parse_timestamp
 from .authorization import AuthorizationDecision
-from .module_contracts import is_legacy_manifest_promotion
+from .module_contracts import (is_legacy_manifest_promotion,
+                               is_legacy_resident_executor_promotion)
 from .engineering import (EngineeringProposal, EngineeringWorkOrder, VerificationResult,
                           proposal_digest, validate_completion, validate_engineering_assignment)
 from .capability_contracts import CapabilityContractError, validate_json
@@ -1075,7 +1077,10 @@ class Store:
             if existing and existing["artifact_digest"].strip() != manifest["artifact_digest"]:
                 raise RuntimeError("An installed module version is immutable; use a new version for a different artifact")
             if existing and existing["manifest"] != manifest:
-                if not is_legacy_manifest_promotion(existing["manifest"], manifest):
+                is_versioned_promotion = is_legacy_manifest_promotion(existing["manifest"], manifest)
+                is_executor_role_promotion = is_legacy_resident_executor_promotion(
+                    existing["manifest"], manifest)
+                if not (is_versioned_promotion or is_executor_role_promotion):
                     raise RuntimeError("An installed module manifest is immutable; publish a new module version")
                 prior_digest = hashlib.sha256(json.dumps(existing["manifest"], sort_keys=True,
                                                          separators=(",", ":")).encode()).hexdigest()
@@ -1089,8 +1094,12 @@ class Store:
                     conn, "module.manifest.promoted", "module",
                     f"{manifest['module_id']}@{manifest['module_version']}",
                     "module.lifecycle", 2, existing["lifecycle_state"], existing["lifecycle_state"],
-                    "promoted synthesized lifecycle metadata to the declared versioned module manifest",
-                    {"manifest_contract": manifest["manifest_contract"],
+                    ("promoted synthesized lifecycle metadata to the declared versioned module manifest"
+                     if is_versioned_promotion else
+                     "added validated resident-executor metadata to an unchanged primary module registration"),
+                    {"manifest_contract": manifest.get("manifest_contract"),
+                     "resident_executor_added": ("resident_executor" not in existing["manifest"]
+                                                 and "resident_executor" in manifest),
                      "previous_manifest_sha256": prior_digest,
                      "current_manifest_sha256": next_digest,
                      "artifact_digest": manifest["artifact_digest"]})

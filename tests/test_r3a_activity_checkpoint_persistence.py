@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_activity_checkpoint_persistence.py
 Component: R3A-ACTIVITY-CHECKPOINT-PERSISTENCE-REGRESSION
-File Revision: 1.0.0
+File Revision: 1.0.2
 Created: 2026-11-10
 Created By: Codex GPT-6
 Purpose: Verify generic handler checkpoints persist through PostgreSQL progress updates and lease recovery.
@@ -11,10 +11,12 @@ Observability: Reads the activity row after writes, interruption recovery, and r
 Dependencies: psycopg 3; R3A Store migrations; shared #46 activity-handler fixture.
 Authority: Steward corrective directive, Autonomy / CME Issue #43.
 Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GPT-6 | Exercise atomic progress/checkpoint persistence and recovery against PostgreSQL.
+Changed: 2026-11-10T15:16:00Z | R3A-AUTONOMY-EXECUTOR-ROLE-P0 | Codex GPT-6 | Exercise durable promotion of the validated top-level executor role without changing registered artifact identity.
 Supersedes: None.
 Contracts: r3a.activity-handler.v1; activity.generic v1; existing CME activity ledger.
 Tests: Set R3A_CHECKPOINT_TEST_DSN to a disposable test database and run this module.
 History/Predecessor: New permanent persistence regression.
+Immediate Predecessor: Commit 1dd57e17e81531feaa77099e5d6aecc1debb2b7e, blob fbc0a36416bd6348300d4a0cb826082edf039ad8.
 """
 from __future__ import annotations
 
@@ -66,6 +68,40 @@ class ActivityCheckpointPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         if hasattr(self, "store"):
             await self.store.close()
+
+    async def test_primary_module_executor_role_promotion_is_persisted_additively(self):
+        old = {
+            "module_id": "executor.fixture", "module_version": "1.0.0",
+            "contract_id": "r3a.module.v1", "protocol_major": 1,
+            "protocol_minor": 0, "protocol_min_minor": 0, "protocol_max_minor": 0,
+            "owner": "test-owner", "entrypoint": "fixture.module",
+            "dependencies": [], "configuration_schema": "r3a.bootstrap.v1",
+            "configuration_ref": "/tmp/fixture-bootstrap.json", "capability_refs": [],
+            "migration_contract": "none-v1", "artifact_ref": "/tmp/fixture-module.py",
+            "artifact_digest": "a" * 64, "recovery_policy": "idempotent",
+            "resource_refs": [], "state_namespace": "executor.fixture",
+        }
+        role = {
+            "contract_id": "r3a.resident.executor", "contract_version": "1.0.0",
+            "execution_contract_range": {"contract_id": "r3a.resident.execution",
+                                         "major": 1, "min_minor": 0, "max_minor": 2},
+        }
+        await self.store.register_module(old, "ACTIVE", "healthy")
+        await self.store.register_module({**old, "resident_executor": role}, "ACTIVE", "healthy")
+        async with self.store.pool.connection() as conn:
+            row = await (await conn.execute(
+                "SELECT manifest,artifact_digest FROM r3a.module_registry "
+                "WHERE module_id='executor.fixture' AND module_version='1.0.0'"
+            )).fetchone()
+            events = await (await conn.execute(
+                "SELECT evidence FROM r3a.institution_events "
+                "WHERE event_type='module.manifest.promoted' AND subject_type='module' "
+                "AND subject_id='executor.fixture@1.0.0'"
+            )).fetchall()
+        self.assertEqual("a" * 64, row["artifact_digest"])
+        self.assertEqual(role, row["manifest"]["resident_executor"])
+        self.assertEqual(1, len(events))
+        self.assertTrue(events[0]["evidence"]["resident_executor_added"])
 
     async def test_handler_checkpoint_survives_progress_and_process_loss_retry(self):
         sample = fixture()

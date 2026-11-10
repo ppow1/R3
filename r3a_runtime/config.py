@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/config.py
 Component: R3A-BOOTSTRAP-CONFIG
-File Revision: 1.9.1
+File Revision: 1.9.3
 Created: 2026-11-06T15:04:00Z
 Created By: Codex GPT-6
 Purpose: Strictly validate external R3A AP0-M1 bootstrap and operating settings.
@@ -27,10 +27,12 @@ Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | R3A Coordinator | Resolv
 Changed: 2026-11-08 | R3A-CONTEXT-RECOVERY | R3A Coordinator | Configure route context windows while preserving legacy configuration digests.
 Changed: 2026-11-10T01:26:34Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Load and validate external resident-to-module bindings against declared executor roles and preserve them in durable configuration projections.
 Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT-6 | Accept stable module identifiers and arbitrary dotted executor entrypoints without resident-specific allowlists.
+Changed: 2026-11-10T15:16:00Z | R3A-AUTONOMY-EXECUTOR-ROLE-P0 | Codex GPT-6 | Load the shared executor role declaration from the configured primary module and validate bindings against its exact version and source digest.
 Supersedes: None.
 Contracts: AP0-001/008/009; R3A-019; Issue #46; AP0-M1 D7; r3a_runtime.contracts; hints/file-provenance.md.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_context_recovery.py; tests/test_r3a_octominer_plugin.py.
 History/Predecessor: Prior revision at integration commit 9a41d7e9647d37c2b7dc6f2aca3be3f5f82ccfe9, blob 5fbebd029263678252d366dd172a04ab8ef758bc.
+Immediate Predecessor: Commit 1dd57e17e81531feaa77099e5d6aecc1debb2b7e, blob 822bed008938e76b15b910404b568bcb3bd38ba0.
 """
 from __future__ import annotations
 
@@ -50,7 +52,8 @@ from .timestamp_presentation import (DEFAULT_PRESENTATION_TIMEZONE,
 
 from .module_contracts import validate_dependency_graph
 from .module_extensions import (ModuleExtensionError, validate_resident_bindings,
-                                validate_resident_binding_targets)
+                                validate_resident_binding_targets,
+                                validate_resident_executor_declaration)
 
 
 class ConfigurationError(ValueError):
@@ -266,6 +269,7 @@ class Settings:
     module_entrypoint: str
     module_source: Path
     module_digest: str
+    module_resident_executor: dict[str, Any] | None
     observer_interval_seconds: float
     scheduler_interval_seconds: float
     lease_seconds: float
@@ -436,7 +440,9 @@ def load_settings(path: str | Path) -> Settings:
     module = value["module"]
     if not isinstance(module, dict):
         raise ConfigurationError("module must be an object")
-    _keys(module, {"module_id", "version", "contract_id", "protocol_major", "protocol_minor", "capabilities", "owner", "entrypoint", "source", "sha256"}, "module")
+    required_module_keys = {"module_id", "version", "contract_id", "protocol_major", "protocol_minor",
+                            "capabilities", "owner", "entrypoint", "source", "sha256"}
+    _keys(module, required_module_keys | ({"resident_executor"} & module.keys()), "module")
     module_id = _text(module["module_id"], "module.module_id")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}", module_id):
         raise ConfigurationError("module.module_id is not a stable module identifier")
@@ -469,6 +475,12 @@ def load_settings(path: str | Path) -> Settings:
     actual_digest = hashlib.sha256(module_source.read_bytes()).hexdigest()
     if actual_digest != module_digest:
         raise ConfigurationError("module source digest does not match the registered manifest")
+    module_resident_executor = None
+    if "resident_executor" in module:
+        try:
+            module_resident_executor = validate_resident_executor_declaration(module["resident_executor"])
+        except ModuleExtensionError as exc:
+            raise ConfigurationError(f"module.resident_executor is invalid: {exc}") from exc
 
     grace = value.get("grace")
     model_provider = model_endpoint = model_name = None
@@ -778,6 +790,13 @@ def load_settings(path: str | Path) -> Settings:
     configured_provider_versions: dict[str, set[str]] = {}
     declared_module_dependencies: list[tuple[str, dict[str, Any]]] = []
     declared_role_modules: dict[tuple[str, str], dict[str, Any]] = {}
+    if module_resident_executor is not None:
+        declared_role_modules[(module_id, module_version)] = {
+            "module_id": module_id,
+            "module_version": module_version,
+            "artifact_digest": module_digest,
+            "resident_executor": module_resident_executor,
+        }
     if "capability_plugins" in value and "capability_operations" in value:
         raise ConfigurationError("use one capability_operations registry input; capability_plugins is a compatibility alias")
     raw_plugins = value.get("capability_operations", value.get("capability_plugins", []))
@@ -944,6 +963,7 @@ def load_settings(path: str | Path) -> Settings:
         module_entrypoint=entrypoint,
         module_source=module_source,
         module_digest=module_digest,
+        module_resident_executor=module_resident_executor,
         observer_interval_seconds=_positive(timing["observer_interval_seconds"], "timing.observer_interval_seconds"),
         scheduler_interval_seconds=_positive(timing["scheduler_interval_seconds"], "timing.scheduler_interval_seconds"),
         lease_seconds=_positive(timing["lease_seconds"], "timing.lease_seconds"),
@@ -998,7 +1018,9 @@ def sanitized_config(settings: Settings) -> dict[str, Any]:
                    "protocol_minor": settings.module_protocol_minor,
                    "capabilities": list(settings.module_capabilities), "owner": settings.module_owner,
                    "entrypoint": settings.module_entrypoint, "source": str(settings.module_source),
-                   "sha256": settings.module_digest},
+                   "sha256": settings.module_digest,
+                   **({"resident_executor": copy.deepcopy(settings.module_resident_executor)}
+                      if settings.module_resident_executor is not None else {})},
         "authorization": {"provider_id": settings.authorization_provider.provider_id,
                           "contract_version": settings.authorization_provider.contract_version,
                           "options": _redact_provider_options(settings.authorization_provider.options)},

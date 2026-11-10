@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.20.7
+File Revision: 1.20.8
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -26,6 +26,7 @@ Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GP
 Changed: 2026-11-10 | #51 | R3A Coordinator | Exclude unavailable optional tools and apply conversation-specific completion validation.
 Changed: 2026-11-10T13:15:00Z | R3A-GRACE-CAPABILITY-AUTONOMY | Codex GPT-6 | Filter resident capability discovery by current grants and pass registered provider limitations to Grace.
 Changed: 2026-11-10T14:05:00Z | R3A-GRACE-CAPABILITY-AUTONOMY | Codex GPT-6 | Authorize primary resident tools against the running executor module while retaining the directory principal.
+Changed: 2026-11-10T15:16:00Z | R3A-AUTONOMY-EXECUTOR-ROLE-P0 | Codex GPT-6 | Publish the configured primary module's shared resident-executor role declaration in its registry manifest.
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Dispatch generic versioned Steward read/write effects through existing authorization, invocation, and provider paths.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
@@ -242,7 +243,7 @@ class CME:
         return isinstance(previous_grace, dict) and previous_grace == current_grace
 
     def manifest(self, version: str | None = None) -> dict[str, Any]:
-        return {
+        manifest = {
             "module_id": self.module_id,
             "module_version": version or self.settings.module_version,
             "contract_id": self.settings.module_contract_id,
@@ -263,6 +264,10 @@ class CME:
             "resource_refs": ["foundation.observer", "institution.reasoning"],
             "state_namespace": self.module_id,
         }
+        resident_executor = getattr(self.settings, "module_resident_executor", None)
+        if resident_executor is not None:
+            manifest["resident_executor"] = resident_executor
+        return manifest
 
     async def start(self) -> None:
         await self.store.open()
