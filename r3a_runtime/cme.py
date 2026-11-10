@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.9.0
+File Revision: 2.0.4
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -38,10 +38,15 @@ Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Expose sepa
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Enforce Grace-requested reasoning escalation through existing authorization, readiness, durable checkpoint and per-activity token-budget paths.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Dispatch escalation inference through the unified capability invocation and durable budget-reservation path.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Resolve routes by configured task class and reject autonomic objective inference before model execution.
+Changed: 2026-11-10T00:49:41Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Add registry-bound generic handler dispatch while preserving Grace and provider paths.
+Changed: 2026-11-10T01:00:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Route bound residents through registry-selected executors and validate their manifest protocol range.
+Changed: 2026-11-10T01:05:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Preserve test and compatibility contexts that omit the optional primary resident identifier.
+Changed: 2026-11-10T01:10:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Block invalid registry bindings immediately and authorize handler capabilities as the registered handler module.
+Changed: 2026-11-10T01:15:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Require handler capability declarations to be present in the registered module manifest.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py; tests/test_r3a_telemetry_providers.py; tests/test_r3a_capability_contracts.py; tests/test_r3a_engineering.py.
-History/Predecessor: Modular baseline ca2d29e47336dfb3d6a0e633c20bd31e1a200978; AP2 baseline b018578ea576813fed2c973236f35d82843daf14.
+History/Predecessor: Prior revision preserved at pre-change HEAD db9ba0e96eb02049a44729d982cc8522a0066937.
 """
 from __future__ import annotations
 
@@ -79,6 +84,9 @@ from .acceptance import (AcceptanceCriteriaRequired, OBJECTIVE_ACCEPTANCE_CONTRA
                          OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, evidence_fingerprint,
                          validate_acceptance, validate_required_criteria)
 from .protocol import PROTOCOL_MAJOR, PROTOCOL_MINOR, request as module_request
+from .modular_dispatch import (DispatchContractError, build_resident_execution_profile,
+                               resolve_activity_handler, resolve_resident_binding,
+                               validate_activity_handler)
 
 
 _RESIDENT_TOOLS = (
@@ -101,6 +109,9 @@ _RESIDENT_TOOLS = (
      "description": "Read PostgreSQL availability, database identity, server version, and recovery state.",
      "arguments_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
 )
+
+ACTIVITY_INTAKE_SCHEMA = json.loads(
+    (Path(__file__).parent / "schemas" / "activity-intake.v1.schema.json").read_text(encoding="utf-8"))
 
 
 def _requires_runtime_evidence(objective: str) -> bool:
@@ -169,6 +180,7 @@ class CME:
         self.module_version = settings.module_version
         self.module_pid: int | None = None
         self.module_lock = asyncio.Lock()
+        self.module_workers: dict[tuple[str, str, str], tuple[asyncio.subprocess.Process, Path]] = {}
         self.booted_at = utcnow()
 
     def manifest(self, version: str | None = None) -> dict[str, Any]:
@@ -279,6 +291,20 @@ class CME:
         if self.active_activities:
             await asyncio.gather(*self.active_activities.values(), return_exceptions=True)
         await self._stop_module()
+        for key, (process, socket_path) in list(self.module_workers.items()):
+            try:
+                await module_request(socket_path, key[0], key[1], "stop", {}, timeout=2.0)
+            except Exception:
+                pass
+            if process.returncode is None:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), 3.0)
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.wait()
+            socket_path.unlink(missing_ok=True)
+        self.module_workers.clear()
         if self.control:
             await self.control.close()
         if self.diagnostics:
@@ -312,9 +338,16 @@ class CME:
         try:
             if proc.stat().st_uid != os.getuid():
                 return
+            rows = await self.store.rows(
+                "SELECT manifest FROM r3a.module_registry WHERE module_id=%s AND module_version=%s",
+                (module_id, version))
+            if len(rows) != 1 or not isinstance(rows[0]["manifest"], dict):
+                return
+            entrypoint = rows[0]["manifest"].get("entrypoint")
+            if not isinstance(entrypoint, str):
+                return
             argv = (proc / "cmdline").read_bytes().split(b"\0")
-            entrypoint = b"r3a_runtime.grace_module" if module_id == "resident.grace" else b"r3a_runtime.observer_module"
-            expected = [b"-m", entrypoint, b"--module-id", module_id.encode(),
+            expected = [b"-m", entrypoint.encode(), b"--module-id", module_id.encode(),
                         b"--module-version", version.encode()]
             if any(item not in argv for item in expected) or not process_alive(pid):
                 return
@@ -340,6 +373,222 @@ class CME:
                 {"operation": "execute", "continuation_ref": payload.get("continuation_ref")}).to_dict()
         return await module_request(self.settings.module_socket, self.module_id, self.module_version,
                                     operation, payload, timeout=timeout)
+
+    async def _registered_module_call(self, module_id: str, module_version: str, operation: str,
+                                      payload: dict[str, Any], timeout: float = 30.0,
+                                      configuration_ref: str | None = None,
+                                      binding_revision: str | None = None) -> dict[str, Any]:
+        """Call an active registered module in its own CME-supervised worker process."""
+        if (module_id, module_version) == (self.module_id, self.module_version):
+            return await self._module_call(operation, payload, timeout)
+        scope = binding_revision or "module-default"
+        key = (module_id, module_version, scope)
+        worker = self.module_workers.get(key)
+        if worker is None or worker[0].returncode is not None:
+            rows = await self.store.rows(
+                "SELECT manifest,lifecycle_state FROM r3a.module_registry WHERE module_id=%s AND module_version=%s",
+                key[:2])
+            if len(rows) != 1 or rows[0]["lifecycle_state"] != "ACTIVE":
+                raise PermissionError("registered module is missing or not active")
+            manifest = rows[0]["manifest"]
+            entrypoint = manifest.get("entrypoint") if isinstance(manifest, dict) else None
+            if not isinstance(entrypoint, str) or not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+", entrypoint):
+                raise ValueError("registered module entrypoint is invalid")
+            artifact_ref = manifest.get("artifact_ref")
+            digest = manifest.get("artifact_digest")
+            artifact = Path(artifact_ref) if isinstance(artifact_ref, str) else None
+            if (artifact is None or not artifact.is_absolute() or not artifact.is_file()
+                    or not isinstance(digest, str) or hashlib.sha256(artifact.read_bytes()).hexdigest() != digest):
+                raise PermissionError("registered module artifact is unavailable or its immutable digest changed")
+            socket_path = self.settings.module_socket.parent / "modules" / hashlib.sha256(
+                f"{module_id}@{module_version}@{scope}".encode()).hexdigest() / "module.sock"
+            socket_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            socket_path.unlink(missing_ok=True)
+            command = [sys.executable, "-m", entrypoint, "--socket", str(socket_path),
+                       "--module-id", module_id, "--module-version", module_version]
+            config_ref = configuration_ref or manifest.get("configuration_ref")
+            if isinstance(config_ref, str) and Path(config_ref).is_absolute() and Path(config_ref).is_file():
+                command.extend(["--config", config_ref])
+            process = await asyncio.create_subprocess_exec(
+                *command, cwd=Path(__file__).resolve().parent.parent,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+                start_new_session=True)
+            self.module_workers[key] = (process, socket_path)
+            deadline = asyncio.get_running_loop().time() + 8.0
+            while asyncio.get_running_loop().time() < deadline:
+                if process.returncode is not None:
+                    message = (await process.stderr.read()).decode("utf-8", "replace")[-1500:]
+                    self.module_workers.pop(key, None)
+                    raise RuntimeError(f"registered module failed to start: {message}")
+                try:
+                    hello = await module_request(socket_path, module_id, module_version, "hello", {}, timeout=1.0)
+                    supported = hello.get("result", {}).get("supported_protocol", {})
+                    if (supported.get("major") != PROTOCOL_MAJOR
+                            or supported.get("min_minor", 999) > PROTOCOL_MINOR
+                            or supported.get("max_minor", -1) < PROTOCOL_MINOR):
+                        raise PermissionError("registered module protocol is incompatible")
+                    break
+                except (OSError, ConnectionError, asyncio.TimeoutError, RuntimeError):
+                    await asyncio.sleep(0.1)
+            else:
+                process.terminate()
+                await process.wait()
+                self.module_workers.pop(key, None)
+                raise TimeoutError("registered module did not expose its private socket")
+            worker = (process, socket_path)
+        return await module_request(worker[1], module_id, module_version, operation, payload, timeout)
+
+    async def _registered_handler(self, activity_type: str) -> dict[str, Any]:
+        if not hasattr(self.store, "rows"):
+            return {}
+        rows = await self.store.rows(
+            "SELECT module_id,module_version,manifest,lifecycle_state FROM r3a.module_registry "
+            "ORDER BY module_id,module_version")
+        declared = any(isinstance(row.get("manifest"), dict)
+                       and isinstance(row["manifest"].get("activity_handler"), dict)
+                       and activity_type in row["manifest"]["activity_handler"].get("activity_types", [])
+                       for row in rows)
+        active = [row for row in rows if row.get("lifecycle_state") == "ACTIVE"]
+        if not declared:
+            # Activities with no handler declaration may still resolve through a resident binding.
+            return {}
+        resolved = resolve_activity_handler(active, activity_type)
+        declared_capabilities = set(resolved["module"]["manifest"].get("capability_refs", []))
+        if not set(resolved["handler"]["required_capabilities"]).issubset(declared_capabilities):
+            raise DispatchContractError("activity handler requires capabilities absent from its registered module manifest")
+        return resolved
+
+    async def _resolve_resident_executor(self, activity: dict[str, Any]) -> dict[str, Any] | None:
+        event_input = activity.get("input") or {}
+        resident_id = event_input.get("resident_id")
+        if not isinstance(resident_id, str) or not resident_id:
+            return None
+        bindings = [binding for binding in getattr(self.settings, "resident_module_bindings", ())
+                    if binding.get("resident_id") == resident_id]
+        if not bindings:
+            if resident_id == self.module_id:
+                return None
+            raise DispatchContractError("no effective resident module binding is configured")
+        if len(bindings) != 1:
+            raise DispatchContractError("resident module binding is ambiguous")
+        binding = bindings[0]
+        activity_id = str(activity["activity_id"])
+        attempt_id = str(activity["attempt_id"])
+        decision = await self._authorization_decision(
+            "resident.executor.execute", activity_id=activity_id, attempt_id=attempt_id,
+            request_id=str(uuid.uuid5(uuid.UUID(activity_id), f"resident-execution:{resident_id}:{attempt_id}")),
+            context={"dispatcher": "CME", "resident_id": resident_id,
+                     "module_id": binding["module_id"], "module_version": binding["module_version"],
+                     "binding_revision": binding["binding_revision"]}, resident_id=resident_id)
+        try:
+            directory_operation = self.settings.capability_registry.resolve("institutional.directory.discover")
+        except KeyError as exc:
+            raise DispatchContractError("authoritative resident directory capability is unavailable") from exc
+        descriptor = directory_operation.descriptor
+        request_id = str(uuid.uuid5(uuid.UUID(activity_id), f"resident-directory:{resident_id}:{attempt_id}"))
+        invocation = {
+            "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+            "invocation_id": request_id, "operation_id": descriptor["operation_id"],
+            "operation_contract_version": descriptor["contract_version"],
+            "caller": {"principal_id": resident_id, "resident_id": resident_id, "service_id": None},
+            "target": {}, "input": {"resident_id": resident_id},
+            "activity_id": activity_id, "attempt_id": attempt_id, "correlation_id": activity_id,
+            "work_order": None, "evidence_purpose": "Verify current authoritative resident/office association",
+            "idempotency_key": request_id,
+            "deadline": (datetime.now(timezone.utc)
+                         + timedelta(seconds=descriptor["execution"]["timeout_seconds"])).isoformat(),
+            "config_revision": self.settings.source_digest,
+        }
+        directory_result = await self.invoke_capability(invocation)
+        if directory_result.get("outcome") != "SUCCEEDED" or not isinstance(directory_result.get("output"), dict):
+            raise DispatchContractError("authoritative directory lookup did not succeed")
+        module_rows = await self.store.rows(
+            "SELECT module_id,module_version,manifest,lifecycle_state FROM r3a.module_registry "
+            "ORDER BY module_id,module_version")
+        resolved = resolve_resident_binding(bindings, resident_id,
+                                            binding["identity_association"], module_rows)
+        config_path = Path(binding["configuration_ref"])
+        profile = build_resident_execution_profile(binding, directory_result["output"], config_path)
+        resolved["execution_profile"] = profile
+        resolved["configuration_path"] = str(config_path)
+        resolved["execution_authorization"] = {"decision_id": decision.decision_id,
+                                                "audit_event_id": decision.audit_event_id,
+                                                "policy_revision": decision.policy_revision}
+        return resolved
+
+    async def _run_registered_activity(self, activity: dict[str, Any], resolved: dict[str, Any]) -> None:
+        handler = validate_activity_handler(resolved["handler"])
+        module = resolved["module"]
+        event_input = activity.get("input") or {}
+        payload = {"contract_id": "r3a.activity-handler.request", "contract_version": "1.0.0",
+                   "activity_id": str(activity["activity_id"]), "attempt_id": str(activity["attempt_id"]),
+                   "correlation_id": str(event_input.get("correlation_id") or activity["activity_id"]),
+                   "activity_type": activity["activity_type"], "idempotency_key": activity["idempotency_key"],
+                   "input": event_input.get("activity_input", event_input),
+                   "evidence": event_input.get("activity_evidence", []),
+                   "checkpoint": activity.get("checkpoint") or {},
+                   "handler": {"handler_id": handler["handler_id"],
+                               "handler_version": handler["handler_version"],
+                               "module_id": resolved["module_id"],
+                               "module_version": resolved["module_version"],
+                               "artifact_digest": resolved["artifact_digest"]}}
+        validate_json(payload["input"], handler["request_schema"], path="$.input")
+        handler_decision = await self._authorization_decision(
+            "activity.handler.execute", activity_id=str(activity["activity_id"]),
+            attempt_id=str(activity["attempt_id"]),
+            request_id=str(uuid.uuid5(uuid.UUID(str(activity["activity_id"])),
+                                      f"handler-execute:{resolved['module_id']}:{activity['attempt_id']}")),
+            context={"dispatcher": "CME", "handler_id": handler["handler_id"],
+                     "module_id": resolved["module_id"], "activity_type": activity["activity_type"]},
+            resident_id=event_input.get("resident_id") or resolved["module_id"])
+        decisions = [{"capability_id": "activity.handler.execute",
+                      "decision_id": handler_decision.decision_id,
+                      "audit_event_id": handler_decision.audit_event_id,
+                      "policy_revision": handler_decision.policy_revision}]
+        for index, capability_id in enumerate(handler["required_capabilities"]):
+            decision = await self._authorization_decision(
+                capability_id, activity_id=str(activity["activity_id"]),
+                attempt_id=str(activity["attempt_id"]),
+                request_id=str(uuid.uuid5(uuid.UUID(str(activity["activity_id"])),
+                                          f"handler-grant:{capability_id}:{activity['attempt_id']}")),
+                context={"dispatcher": "CME", "handler_id": handler["handler_id"],
+                         "module_id": resolved["module_id"], "activity_type": activity["activity_type"]},
+                resident_id=resolved["module_id"])
+            decisions.append({"capability_id": capability_id, "decision_id": decision.decision_id,
+                              "audit_event_id": decision.audit_event_id,
+                              "policy_revision": decision.policy_revision})
+        payload["authorized_capabilities"] = decisions
+        await self.store.record_progress(activity,
+            {"phase": "handler.dispatched", "handler_id": handler["handler_id"],
+             "module_id": resolved["module_id"], "module_version": resolved["module_version"],
+             "at": utcnow().isoformat()},
+            {"handler": payload["handler"], "request": payload})
+        response = await self._registered_module_call(
+            resolved["module_id"], resolved["module_version"], "execute", payload, timeout=60.0)
+        result = response.get("result")
+        if not isinstance(result, dict):
+            raise ValueError("activity handler returned a non-object result")
+        validate_json(result, handler["result_schema"], path="$.result")
+        progress = result.get("progress")
+        if progress is not None:
+            validate_json(progress, handler["progress_schema"], path="$.progress")
+        checkpoint = result.get("checkpoint")
+        if checkpoint is not None:
+            validate_json(checkpoint, handler["checkpoint_schema"], path="$.checkpoint")
+            await self.store.record_progress(activity,
+                {"phase": "handler.checkpointed", "at": utcnow().isoformat(),
+                 "handler_id": handler["handler_id"]},
+                {"handler": payload["handler"], "handler_checkpoint": checkpoint})
+        outcome = result.get("outcome")
+        if outcome == "completed":
+            await self.store.finish_activity(activity,
+                {"contract_id": "r3a.activity-handler.result", "contract_version": "1.0.0",
+                 "handler": payload["handler"], "authorization": decisions, "result": result})
+        elif outcome == "blocked":
+            await self.store.block_activity(activity, str(result.get("reason") or "activity handler blocked"),
+                {"handler": payload["handler"], "authorization": decisions, "result": result})
+        else:
+            raise ValueError("activity handler result outcome must be completed or blocked")
 
     async def _authorization_decision(self, capability_id: str, *, activity_id: str | None = None,
                                     attempt_id: str | None = None,
@@ -394,6 +643,38 @@ class CME:
                 await self.store.module_state(module_id, version, "INCOMPATIBLE", "unavailable",
                                               {"reason": "host contract version outside supported range"})
                 raise RuntimeError("Module contract is incompatible with this CME")
+            if (module_id, version) != (self.module_id, self.module_version):
+                worker_key = (module_id, version, "module-default")
+                running = self.module_workers.get(worker_key)
+                if running is not None and running[0].returncode is None:
+                    health = await self._registered_module_call(module_id, version, "health", {})
+                    if health.get("result", {}).get("state") == "ACTIVE":
+                        return {"module_id": module_id, "version": version,
+                                "state": "ACTIVE", "pid": running[0].pid}
+                await self.store.module_state(module_id, version, "ACTIVATING", "starting")
+                try:
+                    await self._registered_module_call(module_id, version, "hello", {},
+                                                       allow_activation=True)
+                    await self._registered_module_call(module_id, version, "prepare", {})
+                    await self._registered_module_call(module_id, version, "activate", {})
+                    health = await self._registered_module_call(module_id, version, "health", {})
+                    if (health.get("result", {}).get("state") != "ACTIVE"
+                            or health.get("result", {}).get("health") != "healthy"):
+                        raise RuntimeError("registered module readiness observation did not report healthy/active")
+                    worker = self.module_workers[worker_key]
+                    await self.store.module_state(module_id, version, "ACTIVE", "healthy",
+                                                  {"pid": worker[0].pid,
+                                                   "artifact_digest": manifest["artifact_digest"]})
+                    return {"module_id": module_id, "version": version,
+                            "state": "ACTIVE", "pid": worker[0].pid}
+                except Exception as exc:
+                    await self.store.module_state(module_id, version, "FAILED", "unavailable",
+                                                  {"reason": f"{type(exc).__name__}: {exc}"})
+                    worker = self.module_workers.pop(worker_key, None)
+                    if worker and worker[0].returncode is None:
+                        worker[0].terminate()
+                        await worker[0].wait()
+                    raise
             if self.module_process and self.module_process.returncode is None:
                 if module_id == self.module_id and version == self.module_version:
                     health = await self._module_call("health")
@@ -492,6 +773,39 @@ class CME:
         return {"stopped": True, "module_id": module_id, "version": version,
                 "exit_code": process.returncode}
 
+    async def _stop_registered_module(self, module_id: str, version: str) -> dict[str, Any]:
+        matching = [(key, worker) for key, worker in self.module_workers.items()
+                    if key[0] == module_id and key[1] == version]
+        if not matching:
+            await self.store.module_state(module_id, version, "STOPPED", "stopped",
+                                          {"reason": "module worker was not running"})
+            return {"stopped": True, "already_stopped": True, "module_id": module_id,
+                    "version": version}
+        await self.store.module_state(module_id, version, "STOPPING", "stopping")
+        exit_codes = []
+        for key, (process, socket_path) in matching:
+            try:
+                await module_request(socket_path, module_id, version, "stop", {}, timeout=2.0)
+            except Exception:
+                pass
+            if process.returncode is None:
+                try:
+                    await asyncio.wait_for(process.wait(), self.settings.heartbeat_stale_after_seconds)
+                except asyncio.TimeoutError:
+                    process.terminate()
+                    try:
+                        await asyncio.wait_for(process.wait(), self.settings.heartbeat_stale_after_seconds)
+                    except asyncio.TimeoutError:
+                        process.kill()
+                        await process.wait()
+            socket_path.unlink(missing_ok=True)
+            self.module_workers.pop(key, None)
+            exit_codes.append(process.returncode)
+        await self.store.module_state(module_id, version, "STOPPED", "stopped",
+                                      {"exit_codes": exit_codes})
+        return {"stopped": True, "module_id": module_id, "version": version,
+                "exit_codes": exit_codes}
+
     async def _replace_module(self, version: str) -> dict[str, Any]:
         parts = version.split(".")
         if len(parts) != 3 or any(not part.isdigit() for part in parts):
@@ -523,6 +837,57 @@ class CME:
             self.shutdown.set()
             return {"stopping": True}
         if operation == "module.install":
+            registered_manifest = payload.get("manifest")
+            if registered_manifest is not None:
+                if not isinstance(registered_manifest, dict):
+                    raise ValueError("module.install manifest must be an object")
+                required = {"module_id", "module_version", "contract_id", "protocol_major", "protocol_minor",
+                            "entrypoint", "artifact_ref", "artifact_digest"}
+                if not required.issubset(registered_manifest):
+                    raise ValueError("module.install manifest is missing required registry fields")
+                module_id = registered_manifest["module_id"]
+                version = registered_manifest["module_version"]
+                artifact_ref = registered_manifest["artifact_ref"]
+                digest = registered_manifest["artifact_digest"]
+                registered_manifest.setdefault("protocol_min_minor", registered_manifest["protocol_minor"])
+                registered_manifest.setdefault("protocol_max_minor", registered_manifest["protocol_minor"])
+                if (not isinstance(module_id, str)
+                        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}", module_id)
+                        or not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version)
+                        or not isinstance(registered_manifest["contract_id"], str)
+                        or registered_manifest["protocol_major"] != PROTOCOL_MAJOR
+                        or isinstance(registered_manifest["protocol_minor"], bool)
+                        or not isinstance(registered_manifest["protocol_minor"], int)
+                        or any(isinstance(registered_manifest[key], bool)
+                               or not isinstance(registered_manifest[key], int)
+                               for key in ("protocol_min_minor", "protocol_max_minor"))
+                        or registered_manifest["protocol_min_minor"] < 0
+                        or registered_manifest["protocol_max_minor"] < registered_manifest["protocol_min_minor"]
+                        or not registered_manifest["protocol_min_minor"] <= PROTOCOL_MINOR
+                           <= registered_manifest["protocol_max_minor"]
+                        or not isinstance(registered_manifest["entrypoint"], str)
+                        or not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+", registered_manifest["entrypoint"])):
+                    raise ValueError("module.install identity or protocol declaration is invalid")
+                artifact = Path(artifact_ref) if isinstance(artifact_ref, str) else None
+                if (artifact is None or not artifact.is_absolute() or not artifact.is_file()
+                        or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
+                        or hashlib.sha256(artifact.read_bytes()).hexdigest() != digest):
+                    raise PermissionError("module.install artifact is unavailable or digest does not match")
+                handler = (validate_activity_handler(registered_manifest["activity_handler"])
+                           if registered_manifest.get("activity_handler") is not None else None)
+                caps = registered_manifest.get("capability_refs", [])
+                if (not isinstance(caps, list)
+                        or any(not isinstance(cap, str) or not cap.strip() for cap in caps)
+                        or len(set(caps)) != len(caps)):
+                    raise ValueError("module.install capability_refs must be unique capability identifiers")
+                if handler is not None and not set(handler["required_capabilities"]).issubset(set(caps)):
+                    raise ValueError("module.install handler capabilities must be declared in capability_refs")
+                await self.store.register_module(registered_manifest, "INSTALLED", "unknown",
+                                                 {"idempotency_key": idempotency_key})
+                await self.store.module_state(module_id, version, "INSTALLED", "unknown",
+                                              {"artifact_digest": digest, "idempotency_key": idempotency_key})
+                return {"installed": True, "module_id": module_id, "version": version,
+                        "artifact_digest": digest, "lifecycle_state": "INSTALLED"}
             version = str(payload.get("version", self.settings.module_version))
             manifest = self.manifest(version)
             existing = await self.store.rows(
@@ -548,8 +913,35 @@ class CME:
             version = str(payload.get("version", self.settings.module_version))
             return await self._activate_module(module_id, version)
         if operation == "module.stop":
-            return await self._stop_module()
+            module_id = str(payload.get("module_id", self.module_id))
+            version = str(payload.get("version", self.module_version))
+            if (module_id, version) == (self.module_id, self.module_version):
+                return await self._stop_module()
+            return await self._stop_registered_module(module_id, version)
         if operation == "module.replace":
+            module_id = str(payload.get("module_id", self.module_id))
+            old_version = str(payload.get("old_version", self.module_version))
+            new_version = str(payload.get("new_version", payload.get("version", "")))
+            if module_id != self.module_id:
+                if any(not task.done() for task in self.active_activities.values()):
+                    raise RuntimeError("registered module replacement waits for active activities to reach a safe boundary")
+                new_manifest = payload.get("manifest")
+                if new_manifest is not None:
+                    installed = await self._control_request(
+                        "module.install", {"manifest": new_manifest}, f"{idempotency_key}:install")
+                    if installed["module_id"] != module_id or installed["version"] != new_version:
+                        raise ValueError("replacement manifest identity does not match module_id/new_version")
+                if not new_version or new_version == old_version:
+                    raise ValueError("replacement requires a distinct semantic module version")
+                await self._stop_registered_module(module_id, old_version)
+                try:
+                    activated = await self._activate_module(module_id, new_version)
+                except Exception:
+                    await self._activate_module(module_id, old_version)
+                    raise
+                await self.store.record_module_replacement(module_id, old_version, new_version)
+                return {**activated, "prior_version": old_version, "replacement_completed": True,
+                        "cme_pid_unchanged": True}
             return await self._replace_module(str(payload["version"]))
         if operation == "capability.grant":
             module_id = str(payload["module_id"])
@@ -600,6 +992,54 @@ class CME:
             if request.get("work_order") is not None:
                 raise ValueError("work-order invocations must be submitted by the AP2 Engineering adapter")
             return await self.invoke_capability(request)
+        if operation == "activity.intake.submit":
+            operation_id = payload.get("operation_id")
+            contract_version = payload.get("contract_version", "1.0.0")
+            arguments = payload.get("arguments")
+            if not isinstance(operation_id, str) or not operation_id or not isinstance(arguments, dict):
+                raise ValueError("activity.intake.submit requires an operation_id and object arguments")
+            provider_operation = self.settings.capability_registry.resolve(operation_id, contract_version)
+            descriptor = provider_operation.descriptor
+            if (descriptor["effect_class"] != "read"
+                    or descriptor["output_schema"].get("$id") != "r3a.activity-intake.v1"):
+                raise PermissionError("activity intake requires a read-only registered provider with the activity-intake output contract")
+            validate_json(arguments, descriptor["input_schema"], path="$.arguments")
+            invocation_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"r3a.activity-intake:{idempotency_key}"))
+            source_activity_id = str(uuid.uuid5(uuid.NAMESPACE_URL,
+                                                f"r3a.source-activity:{idempotency_key}"))
+            source_attempt_id = str(uuid.uuid5(uuid.UUID(invocation_id), "source-intake"))
+            invocation = {
+                "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+                "invocation_id": invocation_id, "operation_id": operation_id,
+                "operation_contract_version": contract_version,
+                "caller": {"principal_id": self.module_id, "resident_id": self.module_id,
+                           "service_id": None},
+                "target": {}, "input": arguments, "activity_id": source_activity_id,
+                "attempt_id": source_attempt_id,
+                "correlation_id": invocation_id, "work_order": None,
+                "evidence_purpose": "Read an authorized source and submit one durable activity intake",
+                "idempotency_key": idempotency_key,
+                "deadline": (datetime.now(timezone.utc)
+                             + timedelta(seconds=descriptor["execution"]["timeout_seconds"])).isoformat(),
+                "config_revision": self.settings.source_digest,
+            }
+            invocation_result = await self.invoke_capability(invocation)
+            if invocation_result.get("outcome") != "SUCCEEDED":
+                raise RuntimeError("registered activity-intake source did not return a successful result")
+            intake = invocation_result.get("output")
+            validate_json(intake, ACTIVITY_INTAKE_SCHEMA, path="$.activity_intake")
+            provider = descriptor["provider"]
+            provenance = intake["provenance"]
+            if (provenance["module_id"] != provider["provider_id"]
+                    or provenance["module_version"] != provider["provider_version"]
+                    or provenance["artifact_sha256"] != provider["artifact_sha256"]
+                    or provenance["configuration_revision"] != self.settings.source_digest
+                    or intake["source"]["idempotency_key"] != idempotency_key):
+                raise CapabilityContractError("activity-intake provenance or idempotency key does not match its authorized source")
+            accepted = await self.store.submit_activity_intake(intake, invocation_result)
+            return {**accepted, "source_invocation_id": invocation_id,
+                    "source_authorization": invocation_result["authorization"],
+                    "source_provider": invocation_result["provider"]}
         if operation == "model.readiness.refresh":
             role_id = str(payload["role_id"])
             role = next((entry for entry in self.settings.model_roles if entry.role_id == role_id), None)
@@ -990,7 +1430,16 @@ class CME:
                      if entry["capability_id"] == capability_id), None)
         if tool is None:
             raise PermissionError("resident requested a capability without an execution adapter")
-        if capability_id not in self.settings.module_capabilities:
+        executor_module_id = activity.get("input", {}).get("executor_module_id")
+        if executor_module_id:
+            executor_version = activity.get("input", {}).get("executor_module_version")
+            rows = await self.store.rows(
+                "SELECT manifest,lifecycle_state FROM r3a.module_registry WHERE module_id=%s AND module_version=%s",
+                (executor_module_id, executor_version))
+            if (len(rows) != 1 or rows[0].get("lifecycle_state") != "ACTIVE"
+                    or capability_id not in (rows[0].get("manifest") or {}).get("capability_refs", [])):
+                raise PermissionError("resident capability is absent from its active executor manifest")
+        elif capability_id not in self.settings.module_capabilities:
             raise PermissionError("resident requested a capability absent from its configured manifest")
         if (request.get("contract_id") != tool["contract_id"]
                 or request.get("contract_version") != tool["contract_version"]):
@@ -1025,7 +1474,8 @@ class CME:
                      "effect_class": registered_operation.descriptor["effect_class"]
                      if registered_operation is not None else "read",
                      "query_sha256": hashlib.sha256(query.encode()).hexdigest()
-                     if capability_id == "institution.knowledge.read" else None})
+                     if capability_id == "institution.knowledge.read" else None},
+            resident_id=activity.get("input", {}).get("resident_id"))
         evidence = []
         capability_output: Any = None
         if capability_id == "institution.knowledge.read":
@@ -1522,9 +1972,156 @@ class CME:
             "grace_assessment": assessment, "model_turns": model_turns,
             "invocation": invocation, "verification": verification.to_dict()})
 
+    async def _run_bound_resident_activity(self, activity: dict[str, Any],
+                                           resolved: dict[str, Any]) -> None:
+        """Dispatch through the binding selected from external configuration and the module registry."""
+        profile = resolved["execution_profile"]
+        module = resolved["module"]
+        resident_id = profile["resident_id"]
+        event_input = activity.get("input") or {}
+        module_capabilities = set(module["manifest"].get("capability_refs", []))
+        tools = [tool for tool in self._resident_tools()
+                 if tool.get("capability_id") in module_capabilities]
+        resident_input = event_input.get("activity_input", event_input)
+        conversation = list((activity.get("checkpoint") or {}).get("resident_conversation", []))
+        evidence = list((activity.get("checkpoint") or {}).get("resident_evidence", []))
+        correlation_id = str(event_input.get("correlation_id") or activity["activity_id"])
+        request_ref = str(uuid.uuid5(uuid.UUID(str(activity["activity_id"])),
+                                     f"resident:{resolved['binding_revision']}:{activity['attempt_id']}"))
+        execution = {"activity_id": str(activity["activity_id"]),
+                    "attempt_id": str(activity["attempt_id"]),
+                    "correlation_id": correlation_id, "resident_id": resident_id,
+                    "executor_module_id": resolved["module_id"],
+                    "executor_module_version": resolved["module_version"],
+                    "binding_revision": resolved["binding_revision"],
+                    "configuration_revision": profile["config_revision"],
+                    "profile": profile, "conversation": conversation, "evidence": evidence,
+                    "request_ref": request_ref}
+        await self.store.record_progress(activity,
+            {"phase": "resident.executor.dispatched", "at": utcnow().isoformat(),
+             "resident_id": resident_id, "module_id": resolved["module_id"],
+             "module_version": resolved["module_version"],
+             "binding_revision": resolved["binding_revision"]},
+            {"resident_execution": execution})
+        execution_request_id = request_ref
+        bound_activity = {**activity, "input": {**event_input, "resident_id": resident_id,
+                                                  "executor_module_id": resolved["module_id"],
+                                                  "executor_module_version": resolved["module_version"]}}
+        while True:
+            envelope = ContractEnvelope(
+                "r3a.resident.execution", "1.0.0", execution_request_id,
+                str(activity["activity_id"]), str(activity["attempt_id"]), correlation_id,
+                resident_id, profile["config_revision"], utcnow().isoformat(),
+                {"operation": "execute", "continuation_ref": str(activity["activity_id"])}).to_dict()
+            payload = {"contract_envelope": envelope,
+                       "activity_type": activity["activity_type"],
+                       "activity_id": str(activity["activity_id"]),
+                       "attempt_id": str(activity["attempt_id"]), "correlation_id": correlation_id,
+                       "resident_id": resident_id, "config_revision": profile["config_revision"],
+                       "resident_profile": profile, "objective": event_input.get("objective", ""),
+                       "activity_input": resident_input, "evidence": evidence,
+                       "conversation": conversation, "available_tools": tools,
+                       "request_ref": execution_request_id}
+            if "resident_result" in execution:
+                payload["resident_result"] = execution["resident_result"]
+            response = await self._registered_module_call(
+                resolved["module_id"], resolved["module_version"], "execute", payload,
+                timeout=120.0, configuration_ref=resolved["configuration_path"],
+                binding_revision=resolved["binding_revision"])
+            result = response.get("result")
+            if not isinstance(result, dict):
+                raise ValueError("resident executor returned a non-object result")
+            if result.get("action") == "invoke_capability":
+                request = result.get("capability_request")
+                if not isinstance(request, dict):
+                    raise ValueError("resident executor returned an incomplete capability request")
+                try:
+                    capability_result = await self._invoke_resident_capability(bound_activity, request)
+                    feedback_outcome, feedback_reasons = "PASS", []
+                except PermissionError as exc:
+                    capability_result = {"outcome": "denied", "error": str(exc), "evidence": []}
+                    feedback_outcome = "REJECTED"
+                    feedback_reasons = [{"code": "capability_denied", "message": str(exc),
+                                         "evidence_refs": []}]
+                returned = capability_result.get("evidence", [])
+                feedback_evidence = [{"evidence_ref": str(item.get("source_id") or
+                                                              f"capability:{request.get('capability_id')}:{index}"),
+                                      "kind": "capability_result", "content": item}
+                                     for index, item in enumerate(returned) if isinstance(item, dict)]
+                auth = capability_result.get("authorization") or {}
+                feedback = {"contract_id": "r3a.resident.result", "contract_version": "1.0.0",
+                            "activity_id": str(activity["activity_id"]),
+                            "attempt_id": str(activity["attempt_id"]), "correlation_id": correlation_id,
+                            "resident_id": resident_id, "config_revision": profile["config_revision"],
+                            "issued_at": utcnow().isoformat(),
+                            "issuer": {"component_id": "cme",
+                                       "decision_ref": str(auth.get("audit_event_id") or execution_request_id)},
+                            "outcome": feedback_outcome, "evidence": feedback_evidence,
+                            "failure_reasons": feedback_reasons, "completion_authority": False}
+                conversation.extend([
+                    {"role": "assistant", "content": json.dumps({"capability_request": request}, separators=(",", ":"))},
+                    {"role": "user", "content": json.dumps({"resident_result": feedback,
+                                                               "capability_result": capability_result},
+                                                              separators=(",", ":"))}])
+                evidence.extend(feedback_evidence)
+                execution["resident_result"] = feedback
+                execution["conversation"] = conversation
+                execution["evidence"] = evidence
+                execution_request_id = str(uuid.uuid5(uuid.UUID(str(activity["activity_id"])),
+                                                      f"resident-continuation:{activity['attempt_id']}:{len(conversation)}"))
+                execution["request_ref"] = execution_request_id
+                await self.store.record_progress(activity,
+                    {"phase": "resident.capability.completed" if feedback_outcome == "PASS"
+                     else "resident.capability.denied", "at": utcnow().isoformat(),
+                     "resident_id": resident_id, "capability_id": request.get("capability_id")},
+                    {"resident_execution": execution})
+                continue
+            if result.get("action") != "final" or not isinstance(result.get("decision"), dict):
+                raise ValueError("resident executor returned no typed final decision")
+            decision = result["decision"]
+            if decision.get("status") == "blocked":
+                await self.store.block_activity(activity, "resident executor returned a blocked decision",
+                    {"resident_id": resident_id, "module_id": resolved["module_id"],
+                     "module_version": resolved["module_version"],
+                     "binding_revision": resolved["binding_revision"], "decision": decision,
+                     "model": result.get("model")})
+            elif decision.get("status") in {"healthy", "degraded"}:
+                await self.store.finish_activity(activity,
+                    {"contract_id": "r3a.resident.execution-result", "contract_version": "1.0.0",
+                     "resident_id": resident_id, "module_id": resolved["module_id"],
+                     "module_version": resolved["module_version"],
+                     "artifact_digest": resolved["artifact_digest"],
+                     "binding_revision": resolved["binding_revision"],
+                     "configuration_revision": profile["config_revision"],
+                     "decision": decision, "model": result.get("model"),
+                     "conversation": conversation, "evidence": evidence})
+            else:
+                raise ValueError("resident executor decision status is invalid")
+            return
+
     async def _run_activity(self, activity: dict[str, Any]) -> None:
         lease_task: asyncio.Task | None = None
         try:
+            handler = await self._registered_handler(activity["activity_type"])
+            if handler:
+                lease_task = asyncio.create_task(self._lease_heartbeat(activity),
+                                                 name=f"lease-heartbeat:{activity['activity_id']}")
+                await self._run_registered_activity(activity, handler)
+                return
+            event_input = activity.get("input") or {}
+            target_resident = event_input.get("resident_id")
+            if target_resident is None and activity["activity_type"] == "grace.objective":
+                target_resident = getattr(self, "module_id", None)
+            if target_resident is not None:
+                bound = await self._resolve_resident_executor(
+                    {**activity, "input": {**event_input, "resident_id": target_resident}})
+                if bound:
+                    lease_task = asyncio.create_task(self._lease_heartbeat(activity),
+                                                     name=f"lease-heartbeat:{activity['activity_id']}")
+                    await self._run_bound_resident_activity(activity, bound)
+                    return
+            if activity["activity_type"] != "grace.objective":
+                raise DispatchContractError("no registered handler or resident binding accepts this activity type")
             if self.module_process is None or self.module_process.returncode is not None:
                 raise RuntimeError("registered module process is not running")
             context = (await self._objective_context(activity) if activity["activity_type"] == "grace.objective"
@@ -2049,6 +2646,9 @@ class CME:
                                                                   "source_sha256": item.get("source_sha256")}
                                                                  for item in evidence]}
                 await self.store.finish_activity(activity, observations)
+        except DispatchContractError as exc:
+            await self.store.block_activity(activity, "registered dispatch contract denied activity",
+                                            {"contract": "r3a.modular-dispatch.v1", "error": str(exc)})
         except AcceptanceCriteriaRequired as exc:
             await self.store.block_activity(
                 activity, "objective acceptance criteria are required",

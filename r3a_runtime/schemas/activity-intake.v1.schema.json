@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.activity-intake.v1",
+  "title": "R3A Activity Intake Envelope v1",
+  "type": "object",
+  "required": ["contract_id", "contract_version", "intake_id", "source", "correlation_id", "activity", "provenance", "lifecycle_projection"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_id": {"type": "string", "const": "r3a.activity-intake.v1"},
+    "contract_version": {"type": "string", "const": "1.0.0"},
+    "intake_id": {"type": "string", "minLength": 1, "maxLength": 160},
+    "parent_activity_id": {"type": ["string", "null"], "maxLength": 64},
+    "correlation_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "source": {
+      "type": "object",
+      "required": ["source_id", "event_id", "revision", "idempotency_key", "occurred_at", "received_at", "payload_ref", "payload_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {"type": "string", "minLength": 1, "maxLength": 160},
+        "event_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "revision": {"type": "string", "minLength": 1, "maxLength": 128},
+        "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 512},
+        "occurred_at": {"type": "string", "format": "date-time"},
+        "received_at": {"type": "string", "format": "date-time"},
+        "payload_ref": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "payload_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "causation_id": {"type": ["string", "null"], "maxLength": 128}
+      }
+    },
+    "activity": {
+      "type": "object",
+      "required": ["activity_type", "task_class", "objective", "input", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "activity_type": {"type": "string", "pattern": "^[a-z][a-z0-9.-]*\\.[a-z][a-z0-9.-]*$", "maxLength": 128},
+        "task_class": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{1,63}$"},
+        "objective": {"type": "string", "minLength": 1, "maxLength": 20000},
+        "input": {"type": "object"},
+        "evidence": {
+          "type": "array", "maxItems": 128,
+          "items": {
+            "type": "object",
+            "required": ["source_id", "source_ref", "sha256", "provenance"],
+            "additionalProperties": false,
+            "properties": {
+              "source_id": {"type": "string", "minLength": 1, "maxLength": 256},
+              "source_ref": {"type": "string", "minLength": 1, "maxLength": 2048},
+              "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+              "provenance": {"type": "string", "minLength": 1, "maxLength": 512}
+            }
+          }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["module_id", "module_version", "artifact_sha256", "configuration_revision"],
+      "additionalProperties": false,
+      "properties": {
+        "module_id": {"type": "string", "minLength": 1, "maxLength": 160},
+        "module_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "artifact_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "configuration_revision": {"type": "string", "minLength": 1, "maxLength": 160}
+      }
+    },
+    "lifecycle_projection": {
+      "type": "object",
+      "required": ["received", "actionable", "acknowledged", "resolved", "blocked"],
+      "additionalProperties": false,
+      "properties": {
+        "received": {"type": "string", "pattern": "^[a-z][a-z0-9.-]*\\.[a-z][a-z0-9.-]*$"},
+        "actionable": {"type": "string", "pattern": "^[a-z][a-z0-9.-]*\\.[a-z][a-z0-9.-]*$"},
+        "acknowledged": {"type": "string", "pattern": "^[a-z][a-z0-9.-]*\\.[a-z][a-z0-9.-]*$"},
+        "resolved": {"type": "string", "pattern": "^[a-z][a-z0-9.-]*\\.[a-z][a-z0-9.-]*$"},
+        "blocked": {"type": "string", "pattern": "^[a-z][a-z0-9.-]*\\.[a-z][a-z0-9.-]*$"}
+      }
+    }
+  }
+}

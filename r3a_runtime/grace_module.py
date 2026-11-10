@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.10.10
+File Revision: 1.10.14
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
 Purpose: Execute Grace objectives through configured inference and resident-selected capabilities in the authorized canonical runtime.
@@ -25,6 +25,9 @@ Changed: 2026-11-07 | R3A-019 | Codex GPT-6 | Normalize omitted arguments to an 
 Changed: 2026-11-07T02:35:35Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Give Grace explicit objective criteria and continuation feedback.
 Changed: 2026-11-07T02:41:51Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Deliver the versioned acceptance envelope in the resident inference context.
 Changed: 2026-11-07T03:34:34Z | R3A-019-INBOX-LOOP | Codex GPT-6 | Constrain capability identifiers to the exact configured tool manifest values.
+Changed: 2026-11-10T01:00:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Match execution envelopes and resident results to the bound resident identity.
+Changed: 2026-11-10T01:05:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Retain primary legacy Grace calls without weakening profile checks for explicitly bound identities.
+Changed: 2026-11-10T01:10:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Default optional context-window metadata for legacy in-process model-route fixtures.
 Supersedes: None.
 Contracts: R3A-019; AP1-M1 Issue #43 acceptance; r3a.resident.execution.v1; r3a.resident.approved-character-context@2.0.0; r3a.resident.result@1.0.0; r3a.resident.execution-profile@1.0.0.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; automated inference responses are fixtures.
@@ -45,6 +48,7 @@ Changed: 2026-11-08T15:37:17Z | R3A-CHARACTER-CONTEXT-CONSUMER | Codex GPT-6 | Q
 Changed: 2026-11-08T17:31:16Z | R3A-CHARACTER-CONTEXT-V2 | Codex GPT-6 | Consume Character Architecture v2 identity/activity pins and keep diagnostic projection metadata-only.
 Changed: 2026-11-08T17:34:06Z | R3A-CHARACTER-CONTEXT-V2 | Codex GPT-6 | Record the immediate predecessor for the current revision.
 Changed: 2026-11-08T17:34:44Z | R3A-CHARACTER-CONTEXT-V2 | Codex GPT-6 | Keep required provenance fields inside the validator's inspected header range.
+Changed: 2026-11-09T00:00:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Validate delegated resident identity against its bound profile rather than the executor module identity.
 """
 from __future__ import annotations
 
@@ -593,7 +597,8 @@ def fit_model_request_context(request: dict[str, Any], evidence: list[dict[str, 
     """Preflight a model request; preserve the durable evidence and project only its model view."""
     messages = [dict(message) for message in request["messages"]]
     user_value = json.loads(messages[-1]["content"])
-    limit = min(route.context_window_tokens, reported_context_tokens or route.context_window_tokens)
+    configured_context_window = getattr(route, "context_window_tokens", 16384)
+    limit = min(configured_context_window, reported_context_tokens or configured_context_window)
     safety = max(512, math.ceil(limit * (0.18 if aggressive else 0.12)))
     prompt_budget = max(256, limit - route.max_tokens - safety)
     original_evidence = user_value.get("evidence", evidence)
@@ -633,7 +638,7 @@ def fit_model_request_context(request: dict[str, Any], evidence: list[dict[str, 
             "contract_id": "r3a.model-context-budget",
             "contract_version": "1.0.0",
             "mode": mode if prior_failure is None else "provider_context_recovery",
-            "configured_context_window_tokens": route.context_window_tokens,
+            "configured_context_window_tokens": configured_context_window,
             "effective_context_window_tokens": limit,
             "completion_tokens_reserved": route.max_tokens,
             "safety_margin_tokens": safety,
@@ -765,10 +770,11 @@ class GraceResident:
             if self.state != "ACTIVE":
                 raise RuntimeError("Grace resident is not active")
             envelope_value = payload.get("contract_envelope")
+            execution_resident_id = payload.get("resident_id", self.module_id)
             if envelope_value is not None:
                 envelope = ContractEnvelope.from_dict(
                     envelope_value, expected_contract="r3a.resident.execution")
-                if envelope.resident_id != self.module_id:
+                if envelope.resident_id != execution_resident_id:
                     raise ContractValidationError("resident identity mismatch")
                 if envelope.activity_id != str(payload.get("activity_id")) or \
                         envelope.attempt_id != str(payload.get("attempt_id")):
@@ -793,15 +799,15 @@ class GraceResident:
             resident_profile = None
             if payload.get("resident_profile") is not None:
                 resident_profile = validate_resident_profile(
-                    payload["resident_profile"], resident_id=self.module_id,
+                    payload["resident_profile"], resident_id=execution_resident_id,
                     config_revision=str(payload.get("config_revision")))
                 requested_route = payload.get("route_id")
                 if requested_route is not None and requested_route != resident_profile["model_route_id"]:
                     raise ValueError("resident route conflicts with its configured execution profile")
                 route = self.settings.model_route(resident_profile["model_route_id"])
             else:
-                if self.module_id != "resident.grace":
-                    raise ValueError("non-primary resident execution requires a directory-backed profile")
+                if payload.get("resident_id") is not None:
+                    raise ValueError("bound resident execution requires a directory-backed profile")
                 route = self.settings.model_route(payload.get("route_id"))
             resident_character_context = None
             resident_character_binding = None
@@ -847,7 +853,7 @@ class GraceResident:
                     resident_result_value, activity_id=str(payload.get("activity_id")),
                     attempt_id=str(payload.get("attempt_id")),
                     correlation_id=str(correlation_id) if correlation_id is not None else None,
-                    resident_id=self.module_id, config_revision=str(payload.get("config_revision")))
+                    resident_id=execution_resident_id, config_revision=str(payload.get("config_revision")))
             request = {
                 "model": route.model,
                 "temperature": 0,

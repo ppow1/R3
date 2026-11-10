@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/config.py
 Component: R3A-BOOTSTRAP-CONFIG
-File Revision: 1.6.2
+File Revision: 1.7.1
 Created: 2026-11-06T15:04:00Z
 Created By: Codex GPT-6
 Purpose: Strictly validate external R3A AP0-M1 bootstrap and operating settings.
@@ -23,10 +23,12 @@ Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Add externally
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Bind configured model roles to task classes and reject cross-class fallback.
 Changed: 2026-11-08T13:50:35Z | R3A-AUTONOMY-RETRY-BOUND | Codex GPT-6 | Add a validated external ceiling for durable activity retries after repeated execution failures.
 Changed: 2026-11-08T14:51:43Z | R3A-CONTEXT-RECOVERY | Codex GPT-6 | Allow each configured reasoning route to declare its context window for resident-side prompt budgeting.
+Changed: 2026-11-10T00:52:25Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Load validated resident-to-module bindings as external configuration without granting execution authority.
+Changed: 2026-11-10T01:00:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Validate unique external resident bindings while keeping them separate from authorization grants.
 Supersedes: None.
 Contracts: AP0-001/008/009; R3A-019; Issue #46; AP0-M1 D7; r3a_runtime.contracts; hints/file-provenance.md.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py.
-History/Predecessor: Git blob 189c6ef7ef3821f9140bddbeac8d04c177ca32ac at commit ad16700f1e94dd36c81cac5383f9f2e2771a98a1.
+History/Predecessor: Prior revision preserved at pre-change HEAD db9ba0e96eb02049a44729d982cc8522a0066937, blob 2318d630660d49faa491598b5625ff7df3675b2b.
 """
 from __future__ import annotations
 
@@ -40,6 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+from .modular_dispatch import validate_resident_binding
 
 
 class ConfigurationError(ValueError):
@@ -265,6 +268,7 @@ class Settings:
     authorization_provider: AuthorizationProviderSettings
     knowledge_sources: tuple[Path, ...]
     capability_registry: Any
+    resident_module_bindings: tuple[dict[str, Any], ...]
 
     def model_route(self, route_id: str | None = None) -> ModelRoute:
         return resolve_model_route(self.model_routes, self.default_model_route, route_id)
@@ -303,12 +307,23 @@ def load_settings(path: str | Path) -> Settings:
     if not isinstance(value, dict):
         raise ConfigurationError("bootstrap config must be a JSON object")
     expected_root = {"schema_version", "instance_id", "paths", "postgres", "module", "timing"}
-    extra = value.keys() - expected_root - {"grace", "authorization", "capability_plugins", "capability_operations"}
+    extra = value.keys() - expected_root - {"grace", "authorization", "capability_plugins",
+                                           "capability_operations", "resident_module_bindings"}
     missing = expected_root - value.keys()
     if missing or extra:
         raise ConfigurationError(f"root keys invalid; missing={sorted(missing)}, unknown={sorted(extra)}")
     if value["schema_version"] != 1:
         raise ConfigurationError("schema_version must equal 1")
+    binding_values = value.get("resident_module_bindings", [])
+    if not isinstance(binding_values, list):
+        raise ConfigurationError("resident_module_bindings must be an array")
+    try:
+        resident_module_bindings = tuple(validate_resident_binding(item) for item in binding_values)
+    except ValueError as exc:
+        raise ConfigurationError(f"resident_module_bindings is invalid: {exc}") from exc
+    resident_ids = [item["resident_id"] for item in resident_module_bindings]
+    if len(set(resident_ids)) != len(resident_ids):
+        raise ConfigurationError("resident_module_bindings must contain at most one effective binding per resident")
     instance_id = _text(value["instance_id"], "instance_id")
     if not instance_id.startswith("r3a_") or not instance_id.replace("_", "").isalnum():
         raise ConfigurationError("instance_id must use the isolated r3a_<name> form")
@@ -813,6 +828,7 @@ def load_settings(path: str | Path) -> Settings:
         authorization_provider=authorization_provider,
         knowledge_sources=knowledge_sources,
         capability_registry=capability_registry,
+        resident_module_bindings=resident_module_bindings,
     )
 
 

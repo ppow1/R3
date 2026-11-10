@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.9.1
+File Revision: 2.0.2
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -35,11 +35,14 @@ Changed: 2026-11-08T13:50:35Z | R3A-AUTONOMY-RETRY-BOUND | Codex GPT-6 | Stop id
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Snapshot the configured escalation policy on each durable objective so continuation uses its original budget and allowed routes.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Persist activity-scoped capability grants and atomically reserve per-activity external invocation budgets.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Persist objective task class and selected role with durable intake for route-safe recovery.
+Changed: 2026-11-10T00:49:41Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Persist authorized generic activity intake with stable replay and institutional event lineage.
 Changed: 2026-11-07 | R3A-AP1-CME-OBSERVER-QUEUE | Codex GPT-6 | Keep one pending durable observer activity instead of replenishing an existing backlog.
+Changed: 2026-11-10T01:00:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Extend the existing activity ledger for authorized generic activity intake and replay validation.
+Changed: 2026-11-10T01:10:00Z | R3A-AD024-MODULAR-DISPATCH | Codex GPT-6 | Preserve the source activity target resident in the durable generic activity input.
 Supersedes: None.
 Contracts: AP0-003–010; R3A-019; R3A-011/R3A-012; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1; r3a.engineering-work-order.v1; r3a.capability-invocation.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_engineering.py; tests/test_r3a_capability_integration_demo.py.
-History/Predecessor: Prior revision at AP2 commit 600020fd81b4b1e5ed4d938f95592560963a616d, blob a71a534e88a20df82ae2ea7989ca706dbb283c6e; earlier baseline blob f2cffbc6f44a47b10f6262ee469bd310ca652683.
+History/Predecessor: Prior revision preserved at pre-change HEAD db9ba0e96eb02049a44729d982cc8522a0066937.
 """
 from __future__ import annotations
 
@@ -63,6 +66,7 @@ from .contracts import ActivityDependencySet, ReadinessObservation, parse_timest
 from .authorization import AuthorizationDecision
 from .engineering import (EngineeringProposal, EngineeringWorkOrder, VerificationResult,
                           proposal_digest, validate_completion, validate_engineering_assignment)
+from .capability_contracts import validate_json
 
 
 IMPLEMENTATION_REVISION = os.environ.get("R3A_IMPLEMENTATION_REVISION", "working-tree")
@@ -1273,6 +1277,97 @@ class Store:
                     "idempotency_key": idempotency_key, "attempt_count": 0, "duplicate": False,
                     "event_kind": event_kind, "route_id": selected_route_id,
                     "correlation_id": correlation_id, "received_event_id": event_id}
+
+    async def submit_activity_intake(self, intake: dict[str, Any],
+                                     invocation_result: dict[str, Any]) -> dict[str, Any]:
+        """Persist one successfully authorized provider intake under its declared activity type."""
+        schema = json.loads((Path(__file__).parent / "schemas" / "activity-intake.v1.schema.json")
+                            .read_text(encoding="utf-8"))
+        validate_json(intake, schema, path="$.activity_intake")
+        if len(json.dumps(intake, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) > 524288:
+            raise ValueError("activity intake exceeds 512 KiB")
+        if (not isinstance(invocation_result, dict)
+                or invocation_result.get("contract_id") != "r3a.capability-invocation.v1"
+                or invocation_result.get("outcome") != "SUCCEEDED"
+                or not isinstance(invocation_result.get("provider"), dict)
+                or not isinstance(invocation_result.get("authorization"), dict)
+                or invocation_result["authorization"].get("allowed") is not True):
+            raise PermissionError("activity intake requires a successful CME-authorized source invocation")
+        provider = invocation_result["provider"]
+        provenance = intake["provenance"]
+        if (provenance["module_id"] != provider.get("provider_id")
+                or provenance["module_version"] != provider.get("provider_version")
+                or provenance["artifact_sha256"] != provider.get("artifact_sha256")):
+            raise ValueError("activity-intake provenance does not match its authorized source provider")
+        stable_key = intake["source"]["idempotency_key"]
+        activity_type = intake["activity"]["activity_type"]
+        correlation_value = intake["correlation_id"]
+        try:
+            correlation_id = uuid.UUID(correlation_value)
+        except ValueError:
+            correlation_id = uuid.uuid5(uuid.NAMESPACE_URL, f"r3a.correlation:{correlation_value}")
+        causation_value = intake["source"].get("causation_id") or intake["source"]["event_id"]
+        try:
+            causation_id = uuid.UUID(causation_value)
+        except ValueError:
+            causation_id = uuid.uuid5(uuid.NAMESPACE_URL, f"r3a.causation:{causation_value}")
+        activity_id = uuid.uuid5(uuid.NAMESPACE_URL, f"r3a.activity-intake:{intake['intake_id']}")
+        durable_input = {
+            "objective": intake["activity"]["objective"], "event_kind": "activity_intake",
+            "task_class": intake["activity"]["task_class"],
+            "activity_input": intake["activity"]["input"],
+            "activity_evidence": intake["activity"]["evidence"],
+            "activity_intake": intake,
+            "resident_id": intake["activity"]["input"].get("resident_id"),
+            "source_invocation_id": invocation_result.get("invocation_id"),
+            "source_provider": provider, "source_authorization": invocation_result["authorization"],
+            "correlation_id": str(correlation_id),
+        }
+        evidence = {"intake_id": intake["intake_id"], "source": intake["source"],
+                    "source_provider": provider, "authorization": invocation_result["authorization"],
+                    "source_invocation_id": invocation_result.get("invocation_id"),
+                    "activity_evidence": intake["activity"]["evidence"],
+                    "lifecycle_projection": intake["lifecycle_projection"]}
+        async with self.pool.connection() as conn, conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (stable_key,))
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                               (f"activity-intake:{intake['intake_id']}",))
+            existing = await (await conn.execute(
+                "SELECT activity_id,state,activity_type,idempotency_key,input,attempt_count "
+                "FROM r3a.activities WHERE idempotency_key=%s OR activity_id=%s FOR UPDATE",
+                (stable_key, activity_id))).fetchone()
+            if existing:
+                prior = dict(existing["input"] or {})
+                if (existing["idempotency_key"] != stable_key or existing["activity_type"] != activity_type
+                        or prior.get("activity_intake") != intake):
+                    raise ValueError("activity-intake idempotency key conflicts with prior source data")
+                return {**existing, "duplicate": True, "intake_id": intake["intake_id"]}
+            config = await (await conn.execute(
+                "SELECT revision_id FROM r3a.config_current WHERE singleton=true")).fetchone()
+            await conn.execute(
+                "INSERT INTO r3a.activities(activity_id,activity_type,idempotency_key,machine_id,machine_version,state,"
+                "available_at,recovery_policy,config_revision,input) "
+                "VALUES (%s,%s,%s,'activity.generic',1,'QUEUED',clock_timestamp(),'idempotent',%s,%s)",
+                (activity_id, activity_type, stable_key, config["revision_id"] if config else None,
+                 json.dumps(durable_input)))
+            event_id = await self._event(
+                intake["lifecycle_projection"]["received"], "activity", str(activity_id),
+                "activity.generic", 1, None, "QUEUED", "authorized source activity accepted by CME",
+                {**evidence, "objective_sha256": hashlib.sha256(
+                    intake["activity"]["objective"].encode("utf-8")).hexdigest()},
+                correlation_id=correlation_id, causation_id=causation_id)
+            accepted = await self._transition_on_conn(
+                conn, "activity", str(activity_id), "activity.generic", 1, "QUEUED",
+                "authorized source activity accepted by CME", evidence, initial=True,
+                correlation_id=correlation_id, causation_id=causation_id)
+            if not accepted:
+                raise InvalidTransition("generic activity intake could not enter QUEUED")
+            await conn.execute("UPDATE r3a.activities SET latest_event_id=%s WHERE activity_id=%s",
+                               (event_id, activity_id))
+            return {"activity_id": activity_id, "state": "QUEUED", "activity_type": activity_type,
+                    "idempotency_key": stable_key, "intake_id": intake["intake_id"],
+                    "attempt_count": 0, "duplicate": False, "event_id": event_id,
+                    "correlation_id": correlation_id}
 
     async def requeue_blocked_activities(self) -> int:
         async with self.pool.connection() as conn, conn.transaction():
