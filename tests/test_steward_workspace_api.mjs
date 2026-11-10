@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_steward_workspace_api.mjs
 Component: R3A-STEWARD-WORKSPACE-CLIENT-TESTS
-File Revision: 1.0.4
+File Revision: 1.0.5
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Verify the versioned workspace browser client transport and denial behavior.
@@ -14,6 +14,7 @@ Changed: 2026-11-07 | R3A-007/R3A-010/R3A-019 | Add chat, notification, session,
 Changed: 2026-11-08 | R3A-007/R3A-010 | Cover DST-aware UTC-preserving time display and unavailable API routing.
 Changed: 2026-11-10 | #51 | Verify delayed conversation responses cannot overwrite a newer resident selection.
 Changed: 2026-11-10 | #51 | Cover explicit empty authoritative roster state.
+Changed: 2026-11-10 | #51 | Verify compact chat rendering, action availability, Enter/IME behavior, Eastern seconds, and startup feedback.
 Supersedes: None.
 Contracts: r3a.steward-workspace-web.v1; r3a.steward-session.v1; r3a.notification-inbox.v1; r3a.grace-objective-submission.v1.
 Tests: node --test tests/test_steward_workspace_api.mjs.
@@ -22,7 +23,7 @@ History/Predecessor: New file; initial publication recorded in Git.
 // Mock fetch never supplies live institutional data.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp, notificationPresentation, residentProgressLabel, residentBlockedLabel, residentChatStatusLabel, residentRosterSummary, conversationHistoryLoadingLabel, conversationPollState, mountResidentChat} from '../web/steward-workspace-api.mjs';
+import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp, formatConversationTimestamp, messageSenderLabel, messageStatusPresentation, conversationDisplayTitle, conversationPollDelay, copyMessageText, shouldSendOnEnter, notificationPresentation, residentProgressLabel, residentBlockedLabel, residentChatStatusLabel, residentRosterSummary, conversationHistoryLoadingLabel, conversationPollState, mountResidentChat} from '../web/steward-workspace-api.mjs';
 
 function response(status, payload, headers = {}) {
   return {
@@ -127,10 +128,30 @@ test('blocked turn status names the resident selected for that conversation', ()
 test('history polling keeps loaded messages visible and stops with an explicit timeout state', () => {
   assert.equal(conversationHistoryLoadingLabel(true), 'Loading durable conversation history…');
   assert.equal(conversationHistoryLoadingLabel(false), null);
-  assert.equal(conversationPollState(20).continuePolling, true);
-  const timeout = conversationPollState(21);
+  assert.equal(conversationPollState(80).continuePolling, true);
+  const timeout = conversationPollState(81);
   assert.equal(timeout.continuePolling, false);
   assert.match(timeout.message, /Automatic refresh is paused/);
+});
+
+test('conversation UI helpers present readable names, meaningful titles, Eastern seconds, and explicit states', async () => {
+  assert.equal(messageSenderLabel({sender: {kind: 'steward'}}), 'Steward');
+  assert.equal(messageSenderLabel({sender: {kind: 'resident', display_name: 'resident:grace_hopper'}}), 'Grace Hopper');
+  assert.match(formatConversationTimestamp('2026-11-10T17:08:09Z'), /12:08:09 PM EST/);
+  assert.match(formatConversationTimestamp('2026-07-10T17:08:09Z'), /01:08:09 PM EDT/);
+  assert.equal(conversationDisplayTitle({title: 'Conversation', created_at: '2026-11-10T17:08:09Z'}, 'Grace'), 'Grace · Nov 10, 12:08 PM EST');
+  assert.equal(conversationDisplayTitle({title: 'Medication follow-up'}, 'Grace'), 'Medication follow-up');
+  assert.equal(messageStatusPresentation('processing').label, 'Resident is working on this turn');
+  assert.ok(conversationPollDelay(1) < conversationPollDelay(2));
+  assert.equal(conversationPollDelay(20), 8000);
+  let copied;
+  await copyMessageText('persisted reply', {writeText: async text => { copied = text; }});
+  assert.equal(copied, 'persisted reply');
+  await assert.rejects(copyMessageText('x', null), /Clipboard permission/);
+  assert.equal(shouldSendOnEnter({key: 'Enter'}), true);
+  assert.equal(shouldSendOnEnter({key: 'Enter', shiftKey: true}), false);
+  assert.equal(shouldSendOnEnter({key: 'Enter', isComposing: true}), false);
+  assert.equal(shouldSendOnEnter({key: 'Enter', keyCode: 229}), false);
 });
 
 test('resident roster labels chat eligibility from CME readiness evidence', () => {
@@ -166,7 +187,7 @@ test('late conversation-list responses cannot replace the currently selected res
   class FakeOption extends FakeElement {
     constructor(text, value) { super('option'); this.textContent = text; this.value = value; }
   }
-  const ids = ['chat-panel', 'chat-resident-select', 'chat-conversation-list', 'chat-message-list', 'chat-service-status', 'chat-composer-input', 'chat-send', 'chat-new', 'nav-chat', 'chat-refresh'];
+  const ids = ['chat-panel', 'chat-resident-select', 'chat-conversation-list', 'chat-message-list', 'chat-service-status', 'chat-runtime-status', 'chat-resident-indicator', 'chat-current-title', 'chat-conversation-toolbar', 'chat-conversation-actions', 'chat-composer-input', 'chat-send', 'chat-new', 'nav-chat', 'chat-refresh'];
   const elements = Object.fromEntries(ids.map(id => [id, new FakeElement(id === 'chat-resident-select' ? 'select' : 'div')]));
   const root = {
     getElementById: id => elements[id] ?? null,
@@ -193,27 +214,53 @@ test('late conversation-list responses cannot replace the currently selected res
         : Promise.resolve({freshness: 'A current', conversations: [{conversation_id: 'a-conversation', title: 'A conversation'}]}))
       : Promise.resolve({freshness: 'B current', conversations: [{conversation_id: 'b-conversation', title: 'B conversation'}]}),
     messages: () => new Promise(resolve => { resolveMessages = resolve; }),
+    about: async () => ({freshness: 'current', observed_at: '2026-11-10T12:00:00Z', ring0: {health: 'healthy'}, cme: {health: 'healthy'}, grace: {health: 'healthy'}}),
   };
   try {
     mountResidentChat({api, root});
     await new Promise(resolve => setImmediate(resolve));
     const select = elements['chat-resident-select'];
+    assert.deepEqual(select.options.map(option => option.textContent), ['Select a resident…', 'A', 'B']);
+    assert.match(elements['chat-runtime-status'].textContent, /model\/provider readiness is not reported/);
     select.value = 'resident:a'; select.dispatch('change');
     select.value = 'resident:b'; select.dispatch('change');
     await new Promise(resolve => setImmediate(resolve));
-    assert.equal(elements['chat-conversation-list'].childNodes[0].textContent, 'B conversation');
-    elements['chat-conversation-list'].childNodes[0].dispatch('click');
+    assert.equal(elements['chat-conversation-list'].childNodes[0].childNodes[0].textContent, 'B conversation');
+    const conversationToolbar = elements['chat-conversation-list'].childNodes[0].childNodes[2];
+    assert.equal(conversationToolbar.childNodes[0].disabled, true);
+    assert.match(conversationToolbar.childNodes[0].title, /not implemented/);
+    elements['chat-conversation-list'].childNodes[0].childNodes[0].dispatch('click');
     await new Promise(resolve => setImmediate(resolve));
     select.value = 'resident:a'; select.dispatch('change');
     await new Promise(resolve => setImmediate(resolve));
-    assert.equal(elements['chat-conversation-list'].childNodes[0].textContent, 'A conversation');
+    assert.equal(elements['chat-conversation-list'].childNodes[0].childNodes[0].textContent, 'A conversation');
     resolveMessages({freshness: 'current', messages: [{message_id: 'late-message', sender: {kind: 'resident', display_name: 'B'}, created_at: '2026-11-10T12:00:00Z', text: 'Stale response'}]});
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(elements['chat-message-list'].childNodes.length, 0);
     resolveResidentA({freshness: 'A current', conversations: [{conversation_id: 'a-conversation', title: 'A conversation'}]});
     await new Promise(resolve => setImmediate(resolve));
-    assert.equal(elements['chat-conversation-list'].childNodes[0].textContent, 'A conversation');
+    assert.equal(elements['chat-conversation-list'].childNodes[0].childNodes[0].textContent, 'A conversation');
     assert.match(elements['chat-service-status'].textContent, /A current/);
+    elements['chat-conversation-list'].childNodes[0].childNodes[0].dispatch('click');
+    await new Promise(resolve => setImmediate(resolve));
+    resolveMessages({freshness: 'current', messages: [{message_id: 'current-message', sender: {kind: 'steward'}, delivery_state: 'completed', created_at: '2026-11-10T17:08:09Z', text: 'The durable response.'}]});
+    await new Promise(resolve => setImmediate(resolve));
+    const card = elements['chat-message-list'].childNodes[0];
+    assert.equal(card.className, 'workspace-message steward');
+    assert.equal(card.childNodes[0].childNodes[0].textContent, 'Steward');
+    assert.match(card.childNodes[0].childNodes[1].textContent, /12:08:09 PM EST/);
+    assert.equal(card.childNodes[0].childNodes[2].attributes['aria-label'], 'Completed');
+    const messageTools = card.childNodes[0].childNodes[3].childNodes[1];
+    assert.equal(messageTools.hidden, true);
+    const menu = card.childNodes[0].childNodes[3].childNodes[0];
+    menu.dispatch('click');
+    assert.equal(messageTools.hidden, false);
+    assert.equal(messageTools.childNodes[0].disabled, false);
+    assert.equal(messageTools.childNodes[1].disabled, false);
+    assert.equal(messageTools.childNodes[2].disabled, true);
+    assert.match(messageTools.childNodes[2].title, /not implemented/);
+    messageTools.childNodes[1].dispatch('click');
+    assert.equal(card.childNodes[2].hidden, false);
   } finally {
     globalThis.document = previousDocument;
     if (previousOption === undefined) delete globalThis.Option;

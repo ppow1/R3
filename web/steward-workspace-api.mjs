@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: web/steward-workspace-api.js
 Component: R3A-STEWARD-WORKSPACE-CLIENT
-File Revision: 1.0.12
+File Revision: 1.0.14
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Same-origin client for versioned resident conversation and notification contracts
@@ -22,6 +22,8 @@ Changed: 2026-11-09 | R3A-STEWARD-CHAT-READINESS | R3A Coordinator | Show the ev
 Changed: 2026-11-10 | #51 | Keep loaded history visible during polling and pause refresh after a bounded wait.
 Changed: 2026-11-10 | #51 | Ignore stale resident/conversation responses after selection changes.
 Changed: 2026-11-10 | #51 | Report and disable an empty authoritative resident roster accurately.
+Changed: 2026-11-10 | #51 | Render compact resident chat, accessible message actions, and Eastern timestamps.
+Changed: 2026-11-10 | #51 | Add truthful live readiness, cold-start-safe polling, message tools, and clear backend action limits.
 Tests: tests/test_steward_workspace_api.mjs uses mocked fetch only as a labeled development test
 */
 
@@ -99,7 +101,7 @@ export function conversationHistoryLoadingLabel(isInitialLoad) {
   return isInitialLoad ? 'Loading durable conversation history…' : null;
 }
 
-export function conversationPollState(polls, maxPolls = 20) {
+export function conversationPollState(polls, maxPolls = 80) {
   const continuePolling = Number.isInteger(polls) && polls <= maxPolls;
   return {
     continuePolling,
@@ -126,6 +128,62 @@ export function residentRosterSummary(residents, freshness = 'unknown') {
         : `Directory source ${freshness || 'unknown'}`)
       : 'The institutional directory returned no resident records.',
   };
+}
+
+export function messageSenderLabel(message, residentName = '') {
+  if (message?.sender?.kind === 'steward') return 'Steward';
+  const supplied = typeof message?.sender?.display_name === 'string' ? message.sender.display_name : '';
+  const raw = supplied || residentName || 'Resident';
+  const readable = raw.replace(/^resident[:/]/i, '').replace(/^steward[:/]/i, '').replace(/[._-]+/g, ' ').trim();
+  return readable ? readable.replace(/\b\p{L}/gu, letter => letter.toLocaleUpperCase()) : 'Resident';
+}
+
+export function formatConversationTimestamp(value, timezone = 'America/New_York') {
+  if (typeof value !== 'string' || !value.trim()) return 'Time unavailable';
+  const instant = new Date(value);
+  if (!Number.isFinite(instant.getTime())) return 'Time unavailable';
+  const options = {timeZone: timezone || 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZoneName: 'short'};
+  try { return new Intl.DateTimeFormat('en-US', options).format(instant); }
+  catch { return new Intl.DateTimeFormat('en-US', {...options, timeZone: 'America/New_York'}).format(instant); }
+}
+
+export function conversationDisplayTitle(conversation, residentName = 'Resident', timezone = 'America/New_York') {
+  const title = typeof conversation?.title === 'string' ? conversation.title.trim() : '';
+  if (title && title.toLocaleLowerCase() !== 'conversation') return title;
+  const raw = conversation?.updated_at || conversation?.created_at;
+  const instant = typeof raw === 'string' ? new Date(raw) : new Date(NaN);
+  let updated = formatConversationTimestamp(raw, timezone);
+  if (Number.isFinite(instant.getTime())) {
+    try { updated = new Intl.DateTimeFormat('en-US', {timeZone: timezone, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short'}).format(instant); }
+    catch { /* use the safe Eastern time-only label */ }
+  }
+  return `${messageSenderLabel({sender: {kind: 'resident', display_name: residentName}})} · ${updated}`;
+}
+
+export function messageStatusPresentation(state) {
+  const values = {
+    accepted: ['◷', 'Accepted; waiting for the resident service'],
+    processing: ['◌', 'Resident is working on this turn'],
+    completed: ['✓', 'Completed'],
+    blocked: ['!', 'Blocked; review details for the service result'],
+    failed: ['×', 'Failed; review details and retry guidance'],
+    rejected: ['×', 'Rejected; review details and authorization'],
+  };
+  const [icon, label] = values[state] || ['·', state || 'Status unavailable'];
+  return {icon, label};
+}
+
+export function conversationPollDelay(attempt) {
+  return Math.min(1500 * (1.6 ** Math.max(0, attempt - 1)), 8000);
+}
+
+export async function copyMessageText(text, clipboard = globalThis.navigator?.clipboard) {
+  if (!clipboard || typeof clipboard.writeText !== 'function') throw new Error('Clipboard permission is unavailable');
+  await clipboard.writeText(String(text ?? ''));
+}
+
+export function shouldSendOnEnter(event) {
+  return event?.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229;
 }
 
 export class StewardWorkspaceApi {
@@ -165,6 +223,7 @@ export class StewardWorkspaceApi {
   session({signal} = {}) { return this.request('/api/v1/steward/session', {signal, contract: 'r3a.steward-session.v1'}); }
   endSession({signal} = {}) { return this.request('/api/v1/steward/session', {method: 'DELETE', signal, contract: 'r3a.steward-session.v1'}); }
   accessStatus({signal} = {}) { return this.request('/api/v1/steward/status', {signal, contract: 'r3a.steward-access-status.v1'}); }
+  about({signal} = {}) { return this.request('/api/v1/steward/about', {signal, contract: 'r3a.website-about.v1'}); }
   capabilityDiscovery({signal} = {}) { return this.request('/api/v1/steward/capabilities', {signal, contract: 'r3a.steward-capability-discovery.v1'}); }
   invokeOperation(request, {signal} = {}) { return this.request('/api/v1/steward/operations/invoke', {method: 'POST', signal, contract: 'r3a.steward-operation-result.v1', body: {request}}); }
   submitObjective(body, {signal} = {}) { return this.request('/api/v1/steward/r3a/objectives', {method: 'POST', signal, contract: 'r3a.grace-objective-submission.v1', body}); }
@@ -227,6 +286,9 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   const conversationList = root.getElementById('chat-conversation-list');
   const messageList = root.getElementById('chat-message-list');
   const status = root.getElementById('chat-service-status');
+  const runtimeStatus = root.getElementById('chat-runtime-status');
+  const residentIndicator = root.getElementById('chat-resident-indicator');
+  const currentTitle = root.getElementById('chat-current-title');
   const composer = root.getElementById('chat-composer-input');
   const sendButton = root.getElementById('chat-send');
   let selectedResident = '';
@@ -240,13 +302,24 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   let pendingMessage = null;
   const newConversationButton = root.getElementById('chat-new');
   const processingPolls = new Map();
-  const maxProcessingPolls = 20;
+  const maxProcessingPolls = 80;
   let conversationLoadRevision = 0;
   let messageLoadRevision = 0;
+  let runtimePollTimer = null;
+  const pollTimers = new Map();
+  const loadedConversationIds = new Set();
+  const conversationTitles = new Map();
+  const conversationMenu = root.getElementById('chat-conversation-toolbar');
+  const conversationMenuButton = root.getElementById('chat-conversation-actions');
+  const lastResidentRecords = new Map();
   function syncNewConversationButton() {
     newConversationButton.disabled = !directoryAvailable || !selectedResident || !chatAvailableResidentIds.has(selectedResident) || creatingConversation;
     newConversationButton.setAttribute('aria-busy', String(creatingConversation));
-    newConversationButton.title = creatingConversation ? 'Conversation creation in progress' : newConversationButton.disabled ? 'Select a resident whose current directory record is available for chat' : 'Start a persistent conversation with the selected resident';
+    newConversationButton.title = creatingConversation
+      ? 'Conversation creation in progress'
+      : newConversationButton.disabled
+        ? `New conversation unavailable · ${lastResidentRecords.has(selectedResident) ? residentChatStatusLabel(lastResidentRecords.get(selectedResident)) : 'select an available resident'}`
+        : 'Start a persistent conversation with the selected resident';
   }
 
   const unavailable = error => {
@@ -259,53 +332,168 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     }
   };
 
-  async function loadMessages(conversationId) {
+  function cancelConversationPolls() {
+    for (const timer of pollTimers.values()) clearTimeout(timer);
+    pollTimers.clear();
+  }
+
+  function scheduleMessages(conversationId, attempt, delay = conversationPollDelay(attempt)) {
+    const oldTimer = pollTimers.get(conversationId);
+    if (oldTimer) clearTimeout(oldTimer);
+    const timer = setTimeout(() => {
+      pollTimers.delete(conversationId);
+      if (selectedConversation === conversationId) loadMessages(conversationId, {attempt});
+    }, delay);
+    pollTimers.set(conversationId, timer);
+    timer?.unref?.();
+  }
+
+  function setResidentAvailability(residentId) {
+    const available = chatAvailableResidentIds.has(residentId);
+    const record = lastResidentRecords.get(residentId);
+    residentIndicator.className = `resident-indicator ${available ? 'available' : record ? 'unavailable' : 'unknown'}`;
+    residentIndicator.title = available ? 'Chat available' : record ? residentChatStatusLabel(record) : 'Resident availability unknown';
+    residentIndicator.setAttribute('aria-label', residentIndicator.title);
+  }
+
+  function toolbarButton(container, {icon, label, available = true, onClick}) {
+    const button = root.createElement('button');
+    button.type = 'button';
+    button.className = 'icon-button';
+    button.textContent = icon;
+    button.title = available ? `${label} · available` : `${label} · not implemented by the current service`;
+    button.setAttribute('aria-label', button.title);
+    button.disabled = !available;
+    if (onClick) button.addEventListener('click', onClick);
+    container.appendChild(button);
+    return button;
+  }
+
+  function renderMessage(message, residentName) {
+    const sender = messageSenderLabel(message, residentName);
+    const state = message.delivery_state || 'unknown';
+    const presentation = messageStatusPresentation(state);
+    const article = root.createElement('article');
+    article.className = `workspace-message ${message.sender?.kind === 'resident' ? 'resident' : 'steward'}`;
+    article.dataset.state = state;
+
+    const header = root.createElement('header');
+    header.className = 'workspace-message-head';
+    const senderNode = root.createElement('span');
+    senderNode.className = 'workspace-message-sender'; senderNode.textContent = sender;
+    const time = root.createElement('time');
+    time.className = 'workspace-message-time'; time.dateTime = message.created_at || '';
+    time.textContent = formatConversationTimestamp(message.created_at);
+    const statusIcon = root.createElement('span');
+    statusIcon.className = 'workspace-message-status'; statusIcon.textContent = presentation.icon;
+    statusIcon.setAttribute('role', 'img'); statusIcon.setAttribute('aria-label', presentation.label); statusIcon.title = presentation.label;
+
+    const toolsAnchor = root.createElement('div'); toolsAnchor.className = 'workspace-message-tools-anchor';
+    const menuButton = root.createElement('button');
+    menuButton.type = 'button'; menuButton.className = 'icon-button workspace-message-menu';
+    menuButton.textContent = '⋯'; menuButton.title = `Message actions for ${sender}`;
+    menuButton.setAttribute('aria-label', menuButton.title); menuButton.setAttribute('aria-expanded', 'false');
+    const toolbar = root.createElement('div'); toolbar.className = 'message-toolbar'; toolbar.setAttribute('role', 'toolbar'); toolbar.setAttribute('aria-label', `${sender} message actions`); toolbar.hidden = true;
+    menuButton.addEventListener('click', () => {
+      toolbar.hidden = !toolbar.hidden;
+      menuButton.setAttribute('aria-expanded', String(!toolbar.hidden));
+    });
+
+    const body = root.createElement('p'); body.className = 'workspace-message-body'; body.textContent = message.text || '';
+    const details = root.createElement('section'); details.className = 'workspace-message-details'; details.hidden = true;
+    const detailHeading = root.createElement('b'); detailHeading.textContent = 'Message details'; details.appendChild(detailHeading);
+    const list = root.createElement('dl');
+    const metadata = [
+      ['Status', presentation.label], ['Local time', formatConversationTimestamp(message.created_at)],
+      ['Source time', message.created_at || 'Unavailable'], ['Resident', residentName || sender],
+      ['Activity reference', message.activity_id || 'Not assigned'], ['Message reference', message.message_id || 'Unavailable'],
+    ];
+    for (const [label, value] of metadata) {
+      const term = root.createElement('dt'); term.textContent = label;
+      const description = root.createElement('dd'); description.textContent = String(value);
+      list.append(term, description);
+    }
+    details.appendChild(list);
+
+    toolbarButton(toolbar, {icon: '⧉', label: 'Copy message text', onClick: async () => {
+      try { await copyMessageText(message.text || ''); setText(status, `Copied ${sender} message.`); }
+      catch { setText(status, 'Clipboard unavailable. Check browser clipboard permission or select the message text to copy.'); }
+      toolbar.hidden = true; menuButton.setAttribute('aria-expanded', 'false');
+    }});
+    toolbarButton(toolbar, {icon: 'ⓘ', label: 'Details', onClick: () => {
+      details.hidden = !details.hidden;
+      const button = toolbar.querySelector?.('[aria-label^="Details"]');
+      if (button) button.setAttribute('aria-expanded', String(!details.hidden));
+      toolbar.hidden = true; menuButton.setAttribute('aria-expanded', 'false');
+    }});
+    toolbarButton(toolbar, {icon: '✎', label: 'Edit message', available: false});
+    toolbarButton(toolbar, {icon: '⌫', label: 'Delete message', available: false});
+    toolbarButton(toolbar, {icon: '▧', label: 'Generate image', available: false});
+    toolbarButton(toolbar, {icon: '↗', label: 'Assign work to Grace', available: false});
+
+    header.append(senderNode, time, statusIcon);
+    toolsAnchor.append(menuButton, toolbar);
+    header.appendChild(toolsAnchor);
+    article.append(header, body, details);
+    return article;
+  }
+
+  async function loadMessages(conversationId, {attempt = 1} = {}) {
     const changingConversation = selectedConversation !== conversationId;
     const requestedResident = selectedResident;
     const revision = ++messageLoadRevision;
     selectedConversation = conversationId;
+    currentTitle.textContent = conversationTitles.get(conversationId) || residentNames.get(requestedResident) || 'Resident conversation';
     const loadingLabel = conversationHistoryLoadingLabel(changingConversation || !messageList.childNodes.length);
     if (loadingLabel) setText(messageList, loadingLabel);
     try {
       const result = await api.messages(conversationId);
       if (selectedResident !== requestedResident || selectedConversation !== conversationId || revision !== messageLoadRevision) return [];
       messageList.replaceChildren();
-      for (const message of result.messages || []) {
-        const item = row('article', `workspace-message ${message.sender?.kind || 'unknown'}`, message.sender?.display_name || message.sender?.id || 'Unknown sender', `${formatPresentationTimestamp(message.created_at, root.documentElement?.dataset.presentationTimezone)} · ${message.delivery_state || 'state unavailable'}`);
-        const body = document.createElement('p');
-        body.textContent = message.text || '';
-        item.appendChild(body);
-        messageList.appendChild(item);
-      }
+      for (const message of result.messages || []) messageList.appendChild(renderMessage(message, residentNames.get(requestedResident)));
       if (!messageList.childNodes.length) setText(messageList, 'This conversation has no messages yet.');
-      const processing = (result.messages || []).some(message => message.sender?.kind === 'steward' && message.delivery_state === 'processing');
-      const failed = (result.messages || []).some(message => message.sender?.kind === 'steward' && message.delivery_state === 'blocked');
+      loadedConversationIds.add(conversationId);
+      const messages = result.messages || [];
+      const processing = messages.some(message => message.sender?.kind === 'steward' && ['accepted', 'processing'].includes(message.delivery_state));
+      const lastMessage = messages.at(-1);
+      const failedMessage = lastMessage && ['blocked', 'failed', 'rejected'].includes(lastMessage.delivery_state) ? lastMessage : null;
       composer.disabled = processing;
       sendButton.disabled = processing;
       if (processing) {
-        const polls = (processingPolls.get(conversationId) || 0) + 1;
-        processingPolls.set(conversationId, polls);
-        const pollState = conversationPollState(polls, maxProcessingPolls);
+        const pollAttempt = processingPolls.get(conversationId) || 0;
+        const nextAttempt = pollAttempt + 1;
+        processingPolls.set(conversationId, nextAttempt);
+        const pollState = conversationPollState(nextAttempt, maxProcessingPolls);
         if (pollState.continuePolling) {
-          setText(status, residentProgressLabel(residentNames.get(selectedResident)));
-          setTimeout(() => { if (selectedConversation === conversationId) loadMessages(conversationId); }, 1500);
+          const runtime = runtimeStatus.dataset.modelReadiness === 'starting' ? ' The model service is still starting; the conversation will update here.' : '';
+          setText(status, `${residentProgressLabel(residentNames.get(requestedResident))}${runtime} · checked ${formatConversationTimestamp(new Date().toISOString())}`);
+          scheduleMessages(conversationId, nextAttempt);
         } else {
-          setText(status, pollState.message);
+          setText(status, 'This turn is still processing. Automatic checks paused; refresh to check its durable status.');
           status.dataset.state = 'processing-timeout';
         }
-      } else if (failed) {
+      } else if (failedMessage) {
         processingPolls.delete(conversationId);
-        setText(status, residentBlockedLabel(residentNames.get(requestedResident)));
-        status.dataset.state = 'blocked';
+        const name = residentNames.get(requestedResident);
+        setText(status, failedMessage.delivery_state === 'blocked'
+          ? residentBlockedLabel(name)
+          : `${name || 'Resident'}'s turn failed. Review message details, check service readiness, and retry when available.`);
+        status.dataset.state = failedMessage.delivery_state;
       } else {
         processingPolls.delete(conversationId);
-        setText(status, `History loaded from service · ${result.freshness || 'freshness unknown'}`);
+        setText(status, `Conversation current · ${result.freshness || 'freshness unknown'}`);
         status.dataset.state = result.freshness || 'unknown';
       }
       return result.messages || [];
     } catch (error) {
       if (selectedResident === requestedResident && selectedConversation === conversationId && revision === messageLoadRevision) {
-        unavailable(error); setText(messageList, 'History unavailable; no local transcript is shown.');
+        unavailable(error);
+        if (!loadedConversationIds.has(conversationId)) setText(messageList, 'Conversation history is not available yet. The service will retry automatically when the session and runtime are reachable.');
+        if (!error.status || error.status === 429 || error.status >= 500) {
+          setText(status, 'Connection to the conversation service was lost; previous messages are retained while it reconnects.');
+          status.dataset.state = 'reconnecting';
+          scheduleMessages(conversationId, attempt + 1);
+        }
       }
     }
   }
@@ -319,11 +507,34 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
       if (selectedResident !== requestedResident || revision !== conversationLoadRevision) return;
       conversationList.replaceChildren();
       for (const conversation of result.conversations || []) {
-        const button = document.createElement('button');
+        const title = conversationDisplayTitle(conversation, residentNames.get(requestedResident));
+        conversationTitles.set(conversation.conversation_id, title);
+        const row = root.createElement('div'); row.className = 'workspace-conversation-row';
+        const button = root.createElement('button');
         button.type = 'button'; button.className = 'workspace-conversation';
-        button.textContent = conversation.title || conversation.conversation_id;
-        button.addEventListener('click', () => loadMessages(conversation.conversation_id));
-        conversationList.appendChild(button);
+        button.textContent = title;
+        button.setAttribute('aria-current', String(selectedConversation === conversation.conversation_id));
+        button.title = title;
+        button.addEventListener('click', () => {
+          conversationList.querySelectorAll?.('.workspace-conversation').forEach(item => item.setAttribute('aria-current', 'false'));
+          button.setAttribute('aria-current', 'true');
+          loadMessages(conversation.conversation_id);
+        });
+        const actionsButton = root.createElement('button');
+        actionsButton.type = 'button'; actionsButton.className = 'icon-button conversation-menu-trigger';
+        actionsButton.textContent = '⋯'; actionsButton.title = `Conversation actions for ${title}`;
+        actionsButton.setAttribute('aria-label', actionsButton.title); actionsButton.setAttribute('aria-expanded', 'false');
+        const actions = root.createElement('div'); actions.className = 'conversation-toolbar';
+        actions.setAttribute('role', 'toolbar'); actions.setAttribute('aria-label', `${title} actions`); actions.hidden = true;
+        actionsButton.addEventListener('click', () => {
+          actions.hidden = !actions.hidden;
+          actionsButton.setAttribute('aria-expanded', String(!actions.hidden));
+        });
+        toolbarButton(actions, {icon: '✎', label: 'Rename conversation', available: false});
+        toolbarButton(actions, {icon: '▱', label: 'Archive conversation', available: false});
+        toolbarButton(actions, {icon: '⌫', label: 'Delete conversation', available: false});
+        row.append(button, actionsButton, actions);
+        conversationList.appendChild(row);
       }
       if (!conversationList.childNodes.length) setText(conversationList, 'No conversations returned for this resident.');
       if (selectedConversation) await loadMessages(selectedConversation);
@@ -341,6 +552,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     directoryAvailable = false;
     chatAvailableResidentIds.clear();
     residentNames.clear();
+    lastResidentRecords.clear();
     selectedResident = '';
     syncNewConversationButton();
     residentSelect.disabled = true;
@@ -353,11 +565,9 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
       for (const resident of roster.residents) {
         const chatAvailable = resident.chat_available === true;
         if (chatAvailable) chatAvailableResidentIds.add(resident.resident_id);
-        residentNames.set(resident.resident_id, resident.display_name || resident.resident_id);
-        const onboarding = resident.onboarding_status || 'unknown';
-        const readiness = residentChatStatusLabel(resident);
-        const option = new Option(`${resident.display_name || resident.resident_id} · ${readiness} · onboarding ${onboarding}`, resident.resident_id);
-        option.disabled = !chatAvailable;
+        residentNames.set(resident.resident_id, resident.display_name || 'Resident');
+        lastResidentRecords.set(resident.resident_id, resident);
+        const option = new Option(messageSenderLabel({sender: {kind: 'resident', display_name: resident.display_name || 'Resident'}}), resident.resident_id);
         residentSelect.add(option);
       }
       residentSelect.disabled = roster.residents.length === 0;
@@ -378,11 +588,15 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     conversationLoadRevision += 1;
     messageLoadRevision += 1;
     selectedResident = residentSelect.value;
+    setResidentAvailability(selectedResident);
     pendingConversationId = null;
     pendingMessage = null;
     composer.value = '';
     syncNewConversationButton();
     selectedConversation = '';
+    currentTitle.textContent = residentNames.get(selectedResident) || 'Resident conversation';
+    cancelConversationPolls();
+    processingPolls.clear();
     conversationList.replaceChildren(); messageList.replaceChildren();
     composer.disabled = true; sendButton.disabled = true;
     if (selectedResident) loadConversations();
@@ -424,8 +638,57 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     }
     finally { sendButton.disabled = !selectedConversation || composer.disabled; }
   });
+  composer.addEventListener('keydown', event => {
+    if (!shouldSendOnEnter(event)) return;
+    event.preventDefault();
+    if (!sendButton.disabled) sendButton.click();
+  });
+
+  function processHealth(process) {
+    const health = String(process?.health || process?.state || '').toLowerCase();
+    if (['healthy', 'ready', 'active', 'running'].includes(health)) return 'ready';
+    if (['starting', 'initializing', 'warming', 'recovering'].includes(health)) return 'starting';
+    if (['stale', 'degraded', 'unavailable', 'failed', 'stopped', 'blocked'].includes(health)) return health;
+    return 'unknown';
+  }
+
+  async function refreshRuntimeStatus() {
+    clearTimeout(runtimePollTimer);
+    try {
+      const about = await api.about();
+      const ring0 = processHealth(about.ring0);
+      const cme = processHealth(about.cme);
+      const grace = processHealth(about.grace);
+      runtimeStatus.dataset.modelReadiness = 'unknown';
+      runtimeStatus.dataset.state = about.freshness || 'unknown';
+      const checked = formatConversationTimestamp(about.observed_at);
+      setText(runtimeStatus, `Website API connected · Ring0 ${ring0} · CME ${cme} · resident runtime ${grace} · model/provider readiness is not reported by this Website API · checked ${checked}`);
+      runtimePollTimer = setTimeout(refreshRuntimeStatus, ring0 === 'ready' && cme === 'ready' ? 15000 : 5000);
+      runtimePollTimer?.unref?.();
+    } catch (error) {
+      runtimeStatus.dataset.state = error?.status === 401 ? 'unauthenticated' : 'unavailable';
+      runtimeStatus.dataset.modelReadiness = 'unknown';
+      const detail = error?.status === 401
+        ? 'Session verification required'
+        : !error?.status ? 'Website API unreachable' : 'Website API reachable; Ring0/CME diagnostics unavailable';
+      setText(runtimeStatus, `${detail}; checking again automatically · last check ${formatConversationTimestamp(new Date().toISOString())}`);
+      runtimePollTimer = setTimeout(refreshRuntimeStatus, 5000);
+      runtimePollTimer?.unref?.();
+    }
+  }
+
+  root.addEventListener?.('r3:steward-session-established', refreshRuntimeStatus);
+  root.addEventListener?.('r3:steward-session-revoked', () => {
+    clearTimeout(runtimePollTimer); runtimePollTimer = null;
+    cancelConversationPolls();
+    setText(runtimeStatus, 'Website session ended · runtime checks stopped.');
+    runtimeStatus.dataset.state = 'unauthenticated';
+  });
+  if (root.documentElement?.dataset.r3aAuthVerified === 'true') refreshRuntimeStatus();
   root.getElementById('nav-chat')?.addEventListener('click', () => loadResidents());
   root.addEventListener?.('r3:steward-session-established', () => {
+    cancelConversationPolls(); loadedConversationIds.clear(); conversationTitles.clear();
+    residentNames.clear(); lastResidentRecords.clear();
     loaded = false; directoryAvailable = false; selectedResident = ''; selectedConversation = '';
     pendingConversationId = null; pendingMessage = null; chatAvailableResidentIds.clear();
     residentSelect.disabled = true; residentSelect.replaceChildren(new Option('Loading institutional resident roster…', ''));
@@ -434,6 +697,8 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     loadResidents();
   });
   root.addEventListener?.('r3:steward-session-revoked', () => {
+    cancelConversationPolls(); loadedConversationIds.clear(); conversationTitles.clear();
+    residentNames.clear(); lastResidentRecords.clear();
     loaded = false; directoryAvailable = false; selectedResident = ''; selectedConversation = '';
     pendingConversationId = null; pendingMessage = null; composer.value = '';
     chatAvailableResidentIds.clear(); residentSelect.disabled = true;
@@ -446,6 +711,15 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     if (selectedResident && directoryAvailable) loadConversations();
     else { loaded = false; loadResidents(); }
   });
+  conversationMenuButton?.addEventListener('click', () => {
+    conversationMenu.hidden = !conversationMenu.hidden;
+    conversationMenuButton.setAttribute('aria-expanded', String(!conversationMenu.hidden));
+  });
+  if (conversationMenu) {
+    toolbarButton(conversationMenu, {icon: '✎', label: 'Rename conversation', available: false});
+    toolbarButton(conversationMenu, {icon: '▱', label: 'Archive conversation', available: false});
+    toolbarButton(conversationMenu, {icon: '⌫', label: 'Delete conversation', available: false});
+  }
   if (root.documentElement?.dataset.r3aAuthVerified === 'true') loadResidents();
 }
 
