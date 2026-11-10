@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_capability_integration_demo.py
 Component: R3A-CAPABILITY-INTEGRATION-REGRESSION
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Verify canonical CME invocation, idempotent recovery, and independently gated completion.
@@ -13,10 +13,11 @@ Authority: R3 Alpha AP2 capability integration and escalation continuity.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Distinguish first invocation creation from ambiguous recovery in the non-replayable path.
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Exercise AP0-M1 provider process installation, activation, immutable version replacement, replay, and deactivation.
 Changed: 2026-11-10T01:35:58Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify generic executor and activity-handler declarations survive registration, replacement, activation, and deactivation.
+Changed: 2026-11-10T01:38:38Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Exercise an actual provider worker startup failure during replacement and assert the old process remains effective.
 Supersedes: None.
 Contracts: r3a.capability-invocation.v1; r3a.engineering-work-order.v1; r3a.verification-result.v1; module.lifecycle v2.
 Tests: This test module.
-History/Predecessor: Existing AP2 capability integration regression; prior tracked blob 10dc99eb14a2d7365d71a8db84af131ed605c4e2.
+History/Predecessor: Existing AP2 capability integration regression; prior tracked blob 10dc99eb14a2d7365d71a8db84af131ed605c4e2; immediately prior revision recorded in Git.
 """
 from __future__ import annotations
 
@@ -402,6 +403,17 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 str(replacement_artifact): second["provider"]["artifact_sha256"],
                 **first_manifest["_pinned_artifact_paths"]}
             registry.register(second, {"workspace_root": str(root)}, legacy_manifest=second_manifest)
+            failed_manifest = copy.deepcopy(first_manifest)
+            failed_manifest["plugin_version"] = "1.0.2"
+            failed_manifest["provider"]["provider_version"] = "1.0.2"
+            failed_manifest["provider"]["entrypoint"] = (
+                "r3a_plugins.engineering_workspace.provider:missing_factory")
+            failed_manifest["operation"]["provider"].update(failed_manifest["provider"])
+            failed_manifest["module_manifest"]["module_version"] = "1.0.2"
+            failed_manifest["module_manifest"]["binding"]["entrypoint"] = (
+                "r3a_plugins.engineering_workspace.provider:missing_factory")
+            failed = operation_from_manifest(failed_manifest)
+            registry.register(failed, {"workspace_root": str(root)}, legacy_manifest=failed_manifest)
             with patch.dict("os.environ", {"R3A_TELEMETRY_DATABASE_DSN": "must-not-cross-module-boundary",
                                             "R3A_OCTOMINER_SSH_HOST": "telemetry-host"}):
                 telemetry = registry.resolve("infrastructure.octominer.telemetry.read")
@@ -459,6 +471,23 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                        "work_order": {"workspace_id": "candidate-1", "allowed_paths": ["artifacts/**"]}}
             result = await runtime.invoke(old, {"path": "artifacts/result.txt", "content": "R3A module lifecycle\n"}, context)
             self.assertFalse(result["replayed"])
+
+            with self.assertRaisesRegex(RuntimeError, "provider|factory|attribute"):
+                await cme._control_request(
+                    "capability.module.replace",
+                    {"operation_id": "engineering.workspace.apply_patch",
+                     "old_module_id": "r3a.isolated_workspace", "old_version": "1.0.0",
+                     "new_provider_version": "1.0.2"},
+                    "replace-engineering-provider-with-failing-candidate")
+            selected_after_failure = registry.resolve("engineering.workspace.apply_patch")
+            self.assertEqual("1.0.0", selected_after_failure.descriptor["provider"]["provider_version"])
+            failed_candidate = await store.rows(
+                "lifecycle_state", ("r3a.isolated_workspace", "1.0.2"))
+            self.assertEqual("FAILED", failed_candidate[0]["lifecycle_state"])
+            prior_after_failure = await store.rows(
+                "lifecycle_state", ("r3a.isolated_workspace", "1.0.0"))
+            self.assertEqual("ACTIVE", prior_after_failure[0]["lifecycle_state"])
+            self.assertEqual([], store.replacements)
 
             replacement = await cme._control_request(
                 "capability.module.replace",
