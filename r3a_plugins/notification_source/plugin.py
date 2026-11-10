@@ -1,3 +1,19 @@
+# R3 CONTROLLED SOURCE
+# File: r3a_plugins/notification_source/plugin.py
+# Component: R3A-NOTIFICATION-SOURCE-ADAPTER
+# File Revision: 1.0.1
+# Created: Unknown (legacy)
+# Created By: Unknown (legacy)
+# Purpose: Read allowlisted immutable CME events and project versioned notification intake envelopes.
+# Execution Model: Registered read-only capability provider and pure intake projection.
+# Observability: Source identity, event identity, digest, provenance, and provider failures.
+# Dependencies: r3a.notification-intake.v1; r3a.activity-intake.v1; CME capability grants.
+# Authority: Issue #48; source reads require the existing notification.source.read grant.
+# Changed: 2026-11-10T18:53:48Z | R3A-CORE-FREEZE-CORRECTION | Codex GPT-6 | Emit notification-owned activity type for the generic handler boundary.
+# Supersedes: None.
+# Contracts: r3a.notification-intake.v1; r3a.activity-intake.v1.
+# Tests: tests/test_r3a_notification_source_plugin.py.
+# History/Predecessor: Git commit bcae2fc; previous source behavior retained by legacy N1 operation.
 """Read-only capability-operation adapter for the existing CME event ledger."""
 from __future__ import annotations
 

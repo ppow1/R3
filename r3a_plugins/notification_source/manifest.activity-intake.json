@@ -386,7 +386,7 @@
   "supporting_artifacts": [
     {
       "artifact_ref": "plugin.py",
-      "artifact_sha256": "737fad6d26db991b357da4a81d30291c47340534bfbf3716ac3b043044d8399e"
+      "artifact_sha256": "318aab4a555e4737e533b56ababe9238f9527459c685fb25ab637d1e82bfffd1"
     }
   ],
   "module_manifest": {

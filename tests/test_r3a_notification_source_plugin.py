@@ -1,3 +1,19 @@
+# R3 CONTROLLED TEST SOURCE
+# File: tests/test_r3a_notification_source_plugin.py
+# Component: R3A-NOTIFICATION-SOURCE-REGRESSION
+# File Revision: 1.0.1
+# Created: Unknown (legacy)
+# Created By: Unknown (legacy)
+# Purpose: Verify notification source provenance, generic intake projection, and handler registration.
+# Execution Model: Pytest with read-only source and registry fixtures.
+# Observability: Assertions cover source identity, digest, authorization requirements, and lifecycle projection.
+# Dependencies: r3a_plugins.notification_source; capability and activity-handler contracts.
+# Authority: Issue #48; no production source or service access.
+# Changed: 2026-11-10T18:53:48Z | R3A-CORE-FREEZE-CORRECTION | Codex GPT-6 | Verify notification-owned activity type and handler declaration with N1 compatibility.
+# Supersedes: None.
+# Contracts: r3a.notification-intake.v1; r3a.activity-intake.v1; r3a.activity-handler.v1.
+# Tests: This test module.
+# History/Predecessor: Commit bcae2fc; source adapter regression suite.
 """Domain tests for the notification source adapter, independent of CME intake."""
 from __future__ import annotations
 

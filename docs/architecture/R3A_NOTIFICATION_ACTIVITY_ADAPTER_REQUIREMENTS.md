@@ -2,13 +2,14 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_NOTIFICATION_ACTIVITY_ADAPTER_REQUIREMENTS.md
 Component: R3A-AP1-NOTIFICATION-ACTIVITY-ADAPTER
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-08
 Purpose: Document the notification module binding to the reusable generic activity-intake boundary.
 Authority: Issue #48; R3A Baseline 1.0, AP1, R3A-019.
 Dependencies: Existing r3a.notification-intake.v1 and r3a.capability-operation.v1; r3a.activity-intake.v1 and the CME activity-intake consumer.
 Tests: tests/test_r3a_notification_source_plugin.py; tests/test_r3a_activity_intake_consumer.py.
 Status: Source adapter and generic CME consumer are integrated in the unified candidate; managed source configuration, grant, invocation and restart recovery remain unverified.
+Changed: 2026-11-10T18:53:48Z | R3A-CORE-FREEZE-CORRECTION | Codex GPT-6 | Document notification-owned handler metadata and N1 compatibility binding.
 -->
 # Notification Source Adapter Requirements
 

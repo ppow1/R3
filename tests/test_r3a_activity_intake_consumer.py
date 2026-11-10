@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_activity_intake_consumer.py
 Component: R3A-GENERIC-ACTIVITY-INTAKE-REGRESSION
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-09
 Created By: Codex GPT-6
 Purpose: Verify authorized generic activity intake remains durable and idempotent.
@@ -11,6 +11,7 @@ Observability: Assertions cover authorization, durable identity, event lineage, 
 Dependencies: r3a_runtime.cme; r3a_runtime.db; shared activity-intake contracts.
 Authority: AD-024; Autonomy / CME Issue #43.
 Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT-6 | Cover non-Grace activity intake persistence and idempotency.
+Changed: 2026-11-10T18:53:48Z | R3A-CORE-FREEZE-CORRECTION | Codex GPT-6 | Validate canonical provider artifact hashes across checkout line endings.
 Supersedes: None.
 Contracts: r3a.activity-intake.v1; r3a.activity-handler.v1.
 Tests: This test module.

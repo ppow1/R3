@@ -1,3 +1,19 @@
+# R3 CONTROLLED TEST SOURCE
+# File: tests/test_r3a_notification_service.py
+# Component: R3A-NOTIFICATION-SERVICE-REGRESSION
+# File Revision: 1.0.1
+# Created: Unknown (legacy)
+# Created By: Unknown (legacy)
+# Purpose: Verify notification service delivery, inbox behavior, and pinned module artifacts.
+# Execution Model: Pytest with isolated fixtures; PostgreSQL integration is opt-in.
+# Observability: Assertions cover service responses, durable records, and artifact digests.
+# Dependencies: r3a_plugins.notification_service; notification contracts.
+# Authority: Issue #48; no production service or database access.
+# Changed: 2026-11-10T18:53:48Z | R3A-CORE-FREEZE-CORRECTION | Codex GPT-6 | Validate canonical artifact digests independent of checkout line endings.
+# Supersedes: None.
+# Contracts: r3a.notification-inbox.v1; notification module manifest v1.2.1.
+# Tests: This test module.
+# History/Predecessor: Commit bcae2fc; added source-level artifact pin regression.
 """Notification module integration tests; set R3A_NOTIFICATION_TEST_DSN to an isolated PostgreSQL DB."""
 from __future__ import annotations
 
