@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: web/index.html
 Component: R3-ESTATE-HOME
-File Revision: 1.0.30
+File Revision: 1.0.31
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Present the R3 estate home with Engineering and Infrastructure observability panels
@@ -30,6 +30,7 @@ Changed: 2026-11-08 | #49/#51 | Codex GPT-6 | Emit shared session lifecycle even
 Changed: 2026-11-09T19:57:00Z | AP3/R3A-010-LIVE-LOGIN | R3A Coordinator | Remove legacy R3 portal prompts from the R3A workspace and route sign-in to native R3A auth.
 Changed: 2026-11-09T20:25:00Z | R3A-WEBSITE-WIDE-AUTH | R3A Coordinator | Gate the full Website on its native session; remove chat/panel session controls and add one global sign-out.
 Changed: 2026-11-09T21:20:00Z | R3A-LOGIN-REDIRECT-LOOP | R3A Coordinator | Only canonical session verification may redirect to login; operation 401 responses recheck session without forcing navigation.
+Changed: 2026-11-10 | #51 | Load authorized effective configuration with the verified session so chat uses the institution presentation timezone by default.
 -->
 <!doctype html>
 <html lang="en">
@@ -426,7 +427,35 @@ function openSteward(){stewardPanel.hidden=false;profileMenu.hidden=true;layoutQ
 document.getElementById('nav-steward').addEventListener('click',openSteward);document.getElementById('steward-close').addEventListener('click',()=>{stewardPanel.hidden=true;syncPanelNavigation();});document.getElementById('steward-minimize').addEventListener('click',()=>{stewardPanel.classList.toggle('minimized');const minimized=stewardPanel.classList.contains('minimized');const button=document.getElementById('steward-minimize');button.textContent=minimized?'□':'−';button.title=minimized?'Restore Steward panel':'Minimize Steward panel';button.setAttribute('aria-label',button.title);});
 document.getElementById('website-signout').addEventListener('click',async()=>{const button=document.getElementById('website-signout');button.disabled=true;try{await stewardApi('/api/v1/steward/session',{method:'DELETE'});document.dispatchEvent(new CustomEvent('r3:steward-session-revoked'));window.location.replace('/login');}catch(error){if(error.status===401){window.location.replace('/login');return;}button.disabled=false;button.textContent='Sign out unavailable · retry';}});
 document.getElementById('steward-refresh').addEventListener('click',refreshStewardState);
-document.getElementById('settings-config-refresh').addEventListener('click',async()=>{const status=document.getElementById('settings-config-status'),values=document.getElementById('settings-config-values'),history=document.getElementById('settings-config-history');status.textContent='Reading authoritative configuration…';try{const result=await stewardApi('/api/v1/steward/r3a/configuration');values.textContent=JSON.stringify(result.effective_values,null,2);history.replaceChildren();const revision=document.createElement('div');revision.className='settings-config-revision';revision.textContent='Revision '+(result.revision.revision_id||'unknown')+' · activated '+(result.revision.activated_at||'unknown')+' · actor '+(result.revision.actor||'unknown');history.appendChild(revision);const timezone=result.effective_values?.presentation_timezone;if(typeof timezone==='string'&&timezone.trim()){document.documentElement.dataset.presentationTimezone=timezone.trim();document.dispatchEvent(new Event('r3:presentation-timezone'));}for(const item of(result.activation_history||[])){const row=document.createElement('div');row.className='settings-config-revision';row.textContent=(item.occurred_at||'time unknown')+' · '+(item.config_revision||'revision unknown')+' · '+(item.actor||'actor unknown');history.appendChild(row);}status.textContent='Read from '+(result.source||'unknown')+' at '+(result.observed_at||'unknown')+' · activation history is limited to the latest '+result.history_window+' events'+(result.history_complete?'':' (not complete)')+' · writes unavailable';}catch(error){status.textContent='Configuration unavailable: '+error.message;values.textContent='No configuration values loaded.';history.replaceChildren();}});
+let effectiveConfigurationRead = null;
+async function loadEffectiveConfiguration(){
+  if(effectiveConfigurationRead)return effectiveConfigurationRead;
+  effectiveConfigurationRead=(async()=>{
+    const status=document.getElementById('settings-config-status'),values=document.getElementById('settings-config-values'),history=document.getElementById('settings-config-history');
+    status.textContent='Reading authoritative configuration…';
+    try{
+      const result=await stewardApi('/api/v1/steward/r3a/configuration');
+      values.textContent=JSON.stringify(result.effective_values,null,2);
+      history.replaceChildren();
+      const revision=document.createElement('div');revision.className='settings-config-revision';
+      revision.textContent='Revision '+(result.revision.revision_id||'unknown')+' · activated '+(result.revision.activated_at||'unknown')+' · actor '+(result.revision.actor||'unknown');history.appendChild(revision);
+      const timezone=result.effective_values?.presentation_timezone;
+      if(typeof timezone==='string'&&timezone.trim()){
+        document.documentElement.dataset.presentationTimezone=timezone.trim();
+        document.dispatchEvent(new Event('r3:presentation-timezone'));
+      }
+      for(const item of(result.activation_history||[])){
+        const row=document.createElement('div');row.className='settings-config-revision';
+        row.textContent=(item.occurred_at||'time unknown')+' · '+(item.config_revision||'revision unknown')+' · '+(item.actor||'actor unknown');history.appendChild(row);
+      }
+      status.textContent='Read from '+(result.source||'unknown')+' at '+(result.observed_at||'unknown')+' · activation history is limited to the latest '+result.history_window+' events'+(result.history_complete?'':' (not complete)')+' · writes unavailable';
+    }catch(error){status.textContent='Configuration unavailable: '+error.message;values.textContent='No configuration values loaded.';history.replaceChildren();}
+  })();
+  try{return await effectiveConfigurationRead;}finally{effectiveConfigurationRead=null;}
+}
+document.getElementById('settings-config-refresh').addEventListener('click',loadEffectiveConfiguration);
+document.addEventListener('r3:steward-session-established',loadEffectiveConfiguration);
+if(document.documentElement.dataset.r3aAuthVerified==='true')loadEffectiveConfiguration();
 async function stewardApi(path,options={}){const response=await fetch(path,{credentials:'same-origin',cache:'no-store',...options,headers:{...(options.headers||{}),...(options.body?{'Content-Type':'application/json'}:{})}});const body=await response.json().catch(()=>({}));body.request_id=body.request_id||response.headers.get('X-Request-ID');if(!response.ok){const error=new Error(body.detail||('Request failed ('+response.status+')'));error.status=response.status;error.correlationId=body.correlation_id||response.headers.get('X-Correlation-ID')||response.headers.get('X-Request-ID');if(response.status===401)window.r3aCheckWebsiteSession?.();throw error;}return body;}
 function showStewardSession(session){const principal=session.principal||{},status=document.getElementById('steward-auth-status');document.getElementById('steward-workspace').hidden=false;status.textContent='Website session active · '+(principal.principal_id||session.principal_id||'principal unknown')+' · expires '+(session.expires_at||'unknown');document.getElementById('steward-source-state').textContent='Session current · '+(principal.principal_id||session.principal_id||'principal unknown');}
 async function checkStewardSession(){try{const session=await stewardApi('/api/v1/steward/session');showStewardSession(session);refreshStewardState();refreshStewardCapabilities();}catch(error){document.getElementById('steward-workspace').hidden=true;document.getElementById('steward-auth-status').textContent='Institutional Website session unavailable: '+error.message;}}

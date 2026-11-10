@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_website.py
 Component: R3A-WEBSITE-API-TESTS
-File Revision: 1.0.8
+File Revision: 1.0.9
 Created: 2026-11-07T21:59:13Z
 Created By: Codex GPT-6
 Purpose: Verify shared-session gating, versioned objective forwarding, and website client assets.
@@ -19,6 +19,7 @@ Changed: 2026-11-08T14:30:00Z | R3A-010/#49/#51 | Verify same-host configured R3
 Changed: 2026-11-09T18:10:00Z | AP3/R3A-010 | Verify native R3A login page, HTTPS-only submission, and no R3 portal discovery in native mode.
 Changed: 2026-11-09T19:57:00Z | AP3/R3A-010-LIVE-LOGIN | Verify native-mode base routing, no R3 portal UI, and workspace return after login.
 Changed: 2026-11-09T21:20:00Z | R3A-LOGIN-REDIRECT-LOOP | Verify only canonical session 401 redirects and operation 401s trigger a session recheck.
+Changed: 2026-11-10 | #51 | Verify the authenticated workspace loads effective configuration for institution-timezone presentation.
 Supersedes: None.
 Contracts: r3a.steward-session.v1; r3a.grace-objective-submission.v1; R3A AP0 diagnostic socket.
 Tests: python -m unittest tests.test_r3a_website.
@@ -160,6 +161,9 @@ class StewardWebsiteApiTests(unittest.TestCase):
             self.assertNotIn(legacy_copy, workspace.text)
         self.assertIn("window.r3aCheckWebsiteSession", workspace.text)
         self.assertIn("if (response.status === 401) { window.r3aRequireWebsiteLogin(); return null; }", workspace.text)
+        self.assertIn("document.addEventListener('r3:steward-session-established',loadEffectiveConfiguration)", workspace.text)
+        self.assertIn("dataset.r3aAuthVerified==='true')loadEffectiveConfiguration()", workspace.text)
+        self.assertIn("document.dispatchEvent(new Event('r3:presentation-timezone'))", workspace.text)
 
     def test_workspace_operation_401_rechecks_session_without_forcing_login_redirect(self):
         response = self.client.get("/web/steward-workspace-api.mjs")
