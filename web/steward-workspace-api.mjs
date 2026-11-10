@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: web/steward-workspace-api.js
 Component: R3A-STEWARD-WORKSPACE-CLIENT
-File Revision: 1.0.11
+File Revision: 1.0.12
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Same-origin client for versioned resident conversation and notification contracts
@@ -21,6 +21,7 @@ Changed: 2026-11-09 | R3A-STEWARD-CHAT-ROSTER | R3A Coordinator | Render all dyn
 Changed: 2026-11-09 | R3A-STEWARD-CHAT-READINESS | R3A Coordinator | Show the evidence-backed route or authorization reason for disabled roster entries.
 Changed: 2026-11-10 | #51 | Keep loaded history visible during polling and pause refresh after a bounded wait.
 Changed: 2026-11-10 | #51 | Ignore stale resident/conversation responses after selection changes.
+Changed: 2026-11-10 | #51 | Report and disable an empty authoritative resident roster accurately.
 Tests: tests/test_steward_workspace_api.mjs uses mocked fetch only as a labeled development test
 */
 
@@ -113,6 +114,18 @@ export function residentChatStatusLabel(resident) {
   if (resident?.chat_status === 'required_execution_grant_missing') return 'chat unavailable · execution authorization missing';
   if (resident?.chat_status === 'office_role_route_unavailable') return 'chat unavailable · no configured office route';
   return 'chat unavailable · eligibility not confirmed';
+}
+
+export function residentRosterSummary(residents, freshness = 'unknown') {
+  const records = Array.isArray(residents) ? residents.filter(resident => resident && resident.resident_id) : [];
+  return {
+    residents: records,
+    status: records.length
+      ? (freshness === 'current'
+        ? `Institutional resident roster loaded · ${records.filter(resident => resident.chat_available !== true).length} resident(s) currently unavailable for chat.`
+        : `Directory source ${freshness || 'unknown'}`)
+      : 'The institutional directory returned no resident records.',
+  };
 }
 
 export class StewardWorkspaceApi {
@@ -335,13 +348,11 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     try {
       const result = await api.residents();
       directoryAvailable = true;
+      const roster = residentRosterSummary(result.residents, result.freshness);
       residentSelect.replaceChildren(new Option('Select a resident…', ''));
-      let unavailableCount = 0;
-      for (const resident of result.residents || []) {
-        if (!resident.resident_id) continue;
+      for (const resident of roster.residents) {
         const chatAvailable = resident.chat_available === true;
         if (chatAvailable) chatAvailableResidentIds.add(resident.resident_id);
-        else unavailableCount += 1;
         residentNames.set(resident.resident_id, resident.display_name || resident.resident_id);
         const onboarding = resident.onboarding_status || 'unknown';
         const readiness = residentChatStatusLabel(resident);
@@ -349,13 +360,10 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
         option.disabled = !chatAvailable;
         residentSelect.add(option);
       }
-      residentSelect.disabled = !residentSelect.options.length;
+      residentSelect.disabled = roster.residents.length === 0;
       syncNewConversationButton();
-      setText(status, result.freshness === 'current'
-        ? `Institutional resident roster loaded · ${unavailableCount} resident(s) currently unavailable for chat.`
-        : `Directory source ${result.freshness || 'unknown'}`);
+      setText(status, roster.status);
       status.dataset.state = result.freshness || 'unknown';
-      if (!residentSelect.options.length) setText(status, 'The institutional directory returned no resident records.');
     } catch (error) {
       loaded = false;
       directoryAvailable = false;

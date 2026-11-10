@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_steward_workspace_api.mjs
 Component: R3A-STEWARD-WORKSPACE-CLIENT-TESTS
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Verify the versioned workspace browser client transport and denial behavior.
@@ -13,6 +13,7 @@ Authority: R3A Class I website development, Issue #51.
 Changed: 2026-11-07 | R3A-007/R3A-010/R3A-019 | Add chat, notification, session, objective, and capability client tests.
 Changed: 2026-11-08 | R3A-007/R3A-010 | Cover DST-aware UTC-preserving time display and unavailable API routing.
 Changed: 2026-11-10 | #51 | Verify delayed conversation responses cannot overwrite a newer resident selection.
+Changed: 2026-11-10 | #51 | Cover explicit empty authoritative roster state.
 Supersedes: None.
 Contracts: r3a.steward-workspace-web.v1; r3a.steward-session.v1; r3a.notification-inbox.v1; r3a.grace-objective-submission.v1.
 Tests: node --test tests/test_steward_workspace_api.mjs.
@@ -21,7 +22,7 @@ History/Predecessor: New file; initial publication recorded in Git.
 // Mock fetch never supplies live institutional data.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp, notificationPresentation, residentProgressLabel, residentBlockedLabel, residentChatStatusLabel, conversationHistoryLoadingLabel, conversationPollState, mountResidentChat} from '../web/steward-workspace-api.mjs';
+import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp, notificationPresentation, residentProgressLabel, residentBlockedLabel, residentChatStatusLabel, residentRosterSummary, conversationHistoryLoadingLabel, conversationPollState, mountResidentChat} from '../web/steward-workspace-api.mjs';
 
 function response(status, payload, headers = {}) {
   return {
@@ -137,6 +138,15 @@ test('resident roster labels chat eligibility from CME readiness evidence', () =
   assert.equal(residentChatStatusLabel({chat_available: false, chat_status: 'required_execution_grant_missing'}), 'chat unavailable · execution authorization missing');
   assert.equal(residentChatStatusLabel({chat_available: false, chat_status: 'office_role_route_unavailable'}), 'chat unavailable · no configured office route');
   assert.equal(residentChatStatusLabel({chat_available: false}), 'chat unavailable · eligibility not confirmed');
+});
+
+test('empty authoritative resident directory reports no residents instead of counting its placeholder', () => {
+  assert.deepEqual(residentRosterSummary([], 'current'), {
+    residents: [], status: 'The institutional directory returned no resident records.',
+  });
+  const summary = residentRosterSummary([{resident_id: 'resident:a', chat_available: false}], 'current');
+  assert.equal(summary.residents.length, 1);
+  assert.match(summary.status, /1 resident\(s\) currently unavailable for chat/);
 });
 
 test('late conversation-list responses cannot replace the currently selected resident', async () => {
