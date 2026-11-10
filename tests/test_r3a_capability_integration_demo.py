@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_capability_integration_demo.py
 Component: R3A-CAPABILITY-INTEGRATION-REGRESSION
-File Revision: 1.0.2
+File Revision: 1.0.7
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Verify canonical CME invocation, idempotent recovery, and independently gated completion.
@@ -12,10 +12,15 @@ Dependencies: r3a_runtime.capability_contracts; r3a_runtime.cme.
 Authority: R3 Alpha AP2 capability integration and escalation continuity.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Distinguish first invocation creation from ambiguous recovery in the non-replayable path.
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Exercise AP0-M1 provider process installation, activation, immutable version replacement, replay, and deactivation.
+Changed: 2026-11-10T01:35:58Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify generic executor and activity-handler declarations survive registration, replacement, activation, and deactivation.
+Changed: 2026-11-10T01:38:38Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Exercise an actual provider worker startup failure during replacement and assert the old process remains effective.
+Changed: 2026-11-10T01:38:38Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify process loss after activation is durably diagnosed and blocks further discovery/invocation.
+Changed: 2026-11-10T01:38:38Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify handler discovery selects only the replacement module version after lifecycle transition.
+Changed: 2026-11-10T02:02:46Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Use manifest v1.1.0 when lifecycle fixtures declare resident and handler roles.
 Supersedes: None.
 Contracts: r3a.capability-invocation.v1; r3a.engineering-work-order.v1; r3a.verification-result.v1; module.lifecycle v2.
 Tests: This test module.
-History/Predecessor: Existing AP2 capability integration regression.
+History/Predecessor: Existing AP2 capability integration regression; prior tracked blob 10dc99eb14a2d7365d71a8db84af131ed605c4e2; immediate predecessor recorded in Git.
 """
 from __future__ import annotations
 
@@ -60,6 +65,7 @@ from r3a_runtime.engineering import (CapabilityOperationRef, CriterionResult, En
                                     VerificationResult, validate_completion)
 from r3a_runtime.db import utcnow
 from r3a_runtime.provider_runtime import ProviderProcessManager, _module_environment
+from r3a_runtime.module_extensions import resolve_activity_handler
 from r3a_runtime.capability_worker import CapabilityWorker
 from tests.test_r3a_modular_autonomy import make_config
 
@@ -293,7 +299,8 @@ class ProviderLifecycleFixtureStore:
                              "lifecycle_state": prior["lifecycle_state"] if prior else lifecycle,
                              "health": prior["health"] if prior else health,
                              "observed_at": None,
-                             "diagnostic": prior["diagnostic"] if prior else copy.deepcopy(diagnostic or {})}
+                             "diagnostic": prior["diagnostic"] if prior else copy.deepcopy(diagnostic or {}),
+                             "manifest": copy.deepcopy(manifest)}
 
     async def module_state(self, module_id, version, lifecycle, health, diagnostic=None, *, machine_version=1):
         key = module_id, version
@@ -325,6 +332,31 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             bootstrap = make_config(root)
             config = json.loads(bootstrap.read_text(encoding="utf-8"))
             engineering_root = Path(__file__).parents[1] / "r3a_plugins/engineering_workspace"
+            module_declaration = {}
+            module_declaration["resident_executor"] = {
+                "contract_id": "r3a.resident.executor", "contract_version": "1.0.0",
+                "execution_contract_range": {"contract_id": "r3a.resident.execution", "major": 1,
+                                             "min_minor": 0, "max_minor": 2}}
+            module_declaration["activity_handler"] = {
+                "contract_id": "r3a.activity-handler", "contract_version": "1.0.0",
+                "handler_id": "fixture.engineering-handler", "handler_version": "1.0.0",
+                "activity_types": ["fixture.engineering.reconcile"],
+                "activity_contract_range": {"contract_id": "r3a.activity-intake", "major": 1,
+                                             "min_minor": 0, "max_minor": 0},
+                "handler_contract_range": {"contract_id": "r3a.activity-handler", "major": 1,
+                                            "min_minor": 0, "max_minor": 0},
+                "request_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+                "result_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+                "progress_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+                "checkpoint_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+                "progress_semantics": "Progress observations are monotonic.",
+                "checkpoint_semantics": "Checkpoint resumes after the last committed item.",
+                "required_capabilities": [],
+                "resource_constraints": {"cpu_millis": 250, "memory_bytes": 134217728,
+                                         "max_concurrency": 1},
+                "state_namespace": "fixture.engineering", "migration_contract": "fixture.engineering-migration.v1",
+                "recovery": {"mode": "checkpointed", "idempotency_contract": "fixture.engineering-idempotency.v1",
+                             "checkpoint_contract": "fixture.engineering-checkpoint.v1"}}
             engineering_config = root / "engineering-workspace.json"
             engineering_config.write_text(json.dumps({"workspace_root": str(root)}), encoding="utf-8")
             telemetry_root = Path(__file__).parents[1] / "r3a_plugins/octominer_telemetry"
@@ -340,6 +372,10 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             settings = load_settings(bootstrap)
             registry = settings.capability_registry
             first_registered = registry.resolve_provider("engineering.workspace.apply_patch", "1.0.0")
+            first_registered.legacy_manifest["module_manifest"]["contract_version"] = "1.1.0"
+            first_registered.legacy_manifest["module_manifest"].update(copy.deepcopy(module_declaration))
+            registry._operations[("engineering.workspace.apply_patch", "r3a.isolated_workspace", "1.0.0")] = \
+                first_registered
             first = first_registered.descriptor
             first_manifest = copy.deepcopy(first_registered.legacy_manifest)
             second = copy.deepcopy(first)
@@ -372,6 +408,17 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 str(replacement_artifact): second["provider"]["artifact_sha256"],
                 **first_manifest["_pinned_artifact_paths"]}
             registry.register(second, {"workspace_root": str(root)}, legacy_manifest=second_manifest)
+            failed_manifest = copy.deepcopy(first_manifest)
+            failed_manifest["plugin_version"] = "1.0.2"
+            failed_manifest["provider"]["provider_version"] = "1.0.2"
+            failed_manifest["provider"]["entrypoint"] = (
+                "r3a_plugins.engineering_workspace.provider:missing_factory")
+            failed_manifest["operation"]["provider"].update(failed_manifest["provider"])
+            failed_manifest["module_manifest"]["module_version"] = "1.0.2"
+            failed_manifest["module_manifest"]["binding"]["entrypoint"] = (
+                "r3a_plugins.engineering_workspace.provider:missing_factory")
+            failed = operation_from_manifest(failed_manifest)
+            registry.register(failed, {"workspace_root": str(root)}, legacy_manifest=failed_manifest)
             with patch.dict("os.environ", {"R3A_TELEMETRY_DATABASE_DSN": "must-not-cross-module-boundary",
                                             "R3A_OCTOMINER_SSH_HOST": "telemetry-host"}):
                 telemetry = registry.resolve("infrastructure.octominer.telemetry.read")
@@ -408,6 +455,14 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.1"},
                 "install-engineering-v1.0.1")
             self.assertTrue(install_new["installed"])
+            expected_executor = module_declaration["resident_executor"]
+            expected_handler = module_declaration["activity_handler"]
+            installed_roles = store.modules[("r3a.isolated_workspace", "1.0.0")]["manifest"]
+            self.assertEqual(expected_executor, installed_roles["resident_executor"])
+            self.assertEqual(expected_handler, installed_roles["activity_handler"])
+            replacement_roles = store.modules[("r3a.isolated_workspace", "1.0.1")]["manifest"]
+            self.assertEqual(expected_executor, replacement_roles["resident_executor"])
+            self.assertEqual(expected_handler, replacement_roles["activity_handler"])
             installed = await store.rows("lifecycle_state", ("r3a.isolated_workspace", "1.0.0"))
             self.assertEqual("INSTALLED", installed[0]["lifecycle_state"])
 
@@ -422,6 +477,23 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             result = await runtime.invoke(old, {"path": "artifacts/result.txt", "content": "R3A module lifecycle\n"}, context)
             self.assertFalse(result["replayed"])
 
+            with self.assertRaisesRegex(RuntimeError, "provider|factory|attribute"):
+                await cme._control_request(
+                    "capability.module.replace",
+                    {"operation_id": "engineering.workspace.apply_patch",
+                     "old_module_id": "r3a.isolated_workspace", "old_version": "1.0.0",
+                     "new_provider_version": "1.0.2"},
+                    "replace-engineering-provider-with-failing-candidate")
+            selected_after_failure = registry.resolve("engineering.workspace.apply_patch")
+            self.assertEqual("1.0.0", selected_after_failure.descriptor["provider"]["provider_version"])
+            failed_candidate = await store.rows(
+                "lifecycle_state", ("r3a.isolated_workspace", "1.0.2"))
+            self.assertEqual("FAILED", failed_candidate[0]["lifecycle_state"])
+            prior_after_failure = await store.rows(
+                "lifecycle_state", ("r3a.isolated_workspace", "1.0.0"))
+            self.assertEqual("ACTIVE", prior_after_failure[0]["lifecycle_state"])
+            self.assertEqual([], store.replacements)
+
             replacement = await cme._control_request(
                 "capability.module.replace",
                 {"operation_id": "engineering.workspace.apply_patch",
@@ -435,6 +507,16 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                                 active.descriptor["provider"]["artifact_sha256"])
             self.assertEqual("infrastructure.octominer.telemetry.read",
                              registry.resolve("infrastructure.octominer.telemetry.read").descriptor["operation_id"])
+            handler_rows = [
+                {"module_id": module_id, "module_version": version,
+                 "lifecycle_state": row["lifecycle_state"], "manifest": row["manifest"]}
+                for (module_id, version), row in store.modules.items()]
+            discovered_handler = resolve_activity_handler(
+                handler_rows, "fixture.engineering.reconcile")
+            self.assertEqual("r3a.isolated_workspace", discovered_handler["module_id"])
+            self.assertEqual("1.0.1", discovered_handler["module_version"])
+            self.assertEqual(active.descriptor["provider"]["artifact_sha256"],
+                             discovered_handler["artifact_digest"])
             replacement_context = {**context, "invocation_id": "replacement-implementation"}
             replacement_result = await runtime.invoke(
                 active, {"path": "artifacts/replacement.txt", "content": "new implementation\n"},
@@ -465,11 +547,29 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 "deactivate-engineering-v1.0.1")
             stopped_new = await store.rows("lifecycle_state", ("r3a.isolated_workspace", "1.0.1"))
             self.assertEqual("STOPPED", stopped_new[0]["lifecycle_state"])
+            self.assertEqual(expected_executor,
+                             store.modules[("r3a.isolated_workspace", "1.0.1")]["manifest"]["resident_executor"])
+            self.assertEqual(expected_handler,
+                             store.modules[("r3a.isolated_workspace", "1.0.1")]["manifest"]["activity_handler"])
             replacement_states = [state for key, _previous, state, _health, _diagnostic in store.transitions
                                   if key[0] == "r3a.isolated_workspace"]
             self.assertIn("REPLACING", replacement_states)
             self.assertEqual("STOPPED", replacement_states[-1])
             with self.assertRaisesRegex(ValueError, "provider is stopped"):
+                registry.resolve("engineering.workspace.apply_patch")
+            await cme._control_request(
+                "capability.module.activate",
+                {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.1"},
+                "reactivate-engineering-v1.0.1-for-health-failure")
+            active_binding = runtime.processes[("r3a.isolated_workspace", "1.0.1")]
+            active_binding.process.terminate()
+            await active_binding.process.wait()
+            await runtime.check_health()
+            failed_after_start = store.modules[("r3a.isolated_workspace", "1.0.1")]
+            self.assertEqual("FAILED", failed_after_start["lifecycle_state"])
+            self.assertEqual("unavailable", failed_after_start["health"])
+            self.assertEqual("provider process exited", failed_after_start["diagnostic"]["reason"])
+            with self.assertRaisesRegex(ValueError, "provider is failed"):
                 registry.resolve("engineering.workspace.apply_patch")
             self.assertEqual("infrastructure.octominer.telemetry.read",
                              registry.resolve("infrastructure.octominer.telemetry.read").descriptor["operation_id"])
