@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_capability_integration_demo.py
 Component: R3A-CAPABILITY-INTEGRATION-REGRESSION
-File Revision: 1.0.4
+File Revision: 1.0.5
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Verify canonical CME invocation, idempotent recovery, and independently gated completion.
@@ -14,6 +14,7 @@ Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Distinguish first 
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Exercise AP0-M1 provider process installation, activation, immutable version replacement, replay, and deactivation.
 Changed: 2026-11-10T01:35:58Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify generic executor and activity-handler declarations survive registration, replacement, activation, and deactivation.
 Changed: 2026-11-10T01:38:38Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Exercise an actual provider worker startup failure during replacement and assert the old process remains effective.
+Changed: 2026-11-10T01:38:38Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify process loss after activation is durably diagnosed and blocks further discovery/invocation.
 Supersedes: None.
 Contracts: r3a.capability-invocation.v1; r3a.engineering-work-order.v1; r3a.verification-result.v1; module.lifecycle v2.
 Tests: This test module.
@@ -541,6 +542,20 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             self.assertIn("REPLACING", replacement_states)
             self.assertEqual("STOPPED", replacement_states[-1])
             with self.assertRaisesRegex(ValueError, "provider is stopped"):
+                registry.resolve("engineering.workspace.apply_patch")
+            await cme._control_request(
+                "capability.module.activate",
+                {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.1"},
+                "reactivate-engineering-v1.0.1-for-health-failure")
+            active_binding = runtime.processes[("r3a.isolated_workspace", "1.0.1")]
+            active_binding.process.terminate()
+            await active_binding.process.wait()
+            await runtime.check_health()
+            failed_after_start = store.modules[("r3a.isolated_workspace", "1.0.1")]
+            self.assertEqual("FAILED", failed_after_start["lifecycle_state"])
+            self.assertEqual("unavailable", failed_after_start["health"])
+            self.assertEqual("provider process exited", failed_after_start["diagnostic"]["reason"])
+            with self.assertRaisesRegex(ValueError, "provider is failed"):
                 registry.resolve("engineering.workspace.apply_patch")
             self.assertEqual("infrastructure.octominer.telemetry.read",
                              registry.resolve("infrastructure.octominer.telemetry.read").descriptor["operation_id"])
