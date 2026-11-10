@@ -1,0 +1,85 @@
+{
+  "schema_id": "r3a.resident.onboarding-packet",
+  "schema_version": 1,
+  "packet_id": "e1561ef3-ced6-4c16-b8f8-9e0aa789ec67",
+  "packet_revision": 1,
+  "create_idempotency_key": "issue58-vicky-source-packet-20261110",
+  "resident_id": null,
+  "request_context": {
+    "display_label": "Vicky",
+    "requested_role": "Engineering Manager",
+    "source_ref": "https://github.com/ppow1/R3/issues/58#issuecomment-6769020176",
+    "verification_status": "request_only"
+  },
+  "state": "REQUESTED",
+  "resume_state": null,
+  "created_at": "2026-11-10T13:00:00Z",
+  "updated_at": "2026-11-10T13:00:00Z",
+  "domains": {
+    "identity": {
+      "applicability": "mandatory", "owner": "HR", "authority_source": "riverview_authority.hr",
+      "required_approval": "HR identity decision and current source association", "approval_ref": null,
+      "status": "blocked", "validation_contract": "r3a.resident.onboarding.identity.v1",
+      "evidence_refs": ["https://github.com/ppow1/R3/issues/58#issuecomment-6768560524", "https://github.com/ppow1/R3/issues/58#issuecomment-6768796862"],
+      "revision_pins": {}, "blocker_ref": "https://github.com/ppow1/R3/issues/58#issuecomment-6768796862",
+      "fields": [
+        {"field_id": "legacy_hr_key_unverified", "value_ref": "https://github.com/ppow1/R3/issues/58#issuecomment-6768560524", "classification": "personnel_sensitive", "owner": "HR", "source_ref": "https://github.com/ppow1/R3/pull/57", "approval_required": true, "approval_ref": null, "validation_contract": "r3a.resident.hr-identity.v1", "evidence_refs": ["https://github.com/ppow1/R3/issues/58#issuecomment-6768560524"], "revision_pin": "legacy-revision:1", "expires_at": null, "status": "blocked"},
+        {"field_id": "canonical_principal", "value_ref": "https://github.com/ppow1/R3/issues/58#issuecomment-6768796862", "classification": "institutional", "owner": "HR", "source_ref": "authority://riverview_authority.directory", "approval_required": true, "approval_ref": null, "validation_contract": "r3a.resident.identity-association.v1", "evidence_refs": ["https://github.com/ppow1/R3/issues/58#issuecomment-6768796862"], "revision_pin": null, "expires_at": null, "status": "blocked"}
+      ]
+    },
+    "appointment": {
+      "applicability": "mandatory", "owner": "HR", "authority_source": "institutional HR appointment authority",
+      "required_approval": "approved active appointment and office assignment", "approval_ref": null,
+      "status": "blocked", "validation_contract": "r3a.resident.onboarding.appointment.v1",
+      "evidence_refs": ["https://github.com/ppow1/R3/issues/58#issuecomment-6768560524", "https://github.com/ppow1/R3/issues/58#issuecomment-6768796862"],
+      "revision_pins": {}, "fields": [], "blocker_ref": "https://github.com/ppow1/R3/issues/58#issuecomment-6768796862"
+    },
+    "character": {
+      "applicability": "conditional", "owner": "Character Architecture", "authority_source": "R3A Character Architecture dossier and canon workflow",
+      "required_approval": "Jessica/Character Architecture approval where applicable", "approval_ref": null,
+      "status": "blocked", "validation_contract": "r3a.resident.onboarding.character.v1",
+      "evidence_refs": ["repo://data/residents/dossiers/vicky.v1.0.0.json", "https://github.com/ppow1/R3/issues/58#issuecomment-6769020176"],
+      "revision_pins": {"provisional_dossier": "1.0.0"}, "fields": [
+        {"field_id": "provisional_dossier_only", "value_ref": "repo://data/residents/dossiers/vicky.v1.0.0.json", "classification": "institutional", "owner": "Character Architecture", "source_ref": "repo://data/residents/dossiers/vicky.v1.0.0.json", "approval_required": true, "approval_ref": null, "validation_contract": "r3a.resident.dossier.v1", "evidence_refs": ["repo://data/residents/dossiers/vicky.v1.0.0.json"], "revision_pin": "1.0.0", "expires_at": null, "status": "blocked"}
+      ], "blocker_ref": "https://github.com/ppow1/R3/issues/58#issuecomment-6769020176"
+    },
+    "credentials": {
+      "applicability": "mandatory", "owner": "Security", "authority_source": "institutional resident credential authority",
+      "required_approval": "Security credential provisioning approval", "approval_ref": null,
+      "status": "blocked", "validation_contract": "r3a.resident.onboarding.credentials.v1",
+      "evidence_refs": [], "revision_pins": {}, "fields": [], "blocker_ref": "https://github.com/ppow1/R3/issues/58#issuecomment-6769020176"
+    },
+    "grants": {
+      "applicability": "mandatory", "owner": "Security", "authority_source": "R3Authority and CME effective grant policy",
+      "required_approval": "separate exact-scope capability grant approval", "approval_ref": null,
+      "status": "blocked", "validation_contract": "r3a.resident.onboarding.grants.v1",
+      "evidence_refs": [], "revision_pins": {}, "fields": [], "blocker_ref": "https://github.com/ppow1/R3/issues/58#issuecomment-6769020176"
+    },
+    "runtime": {
+      "applicability": "mandatory", "owner": "Coordinator", "authority_source": "R3A CME module registry and execution profile",
+      "required_approval": "Coordinator registration, configured route and deployment approval", "approval_ref": null,
+      "status": "blocked", "validation_contract": "r3a.resident.onboarding.runtime.v1",
+      "evidence_refs": [], "revision_pins": {}, "fields": [], "blocker_ref": "https://github.com/ppow1/R3/issues/58#issuecomment-6769020176"
+    },
+    "communications": {
+      "applicability": "mandatory", "owner": "Website", "authority_source": "authenticated Coordinator Website roster and CME conversation APIs",
+      "required_approval": "Coordinator roster/chat integration acceptance", "approval_ref": null,
+      "status": "blocked", "validation_contract": "r3a.resident.onboarding.communications.v1",
+      "evidence_refs": ["https://github.com/ppow1/R3/issues/58#issuecomment-6768796862"],
+      "revision_pins": {}, "fields": [], "blocker_ref": "https://github.com/ppow1/R3/issues/58#issuecomment-6768796862"
+    },
+    "acceptance": {
+      "applicability": "mandatory", "owner": "Steward", "authority_source": "R3A operational acceptance evidence and Auditor review",
+      "required_approval": "independent review and separate Steward activation", "approval_ref": null,
+      "status": "blocked", "validation_contract": "r3a.resident.onboarding.acceptance.v1",
+      "evidence_refs": [], "revision_pins": {}, "fields": [], "blocker_ref": "https://github.com/ppow1/R3/issues/58#issuecomment-6769020176"
+    },
+    "lifecycle": {
+      "applicability": "mandatory", "owner": "HR", "authority_source": "R3A resident onboarding lifecycle machine v1",
+      "required_approval": "HR/Security/Coordinator lifecycle procedures", "approval_ref": null,
+      "status": "pending", "validation_contract": "r3a.resident.onboarding.lifecycle.v1",
+      "evidence_refs": [], "revision_pins": {}, "fields": [], "blocker_ref": null
+    }
+  },
+  "audit": []
+}

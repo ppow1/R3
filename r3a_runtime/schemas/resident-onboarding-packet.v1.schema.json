@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.resident.onboarding-packet.v1",
+  "title": "R3A universal resident onboarding packet",
+  "description": "Versioned workflow evidence index. Authoritative systems remain owners of HR, directory, character, credential, grant, and runtime facts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "packet_id", "packet_revision", "create_idempotency_key", "resident_id", "request_context", "state", "resume_state", "created_at", "updated_at", "domains", "audit"],
+  "properties": {
+    "schema_id": {"const": "r3a.resident.onboarding-packet", "type": "string"},
+    "schema_version": {"const": 1, "type": "integer"},
+    "packet_id": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "packet_revision": {"type": "integer", "minimum": 1},
+    "create_idempotency_key": {"type": "string", "minLength": 8, "maxLength": 200},
+    "resident_id": {"type": ["string", "null"], "pattern": "^r3:[a-z0-9_.:-]+$"},
+    "request_context": {
+      "type": "object", "additionalProperties": false,
+      "required": ["display_label", "requested_role", "source_ref", "verification_status"],
+      "properties": {
+        "display_label": {"type": "string", "minLength": 1, "maxLength": 120},
+        "requested_role": {"type": ["string", "null"], "maxLength": 160},
+        "source_ref": {"type": "string", "pattern": "^[a-z][a-z0-9+.-]*://[^\\s]+$"},
+        "verification_status": {"enum": ["request_only", "verified"], "type": "string"}
+      }
+    },
+    "state": {"enum": ["REQUESTED", "IDENTITY_PENDING", "APPOINTMENT_PENDING", "AUTHORIZATION_PENDING", "RUNTIME_PENDING", "VALIDATION_PENDING", "ACTIVE", "BLOCKED", "SUSPENDED", "REVOKED", "OFFBOARDED"], "type": "string"},
+    "resume_state": {"type": ["string", "null"], "enum": ["REQUESTED", "IDENTITY_PENDING", "APPOINTMENT_PENDING", "AUTHORIZATION_PENDING", "RUNTIME_PENDING", "VALIDATION_PENDING", "ACTIVE", null]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "domains": {
+      "type": "object", "additionalProperties": false,
+      "required": ["identity", "appointment", "character", "credentials", "grants", "runtime", "communications", "acceptance", "lifecycle"],
+      "properties": {
+        "identity": {"$ref": "#/$defs/domain"},
+        "appointment": {"$ref": "#/$defs/domain"},
+        "character": {"$ref": "#/$defs/domain"},
+        "credentials": {"$ref": "#/$defs/domain"},
+        "grants": {"$ref": "#/$defs/domain"},
+        "runtime": {"$ref": "#/$defs/domain"},
+        "communications": {"$ref": "#/$defs/domain"},
+        "acceptance": {"$ref": "#/$defs/domain"},
+        "lifecycle": {"$ref": "#/$defs/domain"}
+      }
+    },
+    "audit": {"type": "array", "items": {"$ref": "#/$defs/audit_event"}}
+  },
+  "$defs": {
+    "domain": {
+      "type": "object", "additionalProperties": false,
+      "required": ["applicability", "owner", "authority_source", "required_approval", "status", "validation_contract", "evidence_refs", "revision_pins", "fields", "blocker_ref"],
+      "properties": {
+        "applicability": {"enum": ["mandatory", "conditional", "optional"], "type": "string"},
+        "owner": {"enum": ["HR", "Character Architecture", "Security", "Coordinator", "Website", "Independent Auditor", "Steward"], "type": "string"},
+        "authority_source": {"type": "string", "minLength": 1},
+        "required_approval": {"type": "string", "minLength": 1},
+        "approval_ref": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9+.-]*://[^\\s]+$"},
+        "status": {"enum": ["pending", "verified", "blocked", "not_applicable", "revoked"], "type": "string"},
+        "validation_contract": {"type": "string", "minLength": 1},
+        "evidence_refs": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9+.-]*://[^\\s]+$"}},
+        "revision_pins": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+        "fields": {"type": "array", "items": {"$ref": "#/$defs/evidence_field"}},
+        "blocker_ref": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9+.-]*://[^\\s]+$"}
+      }
+    },
+    "evidence_field": {
+      "type": "object", "additionalProperties": false,
+      "required": ["field_id", "value_ref", "classification", "owner", "source_ref", "approval_required", "approval_ref", "validation_contract", "evidence_refs", "revision_pin", "expires_at", "status"],
+      "properties": {
+        "field_id": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]+$"},
+        "value_ref": {"type": "string", "pattern": "^[a-z][a-z0-9+.-]*://[^\\s]+$"},
+        "classification": {"enum": ["public", "institutional", "personnel_sensitive", "protected"], "type": "string"},
+        "owner": {"enum": ["HR", "Character Architecture", "Security", "Coordinator", "Website", "Independent Auditor", "Steward"], "type": "string"},
+        "source_ref": {"type": "string", "pattern": "^[a-z][a-z0-9+.-]*://[^\\s]+$"},
+        "approval_required": {"type": "boolean"},
+        "approval_ref": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9+.-]*://[^\\s]+$"},
+        "validation_contract": {"type": "string", "minLength": 1},
+        "evidence_refs": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9+.-]*://[^\\s]+$"}},
+        "revision_pin": {"type": ["string", "null"]},
+        "expires_at": {"type": ["string", "null"], "format": "date-time"},
+        "status": {"enum": ["pending", "verified", "blocked", "not_applicable", "revoked"], "type": "string"}
+      }
+    },
+    "audit_event": {
+      "type": "object", "additionalProperties": false,
+      "required": ["event_id", "idempotency_key", "correlation_id", "actor_ref", "actor_role", "action", "from_state", "to_state", "expected_revision", "occurred_at", "reason_ref", "approval_ref", "evidence_refs", "domain_id", "payload_digest"],
+      "properties": {
+        "event_id": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+        "idempotency_key": {"type": "string", "minLength": 8, "maxLength": 200},
+        "correlation_id": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+        "actor_ref": {"type": "string", "minLength": 1},
+        "actor_role": {"enum": ["HR", "Character Architecture", "Security", "Coordinator", "Website", "Independent Auditor", "Steward"], "type": "string"},
+        "action": {"type": "string", "minLength": 1},
+        "from_state": {"type": ["string", "null"]},
+        "to_state": {"type": "string", "minLength": 1},
+        "expected_revision": {"type": "integer", "minimum": 0},
+        "occurred_at": {"type": "string", "format": "date-time"},
+        "reason_ref": {"type": "string", "pattern": "^[a-z][a-z0-9+.-]*://[^\\s]+$"},
+        "approval_ref": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9+.-]*://[^\\s]+$"},
+        "evidence_refs": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9+.-]*://[^\\s]+$"}},
+        "domain_id": {"type": ["string", "null"]},
+        "payload_digest": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"}
+      }
+    }
+  }
+}

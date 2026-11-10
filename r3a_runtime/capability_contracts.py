@@ -143,11 +143,25 @@ def _timestamp(value: str, field: str) -> datetime:
     return result.astimezone(timezone.utc)
 
 
-def validate_schema_definition(schema: Any, *, path: str = "schema") -> None:
+def validate_schema_definition(schema: Any, *, path: str = "schema",
+                              root_schema: dict[str, Any] | None = None) -> None:
     """Validate R3A's supported self-contained JSON Schema subset."""
     if not isinstance(schema, dict):
         raise CapabilityContractError(f"{path}: schema must be an object")
-    allowed = {"$schema", "$id", "title", "description", "type", "required", "properties",
+    root = root_schema or schema
+    if "$ref" in schema:
+        ref = schema["$ref"]
+        if not isinstance(ref, str) or not ref.startswith("#/") or set(schema) != {"$ref"}:
+            raise CapabilityContractError(f"{path}: only local reference-only schema nodes are supported")
+        target: Any = root
+        try:
+            for key in ref[2:].split("/"):
+                target = target[key.replace("~1", "/").replace("~0", "~")]
+        except (KeyError, TypeError):
+            raise CapabilityContractError(f"{path}: unresolved schema reference") from None
+        validate_schema_definition(target, path=path + "->$ref", root_schema=root)
+        return
+    allowed = {"$schema", "$id", "$defs", "title", "description", "type", "required", "properties",
                "additionalProperties", "items", "enum", "const", "pattern", "format",
                "minLength", "maxLength", "minItems", "maxItems", "minimum", "maximum",
                "uniqueItems"}
@@ -170,13 +184,19 @@ def validate_schema_definition(schema: Any, *, path: str = "schema") -> None:
         if not isinstance(additional, (bool, dict)):
             raise CapabilityContractError(f"{path}.additionalProperties must be boolean or a schema")
         if isinstance(additional, dict):
-            validate_schema_definition(additional, path=f"{path}.additionalProperties")
+            validate_schema_definition(additional, path=f"{path}.additionalProperties", root_schema=root)
         for key, child in properties.items():
-            validate_schema_definition(child, path=f"{path}.{key}")
+            validate_schema_definition(child, path=f"{path}.{key}", root_schema=root)
+    if "$defs" in schema:
+        definitions = schema["$defs"]
+        if not isinstance(definitions, dict) or any(not isinstance(k, str) for k in definitions):
+            raise CapabilityContractError(f"{path}.$defs must be an object")
+        for key, child in definitions.items():
+            validate_schema_definition(child, path=f"{path}.$defs.{key}", root_schema=root)
     if "array" in type_set:
         if "items" not in schema:
             raise CapabilityContractError(f"{path}.items is required for array schemas")
-        validate_schema_definition(schema["items"], path=f"{path}.items")
+        validate_schema_definition(schema["items"], path=f"{path}.items", root_schema=root)
         if schema.get("uniqueItems", False) not in (True, False):
             raise CapabilityContractError(f"{path}.uniqueItems must be boolean")
     if "string" in type_set:
