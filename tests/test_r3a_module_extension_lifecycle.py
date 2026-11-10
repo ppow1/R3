@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_module_extension_lifecycle.py
 Component: TEST-R3A-MODULE-EXTENSION-LIFECYCLE
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-10T01:09:23Z
 Created By: Codex GPT-6
 Purpose: Verify generic module metadata survives restart-free configuration reload.
@@ -13,6 +13,7 @@ Authority: AD-024; Modular Plugins #46; fixture acceptance only.
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Add restart-free module configuration reload regression.
 Changed: 2026-11-10T01:35:58Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify safe-boundary refusal, active-module retention, and rollback after reload installation failure.
 Changed: 2026-11-10T01:38:38Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify failed candidate activation cancels replacement and preserves the old selected provider.
+Changed: 2026-11-10T01:38:38Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify a deactivated module can be removed by compatible config reload without restarting CME or resident runtime.
 Supersedes: None
 Contracts: MOD-013; module.lifecycle v2; provider configuration reload.
 Tests: python3 -m pytest -q tests/test_r3a_module_extension_lifecycle.py
@@ -247,5 +248,35 @@ def test_failed_provider_replacement_keeps_old_version_selected_and_active():
         provider_runtime.cancel_replacement.assert_awaited_once_with("example.provider", "1.0.0")
         provider_runtime.stop.assert_not_awaited()
         store.record_module_replacement.assert_not_awaited()
+
+    asyncio.run(run())
+
+
+def test_config_reload_removes_deactivated_module_without_restarting_core():
+    async def run():
+        previous, current = _settings("a" * 64), _settings("b" * 64)
+        current.capability_registry = SimpleNamespace(discover=lambda **kwargs: [])
+        provider_runtime = SimpleNamespace(
+            settings=previous, registry=previous.capability_registry, processes={}, install_all=AsyncMock())
+        store = SimpleNamespace(settings=previous, activate_config=AsyncMock(return_value="b" * 64),
+                                register_resource=AsyncMock(), register_model_role=AsyncMock())
+        cme = object.__new__(CME)
+        cme.settings = previous
+        cme.store = store
+        cme.module_id = "resident.fixture"
+        cme.provider_runtime = provider_runtime
+        cme.active_activities = {}
+        cme.module_pid = 41200
+        cme.module_process = SimpleNamespace(pid=41200)
+        with patch("r3a_runtime.cme.load_settings", return_value=current), \
+                patch("r3a_runtime.cme.create_authorization_provider", return_value=object()):
+            result = await CME._control_request(cme, "config.reload", {}, "config-remove-deactivated-module")
+        assert result["activated"] is True
+        assert cme.settings is current
+        assert provider_runtime.registry is current.capability_registry
+        assert current.capability_registry.discover() == []
+        assert provider_runtime.processes == {}
+        assert cme.module_pid == 41200 and cme.module_process.pid == 41200
+        provider_runtime.install_all.assert_awaited_once()
 
     asyncio.run(run())
