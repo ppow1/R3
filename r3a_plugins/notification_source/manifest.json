@@ -3,7 +3,7 @@
   "plugin_id": "r3a.notification-source",
   "plugin_version": "1.0.0",
   "artifact_ref": "plugin.py",
-  "artifact_sha256": "19d080f806313c5cf33f48d34f19bef7a87ddcee71193f39a4ee98ad735f3239",
+  "artifact_sha256": "737fad6d26db991b357da4a81d30291c47340534bfbf3716ac3b043044d8399e",
   "configuration_schema": {
     "schema_id": "r3a.notification-source.config.v1",
     "type": "object",
@@ -49,7 +49,7 @@
     "provider_id": "r3a.notification-source",
     "provider_version": "1.0.0",
     "entrypoint": "r3a_plugins.notification_source.plugin:create_provider",
-    "artifact_sha256": "19d080f806313c5cf33f48d34f19bef7a87ddcee71193f39a4ee98ad735f3239"
+    "artifact_sha256": "737fad6d26db991b357da4a81d30291c47340534bfbf3716ac3b043044d8399e"
   },
   "capability_id": "notification.source.read",
   "operation": {
@@ -61,7 +61,7 @@
       "provider_id": "r3a.notification-source",
       "provider_version": "1.0.0",
       "entrypoint": "r3a_plugins.notification_source.plugin:create_provider",
-      "artifact_sha256": "19d080f806313c5cf33f48d34f19bef7a87ddcee71193f39a4ee98ad735f3239"
+      "artifact_sha256": "737fad6d26db991b357da4a81d30291c47340534bfbf3716ac3b043044d8399e"
     },
     "input_schema": {
       "type": "object",

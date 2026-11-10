@@ -73,7 +73,8 @@ class NotificationAdapterTests(unittest.TestCase):
         manifest_path = root / "r3a_plugins/notification_source/manifest.activity-intake.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         artifact = manifest_path.parent / manifest["artifact_ref"]
-        self.assertEqual(manifest["artifact_sha256"], hashlib.sha256(artifact.read_bytes()).hexdigest())
+        canonical = artifact.read_bytes().replace(b"\r\n", b"\n")
+        self.assertEqual(manifest["artifact_sha256"], hashlib.sha256(canonical).hexdigest())
         descriptor = validate_operation(manifest["operation"])
         self.assertEqual("read", descriptor["effect_class"])
         self.assertEqual(["notification.source.read"], descriptor["required_grants"])

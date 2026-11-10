@@ -107,7 +107,8 @@ def create_provider(configuration: dict[str, Any]) -> InstitutionEventNotificati
 def to_activity_intake(notification: dict[str, Any], source_evidence: dict[str, Any], *,
                        provider: dict[str, Any], configuration_revision: str,
                        lifecycle_projection: dict[str, str], task_class: str = "objective_reasoning",
-                       parent_activity_id: str | None = None) -> dict[str, Any]:
+                       parent_activity_id: str | None = None,
+                       activity_type: str = "notification.event.review") -> dict[str, Any]:
     """Project the established N1 result for CME's generic durable intake boundary.
 
     This is a pure adapter projection. CME still validates authorization, task
@@ -127,6 +128,8 @@ def to_activity_intake(notification: dict[str, Any], source_evidence: dict[str, 
     if (not isinstance(configuration_revision, str) or not configuration_revision.strip()
             or not isinstance(lifecycle_projection, dict)):
         raise ValueError("generic intake configuration provenance is incomplete")
+    if activity_type != "notification.event.review":
+        raise ValueError("notification adapter activity type is not registered")
     required_phases = {"received", "actionable", "acknowledged", "resolved", "blocked"}
     if (set(lifecycle_projection) != required_phases
             or any(not isinstance(value, str) or not value.startswith("grace.notification.")
@@ -162,7 +165,10 @@ def to_activity_intake(notification: dict[str, Any], source_evidence: dict[str, 
             "causation_id": None,
         },
         "activity": {
-            "activity_type": "grace.objective",
+            # Keep N1's Grace objective construction intact for compatibility,
+            # while the generic boundary routes this activity through the
+            # notification module's registered durable handler contract.
+            "activity_type": activity_type,
             "task_class": task_class,
             "objective": objective,
             "input": {"event_kind": "notification", "notification": notification},

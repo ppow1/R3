@@ -35,11 +35,11 @@
     },
     {
       "artifact_ref": "../notification_source/manifest.json",
-      "artifact_sha256": "8288542a21d1ca8d407d5af005b289a087db00a5827009ea45f6c719f7b90ca7"
+      "artifact_sha256": "de8f199d0769080c9e94d891b8fba13271cb246bc9bf67443f13ecfa57829508"
     },
     {
       "artifact_ref": "../notification_source/plugin.py",
-      "artifact_sha256": "19d080f806313c5cf33f48d34f19bef7a87ddcee71193f39a4ee98ad735f3239"
+      "artifact_sha256": "737fad6d26db991b357da4a81d30291c47340534bfbf3716ac3b043044d8399e"
     },
     {
       "artifact_ref": "../../r3a_runtime/schemas/activity-intake.v1.schema.json",
@@ -63,7 +63,7 @@
     },
     {
       "artifact_ref": "../../r3a_runtime/capability_contracts.py",
-      "artifact_sha256": "107ea3b45871477ab24038114d4f00b1bf92d4b78b2ca4882c859635800780c3"
+      "artifact_sha256": "8f6584602d6b6a9c2e8e3f01694c75da721b40a0f1b8f64b91ec9bf587da5480"
     }
   ]
 }

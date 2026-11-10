@@ -279,7 +279,10 @@ class NotificationServicePresentationTests(unittest.TestCase):
         for item in [{"artifact_ref":manifest["artifact_ref"],"artifact_sha256":manifest["artifact_sha256"]},
                      *manifest["supporting_artifacts"]]:
             artifact=(ROOT/"r3a_plugins/notification_service"/item["artifact_ref"]).resolve()
-            self.assertEqual(item["artifact_sha256"],hashlib.sha256(artifact.read_bytes()).hexdigest())
+            # Artifact digests identify repository content; normalize checkout
+            # line endings so the same manifest validates on Windows and Linux.
+            canonical=artifact.read_bytes().replace(b"\r\n",b"\n")
+            self.assertEqual(item["artifact_sha256"],hashlib.sha256(canonical).hexdigest())
         config=load_config(ROOT/"r3a_plugins/notification_service/config.example.json")
         categories={item["category"] for item in config["subscriptions"]}
         self.assertTrue({"resident_objective_completed","resident_objective_blocked",
