@@ -40,6 +40,13 @@ class ModuleAcceptancePreparationTests(unittest.TestCase):
         self.assertIn("canonical operation", acceptance)
         self.assertIn("CME performs authorization and scheduling", acceptance)
 
+        allowed_residents = manifest["operation"]["caller_constraints"]["allowed_residents"]
+        self.assertEqual(["resident.grace"], allowed_residents)
+        self.assertIn("remain disabled until the #43 executor-identity correction", runbook)
+        self.assertIn("caller.principal_id=resident:grace", runbook)
+        self.assertIn("caller.resident_id=resident.grace", runbook)
+        self.assertIn('"module_id": "resident.grace"', runbook)
+
 
 if __name__ == "__main__":
     unittest.main()

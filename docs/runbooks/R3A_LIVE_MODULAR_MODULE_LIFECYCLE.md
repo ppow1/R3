@@ -32,7 +32,9 @@ Install is versioned under `r3a_plugins/octominer_telemetry_2_0_0/`. Repeating t
 
 The deployment owner adds the installed `manifest.json` and a separately protected configuration file to the existing `capability_operations` configuration list, and adds `infrastructure.octominer.telemetry.read` to the existing module's declared `module.capabilities`. Then submit the normal CME `config.reload` operation. Preserve the established telemetry configuration and host provenance. Keep SSH on pinned host keys and read-only commands; do not store credential material in the module package or repository.
 
-This package declares `infrastructure.octominer.telemetry.read`; it creates no grant. For the Grace tool path, the caller is `resident.grace` and the invocation is associated with one durable Grace activity. The tightest scope the current CME grant store can enforce is therefore:
+This package declares `infrastructure.octominer.telemetry.read`; it creates no grant. **The module must remain disabled until the #43 executor-identity correction is independently reviewed, reconciled into the Coordinator baseline, and deployed.** On the current managed path, the directory resident ID is `resident:grace`; CME uses that ID for grant discovery and as both the invocation principal and resident. The OctoMiner manifest allows only `resident.grace`, so the current request fails its caller constraint, and a grant under either identity alone does not make the current path work.
+
+After the reviewed #43 identity correction is active, the intended identities must remain distinct and consistent: `caller.principal_id=resident:grace`, `caller.resident_id=resident.grace`, and the grant lookup subject is the executor `resident.grace`. The narrowest available grant for a single controlled activity is then:
 
 ```json
 {
@@ -42,7 +44,7 @@ This package declares `infrastructure.octominer.telemetry.read`; it creates no g
 }
 ```
 
-The `activity_id` must be the activity used for the controlled invocation. A grant with `{}` scope is global for that resident/capability and is not acceptable for this acceptance run. The current `capability-check` CLI cannot check an activity-scoped grant; verify the grant row and its audit event through Coordinator-approved read-only database access, then verify the actual authorization decision in the CME invocation evidence. Do not use `activity-intake-accept` for this operation: it invokes as CME's configured module identity, while this operation declares `resident.grace` as its allowed resident.
+The `activity_id` must be the activity used for the controlled invocation. A grant with `{}` scope is global for that executor/capability and is not acceptable for this acceptance run. The current `capability-check` CLI cannot check an activity-scoped grant; verify the grant row and its audit event through Coordinator-approved read-only database access, then verify the actual authorization decision in CME invocation evidence. Do not use `activity-intake-accept` for this operation: it invokes as CME's configured module identity, while the telemetry operation requires Grace's canonical capability path.
 
 **Scope limitation requiring Coordinator disposition:** CME currently authorizes by resident, capability, and optional activity ID. `resource_scope` is not passed to the configured grant provider, and the OctoMiner provider currently reads its configured host without applying invocation target filters. The package config fixes the source host to `octo1`, but this is configuration containment rather than host-level authorization. Do not claim source/host-scoped authorization. Before any managed activation, the Coordinator must either explicitly accept this limitation for a one-activity read-only trial with the configured host independently verified, or block activation until target-scope enforcement is implemented and reviewed.
 
