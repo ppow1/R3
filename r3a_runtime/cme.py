@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.19.1
+File Revision: 1.20.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -19,6 +19,7 @@ Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Keep full capability e
 Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Compact legacy durable capability receipts when resuming activities.
 Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Normalize typed module evidence into generic CME resident envelopes.
 Changed: 2026-11-09 | R3A-STEWARD-CHAT-ROSTER | R3A Coordinator | Preserve directory roster rows and evaluate chat readiness through configured office routes and existing execution grants.
+Changed: 2026-11-10T00:14:15Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Separate direct Steward conversation authorization from resident-to-resident delegation while retaining target execution authorization.
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Dispatch generic versioned Steward read/write effects through existing authorization, invocation, and provider paths.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
@@ -1016,24 +1017,18 @@ class CME:
                     self.settings.model_role_for_office(str(entry.get("office_role", "")))
                 except (LookupError, ValueError):
                     route_available = False
-                delegation_authorized = False
                 target_authorized = False
                 if route_available:
-                    try:
-                        await self.store.require_capability(self.module_id, "resident.delegate")
-                        delegation_authorized = True
-                    except PermissionError:
-                        pass
                     try:
                         await self.store.require_capability(entry["resident_id"],
                                                             "resident.objective.execute")
                         target_authorized = True
                     except PermissionError:
                         pass
-                chat_available = route_available and delegation_authorized and target_authorized
+                chat_available = route_available and target_authorized
                 if not route_available:
                     chat_status = "office_role_route_unavailable"
-                elif not delegation_authorized or not target_authorized:
+                elif not target_authorized:
                     chat_status = "required_execution_grant_missing"
                 else:
                     chat_status = "available"
@@ -1044,7 +1039,7 @@ class CME:
                                   "onboarding_status": "unknown",
                                   "execution_status": "configured" if route_available else "unavailable",
                                   "authorization_status": "not_evaluated" if not route_available else (
-                                      "authorized" if delegation_authorized and target_authorized else "denied"),
+                                      "authorized" if target_authorized else "denied"),
                                   "chat_available": chat_available,
                                   "chat_status": chat_status})
             return {"contract": "r3a.resident-directory-view.v1", "contract_version": "1.0.0",
@@ -1073,7 +1068,6 @@ class CME:
             resident_entry = next(item for item in residents if item.get("resident_id") == resident_id)
             if resident_id != self.module_id:
                 self.settings.model_role_for_office(str(resident_entry.get("office_role", "")))
-                await self.store.require_capability(self.module_id, "resident.delegate")
                 await self.store.require_capability(resident_id, "resident.objective.execute")
             conversation = await self.store.create_steward_conversation(
                 principal_id, resident_id,
@@ -1256,6 +1250,7 @@ class CME:
                 raise ValueError("Grace objective intake cannot use autonomic-only model roles")
             requested_role_id = payload.get("role_id")
             requested_route = payload.get("route_id")
+            event_kind = str(payload.get("event_kind", "objective"))
             target_resident_id = payload.get("target_resident_id")
             resident_profile = None
             requested_activity_id = payload.get("requested_activity_id", payload.get("activity_id"))
@@ -1265,21 +1260,25 @@ class CME:
                     raise ValueError("target_resident_id must be a distinct canonical resident identity")
                 activity_id = str(requested_activity_id or uuid.uuid5(
                     uuid.NAMESPACE_URL, f"r3a.resident.objective:{idempotency_key}"))
-                delegation_auth = await self._authorize_capability(
-                    "resident.delegate", activity_id=activity_id,
-                    request_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"resident.delegate:{idempotency_key}")),
-                    context={"target_resident_id": target_resident_id,
-                             "intake": operation},
-                    resident_id=self.module_id)
+                delegation_auth = None
+                if event_kind != "conversation":
+                    delegation_auth = await self._authorize_capability(
+                        "resident.delegate", activity_id=activity_id,
+                        request_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"resident.delegate:{idempotency_key}")),
+                        context={"target_resident_id": target_resident_id,
+                                 "intake": operation},
+                        resident_id=self.module_id)
                 resident_profile, selected_role = await self._resolve_resident_execution_profile(
                     target_resident_id, activity_id=activity_id,
                     idempotency_key=idempotency_key)
+                execute_context = {"resident_profile": resident_profile}
+                if delegation_auth is not None:
+                    execute_context["delegation_audit_event_id"] = delegation_auth["audit_event_id"]
                 target_auth = await self._authorize_capability(
                     "resident.objective.execute", activity_id=activity_id,
                     request_id=str(uuid.uuid5(uuid.NAMESPACE_URL,
                                               f"resident.execute:{idempotency_key}")),
-                    context={"resident_profile": resident_profile,
-                             "delegation_audit_event_id": delegation_auth["audit_event_id"]},
+                    context=execute_context,
                     resident_id=target_resident_id)
                 if target_auth.get("allowed") is False:
                     raise PermissionError("target resident is not authorized for objective execution")
@@ -1309,7 +1308,7 @@ class CME:
                 raise ValueError(f"model role {selected_role.role_id} is not authorized for {task_class}")
             return await self.store.submit_grace_objective(
                 str(payload.get("objective", "")), idempotency_key,
-                str(payload.get("event_kind", "objective")),
+                event_kind,
                 str(selected_role.route_id), str(selected_role.role_id),
                 tuple(payload.get("required_capabilities", ())),
                 modalities,
