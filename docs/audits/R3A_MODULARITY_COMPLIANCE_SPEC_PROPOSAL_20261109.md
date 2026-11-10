@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/audits/R3A_MODULARITY_COMPLIANCE_SPEC_PROPOSAL_20261109.md
 Component: R3A-MODULARITY-COMPLIANCE-SPEC
-File Revision: 1.1.0
+File Revision: 1.2.0
 Created: 2026-11-09T23:34:13Z
 Created By: Codex GPT-6, acting as independent Auditor
 Purpose: Propose an enforceable, cross-cutting definition of R3A modular compliance for Steward review.
@@ -12,14 +12,15 @@ Dependencies: Approved R3 Charter Revision 2; R3A Charter and Roadmap Baseline 1
 Authority: Proposal only under Steward Directive — Auditor / Reviewer V2, 2026-11-09. Does not amend approved requirements or authorize implementation.
 Changed: 2026-11-09T23:34:13Z | R3A-AUDIT-V2 | Codex GPT-6 | Initial modular compliance specification proposal.
 Changed: 2026-11-09 | R3A-AUDIT-V2 | Codex GPT-6 | Recalibrated P-01–P-13 against executable provider, reload, dependency, authorization, and Website evidence; see existing extensibility verification.
-Supersedes: None
+Changed: 2026-11-10T00:17:40Z | R3A-MODULARITY-DECISIONS | Codex GPT-6 | Mark historical proposal superseded by Steward-authorized architecture specification v1.
+Supersedes: None. Superseded By: `docs/architecture/R3A_MODULARITY_COMPLIANCE_SPECIFICATION_V1.md` revision 1.0.0, authorized under AD-024.
 Contracts: MOD-001–MOD-010; AP0-004–010; AD-001–010; capability, lifecycle, state, and shared domain interfaces.
 Tests: N/A; specification proposal.
-History/Predecessor: New proposal; initial revision in auditor branch.
+History/Predecessor: Initial proposal revision in auditor branch; immediate predecessor commit 87d868d7e2a64da1d58ca71eb9899d61b5a1d2b2 (file blob bc98aca9bfe46fe18a403492e337d2c420bf5c16).
 -->
 # R3A Modularity Compliance Specification — proposal for Steward review
 
-**Status:** Proposed, not approved.
+**Status:** Historical proposal, superseded. The governing specification is [R3A Modularity Compliance Specification v1](../architecture/R3A_MODULARITY_COMPLIANCE_SPECIFICATION_V1.md), authorized by Steward decision AD-024. The classifications and evidence below remain historical audit records; the final disposition is in the governing specification.
 **Review baseline:** `9a41d7e9647d37c2b7dc6f2aca3be3f5f82ccfe9`; current extension verification and contract comparison are in [the existing extensibility report](R3A_EXISTING_EXTENSIBILITY_VERIFICATION_20261109.md) and [the interface gap analysis](R3A_INTERFACE_CONTRACT_GAP_ANALYSIS_20261109.md).
 **Purpose:** Turn the approved modularity direction into an auditable definition across core, modules, residents, external integrations, and user interfaces.
 

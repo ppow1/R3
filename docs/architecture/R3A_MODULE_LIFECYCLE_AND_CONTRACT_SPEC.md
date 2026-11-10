@@ -2,24 +2,27 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_MODULE_LIFECYCLE_AND_CONTRACT_SPEC.md
 Component: R3A-MODULE-CONTRACT
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-06T03:39:05Z
 Created By: Codex GPT-6
 Purpose: Specify module discovery, versioning and runtime lifecycle requirements for R3A.
 Execution Model: N/A; contract specification.
 Observability: Registry state and lifecycle event lineage.
 Dependencies: R3A Architecture Charter; AP0 Technical Specification; State Machine and Diagnostic Contract.
-Authority: Steward directive; field encoding and artifact trust choices remain open unless explicitly specified here.
+Authority: Steward directive; field encoding and artifact trust choices remain open except where specified by AD-024.
 Changed: 2026-11-06T03:39:05Z | R3A-BASELINE-001 | Codex GPT-6 | Establish initial module contract specification.
 Changed: 2026-11-06T05:18:48Z | AP0-M1-PLAN | Codex GPT-6 | Select AP0 module process binding and minimum manifest/RPC compatibility profile.
+Changed: 2026-11-10T00:17:40Z | R3A-MODULARITY-DECISIONS | Codex GPT-6 | Apply AD-024: distinguish module roles, require generic resident binding and workflow handler support, clarify restart-free operations and same-UID process boundary.
 Supersedes: None.
 Contracts: AD-004 through AD-008; AP0-007/AP0-008.
 Tests: Not run; documentation only.
-History/Predecessor: Git blob b77d4f50fd6e187b8cf7d9a7a301ba60256be15c at baseline commit f629a570d904719d1f13d2ceaddff7a2af2ce00d.
+History/Predecessor: Git blob b77d4f50fd6e187b8cf7d9a7a301ba60256be15c at baseline commit f629a570d904719d1f13d2ceaddff7a2af2ce00d; immediate predecessor commit 2cf6f502d968a5b6e9eb4ab517d7bbea3765253a (file blob a80d4be11652afe62541587a6e3a8045746c5f48).
 -->
 # Module Lifecycle and Contract Specification
 
 **Status:** Planned contract. The lifecycle capabilities are directed. AP0-M1 selects the local process binding and minimum compatibility shape below; installation trust, distribution and later promotion remain open.
+
+**Architecture authority:** AD-024 and [R3A Modularity Compliance Specification v1](R3A_MODULARITY_COMPLIANCE_SPECIFICATION_V1.md) require the provider profile to remain intact and add generic resident-executor and durable-workflow-handler profiles. The detailed interface requirements below govern those extensions; implementation remains subject to roadmap/issue authorization.
 
 ## Contract principles
 
@@ -35,6 +38,10 @@ History/Predecessor: Git blob b77d4f50fd6e187b8cf7d9a7a301ba60256be15c at baseli
 | MOD-008 | Module state and events are database-backed and namespaced/owned; upgrades declare migration/recovery compatibility before activation. | Persistence/schema and migration decisions. | Restart preserves module state/event lineage; upgrade either migrates compatibly or remains visibly incompatible without discarding prior state. |
 | MOD-009 | Shutdown, replacement or failed activation preserves durable work and records whether it drained, checkpointed, resumed or remains blocked. | Activity continuation/idempotency contract; MOD-003. | Inject stop/replacement during active work and recover or show an explicit blocked state with prior work identity and lineage intact. |
 | MOD-010 | The module's health and version are based on observed process/contract status; declarations alone are not health evidence. | Health probe contract; diagnostics interface. | Reported health changes with observed failure/staleness and returns only after readiness is observed. |
+| MOD-011 | The registry/lifecycle boundary distinguishes capability-provider, resident-executor, and durable-workflow-handler roles. A module may implement multiple roles; each binding declares its applicable versioned interfaces. | AD-024; existing provider registry/process protocol. | Register one fixture for each role and discover declared contract/binding metadata without module-specific CME or Ring 0 source edits. |
+| MOD-012 | Resident executors bind to canonical resident identity and an authoritative existing HR/directory association through a versioned external binding. Binding is not authority; CME revalidates authorization at dispatch. | Resident execution profile; existing HR/directory and capability authorization contracts. | Register and replace an unlisted fixture resident executor by binding/config; no resident-ID or entrypoint branch in CME; invalid association, binding or grant fails closed. |
+| MOD-013 | Compatible module registration, config reload, activation, deactivation, replacement and removal operate without restarting CME or Ring 0 during normal operation. | AD-004/024; safe-boundary config reload; registry/lifecycle. | Perform each operation while both process identities and health remain stable; incompatible infrastructure maintenance follows governed procedure. |
+| MOD-014 | Durable workflow handlers receive, advance, and report module-owned domain work through a generic contract routed by CME's existing durable activity scheduler and lifecycle. | `r3a.activity-intake.v1`; activity/event store, scheduler, module process protocol and capability invocation. | A non-Grace handler processes durable work without adding activity-type branches to CME; test replay, progress, checkpoint, restart, denial and replacement. |
 
 ## Minimum declared contract information
 
@@ -82,11 +89,23 @@ The compatibility evaluator MUST distinguish compatible, incompatible and unknow
 
 ## AP0-M1 binding and protocol profile
 
-AP0-M1 modules run in separate unprivileged child processes supervised by CME. CME communicates over a private Unix domain socket using UTF-8 JSON-lines messages. Every message carries `protocol_version`, `module_id`, immutable `module_version`, `request_id` and correlation ID; responses carry the same IDs plus explicit result/error and observation time. The minimum calls are `hello`, `health`, `prepare`, `activate`, `execute`, `checkpoint` and `stop`. Module processes do not connect directly to the institutional database; CME persists authoritative state and module output through the contract. Control requests are idempotent by request ID or return the existing correlated operation.
+AP0-M1 modules run in separate child processes supervised by CME. The currently verified provider child runs under the same service UID as CME, with filtered environment and private socket controls; this is process/protocol separation and is **not** a distinct OS privilege boundary or sandbox. The module may have access to resources readable by the CME service identity. The runtime filters environment variables by default; an explicit manifest allowlist can pass configured references, so credential exposure to a trusted module is possible. Do not describe this baseline as “unprivileged” or sandboxed. Stronger isolation requires a separate approved threat model. CME communicates over a private Unix domain socket using UTF-8 JSON-lines messages. Every message carries `protocol_version`, `module_id`, immutable `module_version`, `request_id` and correlation ID; responses carry the same IDs plus explicit result/error and observation time. The minimum calls are `hello`, `health`, `prepare`, `activate`, `execute`, `checkpoint` and `stop`. CME persists authoritative state and module output through the contract; same-UID process separation is not an OS-enforced guarantee that a module cannot access resources available to CME. Control requests are idempotent by request ID or return the existing correlated operation.
 
-For AP0, compatibility requires matching protocol major version and a declared supported minor range containing the host minor version. A missing/unknown declaration is incompatible. The manifest is locally staged and immutable after registration; its digest is checked before launch. No general dependency solver or remote installer is included. AP0 may register a test/observer artifact from a local path explicitly listed by configuration; unlisted paths are rejected. This local digest check is integrity identification, not a claim of signed provenance or a complete trust policy.
+For AP0, compatibility requires matching protocol major version and a declared supported minor range containing the host minor version. A missing/unknown declaration is incompatible. The manifest is locally staged and immutable after registration; its digest is checked before launch. The existing dependency evaluator and range grammar are authoritative. No remote installer is implied. Artifacts must be staged through the approved artifact process and explicitly declared by validated configuration; the provider runtime can load compatible config without restarting CME. This local digest check is integrity identification, not a claim of signed provenance or a complete trust policy.
 
-CME is the sole writer of module lifecycle records. Module readiness is observed through process health and successful contract handshake. Replacement closes admission, checkpoints/drains when supported, starts and validates the new version, then records the effective version. If readiness or recovery is uncertain, the operation remains visibly blocked/degraded and the old artifact/state lineage stays attributable; there is no destructive automatic rollback that discards state.
+CME is the sole writer of module lifecycle records. Module readiness is observed through process health and successful contract handshake. Normal registration/configuration/activation/deactivation/replacement/removal of compatible modules must not restart CME or Ring 0. A safe activity boundary may defer a reload; active work is drained/checkpointed or left visibly blocked. Replacement closes admission, checkpoints/drains when supported, starts and validates the new version, then records the effective version. If readiness or recovery is uncertain, the operation remains visibly blocked/degraded and the old artifact/state lineage stays attributable; there is no destructive automatic rollback that discards state.
+
+## Role-specific extension contracts required by AD-024
+
+### Resident executor binding
+
+Use existing module registration/lifecycle and resident execution-profile contracts. Add versioned adjacent binding `r3a.resident.module-binding.v1`; keep `r3a.resident.execution-profile@1.0.0` backward-compatible. The binding references canonical resident principal, authoritative HR/directory association and revision, module ID/version/artifact digest, binding revision, executor contract range, and external config revision. CME resolves this binding generically and dispatches through existing resident IPC/scheduler. It does not define identity, create HR rows, encode grants, or hardcode entrypoints/residents. Activation and replacement use CME lifecycle and normal no-restart behavior.
+
+### Durable activity handler
+
+Use existing activity intake, durable activity/event store, scheduler, capability invocation, and module lifecycle. Add generic contract `r3a.activity-handler.v1`; bind namespaced activity types to one compatible active module/handler using external validated config/manifest declarations. CME owns activity ID, idempotency, authorization, lease, institutionally visible lifecycle/events, routing, diagnostics, and recovery coordination. Handler owns domain policy, task-specific transitions/evidence, and declared private state. The handler protocol reuses module `execute/checkpoint/health/stop`, returning schema-validated progress/outcome/evidence linked to the activity and module version. Missing/ambiguous/incompatible handlers fail closed. The Grace objective path remains supported during incremental migration.
+
+These extensions are contract obligations, not new runtime services. Detailed schemas, implementation sequence and acceptance evidence are in the modularity compliance specification.
 
 ## Remaining decisions outside the AP0-M1 minimum
 

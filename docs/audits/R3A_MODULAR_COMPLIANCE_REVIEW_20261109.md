@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/audits/R3A_MODULAR_COMPLIANCE_REVIEW_20261109.md
 Component: R3A-INDEPENDENT-MODULAR-AUDIT
-File Revision: 1.2.0
+File Revision: 1.3.0
 Created: 2026-11-09T23:28:20Z
 Created By: Codex GPT-6, acting as independent Auditor
 Purpose: Record evidence-backed modular compliance and chat architecture review at the stated baseline.
@@ -13,17 +13,18 @@ Authority: Steward directive — R3A Independent Auditor / Reviewer V2, 2026-11-
 Changed: 2026-11-09T23:28:20Z | R3A-AUDIT-V2 | Codex GPT-6 | Initial independent compliance review.
 Changed: 2026-11-09T23:37:38Z | R3A-AUDIT-V2 | Codex GPT-6 | Add Coordinator 722a102 source review and focused test results; preserve original baseline finding.
 Changed: 2026-11-09 | R3A-AUDIT-V2 | Codex GPT-6 | Supersede startup-only provider-framework finding with executable extensibility evidence; defer broad implementation audit pending Steward approval.
+Changed: 2026-11-10T00:17:40Z | R3A-MODULARITY-DECISIONS | Codex GPT-6 | Link final AD-024 specification and update resident/handler workstream status.
 Supersedes: None
 Contracts: MOD-001–MOD-010; STM-001–STM-007; capability and Website consumer contracts.
 Tests: `node --test tests/test_steward_workspace_api.mjs` at 722a102: 14 passed. Python pytest blocked at collection because psycopg_pool is unavailable; existing venvs lack pytest. No runtime tests.
-History/Predecessor: Revision 1.0.0 in commit cfbeca794a184dc2fbd2bcfb0827bf7677650fdf.
+History/Predecessor: Revision 1.0.0 in commit cfbeca794a184dc2fbd2bcfb0827bf7677650fdf; immediate predecessor commit 87d868d7e2a64da1d58ca71eb9899d61b5a1d2b2 (file blob 893d4a5484af2eeaf0cd7f6397fd75647361f747).
 -->
 # R3A modular compliance review — 2026-11-09
 
 **Reviewer:** Independent Auditor
 **Baseline:** `9a41d7e9647d37c2b7dc6f2aca3be3f5f82ccfe9`
 **Review type:** Source, specification, and handoff review, supplemented by isolated provider-extension tests in revision 1.2.0. No live runtime changes.
-**Status:** Preliminary module-framework finding is superseded by the 2026-11-09 existing extensibility verification; broad post-approval module audit remains deferred.
+**Status:** Preliminary module-framework finding is superseded by the 2026-11-09 existing extensibility verification; broad module-by-module implementation acceptance has not been performed in this document; current corrections are tracked in the AD-024 gap analysis.
 
 ## A. Auditor scope
 
@@ -42,7 +43,7 @@ The source hierarchy used for this review is:
 
 The Website-wide functional requirements in GitHub Issue #51 were issued after the original roadmap baseline. They are assessed as later Steward requirements, not retroactively applied to earlier work. The 2026-11-09 Coordinator handoff and integration inventory are evidence, not specifications.
 
-The proposed [Modularity Compliance Specification](R3A_MODULARITY_COMPLIANCE_SPEC_PROPOSAL_20261109.md) and [Interface Contract Gap Analysis](R3A_INTERFACE_CONTRACT_GAP_ANALYSIS_20261109.md) are now the Auditor's cross-cutting proposal for Steward review; neither silently amends approved authority.
+The Steward-authorized [Modularity Compliance Specification v1](../architecture/R3A_MODULARITY_COMPLIANCE_SPECIFICATION_V1.md) now governs module reviews under AD-024. The [Interface Contract Gap Analysis](R3A_INTERFACE_CONTRACT_GAP_ANALYSIS_20261109.md) records verified gaps and implementation ownership; the prior proposal remains historical.
 
 The previous-auditor branch requested by the Steward was inspected locally. Its ref resolves to `db9ba0e` (`Test Grace continuation from durable checkpoint`), shared with `engineering/r3a-phase0-20261105`; it contains no auditor-specific review or deliverables. No distinct prior audit report or GitHub auditor branch evidence was identified in the available local refs. The valid 2026-11-07 modularity audit and 2026-11-09 handoff were reused and checked against current source.
 
@@ -78,7 +79,7 @@ The roster separation itself is source-level compliant at `722a102`. End-to-end 
 
 | Workstream | Result | Evidence and deviation | Owner / next evidence |
 |---|---|---|---|
-| Modular provider framework | **PASS for capability providers at source/fixture level; resident/workflow limits remain** | Focused existing fixtures demonstrate external provider registration, discovery, lifecycle, authorization, invocation, replacement, stop/disable, dependency checks and unrelated-provider coexistence. A disposable config reload harness adds an already staged provider to a running CME process without changing its PID. This disproves the earlier claim that providers can only load at startup. It does not establish arbitrary resident executor loading, remote package staging, live PostgreSQL/Ring 0 operation, or generic durable module-owned handlers. | See [existing extensibility verification](R3A_EXISTING_EXTENSIBILITY_VERIFICATION_20261109.md). Correct stale foundation documentation. Consider resident binding or generic durable handler only if approved scope requires it and exact source limitation blocks that scope. |
+| Modular provider framework | **PASS for capability providers at source/fixture level; resident/workflow limits remain** | Focused existing fixtures demonstrate external provider registration, discovery, lifecycle, authorization, invocation, replacement, stop/disable, dependency checks and unrelated-provider coexistence. A disposable config reload harness adds an already staged provider to a running CME process without changing its PID. This disproves the earlier claim that providers can only load at startup. It does not establish arbitrary resident executor loading, remote package staging, live PostgreSQL/Ring 0 operation, or generic durable module-owned handlers. | See [existing extensibility verification](R3A_EXISTING_EXTENSIBILITY_VERIFICATION_20261109.md). Correct stale foundation documentation. AD-024 requires generic resident binding and durable handlers; see the approved specification and gap-analysis backlog for the minimal extension. |
 | Capability invocation and authorization | **PASS (source contract), NOT VERIFIED (all live cases)** | `R3A_CAPABILITY_CONTRACT_V1.md` defines versioned discovery/invocation; CME explicitly returns `authorization_evaluated: false` for discovery and invocation uses grants. This follows AD-P03/MOD-006. Full per-module denial and authorized live invocation evidence is not provided for every module. | Module owners/Coordinator: retain invocation IDs, grant/decision evidence, provider version and result for representative allowed and denied cases. |
 | Institutional directory | **PASS (live read reported), FAIL (chat projection)** | Handoff reports fresh measured directory snapshot: one binding/resident, `resident:grace`; CHAT-01 details the projection deviation. The directory contract defines source freshness, not onboarding status. | Coordinator: preserve source digest/invocation; provide independent roster/readiness fields. |
 | Website and Steward access | **PASS (anonymous boundary only), NOT VERIFIED (authenticated workflows)** | Handoff reports `/login` served, anonymous session/resident APIs return 401, website unit active; Issue #51 comments report session-integrated shell and TLS checks. They do not establish authenticated resident chat or all class-I administration workflows. Website v1 is expressly a consumer contract proposal. | Website #51 / Coordinator: authenticated browser evidence for roster/chat, notifications, settings, telemetry, resident administration, and engineering workflow APIs; mark unimplemented features honestly. |
