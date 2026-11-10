@@ -238,8 +238,9 @@ class NotificationSourceAdapterTests(unittest.TestCase):
         manifest = json.loads((PACKAGE / "manifest.activity-intake.json").read_text())
         module = validate_module_manifest(manifest["module_manifest"], manifest["operation"], manifest)
         self.assertEqual("r3a.module-manifest.v1", module["contract_id"])
-        self.assertEqual("1.1.0", module["module_version"])
-        self.assertEqual("1.1.0", manifest["operation"]["operation_revision"])
+        self.assertEqual("1.2.0", module["module_version"])
+        self.assertEqual("1.2.0", manifest["operation"]["operation_revision"])
+        self.assertEqual("1.1.0", module["activity_handler"]["contract_version"])
         self.assertEqual("notification.event.review",
                          module["activity_handler"]["activity_types"][0])
         registry = [{
@@ -278,9 +279,20 @@ class NotificationSourceAdapterTests(unittest.TestCase):
             cme._authorization_decision = AsyncMock(return_value=SimpleNamespace(
                 decision_id="decision-test", audit_event_id="audit-test", policy_revision="policy-test"))
             cme._registered_module_call = AsyncMock(return_value={"result": {
-                "outcome": "completed", "progress": {"phase": "reviewed"},
+                "outcome": "blocked", "reason": "generic CME Grace objective continuation is unavailable",
+                "progress": {"phase": "notification.received"},
                 "checkpoint": {"source_id": "r3a.institution-events",
-                               "source_event_id": str(EVENT_ID)}}})
+                                "source_event_id": str(EVENT_ID),
+                                "correlation_id": str(CORRELATION_ID),
+                                "idempotency_key": f"notification:r3a.institution-events:{EVENT_ID}",
+                                "phase": "awaiting_grace_disposition"},
+                "evidence": [{"source_id": f"notification:r3a.institution-events:{EVENT_ID}",
+                               "source_ref": f"r3a.institution_events/{EVENT_ID}",
+                               "sha256": "a" * 64, "provenance": "fixture"}],
+                "lifecycle_evidence": {"received": "grace.notification.received",
+                                        "actionable": "grace.notification.actionable",
+                                        "blocked": "grace.notification.blocked",
+                                        "acknowledged": None, "resolved": None}}})
             notification = {"source_id": "r3a.institution-events", "source_event_id": str(EVENT_ID)}
             activity = {"activity_id": str(uuid.uuid4()), "attempt_id": str(uuid.uuid4()),
                         "idempotency_key": f"notification:r3a.institution-events:{EVENT_ID}",
@@ -298,8 +310,9 @@ class NotificationSourceAdapterTests(unittest.TestCase):
             self.assertEqual("r3a.notification-activity-intake", call.args[0])
             self.assertEqual("notification.event.review", call.args[3]["activity_type"])
             self.assertEqual(notification, call.args[3]["input"]["notification"])
-            self.assertEqual(2, cme._authorization_decision.await_count)
-            cme.store.finish_activity.assert_awaited_once()
+            self.assertEqual(1, cme._authorization_decision.await_count)
+            cme.store.finish_activity.assert_not_awaited()
+            cme.store.block_activity.assert_awaited_once()
 
         asyncio.run(scenario())
 
