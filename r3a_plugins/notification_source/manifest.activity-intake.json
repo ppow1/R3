@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "plugin_id": "r3a.notification-activity-intake",
-  "plugin_version": "1.0.0",
+  "plugin_version": "1.1.0",
   "artifact_ref": "intake.py",
   "artifact_sha256": "74abb61d56b6b4e59a225234e6473a373551ea1830bc3a0f5789b3748c77806a",
   "configuration_schema": {
@@ -47,7 +47,7 @@
   },
   "provider": {
     "provider_id": "r3a.notification-activity-intake",
-    "provider_version": "1.0.0",
+    "provider_version": "1.1.0",
     "entrypoint": "r3a_plugins.notification_source.intake:create_provider",
     "artifact_sha256": "74abb61d56b6b4e59a225234e6473a373551ea1830bc3a0f5789b3748c77806a"
   },
@@ -56,10 +56,10 @@
     "contract_id": "r3a.capability-operation.v1",
     "contract_version": "1.0.0",
     "operation_id": "notification.activity-intake.prepare",
-    "operation_revision": "1.0.0",
+    "operation_revision": "1.1.0",
     "provider": {
       "provider_id": "r3a.notification-activity-intake",
-      "provider_version": "1.0.0",
+      "provider_version": "1.1.0",
       "entrypoint": "r3a_plugins.notification_source.intake:create_provider",
       "artifact_sha256": "74abb61d56b6b4e59a225234e6473a373551ea1830bc3a0f5789b3748c77806a"
     },
@@ -386,7 +386,103 @@
   "supporting_artifacts": [
     {
       "artifact_ref": "plugin.py",
-      "artifact_sha256": "19d080f806313c5cf33f48d34f19bef7a87ddcee71193f39a4ee98ad735f3239"
+      "artifact_sha256": "318aab4a555e4737e533b56ababe9238f9527459c685fb25ab637d1e82bfffd1"
     }
-  ]
+  ],
+  "module_manifest": {
+    "contract_id": "r3a.module-manifest.v1",
+    "contract_version": "1.1.0",
+    "module_id": "r3a.notification-activity-intake",
+    "module_version": "1.1.0",
+    "owner": "R3A Notifications",
+    "binding": {
+      "contract_id": "r3a.capability-provider.v1",
+      "protocol_major": 1,
+      "protocol_min_minor": 0,
+      "protocol_max_minor": 0,
+      "entrypoint": "r3a_plugins.notification_source.intake:create_provider"
+    },
+    "dependencies": [],
+    "configuration": {
+      "schema_ref": "r3a.notification-source.config.v1",
+      "configuration_ref": "notification-source.json"
+    },
+    "capability_refs": [
+      "notification.activity-intake.prepare",
+      "notification.source.read"
+    ],
+    "resource_refs": [],
+    "state_namespace": "r3a.notification.activity-intake",
+    "migration_contract": "r3a.notification.activity-intake-state.v1",
+    "recovery_policy": "notification.source-event-idempotency.v1",
+    "artifact": {
+      "artifact_ref": "intake.py",
+      "artifact_sha256": "74abb61d56b6b4e59a225234e6473a373551ea1830bc3a0f5789b3748c77806a"
+    },
+    "activity_handler": {
+      "contract_id": "r3a.activity-handler",
+      "contract_version": "1.0.0",
+      "handler_id": "r3a.notification.event-review",
+      "handler_version": "1.0.0",
+      "activity_types": ["notification.event.review"],
+      "activity_contract_range": {
+        "contract_id": "r3a.activity-intake",
+        "major": 1,
+        "min_minor": 0,
+        "max_minor": 0
+      },
+      "handler_contract_range": {
+        "contract_id": "r3a.activity-handler",
+        "major": 1,
+        "min_minor": 0,
+        "max_minor": 0
+      },
+      "request_schema": {
+        "type": "object",
+        "required": ["event_kind", "notification"],
+        "properties": {
+          "event_kind": {"type": "string", "const": "notification"},
+          "notification": {"type": "object"}
+        },
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "type": "object",
+        "required": ["outcome", "progress", "checkpoint"],
+        "properties": {
+          "outcome": {"type": "string", "enum": ["completed", "blocked"]},
+          "reason": {"type": "string", "maxLength": 512},
+          "progress": {"type": "object"},
+          "checkpoint": {"type": "object"}
+        },
+        "additionalProperties": false
+      },
+      "progress_schema": {
+        "type": "object",
+        "required": ["phase"],
+        "properties": {"phase": {"type": "string", "minLength": 1, "maxLength": 64}},
+        "additionalProperties": false
+      },
+      "checkpoint_schema": {
+        "type": "object",
+        "required": ["source_id", "source_event_id"],
+        "properties": {
+          "source_id": {"type": "string", "minLength": 1, "maxLength": 160},
+          "source_event_id": {"type": "string", "minLength": 1, "maxLength": 256}
+        },
+        "additionalProperties": false
+      },
+      "progress_semantics": "Progress records only observed handler phases; it never implies notification acknowledgment or resolution.",
+      "checkpoint_semantics": "The checkpoint binds recovery to the immutable notification source and event identity.",
+      "required_capabilities": ["notification.source.read"],
+      "resource_constraints": {"cpu_millis": 250, "memory_bytes": 134217728, "max_concurrency": 1},
+      "state_namespace": "r3a.notification.activity-intake",
+      "migration_contract": "r3a.notification.activity-intake-state.v1",
+      "recovery": {
+        "mode": "checkpointed",
+        "idempotency_contract": "notification.source-event-idempotency.v1",
+        "checkpoint_contract": "notification.source-event-checkpoint.v1"
+      }
+    }
+  }
 }

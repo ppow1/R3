@@ -1,3 +1,19 @@
+# R3 CONTROLLED SOURCE
+# File: r3a_plugins/notification_source/plugin.py
+# Component: R3A-NOTIFICATION-SOURCE-ADAPTER
+# File Revision: 1.0.1
+# Created: Unknown (legacy)
+# Created By: Unknown (legacy)
+# Purpose: Read allowlisted immutable CME events and project versioned notification intake envelopes.
+# Execution Model: Registered read-only capability provider and pure intake projection.
+# Observability: Source identity, event identity, digest, provenance, and provider failures.
+# Dependencies: r3a.notification-intake.v1; r3a.activity-intake.v1; CME capability grants.
+# Authority: Issue #48; source reads require the existing notification.source.read grant.
+# Changed: 2026-11-10T18:53:48Z | R3A-CORE-FREEZE-CORRECTION | Codex GPT-6 | Emit notification-owned activity type for the generic handler boundary.
+# Supersedes: None.
+# Contracts: r3a.notification-intake.v1; r3a.activity-intake.v1.
+# Tests: tests/test_r3a_notification_source_plugin.py.
+# History/Predecessor: Git commit bcae2fc; previous source behavior retained by legacy N1 operation.
 """Read-only capability-operation adapter for the existing CME event ledger."""
 from __future__ import annotations
 
@@ -107,7 +123,8 @@ def create_provider(configuration: dict[str, Any]) -> InstitutionEventNotificati
 def to_activity_intake(notification: dict[str, Any], source_evidence: dict[str, Any], *,
                        provider: dict[str, Any], configuration_revision: str,
                        lifecycle_projection: dict[str, str], task_class: str = "objective_reasoning",
-                       parent_activity_id: str | None = None) -> dict[str, Any]:
+                       parent_activity_id: str | None = None,
+                       activity_type: str = "notification.event.review") -> dict[str, Any]:
     """Project the established N1 result for CME's generic durable intake boundary.
 
     This is a pure adapter projection. CME still validates authorization, task
@@ -127,6 +144,8 @@ def to_activity_intake(notification: dict[str, Any], source_evidence: dict[str, 
     if (not isinstance(configuration_revision, str) or not configuration_revision.strip()
             or not isinstance(lifecycle_projection, dict)):
         raise ValueError("generic intake configuration provenance is incomplete")
+    if activity_type != "notification.event.review":
+        raise ValueError("notification adapter activity type is not registered")
     required_phases = {"received", "actionable", "acknowledged", "resolved", "blocked"}
     if (set(lifecycle_projection) != required_phases
             or any(not isinstance(value, str) or not value.startswith("grace.notification.")
@@ -162,7 +181,10 @@ def to_activity_intake(notification: dict[str, Any], source_evidence: dict[str, 
             "causation_id": None,
         },
         "activity": {
-            "activity_type": "grace.objective",
+            # Keep N1's Grace objective construction intact for compatibility,
+            # while the generic boundary routes this activity through the
+            # notification module's registered durable handler contract.
+            "activity_type": activity_type,
             "task_class": task_class,
             "objective": objective,
             "input": {"event_kind": "notification", "notification": notification},

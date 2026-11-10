@@ -1,3 +1,19 @@
+# R3 CONTROLLED TEST SOURCE
+# File: tests/test_r3a_notification_source_plugin.py
+# Component: R3A-NOTIFICATION-SOURCE-REGRESSION
+# File Revision: 1.0.1
+# Created: Unknown (legacy)
+# Created By: Unknown (legacy)
+# Purpose: Verify notification source provenance, generic intake projection, and handler registration.
+# Execution Model: Pytest with read-only source and registry fixtures.
+# Observability: Assertions cover source identity, digest, authorization requirements, and lifecycle projection.
+# Dependencies: r3a_plugins.notification_source; capability and activity-handler contracts.
+# Authority: Issue #48; no production source or service access.
+# Changed: 2026-11-10T18:53:48Z | R3A-CORE-FREEZE-CORRECTION | Codex GPT-6 | Verify notification-owned activity type and handler declaration with N1 compatibility.
+# Supersedes: None.
+# Contracts: r3a.notification-intake.v1; r3a.activity-intake.v1; r3a.activity-handler.v1.
+# Tests: This test module.
+# History/Predecessor: Commit bcae2fc; source adapter regression suite.
 """Domain tests for the notification source adapter, independent of CME intake."""
 from __future__ import annotations
 
@@ -13,8 +29,9 @@ from unittest.mock import patch
 
 from r3a_plugins.notification_source import plugin
 from r3a_runtime.capability_contracts import (CapabilityRegistry, normalize_provider_result,
-                                              validate_operation)
+                                              validate_module_manifest, validate_operation)
 from r3a_runtime.config import _validate_plugin_config, load_settings
+from r3a_runtime.module_extensions import resolve_activity_handler
 from r3a_runtime.notifications import same_notification_input, validate_notification_envelope
 from tests.test_r3a_modular_autonomy import make_config
 
@@ -209,8 +226,32 @@ class NotificationSourceAdapterTests(unittest.TestCase):
         self.assertEqual(provider_result.evidence["payload_sha256"], projection["source"]["payload_sha256"])
         self.assertEqual("cfg-17", projection["provenance"]["configuration_revision"])
         self.assertEqual("objective_reasoning", projection["activity"]["task_class"])
+        self.assertEqual("notification.event.review", projection["activity"]["activity_type"])
         self.assertEqual("grace.notification.acknowledged",
                          projection["lifecycle_projection"]["acknowledged"])
+
+    def test_generic_notification_handler_is_registered_and_legacy_n1_contract_remains(self):
+        manifest = json.loads((PACKAGE / "manifest.activity-intake.json").read_text())
+        module = validate_module_manifest(manifest["module_manifest"], manifest["operation"], manifest)
+        self.assertEqual("r3a.module-manifest.v1", module["contract_id"])
+        self.assertEqual("1.1.0", module["module_version"])
+        self.assertEqual("1.1.0", manifest["operation"]["operation_revision"])
+        self.assertEqual("notification.event.review",
+                         module["activity_handler"]["activity_types"][0])
+        registry = [{
+            "module_id": module["module_id"], "module_version": module["module_version"],
+            "lifecycle_state": "ACTIVE",
+            "manifest": {
+                "module_id": module["module_id"], "module_version": module["module_version"],
+                "artifact_digest": module["artifact"]["artifact_sha256"],
+                "capability_refs": module["capability_refs"],
+                "activity_handler": module["activity_handler"],
+            },
+        }]
+        resolved = resolve_activity_handler(registry, "notification.event.review")
+        self.assertEqual("r3a.notification.event-review", resolved["handler"]["handler_id"])
+        legacy = json.loads((PACKAGE / "manifest.json").read_text())
+        self.assertEqual("r3a.notification-intake", legacy["operation"]["output_schema"]["properties"]["contract_id"]["const"])
 
     def test_generic_projection_rejects_mismatched_evidence_and_bad_lifecycle(self):
         with patch.dict(os.environ, {"R3A_NOTIFICATION_SOURCE_DSN": "fixture-secret"}):
