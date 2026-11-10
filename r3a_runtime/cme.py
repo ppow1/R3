@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.20.0
+File Revision: 1.20.1
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -20,6 +20,7 @@ Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Codex GPT-6 | Compact legacy durable
 Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Normalize typed module evidence into generic CME resident envelopes.
 Changed: 2026-11-09 | R3A-STEWARD-CHAT-ROSTER | R3A Coordinator | Preserve directory roster rows and evaluate chat readiness through configured office routes and existing execution grants.
 Changed: 2026-11-10T00:14:15Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Separate direct Steward conversation authorization from resident-to-resident delegation while retaining target execution authorization.
+Changed: 2026-11-10T00:34:18Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Expose exact-grant revocation through the existing private CME operator control path.
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Dispatch generic versioned Steward read/write effects through existing authorization, invocation, and provider paths.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
@@ -957,6 +958,11 @@ class CME:
             return {"grant_id": str(grant_id), "module_id": module_id,
                     "capability_id": capability_id, "activity_id": payload.get("activity_id"),
                     "granted_by": f"uid:{os.getuid()}"}
+        if operation == "capability.revoke":
+            revoked = await self.store.revoke_capability(
+                str(payload.get("grant_id", "")), str(payload.get("reason", "")))
+            return {"operation": "capability.revoke", **revoked,
+                    "revoked_by": f"uid:{os.getuid()}"}
         if operation == "capability.check":
             module_id, capability_id = str(payload["module_id"]), str(payload["capability_id"])
             try:

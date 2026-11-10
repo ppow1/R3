@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.14.0
+File Revision: 1.14.1
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -32,6 +32,7 @@ Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist autho
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Add grant validation for explicit-principal Steward access modes.
 Changed: 2026-11-07T13:20:00Z | R3A-AP2-CAPABILITY-INTEGRATION | Codex GPT-6 | Store canonical invocation authorization in a nonreserved evidence column and verify durable SQL recovery against isolated PostgreSQL.
 Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Persist validated generic activity-intake source lineage and evidence through the existing durable activity/event ledger.
+Changed: 2026-11-10T00:34:18Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Add exact-grant revocation to the existing CME grant store with durable audit evidence.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Persist typed Engineering assignments in durable Grace inbox intake without relaxing AP1 acceptance criteria.
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Park objective dependencies durably, requeue after prerequisite completion, and expose bounded lineage evidence.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Snapshot the configured escalation policy on each durable objective so continuation uses its original budget and allowed routes.
@@ -636,6 +637,42 @@ class Store:
                               None, None, None, "ACTIVE", reason,
                               {"module_id": module_id, "grant_id": str(grant_id), "scope": scope})
             return grant_id
+
+    async def revoke_capability(self, grant_id: str, reason: str) -> dict[str, Any]:
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 1000:
+            raise ValueError("capability revocation reason must be nonempty text of at most 1000 characters")
+        try:
+            parsed_grant_id = uuid.UUID(grant_id)
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise ValueError("grant_id must be a UUID") from exc
+        async with self.pool.connection() as conn, conn.transaction():
+            row = await (await conn.execute(
+                "SELECT grant_id,module_id,capability_id,scope,revoked_at "
+                "FROM r3a.capability_grants WHERE grant_id=%s FOR UPDATE",
+                (parsed_grant_id,),
+            )).fetchone()
+            if row is None:
+                raise KeyError(f"Capability grant not found: {parsed_grant_id}")
+            if row["revoked_at"] is not None:
+                return {"grant_id": str(row["grant_id"]), "module_id": row["module_id"],
+                        "capability_id": row["capability_id"], "scope": row["scope"],
+                        "revoked_at": row["revoked_at"], "already_revoked": True}
+            updated = await (await conn.execute(
+                "UPDATE r3a.capability_grants SET revoked_at=clock_timestamp() "
+                "WHERE grant_id=%s AND revoked_at IS NULL RETURNING revoked_at",
+                (parsed_grant_id,),
+            )).fetchone()
+            if updated is None:
+                raise RuntimeError("Capability grant changed during revocation")
+            await self._event(
+                conn, "capability.revoked", "capability", row["capability_id"],
+                None, None, "ACTIVE", "REVOKED", reason,
+                {"module_id": row["module_id"], "grant_id": str(parsed_grant_id),
+                 "scope": row["scope"]},
+            )
+            return {"grant_id": str(parsed_grant_id), "module_id": row["module_id"],
+                    "capability_id": row["capability_id"], "scope": row["scope"],
+                    "revoked_at": updated["revoked_at"], "already_revoked": False}
 
     async def require_capability(self, module_id: str, capability_id: str,
                                  activity_id: str | None = None) -> None:

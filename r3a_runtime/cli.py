@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cli.py
 Component: R3A-OPERATOR-CLI
-File Revision: 1.6.0
+File Revision: 1.6.1
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Expose operator-invoked AP0 diagnostics, CME controls and isolated backup actions.
@@ -22,6 +22,7 @@ Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Permit configured ob
 Changed: 2026-11-07 | R3A-AP1-N1 | Codex GPT-6 | Add idempotent, source-bound institution-event notification intake.
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Expose generic registered provider install, activation, deactivation, replacement and status operations through CME control.
 Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Expose authorized generic activity-intake acceptance through registered read-only providers.
+Changed: 2026-11-10T00:34:18Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Add exact grant-ID revocation to the existing local CME operator CLI.
 Supersedes: None.
 Contracts: AP0-007/008/010/013; R3A-019; AP0-M1 D8/D9; r3a.model-route-decision.v1; r3a.model-readiness.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; no model inference in this slice.
@@ -78,6 +79,8 @@ async def _run(args: argparse.Namespace, settings: Settings) -> Any:
     elif args.command == "capability-grant":
         payload = {"module_id": args.module_id, "capability_id": args.capability_id,
                    "reason": args.reason, "activity_id": args.activity_id}
+    elif args.command == "capability-revoke":
+        payload = {"grant_id": args.grant_id, "reason": args.reason}
     elif args.command == "grace-objective-submit":
         payload = {"objective": args.objective, "event_kind": "objective",
                    "required_capabilities": args.required_capability,
@@ -166,8 +169,12 @@ def main() -> None:
         if name == "capability-grant":
             cmd.add_argument("--reason", required=True)
             cmd.add_argument("--activity-id", help="Scope an effectful capability grant to one durable activity")
+    revoke = commands.add_parser("capability-revoke",
+                                 help="Revoke one exact capability grant through CME with durable audit")
+    revoke.add_argument("--grant-id", required=True)
+    revoke.add_argument("--reason", required=True)
     for name in ("module-install", "module-activate", "module-stop", "module-replace",
-                 "capability-check", "capability-grant", "capability-module-install",
+                 "capability-check", "capability-grant", "capability-revoke", "capability-module-install",
                  "capability-module-activate", "capability-module-deactivate",
                  "capability-module-status", "capability-module-replace", "config-reload"):
         commands.choices[name].add_argument("--idempotency-key")
