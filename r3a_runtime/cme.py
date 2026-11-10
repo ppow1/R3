@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.20.7
+File Revision: 1.20.8
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -26,6 +26,7 @@ Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GP
 Changed: 2026-11-10 | #51 | R3A Coordinator | Exclude unavailable optional tools and apply conversation-specific completion validation.
 Changed: 2026-11-10T13:15:00Z | R3A-GRACE-CAPABILITY-AUTONOMY | Codex GPT-6 | Filter resident capability discovery by current grants and pass registered provider limitations to Grace.
 Changed: 2026-11-10T14:05:00Z | R3A-GRACE-CAPABILITY-AUTONOMY | Codex GPT-6 | Authorize primary resident tools against the running executor module while retaining the directory principal.
+Changed: 2026-11-10T15:20:26Z | R3A-MODULAR-EXECUTOR-ROLE | Codex GPT-6 | Publish the configured generic executor role and promote compatible registered primary-module metadata.
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Dispatch generic versioned Steward read/write effects through existing authorization, invocation, and provider paths.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
@@ -60,7 +61,7 @@ Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Consume versio
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; module.lifecycle v2; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py; tests/test_r3a_telemetry_providers.py; tests/test_r3a_capability_contracts.py; tests/test_r3a_engineering.py.
-History/Predecessor: Modular baseline ca2d29e47336dfb3d6a0e633c20bd31e1a200978; AP2 baseline b018578ea576813fed2c973236f35d82843daf14.
+History/Predecessor: Immediate predecessor blob e503a741bf1cde59cfaa6ccd1e4183f6d12c3224 at base c62bb28d026e1c1cad99c90583f0debae067f2a1; prior modular and AP2 baselines retained.
 """
 from __future__ import annotations
 
@@ -242,7 +243,7 @@ class CME:
         return isinstance(previous_grace, dict) and previous_grace == current_grace
 
     def manifest(self, version: str | None = None) -> dict[str, Any]:
-        return {
+        manifest = {
             "module_id": self.module_id,
             "module_version": version or self.settings.module_version,
             "contract_id": self.settings.module_contract_id,
@@ -263,6 +264,11 @@ class CME:
             "resource_refs": ["foundation.observer", "institution.reasoning"],
             "state_namespace": self.module_id,
         }
+        resident_executor = getattr(self.settings, "module_resident_executor", None)
+        if resident_executor is not None:
+            manifest["manifest_contract"] = "r3a.module-manifest.v1@1.1.0"
+            manifest["resident_executor"] = copy.deepcopy(resident_executor)
+        return manifest
 
     async def start(self) -> None:
         await self.store.open()
@@ -435,11 +441,19 @@ class CME:
 
     async def _ensure_registered_module(self) -> None:
         module = self.manifest()
-        exists = await self.store.rows(
-            "SELECT 1 FROM r3a.module_registry WHERE module_id=%s AND module_version=%s",
+        existing = await self.store.rows(
+            "SELECT manifest,lifecycle_state,health,diagnostic FROM r3a.module_registry "
+            "WHERE module_id=%s AND module_version=%s",
             (self.module_id, self.module_version),
         )
-        if exists:
+        if existing:
+            prior = existing[0]
+            prior_manifest = prior.get("manifest")
+            if prior_manifest == module:
+                return
+            await self.store.register_module(
+                module, prior.get("lifecycle_state", "INSTALLED"),
+                prior.get("health", "unknown"), prior.get("diagnostic") or {})
             return
         await self.store.register_module(module, "INSTALLED", "unknown")
         await self.store.module_state(self.module_id, self.module_version, "INSTALLED", "unknown",
