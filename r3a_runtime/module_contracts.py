@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/module_contracts.py
 Component: R3A-MODULE-CONTRACTS
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-08
 Created By: R3A Coordinator
 Purpose: Validate reusable semantic version and dependency graph rules for modules.
@@ -11,8 +11,9 @@ Observability: Deterministic configuration errors before module registration or 
 Dependencies: Python standard library.
 Authority: Steward Directive — Coordinator Next Integration Cycle.
 Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | Add dependency range and cycle validation.
+Changed: 2026-11-10T02:02:46Z | R3A-MODULAR-PLUGINS-46 | Accept the versioned v1.1 module-manifest promotion while preserving v1.0 compatibility.
 Supersedes: None.
-Contracts: r3a.module-manifest.v1.
+Contracts: r3a.module-manifest.v1@1.0.0 and @1.1.0.
 Tests: tests/test_r3a_module_contracts.py.
 History/Predecessor: New file.
 """
@@ -105,7 +106,8 @@ def validate_dependency_graph(configured_versions: dict[str, set[str]],
 def is_legacy_manifest_promotion(previous: dict, current: dict) -> bool:
     """Permit only synthesized-default metadata to become an explicit v1 manifest."""
     if (previous.get("manifest_contract") is not None
-            or current.get("manifest_contract") != "r3a.module-manifest.v1@1.0.0"
+            or current.get("manifest_contract") not in {
+                "r3a.module-manifest.v1@1.0.0", "r3a.module-manifest.v1@1.1.0"}
             or previous.get("owner") != "manifest"
             or previous.get("configuration_ref") != "external-config"
             or previous.get("migration_contract") != "provider-stateless.v1"

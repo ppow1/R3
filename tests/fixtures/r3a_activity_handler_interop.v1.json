@@ -1,0 +1,165 @@
+{
+  "fixture_contract": "r3a.activity-handler.interop-fixture.v1@1.0.0",
+  "module_manifest": {
+    "contract_id": "r3a.module-manifest.v1",
+    "contract_version": "1.1.0",
+    "module_id": "example.billing-invoice-handler",
+    "module_version": "1.0.0",
+    "owner": "R3A interop fixture",
+    "binding": {
+      "contract_id": "r3a.capability-provider.v1",
+      "protocol_major": 1,
+      "protocol_min_minor": 0,
+      "protocol_max_minor": 0,
+      "entrypoint": "tests.r3a_activity_handler_interop_provider:create_provider"
+    },
+    "dependencies": [],
+    "configuration": {
+      "schema_ref": "example.billing-handler.config.v1",
+      "configuration_ref": "tests/fixtures/r3a_activity_handler_interop.config.json"
+    },
+    "capability_refs": ["billing.invoice.handle", "billing.invoice.read"],
+    "resource_refs": [],
+    "state_namespace": "example.billing.invoice",
+    "migration_contract": "example.billing.invoice-migration.v1",
+    "recovery_policy": "stable-invoice-idempotency.v1",
+    "artifact": {
+      "artifact_ref": "tests/r3a_activity_handler_interop_provider.py",
+      "artifact_sha256": "43e8d4e2cfa308a84c103771ec294ee611adcc428ccd7f15dc5115a9bb051e8c"
+    },
+    "activity_handler": {
+      "contract_id": "r3a.activity-handler",
+      "contract_version": "1.0.0",
+      "handler_id": "example.billing.invoice-review",
+      "handler_version": "1.0.0",
+      "activity_types": ["billing.invoice.review"],
+      "activity_contract_range": {
+        "contract_id": "r3a.activity-intake",
+        "major": 1,
+        "min_minor": 0,
+        "max_minor": 0
+      },
+      "handler_contract_range": {
+        "contract_id": "r3a.activity-handler",
+        "major": 1,
+        "min_minor": 0,
+        "max_minor": 0
+      },
+      "request_schema": {
+        "type": "object",
+        "properties": {"invoice_id": {"type": "string", "minLength": 1}},
+        "required": ["invoice_id"],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "type": "object",
+        "properties": {
+          "outcome": {"type": "string", "const": "completed"},
+          "invoice_id": {"type": "string", "minLength": 1},
+          "status": {"type": "string", "const": "validated"},
+          "progress": {"type": "object", "properties": {
+            "phase": {"type": "string"}, "completed": {"type": "integer", "minimum": 0}},
+            "required": ["phase", "completed"], "additionalProperties": false},
+          "checkpoint": {"type": "object", "properties": {
+            "cursor": {"type": "integer", "minimum": 0}},
+            "required": ["cursor"], "additionalProperties": false}
+        },
+        "required": ["outcome", "invoice_id", "status", "progress", "checkpoint"],
+        "additionalProperties": false
+      },
+      "progress_schema": {
+        "type": "object",
+        "properties": {"phase": {"type": "string"}, "completed": {"type": "integer", "minimum": 0}},
+        "required": ["phase", "completed"],
+        "additionalProperties": false
+      },
+      "checkpoint_schema": {
+        "type": "object",
+        "properties": {"cursor": {"type": "integer", "minimum": 0}},
+        "required": ["cursor"],
+        "additionalProperties": false
+      },
+      "progress_semantics": "completed counts monotonically increase; phase names the latest completed stage.",
+      "checkpoint_semantics": "cursor resumes at the next invoice after the last committed invoice.",
+      "required_capabilities": ["billing.invoice.read"],
+      "resource_constraints": {"cpu_millis": 250, "memory_bytes": 134217728, "max_concurrency": 1},
+      "state_namespace": "example.billing.invoice",
+      "migration_contract": "example.billing.invoice-handler-state.v1",
+      "recovery": {
+        "mode": "checkpointed",
+        "idempotency_contract": "stable-invoice-id.v1",
+        "checkpoint_contract": "example.billing.invoice-checkpoint.v1"
+      }
+    }
+  },
+  "operation": {
+    "operation_id": "billing.invoice.handle",
+    "provider": {
+      "provider_id": "example.billing-invoice-handler",
+      "provider_version": "1.0.0",
+      "entrypoint": "tests.r3a_activity_handler_interop_provider:create_provider",
+      "artifact_sha256": "43e8d4e2cfa308a84c103771ec294ee611adcc428ccd7f15dc5115a9bb051e8c"
+    }
+  },
+  "source_manifest": {
+    "artifact_sha256": "43e8d4e2cfa308a84c103771ec294ee611adcc428ccd7f15dc5115a9bb051e8c",
+    "configuration_schema": {"schema_id": "example.billing-handler.config.v1"}
+  },
+  "registry_row": {
+    "module_id": "example.billing-invoice-handler",
+    "module_version": "1.0.0",
+    "lifecycle_state": "ACTIVE",
+    "manifest": {
+      "manifest_contract": "r3a.module-manifest.v1@1.1.0",
+      "module_id": "example.billing-invoice-handler",
+      "module_version": "1.0.0",
+      "contract_id": "r3a.capability-provider.v1",
+      "protocol_major": 1,
+      "protocol_minor": 0,
+      "protocol_min_minor": 0,
+      "protocol_max_minor": 0,
+      "owner": "R3A interop fixture",
+      "entrypoint": "tests.r3a_activity_handler_interop_provider:create_provider",
+      "dependencies": [],
+      "configuration_schema": {"schema_id": "example.billing-handler.config.v1"},
+      "configuration_ref": "tests/fixtures/r3a_activity_handler_interop.config.json",
+      "capability_refs": ["billing.invoice.handle", "billing.invoice.read"],
+      "environment_allowlist": [],
+      "migration_contract": "example.billing.invoice-migration.v1",
+      "artifact_ref": "tests/r3a_activity_handler_interop_provider.py",
+      "artifact_digest": "43e8d4e2cfa308a84c103771ec294ee611adcc428ccd7f15dc5115a9bb051e8c",
+      "recovery_policy": "stable-invoice-idempotency.v1",
+      "resource_refs": [],
+      "state_namespace": "example.billing.invoice",
+      "activity_handler": {
+        "contract_id": "r3a.activity-handler",
+        "contract_version": "1.0.0",
+        "handler_id": "example.billing.invoice-review",
+        "handler_version": "1.0.0",
+        "activity_types": ["billing.invoice.review"],
+        "activity_contract_range": {"contract_id": "r3a.activity-intake", "major": 1, "min_minor": 0, "max_minor": 0},
+        "handler_contract_range": {"contract_id": "r3a.activity-handler", "major": 1, "min_minor": 0, "max_minor": 0},
+        "request_schema": {"type": "object", "properties": {"invoice_id": {"type": "string", "minLength": 1}}, "required": ["invoice_id"], "additionalProperties": false},
+        "result_schema": {"type": "object", "properties": {"outcome": {"type": "string", "const": "completed"}, "invoice_id": {"type": "string", "minLength": 1}, "status": {"type": "string", "const": "validated"}, "progress": {"type": "object", "properties": {"phase": {"type": "string"}, "completed": {"type": "integer", "minimum": 0}}, "required": ["phase", "completed"], "additionalProperties": false}, "checkpoint": {"type": "object", "properties": {"cursor": {"type": "integer", "minimum": 0}}, "required": ["cursor"], "additionalProperties": false}}, "required": ["outcome", "invoice_id", "status", "progress", "checkpoint"], "additionalProperties": false},
+        "progress_schema": {"type": "object", "properties": {"phase": {"type": "string"}, "completed": {"type": "integer", "minimum": 0}}, "required": ["phase", "completed"], "additionalProperties": false},
+        "checkpoint_schema": {"type": "object", "properties": {"cursor": {"type": "integer", "minimum": 0}}, "required": ["cursor"], "additionalProperties": false},
+        "progress_semantics": "completed counts monotonically increase; phase names the latest completed stage.",
+        "checkpoint_semantics": "cursor resumes at the next invoice after the last committed invoice.",
+        "required_capabilities": ["billing.invoice.read"],
+        "resource_constraints": {"cpu_millis": 250, "memory_bytes": 134217728, "max_concurrency": 1},
+        "state_namespace": "example.billing.invoice",
+        "migration_contract": "example.billing.invoice-handler-state.v1",
+        "recovery": {"mode": "checkpointed", "idempotency_contract": "stable-invoice-id.v1", "checkpoint_contract": "example.billing.invoice-checkpoint.v1"}
+      }
+    }
+  },
+  "activity_request": {"invoice_id": "invoice-fixture-001"},
+  "expected_result": {
+    "outcome": "completed",
+    "invoice_id": "invoice-fixture-001",
+    "status": "validated",
+    "progress": {"phase": "completed", "completed": 1},
+    "checkpoint": {"cursor": 1}
+  },
+  "authorization_expectation": "billing.invoice.read and activity.handler.execute require existing CME grants; registry membership is not authorization."
+}
