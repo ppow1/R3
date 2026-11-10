@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: web/steward-workspace-api.js
 Component: R3A-STEWARD-WORKSPACE-CLIENT
-File Revision: 1.0.14
+File Revision: 1.0.15
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Same-origin client for versioned resident conversation and notification contracts
@@ -24,6 +24,8 @@ Changed: 2026-11-10 | #51 | Ignore stale resident/conversation responses after s
 Changed: 2026-11-10 | #51 | Report and disable an empty authoritative resident roster accurately.
 Changed: 2026-11-10 | #51 | Render compact resident chat, accessible message actions, and Eastern timestamps.
 Changed: 2026-11-10 | #51 | Add truthful live readiness, cold-start-safe polling, message tools, and clear backend action limits.
+Changed: 2026-11-10 | #51 | Refresh authoritative resident availability and prevent stale directory data after session revocation.
+Changed: 2026-11-10 | #51 | Fail closed on stale/unavailable resident-directory evidence while retaining transcript history.
 Tests: tests/test_steward_workspace_api.mjs uses mocked fetch only as a labeled development test
 */
 
@@ -133,7 +135,7 @@ export function residentRosterSummary(residents, freshness = 'unknown') {
 export function messageSenderLabel(message, residentName = '') {
   if (message?.sender?.kind === 'steward') return 'Steward';
   const supplied = typeof message?.sender?.display_name === 'string' ? message.sender.display_name : '';
-  const raw = supplied || residentName || 'Resident';
+  const raw = residentName || supplied || 'Resident';
   const readable = raw.replace(/^resident[:/]/i, '').replace(/^steward[:/]/i, '').replace(/[._-]+/g, ' ').trim();
   return readable ? readable.replace(/\b\p{L}/gu, letter => letter.toLocaleUpperCase()) : 'Resident';
 }
@@ -147,7 +149,7 @@ export function formatConversationTimestamp(value, timezone = 'America/New_York'
   catch { return new Intl.DateTimeFormat('en-US', {...options, timeZone: 'America/New_York'}).format(instant); }
 }
 
-export function conversationDisplayTitle(conversation, residentName = 'Resident', timezone = 'America/New_York') {
+export function conversationDisplayTitle(conversation, residentName = '', timezone = 'America/New_York') {
   const title = typeof conversation?.title === 'string' ? conversation.title.trim() : '';
   if (title && title.toLocaleLowerCase() !== 'conversation') return title;
   const raw = conversation?.updated_at || conversation?.created_at;
@@ -157,7 +159,18 @@ export function conversationDisplayTitle(conversation, residentName = 'Resident'
     try { updated = new Intl.DateTimeFormat('en-US', {timeZone: timezone, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short'}).format(instant); }
     catch { /* use the safe Eastern time-only label */ }
   }
-  return `${messageSenderLabel({sender: {kind: 'resident', display_name: residentName}})} · ${updated}`;
+  const accurateResidentName = residentName || conversation?.resident_display_name || 'Resident';
+  return `${messageSenderLabel({sender: {kind: 'resident', display_name: accurateResidentName}})} · ${updated}`;
+}
+
+export function residentRosterRefreshDelay(available) { return available ? 15000 : 5000; }
+
+export function residentAvailabilityPresentation(resident, verified, checkedAt = null) {
+  const checked = checkedAt ? ` · ${verified ? 'checked' : 'last confirmed'} ${formatConversationTimestamp(checkedAt)}` : '';
+  if (!resident) return {available: false, className: 'unknown', label: `Resident availability unknown${checked}`};
+  if (!verified) return {available: false, className: 'unknown', label: `Chat availability not confirmed${checked}`};
+  if (resident?.chat_available === true) return {available: true, className: 'available', label: `Chat available${checked}`};
+  return {available: false, className: 'unavailable', label: `${residentChatStatusLabel(resident)}${checked}`};
 }
 
 export function messageStatusPresentation(state) {
@@ -306,6 +319,11 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   let conversationLoadRevision = 0;
   let messageLoadRevision = 0;
   let runtimePollTimer = null;
+  let residentRosterTimer = null;
+  let directoryRefreshing = false;
+  let residentDirectoryRevision = 0;
+  let residentRosterVerified = false;
+  let residentRosterCheckedAt = null;
   const pollTimers = new Map();
   const loadedConversationIds = new Set();
   const conversationTitles = new Map();
@@ -313,12 +331,12 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   const conversationMenuButton = root.getElementById('chat-conversation-actions');
   const lastResidentRecords = new Map();
   function syncNewConversationButton() {
-    newConversationButton.disabled = !directoryAvailable || !selectedResident || !chatAvailableResidentIds.has(selectedResident) || creatingConversation;
+    newConversationButton.disabled = !directoryAvailable || !residentRosterVerified || !selectedResident || !chatAvailableResidentIds.has(selectedResident) || creatingConversation;
     newConversationButton.setAttribute('aria-busy', String(creatingConversation));
     newConversationButton.title = creatingConversation
       ? 'Conversation creation in progress'
       : newConversationButton.disabled
-        ? `New conversation unavailable · ${lastResidentRecords.has(selectedResident) ? residentChatStatusLabel(lastResidentRecords.get(selectedResident)) : 'select an available resident'}`
+        ? `New conversation unavailable · ${lastResidentRecords.has(selectedResident) ? residentAvailabilityPresentation(lastResidentRecords.get(selectedResident), residentRosterVerified, residentRosterCheckedAt).label : 'select an available resident'}`
         : 'Start a persistent conversation with the selected resident';
   }
 
@@ -349,10 +367,10 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   }
 
   function setResidentAvailability(residentId) {
-    const available = chatAvailableResidentIds.has(residentId);
     const record = lastResidentRecords.get(residentId);
-    residentIndicator.className = `resident-indicator ${available ? 'available' : record ? 'unavailable' : 'unknown'}`;
-    residentIndicator.title = available ? 'Chat available' : record ? residentChatStatusLabel(record) : 'Resident availability unknown';
+    const presentation = residentAvailabilityPresentation(record, residentRosterVerified, residentRosterCheckedAt);
+    residentIndicator.className = `resident-indicator ${presentation.className}`;
+    residentIndicator.title = presentation.label;
     residentIndicator.setAttribute('aria-label', residentIndicator.title);
   }
 
@@ -457,8 +475,9 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
       const processing = messages.some(message => message.sender?.kind === 'steward' && ['accepted', 'processing'].includes(message.delivery_state));
       const lastMessage = messages.at(-1);
       const failedMessage = lastMessage && ['blocked', 'failed', 'rejected'].includes(lastMessage.delivery_state) ? lastMessage : null;
-      composer.disabled = processing;
-      sendButton.disabled = processing;
+      const residentCanChat = residentRosterVerified && chatAvailableResidentIds.has(requestedResident);
+      composer.disabled = processing || !residentCanChat;
+      sendButton.disabled = processing || !residentCanChat;
       if (processing) {
         const pollAttempt = processingPolls.get(conversationId) || 0;
         const nextAttempt = pollAttempt + 1;
@@ -479,6 +498,10 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
           ? residentBlockedLabel(name)
           : `${name || 'Resident'}'s turn failed. Review message details, check service readiness, and retry when available.`);
         status.dataset.state = failedMessage.delivery_state;
+      } else if (!residentCanChat) {
+        processingPolls.delete(conversationId);
+        setText(status, `Conversation history is current; ${residentAvailabilityPresentation(lastResidentRecords.get(requestedResident), residentRosterVerified, residentRosterCheckedAt).label}. Sending is unavailable.`);
+        status.dataset.state = 'resident-unavailable';
       } else {
         processingPolls.delete(conversationId);
         setText(status, `Conversation current · ${result.freshness || 'freshness unknown'}`);
@@ -546,41 +569,93 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     }
   }
 
-  async function loadResidents() {
-    if (loaded) return;
-    loaded = true;
-    directoryAvailable = false;
-    chatAvailableResidentIds.clear();
-    residentNames.clear();
-    lastResidentRecords.clear();
-    selectedResident = '';
-    syncNewConversationButton();
-    residentSelect.disabled = true;
-    residentSelect.replaceChildren(new Option('Loading institutional resident roster…', ''));
+  function scheduleResidentRosterRefresh(available = true) {
+    clearTimeout(residentRosterTimer);
+    residentRosterTimer = setTimeout(() => loadResidents({refresh: true}), residentRosterRefreshDelay(available));
+    residentRosterTimer?.unref?.();
+  }
+
+  async function loadResidents({refresh = false} = {}) {
+    if ((loaded && !refresh) || directoryRefreshing) return;
+    directoryRefreshing = true;
+    const revision = ++residentDirectoryRevision;
+    const hadDirectory = directoryAvailable;
+    if (!hadDirectory) {
+      residentSelect.disabled = true;
+      residentSelect.replaceChildren(new Option('Loading resident list…', ''));
+    }
     try {
       const result = await api.residents();
+      if (revision !== residentDirectoryRevision) return;
       directoryAvailable = true;
+      loaded = true;
       const roster = residentRosterSummary(result.residents, result.freshness);
+      const selectedWasAvailable = residentRosterVerified && chatAvailableResidentIds.has(selectedResident);
+      residentRosterVerified = result.freshness === 'current';
+      if (residentRosterVerified) residentRosterCheckedAt = new Date().toISOString();
+      chatAvailableResidentIds.clear(); residentNames.clear(); lastResidentRecords.clear();
       residentSelect.replaceChildren(new Option('Select a resident…', ''));
       for (const resident of roster.residents) {
         const chatAvailable = resident.chat_available === true;
-        if (chatAvailable) chatAvailableResidentIds.add(resident.resident_id);
+        if (chatAvailable && residentRosterVerified) chatAvailableResidentIds.add(resident.resident_id);
         residentNames.set(resident.resident_id, resident.display_name || 'Resident');
         lastResidentRecords.set(resident.resident_id, resident);
         const option = new Option(messageSenderLabel({sender: {kind: 'resident', display_name: resident.display_name || 'Resident'}}), resident.resident_id);
         residentSelect.add(option);
       }
       residentSelect.disabled = roster.residents.length === 0;
+      const hasSelectedResident = roster.residents.some(resident => resident.resident_id === selectedResident);
+      if (hasSelectedResident) {
+        residentSelect.value = selectedResident;
+        setResidentAvailability(selectedResident);
+        const selectedIsAvailable = chatAvailableResidentIds.has(selectedResident);
+        if (!selectedIsAvailable) {
+          composer.disabled = true; sendButton.disabled = true;
+          if (selectedWasAvailable) setText(status, `${residentNames.get(selectedResident)} chat is currently unavailable. Existing conversation history remains available.`);
+          else if (!residentRosterVerified) setText(status, 'Chat availability is not confirmed by a current directory response. Sending is paused; history remains available.');
+        } else if (!selectedWasAvailable && selectedConversation) {
+          loadMessages(selectedConversation);
+        }
+      } else if (selectedResident) {
+        selectedResident = ''; selectedConversation = '';
+        conversationLoadRevision += 1; messageLoadRevision += 1;
+        cancelConversationPolls(); processingPolls.clear();
+        conversationList.replaceChildren(); messageList.replaceChildren();
+        currentTitle.textContent = 'Resident conversation';
+        composer.disabled = true; sendButton.disabled = true;
+        residentSelect.value = '';
+        setResidentAvailability('');
+      }
       syncNewConversationButton();
-      setText(status, roster.status);
-      status.dataset.state = result.freshness || 'unknown';
+      if (!hadDirectory || !residentRosterVerified) {
+        setText(status, residentRosterVerified ? roster.status : 'Directory information is not current; resident chat availability cannot be confirmed.');
+        status.dataset.state = result.freshness || 'unknown';
+      }
+      scheduleResidentRosterRefresh(residentRosterVerified);
     } catch (error) {
-      loaded = false;
-      directoryAvailable = false;
-      residentSelect.replaceChildren(new Option('Resident directory unavailable', ''));
-      residentSelect.disabled = true;
+      if (revision !== residentDirectoryRevision) return;
+      if (!hadDirectory) {
+        loaded = false; directoryAvailable = false;
+        residentRosterVerified = false;
+        residentSelect.replaceChildren(new Option('Resident list unavailable', ''));
+        residentSelect.disabled = true;
+        unavailable(error);
+      } else if (error?.status === 401) {
+        residentRosterVerified = false;
+        composer.disabled = true; sendButton.disabled = true;
+        setResidentAvailability(selectedResident);
+        unavailable(error);
+      } else {
+        residentRosterVerified = false;
+        composer.disabled = true; sendButton.disabled = true;
+        setResidentAvailability(selectedResident);
+        setText(status, 'Resident availability could not be refreshed; showing the last confirmed names. Sending is paused until a current check succeeds.');
+        status.dataset.state = 'reconnecting';
+      }
       syncNewConversationButton();
-      unavailable(error);
+      scheduleResidentRosterRefresh(false);
+    } finally {
+      if (revision === residentDirectoryRevision) directoryRefreshing = false;
     }
   }
 
@@ -680,6 +755,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   root.addEventListener?.('r3:steward-session-established', refreshRuntimeStatus);
   root.addEventListener?.('r3:steward-session-revoked', () => {
     clearTimeout(runtimePollTimer); runtimePollTimer = null;
+    clearTimeout(residentRosterTimer); residentRosterTimer = null;
     cancelConversationPolls();
     setText(runtimeStatus, 'Website session ended · runtime checks stopped.');
     runtimeStatus.dataset.state = 'unauthenticated';
@@ -687,9 +763,12 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   if (root.documentElement?.dataset.r3aAuthVerified === 'true') refreshRuntimeStatus();
   root.getElementById('nav-chat')?.addEventListener('click', () => loadResidents());
   root.addEventListener?.('r3:steward-session-established', () => {
+    clearTimeout(residentRosterTimer); residentRosterTimer = null;
+    residentDirectoryRevision += 1; directoryRefreshing = false;
     cancelConversationPolls(); loadedConversationIds.clear(); conversationTitles.clear();
     residentNames.clear(); lastResidentRecords.clear();
     loaded = false; directoryAvailable = false; selectedResident = ''; selectedConversation = '';
+    residentRosterVerified = false; residentRosterCheckedAt = null;
     pendingConversationId = null; pendingMessage = null; chatAvailableResidentIds.clear();
     residentSelect.disabled = true; residentSelect.replaceChildren(new Option('Loading institutional resident roster…', ''));
     conversationList.replaceChildren(); messageList.replaceChildren(); composer.value = '';
@@ -697,18 +776,22 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     loadResidents();
   });
   root.addEventListener?.('r3:steward-session-revoked', () => {
+    clearTimeout(residentRosterTimer); residentRosterTimer = null;
+    residentDirectoryRevision += 1; directoryRefreshing = false;
     cancelConversationPolls(); loadedConversationIds.clear(); conversationTitles.clear();
     residentNames.clear(); lastResidentRecords.clear();
     loaded = false; directoryAvailable = false; selectedResident = ''; selectedConversation = '';
+    residentRosterVerified = false; residentRosterCheckedAt = null;
     pendingConversationId = null; pendingMessage = null; composer.value = '';
     chatAvailableResidentIds.clear(); residentSelect.disabled = true;
     residentSelect.replaceChildren(new Option('Website session required', ''));
+    setResidentAvailability('');
     conversationList.replaceChildren(); messageList.replaceChildren();
     composer.disabled = true; sendButton.disabled = true; syncNewConversationButton();
     setText(status, 'Steward session revoked · conversation data cleared from this view.'); status.dataset.state = 'unauthenticated';
   });
   root.getElementById('chat-refresh')?.addEventListener('click', () => {
-    if (selectedResident && directoryAvailable) loadConversations();
+    if (selectedResident && directoryAvailable) { loadResidents({refresh: true}); loadConversations(); }
     else { loaded = false; loadResidents(); }
   });
   conversationMenuButton?.addEventListener('click', () => {

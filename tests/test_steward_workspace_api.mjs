@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_steward_workspace_api.mjs
 Component: R3A-STEWARD-WORKSPACE-CLIENT-TESTS
-File Revision: 1.0.5
+File Revision: 1.0.6
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Verify the versioned workspace browser client transport and denial behavior.
@@ -15,6 +15,7 @@ Changed: 2026-11-08 | R3A-007/R3A-010 | Cover DST-aware UTC-preserving time disp
 Changed: 2026-11-10 | #51 | Verify delayed conversation responses cannot overwrite a newer resident selection.
 Changed: 2026-11-10 | #51 | Cover explicit empty authoritative roster state.
 Changed: 2026-11-10 | #51 | Verify compact chat rendering, action availability, Enter/IME behavior, Eastern seconds, and startup feedback.
+Changed: 2026-11-10 | #51 | Cover live roster refresh, availability send gating, and session-revocation race protection.
 Supersedes: None.
 Contracts: r3a.steward-workspace-web.v1; r3a.steward-session.v1; r3a.notification-inbox.v1; r3a.grace-objective-submission.v1.
 Tests: node --test tests/test_steward_workspace_api.mjs.
@@ -23,7 +24,7 @@ History/Predecessor: New file; initial publication recorded in Git.
 // Mock fetch never supplies live institutional data.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp, formatConversationTimestamp, messageSenderLabel, messageStatusPresentation, conversationDisplayTitle, conversationPollDelay, copyMessageText, shouldSendOnEnter, notificationPresentation, residentProgressLabel, residentBlockedLabel, residentChatStatusLabel, residentRosterSummary, conversationHistoryLoadingLabel, conversationPollState, mountResidentChat} from '../web/steward-workspace-api.mjs';
+import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp, formatConversationTimestamp, messageSenderLabel, messageStatusPresentation, conversationDisplayTitle, conversationPollDelay, residentRosterRefreshDelay, residentAvailabilityPresentation, copyMessageText, shouldSendOnEnter, notificationPresentation, residentProgressLabel, residentBlockedLabel, residentChatStatusLabel, residentRosterSummary, conversationHistoryLoadingLabel, conversationPollState, mountResidentChat} from '../web/steward-workspace-api.mjs';
 
 function response(status, payload, headers = {}) {
   return {
@@ -137,13 +138,22 @@ test('history polling keeps loaded messages visible and stops with an explicit t
 test('conversation UI helpers present readable names, meaningful titles, Eastern seconds, and explicit states', async () => {
   assert.equal(messageSenderLabel({sender: {kind: 'steward'}}), 'Steward');
   assert.equal(messageSenderLabel({sender: {kind: 'resident', display_name: 'resident:grace_hopper'}}), 'Grace Hopper');
+  assert.equal(messageSenderLabel({sender: {kind: 'resident', display_name: 'resident.37'}}, 'Grace'), 'Grace');
   assert.match(formatConversationTimestamp('2026-11-10T17:08:09Z'), /12:08:09 PM EST/);
   assert.match(formatConversationTimestamp('2026-07-10T17:08:09Z'), /01:08:09 PM EDT/);
   assert.equal(conversationDisplayTitle({title: 'Conversation', created_at: '2026-11-10T17:08:09Z'}, 'Grace'), 'Grace · Nov 10, 12:08 PM EST');
+  assert.equal(conversationDisplayTitle({title: 'Conversation', resident_display_name: 'Vicky', created_at: '2026-11-10T17:08:09Z'}), 'Vicky · Nov 10, 12:08 PM EST');
   assert.equal(conversationDisplayTitle({title: 'Medication follow-up'}, 'Grace'), 'Medication follow-up');
   assert.equal(messageStatusPresentation('processing').label, 'Resident is working on this turn');
   assert.ok(conversationPollDelay(1) < conversationPollDelay(2));
   assert.equal(conversationPollDelay(20), 8000);
+  assert.equal(residentRosterRefreshDelay(true), 15000);
+  assert.equal(residentRosterRefreshDelay(false), 5000);
+  assert.equal(residentAvailabilityPresentation({chat_available: true}, true, '2026-11-10T17:08:09Z').available, true);
+  assert.equal(residentAvailabilityPresentation({chat_available: true}, false).className, 'unknown');
+  assert.match(residentAvailabilityPresentation({chat_available: true}, false, '2026-11-10T17:08:09Z').label, /last confirmed/);
+  assert.equal(residentAvailabilityPresentation({chat_available: false}, true).className, 'unavailable');
+  assert.equal(residentAvailabilityPresentation(null, true).className, 'unknown');
   let copied;
   await copyMessageText('persisted reply', {writeText: async text => { copied = text; }});
   assert.equal(copied, 'persisted reply');
@@ -170,7 +180,7 @@ test('empty authoritative resident directory reports no residents instead of cou
   assert.match(summary.status, /1 resident\(s\) currently unavailable for chat/);
 });
 
-test('late conversation-list responses cannot replace the currently selected resident', async () => {
+test('resident changes and directory refreshes preserve selection and fail closed across stale responses', async () => {
   class FakeElement {
     constructor(tagName = '') { this.tagName = tagName; this.childNodes = []; this.listeners = {}; this.dataset = {}; this.attributes = {}; this.value = ''; this.disabled = false; this._text = null; }
     get options() { return this.childNodes.filter(node => node instanceof FakeOption); }
@@ -189,11 +199,13 @@ test('late conversation-list responses cannot replace the currently selected res
   }
   const ids = ['chat-panel', 'chat-resident-select', 'chat-conversation-list', 'chat-message-list', 'chat-service-status', 'chat-runtime-status', 'chat-resident-indicator', 'chat-current-title', 'chat-conversation-toolbar', 'chat-conversation-actions', 'chat-composer-input', 'chat-send', 'chat-new', 'nav-chat', 'chat-refresh'];
   const elements = Object.fromEntries(ids.map(id => [id, new FakeElement(id === 'chat-resident-select' ? 'select' : 'div')]));
+  const rootListeners = new Map();
   const root = {
     getElementById: id => elements[id] ?? null,
     createElement: tag => new FakeElement(tag),
     createTextNode: text => { const node = new FakeElement('#text'); node.textContent = text; return node; },
-    addEventListener() {},
+    addEventListener(name, callback) { const callbacks = rootListeners.get(name) || []; callbacks.push(callback); rootListeners.set(name, callbacks); },
+    dispatch(name) { for (const callback of rootListeners.get(name) || []) callback(); },
     documentElement: {dataset: {r3aAuthVerified: 'true', presentationTimezone: 'America/New_York'}},
   };
   const previousDocument = globalThis.document;
@@ -203,17 +215,29 @@ test('late conversation-list responses cannot replace the currently selected res
   let resolveResidentA;
   let resolveMessages;
   let residentACalls = 0;
+  let residentChatAvailable = true;
+  let residentFreshness = 'current';
+  let messageCalls = 0;
+  let deferNextRoster = false;
+  let resolveDeferredRoster;
+  let failNextRoster = false;
   const api = {
-    residents: async () => ({freshness: 'current', residents: [
-      {resident_id: 'resident:a', display_name: 'A', chat_available: true},
-      {resident_id: 'resident:b', display_name: 'B', chat_available: true},
-    ]}),
+    residents: async () => {
+      if (failNextRoster) { failNextRoster = false; throw new Error('unavailable'); }
+      if (deferNextRoster) { deferNextRoster = false; return new Promise(resolve => { resolveDeferredRoster = resolve; }); }
+      return {freshness: residentFreshness, residents: [
+        {resident_id: 'resident:a', display_name: 'A', chat_available: residentChatAvailable},
+        {resident_id: 'resident:b', display_name: 'B', chat_available: true},
+      ]};
+    },
     conversations: ({residentId}) => residentId === 'resident:a'
       ? (++residentACalls === 1
         ? new Promise(resolve => { resolveResidentA = resolve; })
         : Promise.resolve({freshness: 'A current', conversations: [{conversation_id: 'a-conversation', title: 'A conversation'}]}))
       : Promise.resolve({freshness: 'B current', conversations: [{conversation_id: 'b-conversation', title: 'B conversation'}]}),
-    messages: () => new Promise(resolve => { resolveMessages = resolve; }),
+    messages: () => ++messageCalls <= 2
+      ? new Promise(resolve => { resolveMessages = resolve; })
+      : Promise.resolve({freshness: 'current', messages: [{message_id: 'current-message', sender: {kind: 'steward'}, delivery_state: 'completed', created_at: '2026-11-10T17:08:09Z', text: 'The durable response.'}]}),
     about: async () => ({freshness: 'current', observed_at: '2026-11-10T12:00:00Z', ring0: {health: 'healthy'}, cme: {health: 'healthy'}, grace: {health: 'healthy'}}),
   };
   try {
@@ -261,6 +285,47 @@ test('late conversation-list responses cannot replace the currently selected res
     assert.match(messageTools.childNodes[2].title, /not implemented/);
     messageTools.childNodes[1].dispatch('click');
     assert.equal(card.childNodes[2].hidden, false);
+    assert.equal(elements['chat-composer-input'].disabled, false);
+    residentChatAvailable = false;
+    elements['chat-refresh'].dispatch('click');
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(elements['chat-resident-indicator'].className, 'resident-indicator unavailable');
+    assert.equal(elements['chat-composer-input'].disabled, true, elements['chat-service-status'].textContent);
+    assert.match(elements['chat-service-status'].textContent, /chat unavailable/);
+    residentChatAvailable = true;
+    elements['chat-refresh'].dispatch('click');
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(elements['chat-resident-indicator'].className, 'resident-indicator available');
+    assert.equal(elements['chat-composer-input'].disabled, false);
+    failNextRoster = true;
+    elements['chat-refresh'].dispatch('click');
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(elements['chat-resident-select'].options.map(option => option.textContent), ['Select a resident…', 'A', 'B']);
+    assert.equal(elements['chat-resident-indicator'].className, 'resident-indicator unknown');
+    residentFreshness = 'stale';
+    elements['chat-refresh'].dispatch('click');
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(elements['chat-resident-indicator'].className, 'resident-indicator unknown');
+    assert.equal(elements['chat-composer-input'].disabled, true);
+    assert.equal(elements['chat-new'].disabled, true);
+    residentFreshness = 'current';
+    elements['chat-refresh'].dispatch('click');
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(elements['chat-resident-indicator'].className, 'resident-indicator available');
+    assert.equal(elements['chat-composer-input'].disabled, false);
+    deferNextRoster = true;
+    elements['chat-refresh'].dispatch('click');
+    root.dispatch('r3:steward-session-revoked');
+    resolveDeferredRoster({freshness: 'current', residents: [{resident_id: 'resident:a', display_name: 'A', chat_available: true}]});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(elements['chat-resident-select'].options.map(option => option.textContent), ['Website session required']);
+    assert.equal(elements['chat-resident-indicator'].className, 'resident-indicator unknown');
+    assert.equal(elements['chat-composer-input'].disabled, true);
   } finally {
     globalThis.document = previousDocument;
     if (previousOption === undefined) delete globalThis.Option;
