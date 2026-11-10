@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/comms-failure-recovery.md
 Component: COMMS-RECOVERY
-File Revision: 1.0.4
+File Revision: 1.0.5
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
 Purpose: Capture failed and blocked Riverview Comms operations
@@ -11,6 +11,7 @@ Observability: Incident ledger and punch list
 Dependencies: Riverview Comms 1.1 and applicable operational runbooks
 Authority: Steward direction
 Changed: 2026-11-01 UTC | R3-COMMS-003 | ChatGPT GPT-6 | Document dashboard saturation incident and recovery
+Changed: 2026-11-10T01:31:53Z | R3-COMMS-005 | Codex GPT-6 | Record R3A Website resident-directory provider artifact path failure.
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Not applicable
@@ -29,6 +30,7 @@ The Steward reports a historical Riverview V2 grants UI issue: grants were visib
 ## Cases
 
 - [R3-COMMS-001: Camrui command preflight blocked](../docs/comms-incidents/R3-COMMS-001.md)
+- [R3-COMMS-005: R3A Website resident discovery provider artifact path mismatch](../docs/comms-incidents/R3-COMMS-005.md)
 
 ## Mandatory discovery-first preflight
 
