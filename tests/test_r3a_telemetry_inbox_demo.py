@@ -1,4 +1,20 @@
 """Isolated simulated autonomous-inbox demonstration; no DB/model/runtime is started."""
+# R3 CONTROLLED SOURCE
+# File: tests/test_r3a_telemetry_inbox_demo.py
+# Component: R3A-TELEMETRY-INBOX-DEMO-TESTS
+# File Revision: 1.0.0
+# Created: Unknown (legacy)
+# Created By: Unknown (legacy)
+# Purpose: Verify Grace selects and executes a dynamically registered telemetry capability during an objective.
+# Execution Model: unittest with an isolated CME and deterministic provider/model fixtures.
+# Observability: Assertions inspect tool discovery, activity continuation, authorization, and returned evidence.
+# Dependencies: R3A CME, Grace module, CapabilityRegistry, OctoMiner telemetry provider.
+# Authority: Issue #46 telemetry provider contract and R3A capability authorization boundary.
+# Changed: 2026-11-10T13:45:00Z | R3A-GRACE-CAPABILITY-AUTONOMY | Codex GPT-6 | Mark the telemetry fixture provider active to match CME lifecycle semantics.
+# Supersedes: None.
+# Contracts: r3a.capability-invocation.v1; r3a.resident-capability-tool@1.0.0.
+# Tests: python -m pytest -q tests/test_r3a_telemetry_inbox_demo.py
+# History/Predecessor: Git history before R3A capability-autonomy test adjustment.
 from __future__ import annotations
 
 import importlib.util
@@ -44,9 +60,9 @@ class TelemetryInboxDemo(unittest.IsolatedAsyncioTestCase):
         capability_id = manifest["operation"]["operation_id"]
         plugin_config = {"host_id": "fixture-host"}
         registry = CapabilityRegistry()
-        registry.register(manifest["operation"], plugin_config, legacy_manifest=manifest)
-        registry.set_provider_state(manifest["provider"]["provider_id"],
-                                    manifest["provider"]["provider_version"], "ACTIVE")
+        registered = registry.register(manifest["operation"], plugin_config, legacy_manifest=manifest)
+        registry.set_provider_state(registered.descriptor["provider"]["provider_id"],
+                                    registered.descriptor["provider"]["provider_version"], "ACTIVE")
         cme = CME.__new__(CME)
         cme.settings = SimpleNamespace(
             module_capabilities=(capability_id,),

@@ -42,7 +42,10 @@ class ModuleAcceptancePreparationTests(unittest.TestCase):
 
         allowed_residents = manifest["operation"]["caller_constraints"]["allowed_residents"]
         self.assertEqual(["resident.grace"], allowed_residents)
-        self.assertIn("remain disabled until the #43 executor-identity correction", runbook)
+        self.assertIn("Keep the module disabled until a valid resident executor binding", runbook)
+        self.assertIn("no `resident_module_bindings`", runbook)
+        self.assertIn("r3a.resident.executor@1.0.0", runbook)
+        self.assertIn("no effective resident module binding is configured", runbook)
         self.assertIn("caller.principal_id=resident:grace", runbook)
         self.assertIn("caller.resident_id=resident.grace", runbook)
         self.assertIn('"module_id": "resident.grace"', runbook)

@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.20.3
+File Revision: 1.20.7
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -24,6 +24,8 @@ Changed: 2026-11-10T00:34:18Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Expose e
 Changed: 2026-11-10 | #51 | R3A Coordinator | Exclude unavailable optional tools and apply conversation-specific completion validation.
 Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT-6 | Dispatch registered resident executors and durable activity handlers through shared module contracts while retaining legacy Grace compatibility.
 Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GPT-6 | Persist handler progress with its returned checkpoint and restore handler checkpoint state on retry.
+Changed: 2026-11-10T13:15:00Z | R3A-GRACE-CAPABILITY-AUTONOMY | Codex GPT-6 | Filter resident capability discovery by current grants and pass registered provider limitations to Grace.
+Changed: 2026-11-10T14:05:00Z | R3A-GRACE-CAPABILITY-AUTONOMY | Codex GPT-6 | Authorize primary resident tools against the running executor module while retaining the directory principal.
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Dispatch generic versioned Steward read/write effects through existing authorization, invocation, and provider paths.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
@@ -1782,17 +1784,7 @@ class CME:
         reasoning_state = saved.get("reasoning_state") or {}
         if not isinstance(reasoning_state, dict):
             raise RuntimeError("Persisted Grace reasoning continuation is malformed")
-        available_tools = [tool for tool in self._resident_tools()
-                           if tool["capability_id"] in self.settings.module_capabilities]
-        if resident_id != self.module_id:
-            authorized_tools = []
-            for tool in available_tools:
-                try:
-                    await self.store.require_capability(resident_id, tool["capability_id"])
-                except PermissionError:
-                    continue
-                authorized_tools.append(tool)
-            available_tools = authorized_tools
+        available_tools, capability_limitations = await self._resident_capability_view(activity, resident_id)
         available_engineering_operations = []
         if engineering_assignment is not None and self.settings.capability_registry is not None:
             available_engineering_operations = [
@@ -1930,6 +1922,7 @@ class CME:
                 "evidence": evidence,
                 "dependency_context": await self.store.activity_dependency_context(event_input.get("dependencies")),
                 "available_tools": available_tools,
+                "capability_limitations": capability_limitations,
                 "available_residents": available_residents,
                 "engineering_assignment": engineering_assignment,
                 "available_engineering_operations": available_engineering_operations,
@@ -1973,13 +1966,19 @@ class CME:
                 raise PermissionError("effectful operation requires the canonical AP2 invocation dispatcher")
             from .capability_contracts import validate_json
             validate_json(arguments, registered_operation.descriptor["input_schema"], path="$.input")
+        # The activity resident_id is the authoritative directory principal. The
+        # existing capability grant contract binds grants to the executor module;
+        # preserve both identities in invocation metadata and authorize the module.
+        executor_module_id = self.module_id
         authorization = None
         if registered_operation is None:
             authorization = await self._authorize_capability(
                 capability_id, activity_id=str(activity["activity_id"]),
                 attempt_id=str(activity["attempt_id"]),
-                resident_id=resident_id,
+                resident_id=executor_module_id,
                 context={"invocation_source": "resident_selected_action",
+                         "resident_principal_id": resident_id,
+                         "executor_module_id": executor_module_id,
                          "tool_contract_id": tool["contract_id"], "effect_class": "read",
                          "query_sha256": hashlib.sha256(arguments.get("query", "").encode()).hexdigest()
                          if capability_id == "institution.knowledge.read" else None})
@@ -1997,7 +1996,7 @@ class CME:
                 "invocation_id": invocation_id,
                 "operation_id": descriptor["operation_id"],
                 "operation_contract_version": descriptor["contract_version"],
-                "caller": {"principal_id": resident_id, "resident_id": resident_id,
+                "caller": {"principal_id": resident_id, "resident_id": executor_module_id,
                            "service_id": None},
                 "target": {}, "input": arguments,
                 "activity_id": str(activity["activity_id"]),
@@ -2011,16 +2010,23 @@ class CME:
                 "config_revision": self.settings.source_digest,
             }
             canonical_result = await self.invoke_capability(invocation)
-            if canonical_result["outcome"] != "SUCCEEDED":
-                raise RuntimeError("CME capability invocation did not succeed")
-            capability_output = canonical_result["output"]
-            evidence.extend(self._resident_evidence_envelope(
-                descriptor, capability_output, canonical_result["evidence"],
-                canonical_result["finished_at"]))
             authorization = canonical_result["authorization"]
             invocation_summary = {key: canonical_result[key] for key in
                                   ("invocation_id", "operation_id", "operation_contract_version",
                                    "provider", "outcome", "started_at", "finished_at")}
+            if canonical_result["outcome"] != "SUCCEEDED":
+                return {"contract_id": tool["contract_id"],
+                        "contract_version": tool["contract_version"],
+                        "capability_id": capability_id, "outcome": "unavailable",
+                        "arguments": arguments, "output": None, "evidence": [],
+                        "authorization": authorization, "invocation": invocation_summary,
+                        "limitation": canonical_result.get("error") or {
+                            "type": "ProviderUnavailable", "message": "The registered provider did not return a result."},
+                        "observed_at": canonical_result.get("finished_at") or utcnow().isoformat()}
+            capability_output = canonical_result["output"]
+            evidence.extend(self._resident_evidence_envelope(
+                descriptor, capability_output, canonical_result["evidence"],
+                canonical_result["finished_at"]))
         else:
             evidence.extend(await self._read_runtime_capability(capability_id))
             capability_output = evidence
@@ -2312,6 +2318,67 @@ class CME:
             tools.append(operation.resident_tool_projection())
         return tuple(tools)
 
+    async def _resident_capability_view(self, activity: dict[str, Any], resident_id: str
+                                        ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Project configured and currently authorized tools plus safe provider limitations."""
+        configured = set(self.settings.module_capabilities)
+        activity_id = str(activity["activity_id"])
+        attempt_id = str(activity["attempt_id"])
+        available: list[dict[str, Any]] = []
+        limitations: list[dict[str, Any]] = []
+
+        async def authorized(capability_id: str) -> bool:
+            request_id = str(uuid.uuid5(uuid.NAMESPACE_URL,
+                                        f"resident-capability-discovery:{activity_id}:{attempt_id}:{capability_id}"))
+            try:
+                await self._authorization_decision(
+                    capability_id, activity_id=activity_id, attempt_id=attempt_id,
+                    request_id=request_id,
+                    context={"dispatcher": "CME", "purpose": "resident.capability.discovery",
+                             "resident_principal_id": resident_id,
+                             "executor_module_id": self.module_id},
+                    resident_id=self.module_id)
+                return True
+            except PermissionError:
+                return False
+
+        for tool in self._resident_tools():
+            capability_id = tool.get("capability_id")
+            if (not isinstance(capability_id, str) or capability_id not in configured
+                    or not await authorized(capability_id)):
+                continue
+            available.append(tool)
+
+        registry = getattr(self.settings, "capability_registry", None)
+        discover = getattr(registry, "discover", None)
+        if callable(discover):
+            available_ids = {tool["capability_id"] for tool in available}
+            for entry in discover(include_disabled=True):
+                descriptor = entry.get("descriptor", {})
+                capability_id = descriptor.get("operation_id")
+                if (descriptor.get("effect_class") != "read" or capability_id not in configured
+                        or capability_id in available_ids or not await authorized(capability_id)):
+                    continue
+                observation = entry.get("registry_observation", {})
+                diagnostic = observation.get("diagnostic", {})
+                safe_diagnostic = {key: diagnostic[key] for key in ("error_type", "reason", "exit_code")
+                                   if isinstance(diagnostic, dict) and key in diagnostic
+                                   and isinstance(diagnostic[key], (str, int, float, bool))}
+                presentation = entry.get("presentation", {})
+                provider = descriptor.get("provider", {})
+                limitations.append({
+                    "capability_id": capability_id,
+                    "name": presentation.get("name") or capability_id,
+                    "description": presentation.get("description") or "No description is registered.",
+                    "availability": ("disabled" if descriptor.get("lifecycle", {}).get("desired_state") == "disabled"
+                                     else str(observation.get("state", "unknown")).casefold()),
+                    "provider_id": provider.get("provider_id"),
+                    "provider_version": provider.get("provider_version"),
+                    "observed_at": observation.get("observed_at"),
+                    "diagnostic": safe_diagnostic,
+                })
+        return available, limitations
+
     @staticmethod
     def _resident_capability_summary(result: dict[str, Any]) -> dict[str, Any]:
         """Give Grace a durable invocation receipt without duplicating evidence content."""
@@ -2324,6 +2391,7 @@ class CME:
                            if key in invocation},
             "evidence": [{"source_id": item.get("source_id"), "sha256": item.get("sha256")}
                          for item in result.get("evidence", []) if isinstance(item, dict)],
+            "limitation": result.get("limitation") or result.get("error"),
         }}
 
     @classmethod
@@ -3178,8 +3246,21 @@ class CME:
                         capability_request = observations.get("capability_request")
                         if not isinstance(capability_request, dict):
                             raise RuntimeError("Grace returned an incomplete capability request")
-                        capability_result = await self._invoke_resident_capability(activity,
-                                                                                   capability_request)
+                        try:
+                            capability_result = await self._invoke_resident_capability(
+                                activity, capability_request)
+                        except PermissionError as exc:
+                            capability_result = {
+                                "capability_id": capability_request.get("capability_id"),
+                                "outcome": "denied", "evidence": [],
+                                "authorization": {"allowed": False, "reason": str(exc)},
+                                "limitation": {"type": "AuthorizationDenied", "message": str(exc)}}
+                        except (CapabilityContractError, RuntimeError, OSError, asyncio.TimeoutError) as exc:
+                            capability_result = {
+                                "capability_id": capability_request.get("capability_id"),
+                                "outcome": "unavailable", "evidence": [],
+                                "authorization": {"allowed": True},
+                                "limitation": {"type": type(exc).__name__, "message": str(exc)[:512]}}
                         invocations.append({"capability_request": capability_request,
                                             "result": capability_result})
                         evidence.extend(capability_result["evidence"])
@@ -3191,7 +3272,10 @@ class CME:
                             separators=(",", ":"))})
                         await self.store.record_progress(
                             activity,
-                            {"phase": "resident.capability.completed", "at": utcnow().isoformat(),
+                            {"phase": ("resident.capability.completed"
+                                       if capability_result.get("outcome") == "succeeded"
+                                       else f"resident.capability.{capability_result.get('outcome', 'failed')}"),
+                             "at": utcnow().isoformat(),
                              "turn": len(turns), "capability_id": capability_request["capability_id"],
                              "authorization_audit_event_id": capability_result["authorization"].get(
                                  "audit_event_id"),
