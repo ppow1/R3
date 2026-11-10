@@ -270,6 +270,8 @@ class DiagnosticSnapshotPerformanceTests(unittest.TestCase):
         self.assertEqual(status["event_summary"]["latest_event_id"], "event-1")
         self.assertEqual(status["activity_state_counts"], {
             "QUEUED": 3, "RUNNING": 0, "WAITING": 0, "RECOVERING": 0, "BLOCKED": 0})
+        self.assertRegex(status["implementation_source_sha256"], r"^[0-9a-f]{64}$")
+        self.assertNotEqual(status["implementation_revision"], "working-tree")
         self.assertEqual(events["events"], [{"event_id": "event-1"}])
 
 
@@ -964,7 +966,7 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "not offered by policy"):
             asyncio.run(resident.handle("execute", payload))
 
-    def test_cme_returns_source_digested_knowledge_only_after_authorization(self):
+    def test_cme_fails_closed_when_registered_knowledge_provider_is_unavailable(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "process.json"
             source.write_text('{"transitions":{"STOPPING":["STOPPED","FAILED"]}}', encoding="utf-8")
@@ -972,16 +974,14 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
             cme.settings = SimpleNamespace(module_capabilities=("institution.knowledge.read",),
                                            knowledge_sources=(source,))
             cme._authorize_capability = AsyncMock(return_value={"audit_event_id": "audit-1"})
-            result = asyncio.run(cme._invoke_resident_capability(
-                {"activity_id": "activity-1", "attempt_id": "attempt-1"},
-                {"contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
-                 "capability_id": "institution.knowledge.read",
-                 "arguments": {"query": "List successors after STOPPING"},
-                 "rationale": "Need source fact"}))
-            cme._authorize_capability.assert_awaited_once()
-            self.assertEqual(result["outcome"], "succeeded")
-            self.assertEqual(result["evidence"][0]["content"], "Transitions from STOPPING: STOPPED, FAILED")
-            self.assertEqual(result["authorization"]["audit_event_id"], "audit-1")
+            with self.assertRaisesRegex(PermissionError, "active registered provider"):
+                asyncio.run(cme._invoke_resident_capability(
+                    {"activity_id": "activity-1", "attempt_id": "attempt-1"},
+                    {"contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
+                     "capability_id": "institution.knowledge.read",
+                     "arguments": {"query": "List successors after STOPPING"},
+                     "rationale": "Need source fact"}))
+            cme._authorize_capability.assert_not_awaited()
 
     def test_cme_authorizes_and_routes_grace_requested_escalation_with_durable_budget_evidence(self):
         class StoreFake:
@@ -1178,6 +1178,16 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
                     "evidence": initial_evidence, "available_tools": [_RESIDENT_TOOLS[0]], "conversation": [],
                     "reasoning_state": {}, "pending_final": None, "config_revision": "config-1"})
                 cme._authorize_capability = AsyncMock(return_value={"audit_event_id": "audit-1"})
+                cme._invoke_resident_capability = AsyncMock(return_value={
+                    "capability_id": "institution.knowledge.read", "outcome": "succeeded",
+                    "authorization": {"allowed": True, "audit_event_id": "knowledge-audit"},
+                    "invocation": {"invocation_id": "knowledge-invocation",
+                                   "operation_id": "institution.knowledge.read",
+                                   "provider": {"provider_id": "institution.knowledge",
+                                                "provider_version": "1.2.0"},
+                                   "outcome": "SUCCEEDED"},
+                    "evidence": retrieve(source, "knowledge.1",
+                                         "What transitions are permitted after STOPPING?")})
                 next_action = {"action": "invoke_capability",
                                "contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
                                "capability_id": "institution.knowledge.read",
@@ -1216,6 +1226,7 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
                                                "from RUNNING to STOPPED using authoritative evidence.",
                                       "acceptance_criteria": criteria}, "checkpoint": {}}
                 await cme._run_activity(activity)
+                cme._invoke_resident_capability.assert_awaited_once()
                 self.assertIsNone(cme.store.blocked)
                 self.assertEqual(cme.store.completed["decision"], complete)
                 self.assertEqual(len(cme.store.completed["reasoning_trace"]["capability_invocations"]), 1)

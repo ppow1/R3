@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_activity_checkpoint_persistence.py
 Component: R3A-ACTIVITY-CHECKPOINT-PERSISTENCE-REGRESSION
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-10
 Created By: Codex GPT-6
 Purpose: Verify generic handler checkpoints persist through PostgreSQL progress updates and lease recovery.
@@ -11,8 +11,9 @@ Observability: Reads the activity row after writes, interruption recovery, and r
 Dependencies: psycopg 3; R3A Store migrations; shared #46 activity-handler fixture.
 Authority: Steward corrective directive, Autonomy / CME Issue #43.
 Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GPT-6 | Exercise atomic progress/checkpoint persistence and recovery against PostgreSQL.
+Changed: 2026-11-10 | R3A-EXECUTOR-ROLE-P0 | Coordinator | Verify durable v1.1 role promotion preserves primary-module registration and lifecycle state.
 Supersedes: None.
-Contracts: r3a.activity-handler.v1; activity.generic v1; existing CME activity ledger.
+Contracts: r3a.activity-handler.v1; activity.generic v1; r3a.module-manifest.v1@1.1.0; existing CME activity/module ledgers.
 Tests: Set R3A_CHECKPOINT_TEST_DSN to a disposable test database and run this module.
 History/Predecessor: New permanent persistence regression.
 """
@@ -66,6 +67,49 @@ class ActivityCheckpointPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         if hasattr(self, "store"):
             await self.store.close()
+
+    async def test_primary_executor_role_promotion_is_durable_and_preserves_module_state(self):
+        module_id = f"executor.fixture.{uuid.uuid4().hex}"
+        old_manifest = {
+            "module_id": module_id, "module_version": "1.0.0",
+            "contract_id": "r3a.module.v1", "protocol_major": 1,
+            "protocol_minor": 0, "protocol_min_minor": 0, "protocol_max_minor": 0,
+            "owner": "test-owner", "entrypoint": "fixture.module",
+            "dependencies": [], "configuration_schema": "r3a.bootstrap.v1",
+            "configuration_ref": "/tmp/fixture-bootstrap.json", "capability_refs": [],
+            "migration_contract": "none-v1", "artifact_ref": "/tmp/fixture-module.py",
+            "artifact_digest": "a" * 64, "recovery_policy": "idempotent",
+            "resource_refs": [], "state_namespace": module_id,
+        }
+        role = {
+            "contract_id": "r3a.resident.executor", "contract_version": "1.0.0",
+            "execution_contract_range": {"contract_id": "r3a.resident.execution",
+                                         "major": 1, "min_minor": 0, "max_minor": 2},
+        }
+        diagnostic = {"source": "executor-role-postgres-regression"}
+        await self.store.register_module(old_manifest, "ACTIVE", "healthy", diagnostic)
+        promoted = {**old_manifest, "manifest_contract": "r3a.module-manifest.v1@1.1.0",
+                    "resident_executor": role}
+        await self.store.register_module(promoted, "ACTIVE", "healthy", diagnostic)
+
+        rows = await self.store.rows(
+            "SELECT manifest,artifact_digest,lifecycle_state,health,diagnostic FROM r3a.module_registry "
+            "WHERE module_id=%s AND module_version='1.0.0'", (module_id,))
+        events = await self.store.rows(
+            "SELECT evidence FROM r3a.institution_events WHERE event_type='module.manifest.promoted' "
+            "AND subject_type='module' AND subject_id=%s", (f"{module_id}@1.0.0",))
+        self.assertEqual(1, len(rows))
+        self.assertEqual(old_manifest["artifact_digest"], rows[0]["artifact_digest"])
+        self.assertEqual(promoted, rows[0]["manifest"])
+        self.assertEqual("ACTIVE", rows[0]["lifecycle_state"])
+        self.assertEqual("healthy", rows[0]["health"])
+        self.assertEqual(diagnostic, rows[0]["diagnostic"])
+        self.assertEqual(1, len(events))
+        self.assertEqual("r3a.module-manifest.v1@1.1.0", events[0]["evidence"]["manifest_contract"])
+
+        with self.assertRaisesRegex(RuntimeError, "manifest is immutable"):
+            await self.store.register_module({**promoted, "owner": "changed-owner"},
+                                             "ACTIVE", "healthy", diagnostic)
 
     async def test_handler_checkpoint_survives_progress_and_process_loss_retry(self):
         sample = fixture()

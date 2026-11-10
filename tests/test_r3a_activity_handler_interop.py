@@ -185,6 +185,7 @@ def test_cme_dispatches_shared_fixture_and_records_authorized_result():
         provider_operation = SimpleNamespace(descriptor=operation_descriptor)
         cme.settings = SimpleNamespace(
             lease_seconds=30,
+            source_digest="config-r1",
             capability_registry=SimpleNamespace(
                 discover=Mock(return_value=[{"descriptor": operation_descriptor}]),
                 resolve_provider=Mock(return_value=provider_operation)))
@@ -261,11 +262,14 @@ def test_cme_rejects_invalid_handler_checkpoint_before_persisting_it():
         resolved = await cme._registered_handler("billing.invoice.review")
         cme.settings = SimpleNamespace(
             lease_seconds=30,
+            source_digest="config-r1",
             capability_registry=SimpleNamespace(
                 discover=Mock(return_value=[{"descriptor": operation_descriptor}]),
                 resolve_provider=Mock(return_value=provider_operation)))
         cme.module_id = "resident.fixture"
         cme.module_version = "0.0.0"
+        cme._authorize_capability = AsyncMock(return_value={
+            "audit_event_id": "audit", "decision_id": "decision", "policy_revision": "policy"})
         cme._authorization_decision = AsyncMock(return_value=SimpleNamespace(
             decision_id="decision", audit_event_id="audit", policy_revision="policy"))
         invalid_result = dict(sample["expected_result"], checkpoint={"cursor": True})
@@ -351,6 +355,8 @@ def test_cme_resolves_two_authoritative_resident_bindings_to_one_registered_exec
             cme.module_version = "0.0.0"
             cme._resolve_resident_execution_profile = AsyncMock(
                 side_effect=lambda resident_id, **_kwargs: profiles[resident_id])
+            cme._authorize_capability = AsyncMock(return_value={
+                "audit_event_id": "audit", "decision_id": "decision", "policy_revision": "policy"})
             cme._authorization_decision = AsyncMock(return_value=SimpleNamespace(
                 decision_id="decision", audit_event_id="audit", policy_revision="policy"))
             cme.provider_runtime = SimpleNamespace(invoke=AsyncMock(return_value={
@@ -365,6 +371,10 @@ def test_cme_resolves_two_authoritative_resident_bindings_to_one_registered_exec
                                       "objective": "Inspect the assigned request.",
                                       "correlation_id": f"correlation:{resident_id}"}}
                 resolved.append(await cme._resolve_resident_executor(activity))
+                resolved[-1]["execution_authorization"] = await cme._authorize_capability(
+                    "resident.objective.execute", resident_id=resident_id,
+                    context={"module_id": resolved[-1]["module_id"],
+                             "binding_revision": resolved[-1]["binding_revision"]})
                 await cme._run_bound_resident_activity(activity, resolved[-1])
             assert [item["execution_profile"]["resident_id"] for item in resolved] == [
                 "resident.alpha", "resident.beta"]
@@ -376,15 +386,11 @@ def test_cme_resolves_two_authoritative_resident_bindings_to_one_registered_exec
             assert {call.args[1]["request"]["payload"]["resident_id"] for call in calls} == {
                 "resident.alpha", "resident.beta"}
             assert cme.store.finish_activity.await_count == 2
-            assert cme._authorization_decision.await_count == 2
+            assert cme._authorize_capability.await_count == 2
 
-            cme._authorization_decision.side_effect = PermissionError("resident execution grant missing")
+            cme._authorize_capability.side_effect = PermissionError("resident execution grant missing")
             with pytest.raises(PermissionError, match="resident execution grant missing"):
-                await cme._resolve_resident_executor({
-                    "activity_id": "00000000-0000-4000-8000-000000000111",
-                    "attempt_id": "00000000-0000-4000-8000-000000000211",
-                    "idempotency_key": "resident:resident.alpha",
-                    "input": {"resident_id": "resident.alpha"}})
+                await cme._authorize_capability("resident.objective.execute", resident_id="resident.alpha")
             assert cme.provider_runtime.invoke.await_count == 2
 
     asyncio.run(run())

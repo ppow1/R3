@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.20.8
+File Revision: 1.20.9
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -26,7 +26,9 @@ Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GP
 Changed: 2026-11-10 | #51 | R3A Coordinator | Exclude unavailable optional tools and apply conversation-specific completion validation.
 Changed: 2026-11-10T13:15:00Z | R3A-GRACE-CAPABILITY-AUTONOMY | Codex GPT-6 | Filter resident capability discovery by current grants and pass registered provider limitations to Grace.
 Changed: 2026-11-10T14:05:00Z | R3A-GRACE-CAPABILITY-AUTONOMY | Codex GPT-6 | Authorize primary resident tools against the running executor module while retaining the directory principal.
+Changed: 2026-11-10 | R3A-EXECUTOR-ROLE-P0 | Coordinator | Reuse the contracted resident.objective.execute authorization at bound-executor dispatch; remove the ungranted executor-specific capability.
 Changed: 2026-11-10T15:20:26Z | R3A-MODULAR-EXECUTOR-ROLE | Codex GPT-6 | Publish the configured generic executor role and promote compatible registered primary-module metadata.
+Changed: 2026-11-10T18:08:17Z | R3A-CORE-SOCKET-FS02 | Coordinator | Fail closed when the registered Knowledge provider is unavailable; remove CME's direct file retrieval fallback.
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Dispatch generic versioned Steward read/write effects through existing authorization, invocation, and provider paths.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
@@ -96,7 +98,6 @@ from .engineering import (CapabilityOperationRef, CriterionResult, EngineeringPr
                           proposal_digest, validate_completion, validate_engineering_assignment)
 from .engineering_verifier import verify_workspace_artifact
 from .diagnostics import make_server
-from .knowledge import retrieve
 from .notifications import INSTITUTION_EVENT_SOURCE, validate_notification_envelope
 from .acceptance import (AcceptanceCriteriaRequired, OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
                          OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, evidence_fingerprint,
@@ -817,19 +818,9 @@ class CME:
                    "config_revision": binding["configuration_revision"]}
         profile = validate_resident_profile(profile, resident_id=resident_id,
                                             config_revision=binding["configuration_revision"])
-        decision = await self._authorization_decision(
-            "resident.executor.execute", activity_id=activity_id, attempt_id=attempt_id,
-            request_id=str(uuid.uuid5(uuid.UUID(activity_id),
-                                      f"resident-execution:{resident_id}:{attempt_id}")),
-            context={"dispatcher": "CME", "resident_id": resident_id,
-                     "module_id": resolved["module_id"], "module_version": resolved["module_version"],
-                     "binding_revision": resolved["binding_revision"]}, resident_id=resident_id)
         resolved["execution_profile"] = profile
         resolved["configuration_path"] = str(
             (Path(self.settings.source_path).parent / binding["configuration_ref"]).resolve())
-        resolved["execution_authorization"] = {"decision_id": decision.decision_id,
-                                                "audit_event_id": decision.audit_event_id,
-                                                "policy_revision": decision.policy_revision}
         return resolved
 
     async def _activate_configured_module(self) -> None:
@@ -1968,11 +1959,7 @@ class CME:
         except KeyError:
             registered_operation = None
         if capability_id == "institution.knowledge.read" and registered_operation is None:
-            if set(arguments) != {"query"}:
-                raise ValueError("institution.knowledge.read requires exactly one query argument")
-            query = arguments["query"]
-            if not isinstance(query, str) or not query.strip():
-                raise ValueError("institution.knowledge.read query must be nonempty text")
+            raise PermissionError("institution.knowledge.read requires an active registered provider")
         if capability_id != "institution.knowledge.read" and registered_operation is None and arguments:
             raise ValueError(f"{capability_id} accepts no arguments")
         if registered_operation is not None:
@@ -1998,11 +1985,7 @@ class CME:
                          if capability_id == "institution.knowledge.read" else None})
         evidence = []
         capability_output: Any = None
-        if capability_id == "institution.knowledge.read" and registered_operation is None:
-            for index, path in enumerate(self.settings.knowledge_sources):
-                evidence.extend(retrieve(path, f"knowledge.{index+1}", query))
-            capability_output = evidence
-        elif registered_operation is not None:
+        if registered_operation is not None:
             descriptor = registered_operation.descriptor
             invocation_id = str(uuid.uuid4())
             invocation = {
@@ -2900,6 +2883,7 @@ class CME:
                      "binding_revision": resolved["binding_revision"],
                      "artifact_digest": resolved["artifact_digest"],
                      "configuration_revision": profile["config_revision"],
+                     "execution_authorization": resolved["execution_authorization"],
                      "conversation": conversation, "evidence": evidence, "request_ref": request_ref}
         await self.store.record_progress(
             activity, {"phase": "resident.executor.dispatched", "at": utcnow().isoformat(),
@@ -3013,8 +2997,28 @@ class CME:
             if activity.get("input", {}).get("resident_id"):
                 resolved_executor = await self._resolve_resident_executor(activity)
                 if resolved_executor:
+                    execution_authorization = await self._authorize_capability(
+                        "resident.objective.execute", activity_id=str(activity["activity_id"]),
+                        attempt_id=str(activity["attempt_id"]),
+                        request_id=str(uuid.uuid5(
+                            uuid.NAMESPACE_URL,
+                            f"resident.execute:{activity['activity_id']}:{activity['attempt_id']}")),
+                        context={"resident_profile": resolved_executor["execution_profile"],
+                                 "module_id": resolved_executor["module_id"],
+                                 "module_version": resolved_executor["module_version"],
+                                 "binding_revision": resolved_executor["binding_revision"]},
+                        resident_id=resident_id)
+                    resolved_executor["execution_authorization"] = execution_authorization
                     lease_task = asyncio.create_task(self._lease_heartbeat(activity),
                                                      name=f"lease-heartbeat:{activity['activity_id']}")
+                    profile = resolved_executor["execution_profile"]
+                    await self.store.record_progress(
+                        activity, {"phase": "resident.execution.authorized", "at": utcnow().isoformat(),
+                                   "resident_id": resident_id,
+                                   "module_id": resolved_executor["module_id"],
+                                   "authorization_audit_event_id": execution_authorization["audit_event_id"],
+                                   "directory_snapshot_sha256": profile["directory_evidence"][
+                                       "snapshot_sha256"]})
                     await self._run_bound_resident_activity(activity, resolved_executor)
                     return
             if activity["activity_type"] not in {"grace.objective", "grace.conversation", "foundation.observe"}:

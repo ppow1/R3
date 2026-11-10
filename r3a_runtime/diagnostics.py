@@ -21,6 +21,7 @@ Changed: 2026-11-07T00:20:59Z | R3A-AP1-SLICE-2 | Codex GPT-6 | Project provider
 Changed: 2026-11-07T04:36:29Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Exclude event payloads from status snapshots and use indexed latest-event evidence.
 Changed: 2026-11-07T04:41:59Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Report active and blocked queue counts using the existing activity-state index.
 Changed: 2026-11-07T04:44:58Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Finalize bounded indexed status snapshot fields.
+Changed: 2026-11-10T18:08:17Z | R3A-RUNTIME-REVISION | Coordinator | Report the exact imported runtime source digest alongside active configuration revision.
 Supersedes: None.
 Contracts: AP0-010; R3A-019; AP0-M1 D8; STM-006; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py.
@@ -36,7 +37,7 @@ from typing import Any
 from .config import Settings
 from .control import ControlServer
 from .contracts import ContractValidationError, parse_timestamp
-from .db import IMPLEMENTATION_REVISION, Store
+from .db import IMPLEMENTATION_REVISION, IMPLEMENTATION_SOURCE_SHA256, Store
 
 
 def _json_default(value: Any) -> Any:
@@ -153,6 +154,7 @@ class DiagnosticProjection:
         return {"observed_at": now.isoformat(), "instance_id": self.settings.instance_id,
                 "source": "postgresql", "source_freshness": "fresh",
                 "implementation_revision": IMPLEMENTATION_REVISION,
+                "implementation_source_sha256": IMPLEMENTATION_SOURCE_SHA256,
                 "configuration": snapshot["configuration"], "processes": processes,
                 "modules": module_health, "resources": resources,
                 "activities": activities,

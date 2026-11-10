@@ -32,6 +32,7 @@ Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT
 Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GPT-6 | Preserve durable checkpoints across progress-only updates and guard them by the active attempt lease.
 Changed: 2026-11-10T13:15:00Z | R3A-GRACE-CAPABILITY-AUTONOMY | Codex GPT-6 | Reconcile current Coordinator conversation persistence with approved checkpoint-preserving activity updates.
 Changed: 2026-11-10T15:20:26Z | R3A-MODULAR-EXECUTOR-ROLE | Codex GPT-6 | Describe versioned legacy manifest metadata promotions accurately in the durable event ledger.
+Changed: 2026-11-10T18:08:17Z | R3A-RUNTIME-REVISION | Coordinator | Fingerprint the imported runtime source bundle for truthful process diagnostics.
 Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist authorization decision and audit identities as separate provenance fields.
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Add grant validation for explicit-principal Steward access modes.
 Changed: 2026-11-07T13:20:00Z | R3A-AP2-CAPABILITY-INTEGRATION | Codex GPT-6 | Store canonical invocation authorization in a nonreserved evidence column and verify durable SQL recovery against isolated PostgreSQL.
@@ -81,7 +82,28 @@ from .engineering import (EngineeringProposal, EngineeringWorkOrder, Verificatio
 from .capability_contracts import CapabilityContractError, validate_json
 
 
-IMPLEMENTATION_REVISION = os.environ.get("R3A_IMPLEMENTATION_REVISION", "working-tree")
+def _implementation_source_sha256() -> str:
+    """Fingerprint the imported runtime source bundle without claiming a Git revision."""
+    root = Path(__file__).resolve().parent
+    digest = hashlib.sha256()
+    paths = sorted(path for path in root.rglob("*")
+                   if path.is_file() and (path.suffix in {".py", ".json", ".sql"})
+                   and "__pycache__" not in path.parts)
+    for path in paths:
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+IMPLEMENTATION_SOURCE_SHA256 = _implementation_source_sha256()
+_configured_implementation_revision = os.environ.get("R3A_IMPLEMENTATION_REVISION", "").strip()
+IMPLEMENTATION_REVISION = (
+    _configured_implementation_revision
+    if _configured_implementation_revision
+    and _configured_implementation_revision.casefold() not in {"working-tree", "unknown", "unset"}
+    else f"source-sha256:{IMPLEMENTATION_SOURCE_SHA256}")
 MAX_ACTIVITY_INTAKE_BYTES = 512 * 1024
 MAX_CONVERSATION_ATTEMPTS = 8
 ACTIVITY_INTAKE_SCHEMA = json.loads(
