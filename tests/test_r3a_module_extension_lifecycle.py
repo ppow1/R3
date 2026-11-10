@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_module_extension_lifecycle.py
 Component: TEST-R3A-MODULE-EXTENSION-LIFECYCLE
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-10T01:09:23Z
 Created By: Codex GPT-6
 Purpose: Verify generic module metadata survives restart-free configuration reload.
@@ -12,10 +12,11 @@ Dependencies: r3a_runtime.cme config.reload and provider process registry contra
 Authority: AD-024; Modular Plugins #46; fixture acceptance only.
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Add restart-free module configuration reload regression.
 Changed: 2026-11-10T01:35:58Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify safe-boundary refusal, active-module retention, and rollback after reload installation failure.
+Changed: 2026-11-10T01:38:38Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify failed candidate activation cancels replacement and preserves the old selected provider.
 Supersedes: None
 Contracts: MOD-013; module.lifecycle v2; provider configuration reload.
 Tests: python3 -m pytest -q tests/test_r3a_module_extension_lifecycle.py
-History/Predecessor: New file; prior tracked blob cfa4acb8dca330ce4e7439cd065ad77f99ac894f.
+History/Predecessor: New file; prior tracked blob cfa4acb8dca330ce4e7439cd065ad77f99ac894f; immediately prior revision recorded in Git.
 """
 from __future__ import annotations
 
@@ -190,3 +191,61 @@ def test_failed_reload_install_restores_prior_runtime_configuration():
 
 def provider_process_alive(process):
     return process.pid == 41201 and process.returncode is None
+
+
+def test_failed_provider_replacement_keeps_old_version_selected_and_active():
+    async def run():
+        old_operation = SimpleNamespace(descriptor={"provider": {
+            "provider_id": "example.provider", "provider_version": "1.0.0"}})
+        new_operation = SimpleNamespace(descriptor={"provider": {
+            "provider_id": "example.provider", "provider_version": "1.1.0"}})
+
+        class Registry:
+            def __init__(self):
+                self.selected_version = "1.0.0"
+                self.activations = []
+
+            def resolve_provider(self, operation_id, version):
+                assert operation_id == "example.operation"
+                return {"1.0.0": old_operation, "1.1.0": new_operation}[version]
+
+            def activate_provider(self, operation_id, version):
+                self.activations.append(version)
+                self.selected_version = version
+
+        registry = Registry()
+
+        async def activate(operation):
+            if operation is new_operation:
+                raise RuntimeError("candidate readiness failed")
+            return {"module_id": "example.provider", "version": "1.0.0"}
+
+        provider_runtime = SimpleNamespace(
+            activate=AsyncMock(side_effect=activate),
+            begin_replacement=AsyncMock(), cancel_replacement=AsyncMock(),
+            stop=AsyncMock())
+        store = SimpleNamespace(record_module_replacement=AsyncMock())
+        cme = object.__new__(CME)
+        cme.settings = SimpleNamespace(capability_registry=registry)
+        cme.provider_runtime = provider_runtime
+        cme.store = store
+
+        try:
+            await CME._control_request(cme, "capability.module.replace", {
+                "operation_id": "example.operation", "old_module_id": "example.provider",
+                "old_version": "1.0.0", "new_provider_version": "1.1.0"}, "replace-failing-candidate")
+        except RuntimeError as exc:
+            assert "candidate readiness failed" in str(exc)
+        else:
+            raise AssertionError("replacement must report failed candidate activation")
+
+        assert registry.selected_version == "1.0.0"
+        assert registry.activations == []
+        provider_runtime.activate.assert_any_await(old_operation)
+        provider_runtime.activate.assert_any_await(new_operation)
+        provider_runtime.begin_replacement.assert_awaited_once_with("example.provider", "1.0.0")
+        provider_runtime.cancel_replacement.assert_awaited_once_with("example.provider", "1.0.0")
+        provider_runtime.stop.assert_not_awaited()
+        store.record_module_replacement.assert_not_awaited()
+
+    asyncio.run(run())
