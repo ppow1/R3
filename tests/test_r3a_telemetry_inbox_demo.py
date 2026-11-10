@@ -45,6 +45,8 @@ class TelemetryInboxDemo(unittest.IsolatedAsyncioTestCase):
         plugin_config = {"host_id": "fixture-host"}
         registry = CapabilityRegistry()
         registry.register(manifest["operation"], plugin_config, legacy_manifest=manifest)
+        registry.set_provider_state(manifest["provider"]["provider_id"],
+                                    manifest["provider"]["provider_version"], "ACTIVE")
         cme = CME.__new__(CME)
         cme.settings = SimpleNamespace(
             module_capabilities=(capability_id,),

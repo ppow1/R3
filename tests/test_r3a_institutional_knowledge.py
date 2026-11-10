@@ -132,6 +132,8 @@ class InstitutionalKnowledgeProviderTests(unittest.TestCase):
             registry = CapabilityRegistry()
             registered = registry.register(operation_from_manifest(manifest), config,
                                            legacy_manifest=manifest)
+            registry.set_provider_state(registered.descriptor["provider"]["provider_id"],
+                                        registered.descriptor["provider"]["provider_version"], "ACTIVE")
             self.assertEqual("institution.knowledge.read", registered.descriptor["operation_id"])
             self.assertEqual("1.1.0", registered.descriptor["operation_revision"])
             tool = registered.resident_tool_projection()
@@ -199,6 +201,8 @@ class InstitutionalKnowledgeProviderTests(unittest.TestCase):
             registry = CapabilityRegistry()
             registered = registry.register(operation_from_manifest(manifest),
                                            self._configuration(source), legacy_manifest=manifest)
+            registry.set_provider_state(registered.descriptor["provider"]["provider_id"],
+                                        registered.descriptor["provider"]["provider_version"], "ACTIVE")
             tool = registered.resident_tool_projection()
             cme = CME.__new__(CME)
             cme.module_id = "resident.grace"

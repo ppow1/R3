@@ -178,6 +178,8 @@ class InstitutionalDirectoryProviderTests(unittest.TestCase):
     def test_dynamic_grace_tool_receives_directory_output_and_distinct_evidence(self):
         registry = CapabilityRegistry()
         registry.register(self.descriptor, self.config, legacy_manifest=self.manifest)
+        registry.set_provider_state(self.descriptor["provider"]["provider_id"],
+                                    self.descriptor["provider"]["provider_version"], "ACTIVE")
         instance = CME.__new__(CME)
         instance.settings = SimpleNamespace(capability_registry=registry,
                                             module_capabilities=(self.descriptor["operation_id"],),
