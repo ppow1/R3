@@ -1,0 +1,33 @@
+# R3A Website defect backlog — 2026-11-10
+
+**Scope:** Website branch `engineering/r3a-ap3-website-20261107`; primary Steward institutional interface. This is a live evidence snapshot, not a claim that all listed behaviors were exercised with an authenticated Steward browser.
+
+## Evidence captured
+
+- Worktree: `/home/admin1/r3a-workstreams/ap3-website`, clean before Coordinator integration, HEAD `68b4b07c880d55c1fa961ebad2999044e3c8be53`.
+- Integration target: Coordinator V2 `b1b38130e796adfe02c7343f71764e9ab0513f6b`; merge base `db46df7a04c694f0e7508d181a3a65b296cc6d16`; branch counts were 23 Website-only and 104 Coordinator-only commits.
+- Live service owner: `r3a-ap3-website.service` is active; its configured backend listens on `127.0.0.1:18311`, with HTTPS nginx on `192.168.1.155:8311`.
+- `GET https://192.168.1.155:8311/steward` returned 200; `GET http://127.0.0.1:18311/api/v1/website/identity` returned 200 and reported deployed build `e2fe437d02dfef75f6d9a08a64c46e806bacebeb`.
+- Anonymous `GET /api/v1/steward/session`, `/api/v1/steward/residents`, and `/api/v1/steward/conversations?resident_id=grace` on port 18311 returned 401. This confirms the auth gate, but not authenticated directory or chat behavior.
+- Issue #51's latest Coordinator update reports completed Grace conversation `635da82a-96eb-57da-a5e6-78cac6a5a00c`, message/activity/model evidence, and asks for authenticated browser reload as the remaining acceptance step. This is issue-reported evidence; this work window did not reproduce it.
+- Local Chrome and Firefox headless invocations each timed out before loading a page in this container. No authenticated browser profile/session was available. Browser acceptance therefore remains open.
+
+## Prioritized defects and owners
+
+| Priority | Area | Reproducible evidence / current state | Owner and next action |
+|---|---|---|---|
+| P0 | Authenticated Grace chat, history, refresh persistence | Anonymous session/resident/conversation API calls return 401 as intended. Issue #51 reports one completed ordinary Grace turn and a required authenticated browser reload, but this window cannot verify the reload or persisted transcript. | Website + Coordinator: run authenticated browser acceptance after controlled deployment/reload; verify resident list, create/open, ordinary send/receive, and refresh persistence with activity/model references. Preserve the completed conversation. |
+| P1 | Resident selection and blocked-turn attribution | Source review found that late list/transcript responses could render after changing residents, and every blocked turn was labeled as Grace even for a dynamically discovered resident. Fixed in this branch: stale list/history/create/send results no longer mutate the new selection, and blocked-turn text uses the selected resident's directory name. Permanent regressions cover reordered responses and resident-specific status labels. | Website: keep the regressions and verify in authenticated browser once a supported browser session is available. |
+| P1 | Settings and operational controls | `web/index.html` scope buttons only change the visible heading; `settingsRegistryAdapter.read()` explicitly returns unavailable. The separate effective-config read is read-only and labels writes unavailable. Conference button is explicitly disabled/planned. | Website + Coordinator/API owners: retain honest unavailable states; wire each scope only to an authorized, versioned canonical config/capability API. Do not imply scope selection changes live configuration. |
+| P1 | Session vs dependency error visibility | Anonymous session API returns 401 with `Steward session unavailable`; browser redirects on canonical session 401. No authenticated runtime-outage behavior was exercised here. | Website + Coordinator: distinguish unauthenticated, expired session, and session-service outage in the live browser while keeping scoped operation 401 from forcing sign-out. |
+| P1 | Timezone and message timestamps | Client formats message timestamps only when source offsets and an explicit IANA zone are present; otherwise it renders an explicit unavailable/unconverted label. Unit coverage includes DST folds. Live authenticated message presentation remains unverified. | Website: verify local and UTC values on actual persisted conversation; confirm institution timezone is loaded from effective configuration. |
+| P2 | Notifications and action controls | Client is connected to versioned inbox/acknowledge/resolve routes; live anonymous access is protected. No authenticated inbox or action receipt was verified in this window. | Website + Notifications #48: browser-verify real inbox freshness, detail, timestamps, ack and resolution results. |
+| P2 | Responsive navigation, settings menu, workspace persistence | Source contains draggable panels/layout presets and touch/keyboard navigation. Browser binaries timed out in this environment, so layout behavior and errors at mobile/desktop sizes remain unverified. | Website: perform viewport-based browser checks with the operator's authenticated browser; fix keyboard focus, overflow, and persistence defects as found. |
+
+## Fix delivered in this increment
+
+`web/steward-workspace-api.mjs` now ignores conversation-list and history responses when their resident/conversation selection has changed while the request was pending. It also prevents a completed create/send request for the previous resident from changing the current view, and it attributes blocked-turn status to the current directory resident. `tests/test_steward_workspace_api.mjs` exercises deliberately reordered resident-list and message responses plus dynamic blocked-turn labels.
+
+## Acceptance boundary
+
+Contract/unit tests do not substitute for authenticated browser behavior. Do not mark P0 chat, live settings, notifications, or visual browser usability accepted until a real authenticated browser confirms the actual API responses and durable state. Website owns UI defects; Autonomy #43 owns Grace decision behavior; Coordinator owns shared runtime/deployment wiring.

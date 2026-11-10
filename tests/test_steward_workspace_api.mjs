@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_steward_workspace_api.mjs
 Component: R3A-STEWARD-WORKSPACE-CLIENT-TESTS
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Verify the versioned workspace browser client transport and denial behavior.
@@ -12,6 +12,7 @@ Dependencies: web/steward-workspace-api.mjs; Node.js built-in test modules.
 Authority: R3A Class I website development, Issue #51.
 Changed: 2026-11-07 | R3A-007/R3A-010/R3A-019 | Add chat, notification, session, objective, and capability client tests.
 Changed: 2026-11-08 | R3A-007/R3A-010 | Cover DST-aware UTC-preserving time display and unavailable API routing.
+Changed: 2026-11-10 | #51 | Verify delayed conversation responses cannot overwrite a newer resident selection.
 Supersedes: None.
 Contracts: r3a.steward-workspace-web.v1; r3a.steward-session.v1; r3a.notification-inbox.v1; r3a.grace-objective-submission.v1.
 Tests: node --test tests/test_steward_workspace_api.mjs.
@@ -20,7 +21,7 @@ History/Predecessor: New file; initial publication recorded in Git.
 // Mock fetch never supplies live institutional data.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp, notificationPresentation, residentProgressLabel, residentChatStatusLabel, conversationHistoryLoadingLabel, conversationPollState} from '../web/steward-workspace-api.mjs';
+import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp, notificationPresentation, residentProgressLabel, residentBlockedLabel, residentChatStatusLabel, conversationHistoryLoadingLabel, conversationPollState, mountResidentChat} from '../web/steward-workspace-api.mjs';
 
 function response(status, payload, headers = {}) {
   return {
@@ -116,6 +117,12 @@ test('resident progress presentation uses the dynamically selected resident name
   assert.equal(residentProgressLabel('  '), 'Selected resident is working on this turn through managed CME…');
 });
 
+test('blocked turn status names the resident selected for that conversation', () => {
+  assert.match(residentBlockedLabel('Vicky'), /^Vicky could not complete this turn/);
+  assert.match(residentBlockedLabel('Grace'), /^Grace could not complete this turn/);
+  assert.match(residentBlockedLabel(''), /^Resident could not complete this turn/);
+});
+
 test('history polling keeps loaded messages visible and stops with an explicit timeout state', () => {
   assert.equal(conversationHistoryLoadingLabel(true), 'Loading durable conversation history…');
   assert.equal(conversationHistoryLoadingLabel(false), null);
@@ -130,6 +137,78 @@ test('resident roster labels chat eligibility from CME readiness evidence', () =
   assert.equal(residentChatStatusLabel({chat_available: false, chat_status: 'required_execution_grant_missing'}), 'chat unavailable · execution authorization missing');
   assert.equal(residentChatStatusLabel({chat_available: false, chat_status: 'office_role_route_unavailable'}), 'chat unavailable · no configured office route');
   assert.equal(residentChatStatusLabel({chat_available: false}), 'chat unavailable · eligibility not confirmed');
+});
+
+test('late conversation-list responses cannot replace the currently selected resident', async () => {
+  class FakeElement {
+    constructor(tagName = '') { this.tagName = tagName; this.childNodes = []; this.listeners = {}; this.dataset = {}; this.attributes = {}; this.value = ''; this.disabled = false; this._text = null; }
+    get options() { return this.childNodes.filter(node => node instanceof FakeOption); }
+    set textContent(value) { this._text = String(value); this.childNodes = []; }
+    get textContent() { return this._text ?? this.childNodes.map(node => node.textContent).join(''); }
+    addEventListener(name, callback) { this.listeners[name] = callback; }
+    dispatch(name) { return this.listeners[name]?.({currentTarget: this}); }
+    setAttribute(name, value) { this.attributes[name] = String(value); }
+    replaceChildren(...nodes) { this._text = null; this.childNodes = nodes; }
+    appendChild(node) { this._text = null; this.childNodes.push(node); return node; }
+    append(...nodes) { nodes.forEach(node => this.appendChild(node)); }
+    add(node) { this.appendChild(node); }
+  }
+  class FakeOption extends FakeElement {
+    constructor(text, value) { super('option'); this.textContent = text; this.value = value; }
+  }
+  const ids = ['chat-panel', 'chat-resident-select', 'chat-conversation-list', 'chat-message-list', 'chat-service-status', 'chat-composer-input', 'chat-send', 'chat-new', 'nav-chat', 'chat-refresh'];
+  const elements = Object.fromEntries(ids.map(id => [id, new FakeElement(id === 'chat-resident-select' ? 'select' : 'div')]));
+  const root = {
+    getElementById: id => elements[id] ?? null,
+    createElement: tag => new FakeElement(tag),
+    createTextNode: text => { const node = new FakeElement('#text'); node.textContent = text; return node; },
+    addEventListener() {},
+    documentElement: {dataset: {r3aAuthVerified: 'true', presentationTimezone: 'America/New_York'}},
+  };
+  const previousDocument = globalThis.document;
+  const previousOption = globalThis.Option;
+  globalThis.document = root;
+  globalThis.Option = FakeOption;
+  let resolveResidentA;
+  let resolveMessages;
+  let residentACalls = 0;
+  const api = {
+    residents: async () => ({freshness: 'current', residents: [
+      {resident_id: 'resident:a', display_name: 'A', chat_available: true},
+      {resident_id: 'resident:b', display_name: 'B', chat_available: true},
+    ]}),
+    conversations: ({residentId}) => residentId === 'resident:a'
+      ? (++residentACalls === 1
+        ? new Promise(resolve => { resolveResidentA = resolve; })
+        : Promise.resolve({freshness: 'A current', conversations: [{conversation_id: 'a-conversation', title: 'A conversation'}]}))
+      : Promise.resolve({freshness: 'B current', conversations: [{conversation_id: 'b-conversation', title: 'B conversation'}]}),
+    messages: () => new Promise(resolve => { resolveMessages = resolve; }),
+  };
+  try {
+    mountResidentChat({api, root});
+    await new Promise(resolve => setImmediate(resolve));
+    const select = elements['chat-resident-select'];
+    select.value = 'resident:a'; select.dispatch('change');
+    select.value = 'resident:b'; select.dispatch('change');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(elements['chat-conversation-list'].childNodes[0].textContent, 'B conversation');
+    elements['chat-conversation-list'].childNodes[0].dispatch('click');
+    await new Promise(resolve => setImmediate(resolve));
+    select.value = 'resident:a'; select.dispatch('change');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(elements['chat-conversation-list'].childNodes[0].textContent, 'A conversation');
+    resolveMessages({freshness: 'current', messages: [{message_id: 'late-message', sender: {kind: 'resident', display_name: 'B'}, created_at: '2026-11-10T12:00:00Z', text: 'Stale response'}]});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(elements['chat-message-list'].childNodes.length, 0);
+    resolveResidentA({freshness: 'A current', conversations: [{conversation_id: 'a-conversation', title: 'A conversation'}]});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(elements['chat-conversation-list'].childNodes[0].textContent, 'A conversation');
+    assert.match(elements['chat-service-status'].textContent, /A current/);
+  } finally {
+    globalThis.document = previousDocument;
+    if (previousOption === undefined) delete globalThis.Option;
+    else globalThis.Option = previousOption;
+  }
 });
 
 test('notification acknowledgment uses the #48 delivery route and idempotency key', async () => {

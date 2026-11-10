@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: web/steward-workspace-api.js
 Component: R3A-STEWARD-WORKSPACE-CLIENT
-File Revision: 1.0.10
+File Revision: 1.0.11
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Same-origin client for versioned resident conversation and notification contracts
@@ -20,6 +20,7 @@ Changed: 2026-11-09 | R3A-LOGIN-REDIRECT-LOOP | R3A Coordinator | Recheck only t
 Changed: 2026-11-09 | R3A-STEWARD-CHAT-ROSTER | R3A Coordinator | Render all dynamic roster rows and disable chat when the current response does not establish availability.
 Changed: 2026-11-09 | R3A-STEWARD-CHAT-READINESS | R3A Coordinator | Show the evidence-backed route or authorization reason for disabled roster entries.
 Changed: 2026-11-10 | #51 | Keep loaded history visible during polling and pause refresh after a bounded wait.
+Changed: 2026-11-10 | #51 | Ignore stale resident/conversation responses after selection changes.
 Tests: tests/test_steward_workspace_api.mjs uses mocked fetch only as a labeled development test
 */
 
@@ -84,6 +85,13 @@ export function residentProgressLabel(displayName) {
     ? displayName.trim()
     : 'Selected resident';
   return `${name} is working on this turn through managed CME…`;
+}
+
+export function residentBlockedLabel(displayName) {
+  const name = typeof displayName === 'string' && displayName.trim()
+    ? displayName.trim()
+    : 'Resident';
+  return `${name} could not complete this turn. The service returned an explicit blocked result.`;
 }
 
 export function conversationHistoryLoadingLabel(isInitialLoad) {
@@ -220,6 +228,8 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   const newConversationButton = root.getElementById('chat-new');
   const processingPolls = new Map();
   const maxProcessingPolls = 20;
+  let conversationLoadRevision = 0;
+  let messageLoadRevision = 0;
   function syncNewConversationButton() {
     newConversationButton.disabled = !directoryAvailable || !selectedResident || !chatAvailableResidentIds.has(selectedResident) || creatingConversation;
     newConversationButton.setAttribute('aria-busy', String(creatingConversation));
@@ -238,11 +248,14 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
 
   async function loadMessages(conversationId) {
     const changingConversation = selectedConversation !== conversationId;
+    const requestedResident = selectedResident;
+    const revision = ++messageLoadRevision;
     selectedConversation = conversationId;
     const loadingLabel = conversationHistoryLoadingLabel(changingConversation || !messageList.childNodes.length);
     if (loadingLabel) setText(messageList, loadingLabel);
     try {
       const result = await api.messages(conversationId);
+      if (selectedResident !== requestedResident || selectedConversation !== conversationId || revision !== messageLoadRevision) return [];
       messageList.replaceChildren();
       for (const message of result.messages || []) {
         const item = row('article', `workspace-message ${message.sender?.kind || 'unknown'}`, message.sender?.display_name || message.sender?.id || 'Unknown sender', `${formatPresentationTimestamp(message.created_at, root.documentElement?.dataset.presentationTimezone)} · ${message.delivery_state || 'state unavailable'}`);
@@ -269,7 +282,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
         }
       } else if (failed) {
         processingPolls.delete(conversationId);
-        setText(status, 'Grace could not complete this turn. The service returned an explicit blocked result.');
+        setText(status, residentBlockedLabel(residentNames.get(requestedResident)));
         status.dataset.state = 'blocked';
       } else {
         processingPolls.delete(conversationId);
@@ -277,13 +290,20 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
         status.dataset.state = result.freshness || 'unknown';
       }
       return result.messages || [];
-    } catch (error) { unavailable(error); setText(messageList, 'History unavailable; no local transcript is shown.'); }
+    } catch (error) {
+      if (selectedResident === requestedResident && selectedConversation === conversationId && revision === messageLoadRevision) {
+        unavailable(error); setText(messageList, 'History unavailable; no local transcript is shown.');
+      }
+    }
   }
 
   async function loadConversations() {
     if (!selectedResident) return;
+    const requestedResident = selectedResident;
+    const revision = ++conversationLoadRevision;
     try {
-      const result = await api.conversations({residentId: selectedResident});
+      const result = await api.conversations({residentId: requestedResident});
+      if (selectedResident !== requestedResident || revision !== conversationLoadRevision) return;
       conversationList.replaceChildren();
       for (const conversation of result.conversations || []) {
         const button = document.createElement('button');
@@ -295,7 +315,11 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
       if (!conversationList.childNodes.length) setText(conversationList, 'No conversations returned for this resident.');
       if (selectedConversation) await loadMessages(selectedConversation);
       else setText(status, result.freshness === 'current' ? 'Resident directory and conversations loaded.' : `Conversation source ${result.freshness || 'unknown'}`);
-    } catch (error) { unavailable(error); setText(conversationList, 'Conversation list unavailable.'); }
+    } catch (error) {
+      if (selectedResident === requestedResident && revision === conversationLoadRevision) {
+        unavailable(error); setText(conversationList, 'Conversation list unavailable.');
+      }
+    }
   }
 
   async function loadResidents() {
@@ -343,6 +367,8 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   }
 
   residentSelect.addEventListener('change', () => {
+    conversationLoadRevision += 1;
+    messageLoadRevision += 1;
     selectedResident = residentSelect.value;
     pendingConversationId = null;
     pendingMessage = null;
@@ -355,13 +381,15 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   });
   newConversationButton.addEventListener('click', async () => {
     if (newConversationButton.disabled) return;
+    const requestedResident = selectedResident;
     creatingConversation = true;
     syncNewConversationButton();
     setText(status, 'Creating a persistent conversation through the institutional service…');
     try {
       pendingConversationId ||= crypto.randomUUID();
-      const result = await api.createConversation({residentId: selectedResident, clientConversationId: pendingConversationId});
+      const result = await api.createConversation({residentId: requestedResident, clientConversationId: pendingConversationId});
       if (!result.conversation?.conversation_id) throw new WorkspaceApiError('Service did not confirm conversation creation', {code: 'creation_unconfirmed'});
+      if (selectedResident !== requestedResident) return;
       selectedConversation = result.conversation.conversation_id;
       pendingConversationId = null;
       await loadConversations();
@@ -371,16 +399,21 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   sendButton.addEventListener('click', async () => {
     const text = composer.value.trim();
     if (!text || !selectedConversation || sendButton.disabled) return;
+    const requestedConversation = selectedConversation;
+    const requestedResident = selectedResident;
     sendButton.disabled = true;
     if (!pendingMessage || pendingMessage.text !== text) pendingMessage = {text, id: crypto.randomUUID()};
     try {
-      const result = await api.sendMessage(selectedConversation, {clientMessageId: pendingMessage.id, text});
+      const result = await api.sendMessage(requestedConversation, {clientMessageId: pendingMessage.id, text});
+      if (selectedConversation !== requestedConversation || selectedResident !== requestedResident) return;
       if (!result.message?.message_id) throw new WorkspaceApiError('Service did not confirm durable message acceptance', {code: 'acceptance_unconfirmed'});
       composer.value = '';
       pendingMessage = null;
       setText(status, `Message accepted by service · ${result.message.delivery_state || 'state unknown'}${result.correlation_id ? ` · correlation ${result.correlation_id}` : ''}`);
-      await loadMessages(selectedConversation);
-    } catch (error) { unavailable(error); }
+      await loadMessages(requestedConversation);
+    } catch (error) {
+      if (selectedConversation === requestedConversation && selectedResident === requestedResident) unavailable(error);
+    }
     finally { sendButton.disabled = !selectedConversation || composer.disabled; }
   });
   root.getElementById('nav-chat')?.addEventListener('click', () => loadResidents());
