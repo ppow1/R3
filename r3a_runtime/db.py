@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.14.2
+File Revision: 1.14.3
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -29,6 +29,7 @@ Changed: 2026-11-07T05:45:10Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist autho
 Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | R3A Coordinator | Audit and persist a safe legacy-to-versioned module manifest promotion.
 Changed: 2026-11-07T05:52:05Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist stable objective correlation and immutable Grace proposal revisions in existing activity checkpoints/events.
 Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT-6 | Persist generic registered activity-intake types through the existing durable activity ledger.
+Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GPT-6 | Preserve durable checkpoints across progress-only updates and guard them by the active attempt lease.
 Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist authorization decision and audit identities as separate provenance fields.
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Add grant validation for explicit-principal Steward access modes.
 Changed: 2026-11-07T13:20:00Z | R3A-AP2-CAPABILITY-INTEGRATION | Codex GPT-6 | Store canonical invocation authorization in a nonreserved evidence column and verify durable SQL recovery against isolated PostgreSQL.
@@ -1874,9 +1875,11 @@ class Store:
                               checkpoint: dict[str, Any] | None = None) -> None:
         async with self.pool.connection() as conn, conn.transaction():
             updated = await conn.execute(
-                "UPDATE r3a.activities SET progress=%s,checkpoint=%s,lease_until=clock_timestamp()+(%s * interval '1 second'),updated_at=clock_timestamp() "
+                "UPDATE r3a.activities SET progress=%s,checkpoint=COALESCE(%s::jsonb,checkpoint),"
+                "lease_until=clock_timestamp()+(%s * interval '1 second'),updated_at=clock_timestamp() "
                 "WHERE activity_id=%s AND state='RUNNING' AND attempt_id=%s",
-                (json.dumps(progress), json.dumps(checkpoint or {}), self.settings.lease_seconds,
+                (json.dumps(progress), json.dumps(checkpoint) if checkpoint is not None else None,
+                 self.settings.lease_seconds,
                  activity["activity_id"], activity["attempt_id"]),
             )
             if updated.rowcount != 1:

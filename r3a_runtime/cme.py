@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.20.2
+File Revision: 1.20.3
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -22,6 +22,7 @@ Changed: 2026-11-09 | R3A-STEWARD-CHAT-ROSTER | R3A Coordinator | Preserve direc
 Changed: 2026-11-10T00:14:15Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Separate direct Steward conversation authorization from resident-to-resident delegation while retaining target execution authorization.
 Changed: 2026-11-10T00:34:18Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Expose exact-grant revocation through the existing private CME operator control path.
 Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT-6 | Dispatch registered resident executors and durable activity handlers through shared module contracts while retaining legacy Grace compatibility.
+Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GPT-6 | Persist handler progress with its returned checkpoint and restore handler checkpoint state on retry.
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Dispatch generic versioned Steward read/write effects through existing authorization, invocation, and provider paths.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
@@ -582,6 +583,17 @@ class CME:
                                "module_id": resolved["module_id"],
                                "module_version": resolved["module_version"],
                                "artifact_digest": resolved["artifact_digest"]}}
+        stored_checkpoint = activity.get("checkpoint") or {}
+        if isinstance(stored_checkpoint, dict) and isinstance(stored_checkpoint.get("handler"), dict):
+            stored_handler = stored_checkpoint.get("handler") or {}
+            expected_handler = payload["handler"]
+            if any(stored_handler.get(field) != expected_handler[field]
+                   for field in ("handler_id", "handler_version", "module_id", "module_version",
+                                 "artifact_digest")):
+                raise ModuleExtensionError("durable handler checkpoint belongs to a different handler binding")
+            payload["checkpoint"] = stored_checkpoint.get("handler_checkpoint", {})
+            if payload["checkpoint"]:
+                validate_activity_handler_payload(handler, "checkpoint", payload["checkpoint"])
         validate_activity_handler_payload(handler, "request", payload["input"])
         handler_decision = await self._authorization_decision(
             "activity.handler.execute", activity_id=str(activity["activity_id"]),
@@ -624,15 +636,15 @@ class CME:
         checkpoint = result.get("checkpoint")
         if checkpoint is not None:
             validate_activity_handler_payload(handler, "checkpoint", checkpoint)
+        if checkpoint is not None or progress is not None:
+            progress_update = {"phase": "handler.progress" if progress is not None else "handler.checkpointed",
+                               "at": utcnow().isoformat(), "handler_id": handler["handler_id"]}
+            if progress is not None:
+                progress_update["progress"] = progress
             await self.store.record_progress(
-                activity, {"phase": "handler.checkpointed", "at": utcnow().isoformat(),
-                           "handler_id": handler["handler_id"]},
-                {"handler": payload["handler"], "handler_checkpoint": checkpoint})
-        if progress is not None:
-            await self.store.record_progress(
-                activity, {"phase": "handler.progress", "at": utcnow().isoformat(),
-                           "handler_id": handler["handler_id"], "progress": progress},
-                {"handler": payload["handler"], "handler_progress": progress})
+                activity, progress_update,
+                ({"handler": payload["handler"], "handler_checkpoint": checkpoint}
+                 if checkpoint is not None else None))
         if result["outcome"] == "completed":
             await self.store.finish_activity(
                 activity, {"contract_id": "r3a.activity-handler.result", "contract_version": "1.0.0",

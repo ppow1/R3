@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_activity_handler_interop.py
 Component: R3A-ACTIVITY-HANDLER-INTEROPERABILITY-TESTS
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-10T02:02:46Z
 Created By: Codex GPT-6
 Purpose: Validate the shared v1.1 module/handler fixture and provide CME dispatch tests for Autonomy #43 to consume.
@@ -13,6 +13,7 @@ Authority: AD-024; the fixture's required capabilities are not grants.
 Changed: 2026-11-10T02:02:46Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Add shared module-manifest/handler contract and CME interoperability regressions.
 Changed: 2026-11-10T02:07:18Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Avoid installing collection-time database stubs that leak across the full test suite.
 Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT-6 | Exercise CME discovery and resident bindings from the shared v1.1 manifest projection.
+Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GPT-6 | Assert CME commits handler progress and checkpoint in one durable ledger update.
 Supersedes: None.
 Contracts: r3a.module-manifest.v1@1.0.0 and @1.1.0; r3a.activity-handler.v1@1.0.0.
 Tests: python3 -m pytest -q tests/test_r3a_activity_handler_interop.py
@@ -205,6 +206,10 @@ def test_cme_dispatches_shared_fixture_and_records_authorized_result():
         assert dispatched.args[1]["request"]["payload"]["checkpoint"] == {"cursor": 0}
         assert dispatched.kwargs["context"]["handler"]["handler_id"] == resolved["handler"]["handler_id"]
         cme.store.record_progress.assert_awaited()
+        writes = cme.store.record_progress.await_args_list
+        assert len(writes) == 2
+        assert writes[-1].args[1]["progress"] == sample["expected_result"]["progress"]
+        assert writes[-1].args[2]["handler_checkpoint"] == sample["expected_result"]["checkpoint"]
         cme.store.finish_activity.assert_awaited_once()
         final = cme.store.finish_activity.await_args.args[1]
         assert final["handler"]["artifact_digest"] == sample["module_manifest"]["artifact"]["artifact_sha256"]
@@ -233,6 +238,44 @@ def test_cme_authorization_denial_precedes_shared_fixture_dispatch():
         with pytest.raises(PermissionError, match="grant missing"):
             await cme._run_registered_activity(_cme_activity(sample), resolved)
         cme._registered_module_call.assert_not_awaited()
+        cme.store.finish_activity.assert_not_awaited()
+
+    asyncio.run(run())
+
+
+def test_cme_rejects_invalid_handler_checkpoint_before_persisting_it():
+    async def run():
+        from r3a_runtime.cme import CME
+
+        sample, row = validated_fixture()
+        registry_row = {"module_id": row["module_id"], "module_version": row["module_version"],
+                        "manifest": row["manifest"], "lifecycle_state": "ACTIVE"}
+        operation_descriptor = {"operation_id": sample["operation"]["operation_id"],
+                                "provider": sample["operation"]["provider"],
+                                "lifecycle": {"desired_state": "enabled"}}
+        provider_operation = SimpleNamespace(descriptor=operation_descriptor)
+        cme = object.__new__(CME)
+        cme.store = SimpleNamespace(rows=AsyncMock(side_effect=[[registry_row], [registry_row]]),
+                                    record_progress=AsyncMock(), finish_activity=AsyncMock(),
+                                    block_activity=AsyncMock())
+        resolved = await cme._registered_handler("billing.invoice.review")
+        cme.settings = SimpleNamespace(
+            lease_seconds=30,
+            capability_registry=SimpleNamespace(
+                discover=Mock(return_value=[{"descriptor": operation_descriptor}]),
+                resolve_provider=Mock(return_value=provider_operation)))
+        cme.module_id = "resident.fixture"
+        cme.module_version = "0.0.0"
+        cme._authorization_decision = AsyncMock(return_value=SimpleNamespace(
+            decision_id="decision", audit_event_id="audit", policy_revision="policy"))
+        invalid_result = dict(sample["expected_result"], checkpoint={"cursor": True})
+        cme.provider_runtime = SimpleNamespace(invoke=AsyncMock(return_value=invalid_result))
+
+        with pytest.raises(ModuleExtensionError, match="result payload is invalid"):
+            await cme._run_registered_activity(_cme_activity(sample), resolved)
+        # The first write records dispatch metadata. The invalid returned checkpoint
+        # is rejected before any result progress/checkpoint update is written.
+        assert cme.store.record_progress.await_count == 1
         cme.store.finish_activity.assert_not_awaited()
 
     asyncio.run(run())
