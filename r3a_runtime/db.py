@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.14.2
+File Revision: 1.14.3
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -28,6 +28,8 @@ Changed: 2026-11-07T05:28:24Z | AP2-IMPLEMENTATION | Codex GPT-6 | Allow generic
 Changed: 2026-11-07T05:45:10Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist authorized work orders and guard terminal order completion with independent verifier evidence.
 Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | R3A Coordinator | Audit and persist a safe legacy-to-versioned module manifest promotion.
 Changed: 2026-11-07T05:52:05Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist stable objective correlation and immutable Grace proposal revisions in existing activity checkpoints/events.
+Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT-6 | Persist generic registered activity-intake types through the existing durable activity ledger.
+Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GPT-6 | Preserve durable checkpoints across progress-only updates and guard them by the active attempt lease.
 Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist authorization decision and audit identities as separate provenance fields.
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Add grant validation for explicit-principal Steward access modes.
 Changed: 2026-11-07T13:20:00Z | R3A-AP2-CAPABILITY-INTEGRATION | Codex GPT-6 | Store canonical invocation authorization in a nonreserved evidence column and verify durable SQL recovery against isolated PostgreSQL.
@@ -1459,10 +1461,9 @@ class Store:
         validate_json(intake, ACTIVITY_INTAKE_SCHEMA, path="$.activity_intake")
         if len(json.dumps(intake, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > MAX_ACTIVITY_INTAKE_BYTES:
             raise CapabilityContractError("activity intake exceeds the 512 KiB durable envelope limit")
-        if intake["activity"]["activity_type"] != "grace.objective":
-            raise CapabilityContractError("this CME intake consumer currently accepts grace.objective activities only")
+        activity_type = intake["activity"]["activity_type"]
         task_class = intake["activity"]["task_class"]
-        if task_class not in {"objective_reasoning", "vision"}:
+        if activity_type == "grace.objective" and task_class not in {"objective_reasoning", "vision"}:
             raise CapabilityContractError("activity intake task_class is not eligible for Grace objective execution")
         if (not isinstance(invocation_result, dict)
                 or invocation_result.get("contract_id") != "r3a.capability-invocation.v1"
@@ -1491,22 +1492,33 @@ class Store:
             causation_id = uuid.uuid5(uuid.NAMESPACE_URL, f"r3a.causation:{causation_value}")
         activity_id = uuid.uuid5(uuid.NAMESPACE_URL, f"r3a.activity-intake:{intake['intake_id']}")
 
-        role = self.settings.model_role_for_task(task_class) if self.settings.model_roles else None
-        route_id = role.route_id if role else self.settings.default_model_route
+        is_grace_objective = activity_type == "grace.objective"
+        role = (self.settings.model_role_for_task(task_class)
+                if is_grace_objective and self.settings.model_roles else None)
+        route_id = role.route_id if role else (self.settings.default_model_route if is_grace_objective else None)
         role_id = role.role_id if role else None
         if role_id and task_class not in role.task_classes:
             raise CapabilityContractError("configured Grace model role does not allow the intake task class")
-        durable_input = {
-            "objective": intake["activity"]["objective"], "event_kind": "activity_intake",
-            "task_class": task_class, "route_id": route_id if role_id is None else None,
-            "role_id": role_id, "role_config_revision": self.settings.source_digest if role_id else None,
-            "required_capabilities": [], "required_modalities": [],
-            "acceptance_contract": {"contract_id": OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
-                                    "contract_version": OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION,
-                                    "criteria": []},
-            "engineering_assignment": None, "resident_id": self.settings.module_id,
-            "resident_profile": None, "activity_intake": intake,
-        }
+        if is_grace_objective:
+            durable_input = {
+                "objective": intake["activity"]["objective"], "event_kind": "activity_intake",
+                "task_class": task_class, "route_id": route_id if role_id is None else None,
+                "role_id": role_id, "role_config_revision": self.settings.source_digest if role_id else None,
+                "required_capabilities": [], "required_modalities": [],
+                "acceptance_contract": {"contract_id": OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
+                                        "contract_version": OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION,
+                                        "criteria": []},
+                "engineering_assignment": None, "resident_id": self.settings.module_id,
+                "resident_profile": None, "activity_intake": intake,
+            }
+        else:
+            durable_input = {
+                "event_kind": "activity_intake", "task_class": task_class,
+                "objective": intake["activity"]["objective"],
+                "activity_input": intake["activity"]["input"],
+                "activity_evidence": intake["activity"]["evidence"],
+                "activity_intake": intake,
+            }
         evidence = {
             "intake_id": intake["intake_id"], "source": intake["source"],
             "source_provider": provider, "authorization": invocation_result["authorization"],
@@ -1532,7 +1544,7 @@ class Store:
                                      and prior_notification.get("source_id") == intake["source"]["source_id"]
                                      and prior_notification.get("source_event_id") == intake["source"]["event_id"])
                 if (existing["idempotency_key"] != stable_key
-                        or existing["activity_type"] != "grace.objective"
+                        or existing["activity_type"] != activity_type
                         or (prior_input.get("activity_intake") != intake and not same_legacy_source)):
                     raise ValueError("activity-intake idempotency key is already bound to different source data")
                 return {**existing, "duplicate": True, "intake_id": intake["intake_id"]}
@@ -1543,8 +1555,8 @@ class Store:
             await conn.execute(
                 "INSERT INTO r3a.activities(activity_id,activity_type,idempotency_key,machine_id,machine_version,state,"
                 "available_at,recovery_policy,config_revision,input) "
-                "VALUES (%s,'grace.objective',%s,'activity.generic',1,'QUEUED',clock_timestamp(),'idempotent',%s,%s)",
-                (activity_id, stable_key, config["revision_id"] if config else None,
+                "VALUES (%s,%s,%s,'activity.generic',1,'QUEUED',clock_timestamp(),'idempotent',%s,%s)",
+                (activity_id, activity_type, stable_key, config["revision_id"] if config else None,
                  json.dumps(durable_input)),
             )
             event_id = await self._event(
@@ -1561,7 +1573,7 @@ class Store:
                 raise InvalidTransition("generic activity intake could not enter QUEUED")
             await conn.execute("UPDATE r3a.activities SET latest_event_id=%s WHERE activity_id=%s",
                                (event_id, activity_id))
-            return {"activity_id": activity_id, "state": "QUEUED", "activity_type": "grace.objective",
+            return {"activity_id": activity_id, "state": "QUEUED", "activity_type": activity_type,
                     "idempotency_key": stable_key, "intake_id": intake["intake_id"],
                     "attempt_count": 0, "duplicate": False, "event_id": event_id,
                     "correlation_id": correlation_id}
@@ -1879,9 +1891,11 @@ class Store:
                               checkpoint: dict[str, Any] | None = None) -> None:
         async with self.pool.connection() as conn, conn.transaction():
             updated = await conn.execute(
-                "UPDATE r3a.activities SET progress=%s,checkpoint=%s,lease_until=clock_timestamp()+(%s * interval '1 second'),updated_at=clock_timestamp() "
+                "UPDATE r3a.activities SET progress=%s,checkpoint=COALESCE(%s::jsonb,checkpoint),"
+                "lease_until=clock_timestamp()+(%s * interval '1 second'),updated_at=clock_timestamp() "
                 "WHERE activity_id=%s AND state='RUNNING' AND attempt_id=%s",
-                (json.dumps(progress), json.dumps(checkpoint or {}), self.settings.lease_seconds,
+                (json.dumps(progress), json.dumps(checkpoint) if checkpoint is not None else None,
+                 self.settings.lease_seconds,
                  activity["activity_id"], activity["attempt_id"]),
             )
             if updated.rowcount != 1:
