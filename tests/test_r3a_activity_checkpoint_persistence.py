@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_activity_checkpoint_persistence.py
 Component: R3A-ACTIVITY-CHECKPOINT-PERSISTENCE-REGRESSION
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-10
 Created By: Codex GPT-6
 Purpose: Verify generic handler checkpoints persist through PostgreSQL progress updates and lease recovery.
@@ -12,8 +12,9 @@ Dependencies: psycopg 3; R3A Store migrations; shared #46 activity-handler fixtu
 Authority: Steward corrective directive, Autonomy / CME Issue #43.
 Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GPT-6 | Exercise atomic progress/checkpoint persistence and recovery against PostgreSQL.
 Changed: 2026-11-10 | R3A-EXECUTOR-ROLE-P0 | Coordinator | Verify durable v1.1 role promotion preserves primary-module registration and lifecycle state.
+Changed: 2026-11-10T20:10:03Z | R3A-GENERIC-OBJECTIVE-CONTINUATION | R3A Coordinator | Verify PostgreSQL parks and resumes objective-waiting handler activities after child completion.
 Supersedes: None.
-Contracts: r3a.activity-handler.v1; activity.generic v1; r3a.module-manifest.v1@1.1.0; existing CME activity/module ledgers.
+Contracts: r3a.activity-handler.v1; r3a.activity-handler.objective-submission@1.0.0; activity.generic v1; existing CME activity/module ledgers.
 Tests: Set R3A_CHECKPOINT_TEST_DSN to a disposable test database and run this module.
 History/Predecessor: New permanent persistence regression.
 """
@@ -226,3 +227,67 @@ class ActivityCheckpointPostgresTests(unittest.IsolatedAsyncioTestCase):
             "SELECT state,checkpoint,result FROM r3a.activities WHERE activity_id=%s", (activity_id,)))[0]
         self.assertEqual("COMPLETED", final["state"])
         self.assertEqual(sample["expected_result"]["checkpoint"], final["checkpoint"]["handler_checkpoint"])
+
+    async def test_handler_waits_on_objective_durably_and_requeues_after_child_completion(self):
+        parent_id, child_id = uuid.uuid4(), uuid.uuid4()
+        attempt_id, lease_id = uuid.uuid4(), uuid.uuid4()
+        resource_id = f"objective-continuation-{uuid.uuid4()}"
+        correlation_id = uuid.uuid4()
+        handler = {"handler_id": "fixture.handler", "handler_version": "1.0.0",
+                   "module_id": "fixture.module", "module_version": "1.0.0",
+                   "artifact_digest": "a" * 64}
+        pending_action = {"handler": handler,
+                          "action": {"contract_id": "r3a.activity-handler.objective-submission",
+                                     "contract_version": "1.0.0", "action_id": "review-child-1"},
+                          "action_sha256": "b" * 64}
+        checkpoint = {"handler": handler, "handler_checkpoint": {"phase": "submitted"},
+                      "pending_action": pending_action, "action_history": []}
+        deadline = "2099-01-01T00:00:00+00:00"
+        async with self.store.pool.connection() as conn, conn.transaction():
+            await conn.execute(
+                "INSERT INTO r3a.resource_registry(resource_id,contract_version,owner,capacity,allocated,health,observed_at) "
+                "VALUES (%s,'1.0.0','handler-continuation-test',1,1,'available',clock_timestamp())",
+                (resource_id,))
+            await conn.execute(
+                "INSERT INTO r3a.activities(activity_id,activity_type,idempotency_key,machine_id,machine_version,state,"
+                "available_at,attempt_id,attempt_count,lease_owner,lease_until,recovery_policy,input) "
+                "VALUES (%s,'fixture.handler.activity',%s,'activity.generic',1,'RUNNING',clock_timestamp(),%s,1,"
+                "'handler-continuation-test',clock_timestamp()+interval '1 hour','idempotent',%s)",
+                (parent_id, f"handler-parent:{parent_id}", attempt_id,
+                 json.dumps({"correlation_id": str(correlation_id)})))
+            await conn.execute(
+                "INSERT INTO r3a.activities(activity_id,activity_type,idempotency_key,machine_id,machine_version,state,"
+                "available_at,recovery_policy,input) "
+                "VALUES (%s,'grace.objective',%s,'activity.generic',1,'QUEUED',clock_timestamp(),'idempotent',%s)",
+                (child_id, f"handler-child:{child_id}", json.dumps({"objective": "fixture"})))
+            await conn.execute(
+                "INSERT INTO r3a.resource_leases(lease_id,resource_id,activity_id,units,lease_until) "
+                "VALUES (%s,%s,%s,1,clock_timestamp()+interval '1 hour')",
+                (lease_id, resource_id, parent_id))
+        if not await self.store.transition("activity", str(parent_id), "activity.generic", 1,
+                                           "RUNNING", "handler continuation starts", initial=True,
+                                           correlation_id=correlation_id):
+            self.fail("handler activity could not enter RUNNING")
+
+        activity = {"activity_id": parent_id, "attempt_id": attempt_id,
+                    "lease_id": lease_id, "resource_id": resource_id,
+                    "input": {"correlation_id": str(correlation_id)}}
+        await self.store.park_handler_for_objective(activity, checkpoint, str(child_id), deadline)
+        parent = (await self.store.rows(
+            "SELECT state,checkpoint FROM r3a.activities WHERE activity_id=%s", (parent_id,)))[0]
+        self.assertEqual("WAITING", parent["state"])
+        self.assertEqual(str(child_id), parent["checkpoint"]["awaiting_objective"]["activity_id"])
+        self.assertEqual(pending_action, parent["checkpoint"]["pending_action"])
+        self.assertEqual(0, await self.store.requeue_ready_handler_continuations())
+
+        async with self.store.pool.connection() as conn, conn.transaction():
+            await conn.execute(
+                "UPDATE r3a.activities SET state='COMPLETED',result=%s,updated_at=clock_timestamp() "
+                "WHERE activity_id=%s", (json.dumps({"decision": {"status": "healthy"}}), child_id))
+        self.assertEqual(1, await self.store.requeue_ready_handler_continuations())
+        resumed = (await self.store.rows(
+            "SELECT state,checkpoint,progress FROM r3a.activities WHERE activity_id=%s", (parent_id,)))[0]
+        self.assertEqual("QUEUED", resumed["state"])
+        self.assertEqual(pending_action, resumed["checkpoint"]["pending_action"])
+        self.assertEqual(str(child_id), resumed["checkpoint"]["awaiting_objective"]["activity_id"])
+        self.assertEqual(str(child_id), resumed["progress"]["objective_activity_id"])

@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.14.6
+File Revision: 1.14.7
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -33,6 +33,7 @@ Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GP
 Changed: 2026-11-10T13:15:00Z | R3A-GRACE-CAPABILITY-AUTONOMY | Codex GPT-6 | Reconcile current Coordinator conversation persistence with approved checkpoint-preserving activity updates.
 Changed: 2026-11-10T15:20:26Z | R3A-MODULAR-EXECUTOR-ROLE | Codex GPT-6 | Describe versioned legacy manifest metadata promotions accurately in the durable event ledger.
 Changed: 2026-11-10T18:08:17Z | R3A-RUNTIME-REVISION | Coordinator | Fingerprint the imported runtime source bundle for truthful process diagnostics.
+Changed: 2026-11-10T20:10:03Z | R3A-GENERIC-OBJECTIVE-CONTINUATION | Codex GPT-6 | Persist handler WAITING checkpoints and requeue on objective completion or bounded timeout.
 Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist authorization decision and audit identities as separate provenance fields.
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Add grant validation for explicit-principal Steward access modes.
 Changed: 2026-11-07T13:20:00Z | R3A-AP2-CAPABILITY-INTEGRATION | Codex GPT-6 | Store canonical invocation authorization in a nonreserved evidence column and verify durable SQL recovery against isolated PostgreSQL.
@@ -1873,16 +1874,20 @@ class Store:
             evidence = {"objective_activity_id": str(objective_activity_id), "deadline": deadline,
                         "handler_id": (checkpoint.get("handler") or {}).get("handler_id"),
                         "action_id": (checkpoint.get("pending_action") or {}).get("action", {}).get("action_id")}
+            correlation_id = (uuid.UUID((activity.get("input") or {}).get("correlation_id"))
+                              if (activity.get("input") or {}).get("correlation_id") else None)
+            child_causation_id = uuid.UUID(str(objective_activity_id))
             accepted = await self._transition_on_conn(
                 conn, "activity", str(activity["activity_id"]), "activity.generic", 1,
-                "WAITING", "registered handler awaits durable resident objective", evidence)
+                "WAITING", "registered handler awaits durable resident objective", evidence,
+                correlation_id=correlation_id, causation_id=child_causation_id)
             if not accepted:
                 raise InvalidTransition(f"Cannot park handler activity {activity['activity_id']}")
             event_id = await self._event(
                 conn, "activity.handler.objective.waiting", "activity", str(activity["activity_id"]),
                 "activity.generic", 1, "RUNNING", "WAITING",
                 "registered handler awaits durable resident objective", evidence,
-                causation_id=activity["attempt_id"])
+                correlation_id=correlation_id, causation_id=child_causation_id)
             await conn.execute("UPDATE r3a.activities SET latest_event_id=%s WHERE activity_id=%s",
                                (event_id, activity["activity_id"]))
 

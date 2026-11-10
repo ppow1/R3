@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_activity_handler_interop.py
 Component: R3A-ACTIVITY-HANDLER-INTEROPERABILITY-TESTS
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-10T02:02:46Z
 Created By: Codex GPT-6
 Purpose: Validate the shared v1.1 module/handler fixture and provide CME dispatch tests for Autonomy #43 to consume.
@@ -14,6 +14,7 @@ Changed: 2026-11-10T02:02:46Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Add share
 Changed: 2026-11-10T02:07:18Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Avoid installing collection-time database stubs that leak across the full test suite.
 Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT-6 | Exercise CME discovery and resident bindings from the shared v1.1 manifest projection.
 Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GPT-6 | Assert CME commits handler progress and checkpoint in one durable ledger update.
+Changed: 2026-11-10T20:10:03Z | R3A-GENERIC-OBJECTIVE-CONTINUATION | Codex GPT-6 | Cover generic objective action validation, stable replay, worker parking, restart continuation and timeout.
 Supersedes: None.
 Contracts: r3a.module-manifest.v1@1.0.0 and @1.1.0; r3a.activity-handler.v1@1.0.0.
 Tests: python3 -m pytest -q tests/test_r3a_activity_handler_interop.py
@@ -27,7 +28,7 @@ import importlib.util
 import json
 import asyncio
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -241,6 +242,110 @@ def test_generic_objective_submission_parks_and_resumes_with_durable_result():
         assert receipt["invocation"]["result"]["decision"]["status"] == "healthy"
         assert receipt["evidence"] == [{"source_id": "e1"}]
         assert cme._control_request.await_args.args[2] == cme._control_request.await_args_list[0].args[2]
+
+    asyncio.run(run())
+
+
+def test_v11_objective_action_persists_pending_checkpoint_and_resumes_same_handler():
+    async def run():
+        from r3a_runtime.cme import CME
+
+        sample = _v11_handler_fixture()
+        handler = sample["module_manifest"]["activity_handler"]
+        module = sample["module_manifest"]
+        binding = {"handler_id": handler["handler_id"], "handler_version": handler["handler_version"],
+                   "module_id": module["module_id"], "module_version": module["module_version"],
+                   "artifact_digest": module["artifact"]["artifact_sha256"]}
+        resolved = {"handler": handler, "module": {"manifest": {
+            "module_id": module["module_id"], "module_version": module["module_version"]}},
+                    "module_id": module["module_id"], "module_version": module["module_version"],
+                    "artifact_digest": module["artifact"]["artifact_sha256"]}
+        activity = _cme_activity(sample)
+        action = {"contract_id": "r3a.activity-handler.objective-submission",
+                  "contract_version": "1.0.0", "action_id": "review-evt-1",
+                  "target_resident_id": "resident.fixture", "objective": "Review the source record",
+                  "event_kind": "objective", "task_class": "objective_reasoning",
+                  "required_capabilities": [], "required_modalities": [],
+                  "acceptance_criteria": [], "notification_envelope": None, "timeout_seconds": 60}
+        action_required = {"outcome": "action_required", "action": action,
+                           "checkpoint": {"cursor": 1}}
+        completed = {"outcome": "completed", "invoice_id": "invoice-fixture-001",
+                     "status": "validated",
+                     "progress": {"phase": "completed", "completed": 1},
+                     "checkpoint": {"cursor": 1}}
+        cme = object.__new__(CME)
+        cme.settings = SimpleNamespace(source_digest="config-r1")
+        cme.store = SimpleNamespace(record_progress=AsyncMock(), park_handler_for_objective=AsyncMock(),
+                                     finish_activity=AsyncMock(), block_activity=AsyncMock())
+        cme._registered_module_call = AsyncMock(return_value={"result": action_required})
+        cme._dispatch_registered_handler_action = AsyncMock(return_value={
+            "_awaiting_objective": {"activity_id": "00000000-0000-4000-8000-000000000204",
+                                     "deadline": (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat()}})
+        payload = {"handler": binding, "input": {}}
+        decisions = [{"capability_id": "activity.handler.execute", "decision_id": "decision",
+                      "audit_event_id": "audit", "policy_revision": "policy"}]
+
+        await cme._run_registered_activity_with_actions(activity, resolved, payload, decisions)
+        cme.store.park_handler_for_objective.assert_awaited_once()
+        park_args = cme.store.park_handler_for_objective.await_args.args
+        parked_checkpoint = {**park_args[1], "awaiting_objective": {
+            "activity_id": park_args[2], "deadline": park_args[3]}}
+        assert parked_checkpoint["pending_action"]["action"]["action_id"] == "review-evt-1"
+        assert parked_checkpoint["awaiting_objective"]["activity_id"].endswith("0204")
+        assert not cme.store.finish_activity.await_count
+
+        activity["checkpoint"] = parked_checkpoint
+        cme._dispatch_registered_handler_action = AsyncMock(return_value={
+            "contract_id": "r3a.activity-handler.continuation", "contract_version": "1.0.0",
+            "action_id": "review-evt-1", "outcome": "succeeded",
+            "invocation": {"activity_id": parked_checkpoint["awaiting_objective"]["activity_id"],
+                           "state": "COMPLETED", "result": {"decision": {"status": "healthy"}}},
+            "evidence": [], "error": None})
+        cme._registered_module_call = AsyncMock(return_value={"result": completed})
+        await cme._run_registered_activity_with_actions(activity, resolved, payload, decisions)
+        assert cme._registered_module_call.await_count == 1
+        resumed = cme._registered_module_call.await_args.args[3]
+        assert resumed["handler"] == binding
+        assert resumed["continuation"]["invocation"]["state"] == "COMPLETED"
+        assert resumed["action_history"][0]["action_id"] == "review-evt-1"
+        cme.store.finish_activity.assert_awaited_once()
+
+    asyncio.run(run())
+
+
+def test_generic_objective_submission_timeout_is_explicit_and_does_not_resubmit():
+    async def run():
+        from r3a_runtime.cme import CME
+
+        sample = _v11_handler_fixture()
+        handler = sample["module_manifest"]["activity_handler"]
+        module = sample["module_manifest"]
+        resolved = {"handler": handler, "module": {"manifest": {"module_id": module["module_id"]}},
+                    "module_id": module["module_id"]}
+        activity = _cme_activity(sample)
+        action = {"contract_id": "r3a.activity-handler.objective-submission",
+                  "contract_version": "1.0.0", "action_id": "review-timeout",
+                  "target_resident_id": "resident.fixture", "objective": "Review the source record",
+                  "event_kind": "objective", "task_class": "objective_reasoning",
+                  "required_capabilities": [], "required_modalities": [],
+                  "acceptance_criteria": [], "notification_envelope": None, "timeout_seconds": 1}
+        digest = hashlib.sha256(json.dumps(action, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        child_id = "00000000-0000-4000-8000-000000000204"
+        pending = {"handler": {"module_id": module["module_id"]}, "action": action,
+                   "action_sha256": digest, "attempt_id": activity["attempt_id"],
+                   "config_revision": "config-r1",
+                   "awaiting_objective": {"activity_id": child_id,
+                       "deadline": (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()}}
+        cme = object.__new__(CME)
+        cme.settings = SimpleNamespace(source_digest="config-r1")
+        cme._control_request = AsyncMock()
+        cme.store = SimpleNamespace(activity_execution_result=AsyncMock(return_value={
+            "activity_id": child_id, "state": "RUNNING", "result": None}))
+        result = await cme._dispatch_registered_handler_action(activity, resolved, handler, pending)
+        assert result["outcome"] == "failed"
+        assert result["error"]["type"] == "TimeoutError"
+        assert result["invocation"]["state"] == "RUNNING"
+        cme._control_request.assert_not_awaited()
 
     asyncio.run(run())
 

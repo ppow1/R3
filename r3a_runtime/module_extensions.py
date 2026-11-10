@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/module_extensions.py
 Component: R3A-MODULE-EXTENSION-CONTRACTS
-File Revision: 1.1.0
+File Revision: 1.1.1
 Created: 2026-11-10T01:09:23Z
 Created By: Codex GPT-6
 Purpose: Validate resident-executor bindings and durable activity-handler declarations.
@@ -14,6 +14,7 @@ Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Add gener
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Resolve resident bindings against the active registry artifact and declared execution range.
 Changed: 2026-11-10T01:26:34Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Validate configured binding targets against declared executor roles and immutable digests.
 Changed: 2026-11-10 | R3A-CORE-SOCKET-FS03 | Coordinator | Validate handler v1.1 action requests, continuations and v1.2 module compatibility.
+Changed: 2026-11-10T20:10:03Z | R3A-GENERIC-OBJECTIVE-CONTINUATION | Codex GPT-6 | Validate the separate versioned CME objective-submission action.
 Supersedes: None
 Contracts: r3a.resident.module-binding.v1; r3a.resident.execution-profile@1.0.0; r3a.activity-handler.v1@1.0.0 and @1.1.0; r3a.activity-intake.v1.
 Tests: tests/test_r3a_module_extensions.py; tests/test_r3a_module_extension_lifecycle.py; tests/test_r3a_activity_handler_interop.py

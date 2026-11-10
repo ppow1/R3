@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.21.0
+File Revision: 1.22.0
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -30,6 +30,7 @@ Changed: 2026-11-10 | R3A-EXECUTOR-ROLE-P0 | Coordinator | Reuse the contracted 
 Changed: 2026-11-10T15:20:26Z | R3A-MODULAR-EXECUTOR-ROLE | Codex GPT-6 | Publish the configured generic executor role and promote compatible registered primary-module metadata.
 Changed: 2026-11-10T18:08:17Z | R3A-CORE-SOCKET-FS02 | Coordinator | Fail closed when the registered Knowledge provider is unavailable; remove CME's direct file retrieval fallback.
 Changed: 2026-11-10 | R3A-CORE-SOCKET-FS03 | Coordinator | Add versioned generic handler action continuation through CME authorization, durable invocation and resume.
+Changed: 2026-11-10T20:10:03Z | R3A-GENERIC-OBJECTIVE-CONTINUATION | Codex GPT-6 | Add CME-authorized resident objective actions with durable handler parking, replay, timeout and result continuation.
 Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Dispatch generic versioned Steward read/write effects through existing authorization, invocation, and provider paths.
 Changed: 2026-11-06T18:02:08Z | R3A-019 | Codex GPT-6 | Route activities to configured models and persist retrieved evidence snapshots.
 Changed: 2026-11-06T18:09:37Z | R3A-019 | Codex GPT-6 | Reuse the durable evidence and model-route checkpoint when recovering an activity.
@@ -911,16 +912,17 @@ class CME:
                 raise ModuleExtensionError("durable handler objective deadline is malformed") from exc
             if deadline <= datetime.now(timezone.utc):
                 child = await self.store.activity_execution_result(awaiting["activity_id"])
-                return validate_activity_handler_continuation({
-                    "contract_id": "r3a.activity-handler.continuation", "contract_version": "1.0.0",
-                    "action_id": action_id, "outcome": "failed",
-                    "invocation": {"activity_id": awaiting["activity_id"],
-                                   "state": child.get("state") if child else "NOT_FOUND",
-                                   "result": child.get("result") if child else None},
-                    "evidence": [],
-                    "error": {"type": "TimeoutError", "message": "resident objective continuation timed out",
-                              "effect_disposition": "KNOWN_PENDING",
-                              "reconciliation_ref": idempotency_key}})
+                if child is None or child.get("state") not in {"COMPLETED", "BLOCKED", "CANCELLED"}:
+                    return validate_activity_handler_continuation({
+                        "contract_id": "r3a.activity-handler.continuation", "contract_version": "1.0.0",
+                        "action_id": action_id, "outcome": "failed",
+                        "invocation": {"activity_id": awaiting["activity_id"],
+                                       "state": child.get("state") if child else "NOT_FOUND",
+                                       "result": child.get("result") if child else None},
+                        "evidence": [],
+                        "error": {"type": "TimeoutError", "message": "resident objective continuation timed out",
+                                  "effect_disposition": "KNOWN_PENDING" if child else "UNKNOWN",
+                                  "reconciliation_ref": idempotency_key}})
 
         # This invokes the canonical directory, authorization, route selection and durable
         # objective store. It never calls a model provider directly.

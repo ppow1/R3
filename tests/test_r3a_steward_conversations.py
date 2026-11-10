@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_steward_conversations.py
 Component: R3A-CME-CONVERSATION-TESTS
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: Unknown (legacy)
 Created By: Unknown (legacy)
 Purpose: Verify Website conversation dispatch, direct chat authorization, and resident handoff boundaries.
@@ -11,6 +11,7 @@ Observability: Assertion failures identify authorization and durable activity li
 Dependencies: r3a_runtime.cme; unittest mocks.
 Authority: R3A Steward conversation and resident execution contracts.
 Changed: 2026-11-10T00:14:15Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Assert direct Steward chat requires target execution but not resident-to-resident delegation.
+Changed: 2026-11-10T20:10:03Z | R3A-GENERIC-OBJECTIVE-CONTINUATION | R3A Coordinator | Verify same-principal CME objective submission uses execution authorization without manufacturing a delegation grant.
 Supersedes: None
 Contracts: r3a.steward-conversation.v1; r3a.resident.execution-profile@1.0.0; resident.delegate; resident.objective.execute.
 Tests: python -m unittest tests.test_r3a_steward_conversations.
@@ -135,6 +136,42 @@ class ConversationControlTests(unittest.TestCase):
         self.assertEqual(cme.store.submit_grace_objective.await_args.kwargs["resident_profile"], profile)
         self.assertEqual(cme._authorize_capability.await_args_list[0].args[0], "resident.delegate")
         self.assertEqual(cme._authorize_capability.await_args_list[1].args[0], "resident.objective.execute")
+
+    def test_same_principal_objective_submission_requires_execution_but_not_delegation(self):
+        cme = self.cme()
+        role = SimpleNamespace(role_id="role.grace", route_id="route.grace",
+                               task_classes={"objective_reasoning"})
+        cme.settings.model_roles = [role]
+        cme.settings.model_role_for_task = lambda _task: role
+        cme._authorize_capability = AsyncMock(return_value={"allowed": True})
+        cme.store.submit_grace_objective = AsyncMock(return_value={"activity_id": "objective-primary"})
+
+        result = asyncio.run(CME._control_request(cme, "resident.objective.submit", {
+            "objective": "Continue an authorized objective", "event_kind": "objective",
+            "target_resident_id": "resident.grace", "task_class": "objective_reasoning",
+            "acceptance_criteria": []}, "handler-objective-key", _caller_resident_id="resident.grace"))
+
+        self.assertEqual(result["activity_id"], "objective-primary")
+        self.assertEqual([call.args[0] for call in cme._authorize_capability.await_args_list],
+                         ["resident.objective.execute"])
+        self.assertEqual(cme._authorize_capability.await_args.kwargs["resident_id"], "resident.grace")
+        self.assertIsNone(cme.store.submit_grace_objective.await_args.kwargs["resident_profile"])
+
+    def test_same_principal_objective_execution_denial_fails_closed(self):
+        cme = self.cme()
+        role = SimpleNamespace(role_id="role.grace", route_id="route.grace",
+                               task_classes={"objective_reasoning"})
+        cme.settings.model_roles = [role]
+        cme.settings.model_role_for_task = lambda _task: role
+        cme._authorize_capability = AsyncMock(side_effect=PermissionError("objective execution denied"))
+        cme.store.submit_grace_objective = AsyncMock()
+
+        with self.assertRaisesRegex(PermissionError, "objective execution denied"):
+            asyncio.run(CME._control_request(cme, "resident.objective.submit", {
+                "objective": "Continue an authorized objective", "event_kind": "objective",
+                "target_resident_id": "resident.grace", "task_class": "objective_reasoning",
+                "acceptance_criteria": []}, "handler-objective-key", _caller_resident_id="resident.grace"))
+        cme.store.submit_grace_objective.assert_not_awaited()
 
     def test_direct_steward_conversation_requires_target_execution_not_resident_delegation(self):
         cme = self.cme()
