@@ -1846,6 +1846,99 @@ class Store:
             await conn.execute("UPDATE r3a.activities SET latest_event_id=%s WHERE activity_id=%s",
                                (event_id, activity["activity_id"]))
 
+    async def park_handler_for_objective(self, activity: dict[str, Any], checkpoint: dict[str, Any],
+                                        objective_activity_id: str, deadline: str) -> None:
+        """Release a handler worker while its durable CME objective executes."""
+        waiting = {"activity_id": str(objective_activity_id), "deadline": deadline}
+        value = {**checkpoint, "awaiting_objective": waiting}
+        async with self.pool.connection() as conn, conn.transaction():
+            updated = await conn.execute(
+                "UPDATE r3a.activities SET state='WAITING',checkpoint=%s,progress=%s,"
+                "lease_owner=NULL,lease_until=NULL,updated_at=clock_timestamp() "
+                "WHERE activity_id=%s AND state='RUNNING' AND attempt_id=%s",
+                (json.dumps(value), json.dumps({"phase": "handler.objective.waiting",
+                                                "objective_activity_id": str(objective_activity_id),
+                                                "deadline": deadline}),
+                 activity["activity_id"], activity["attempt_id"]),
+            )
+            if updated.rowcount != 1:
+                raise RuntimeError("Handler activity lease was lost before objective continuation")
+            released = await conn.execute(
+                "UPDATE r3a.resource_leases SET released_at=clock_timestamp() "
+                "WHERE lease_id=%s AND released_at IS NULL", (activity["lease_id"],))
+            if released.rowcount:
+                await conn.execute(
+                    "UPDATE r3a.resource_registry SET allocated=GREATEST(0,allocated-1),"
+                    "observed_at=clock_timestamp() WHERE resource_id=%s", (activity["resource_id"],))
+            evidence = {"objective_activity_id": str(objective_activity_id), "deadline": deadline,
+                        "handler_id": (checkpoint.get("handler") or {}).get("handler_id"),
+                        "action_id": (checkpoint.get("pending_action") or {}).get("action", {}).get("action_id")}
+            accepted = await self._transition_on_conn(
+                conn, "activity", str(activity["activity_id"]), "activity.generic", 1,
+                "WAITING", "registered handler awaits durable resident objective", evidence)
+            if not accepted:
+                raise InvalidTransition(f"Cannot park handler activity {activity['activity_id']}")
+            event_id = await self._event(
+                conn, "activity.handler.objective.waiting", "activity", str(activity["activity_id"]),
+                "activity.generic", 1, "RUNNING", "WAITING",
+                "registered handler awaits durable resident objective", evidence,
+                causation_id=activity["attempt_id"])
+            await conn.execute("UPDATE r3a.activities SET latest_event_id=%s WHERE activity_id=%s",
+                               (event_id, activity["activity_id"]))
+
+    async def requeue_ready_handler_continuations(self) -> int:
+        """Requeue durable handler continuations after objective completion or timeout."""
+        requeued = 0
+        async with self.pool.connection() as conn, conn.transaction():
+            rows = await (await conn.execute(
+                "SELECT activity_id,checkpoint,input,machine_id,machine_version FROM r3a.activities "
+                "WHERE state='WAITING' AND checkpoint ? 'awaiting_objective' "
+                "ORDER BY updated_at LIMIT 256 FOR UPDATE SKIP LOCKED")).fetchall()
+            for row in rows:
+                waiting = (row["checkpoint"] or {}).get("awaiting_objective") or {}
+                try:
+                    child_id = uuid.UUID(str(waiting["activity_id"]))
+                    deadline = datetime.fromisoformat(str(waiting["deadline"]).replace("Z", "+00:00"))
+                except (KeyError, TypeError, ValueError):
+                    raise ValueError("durable handler objective continuation is malformed")
+                child = await (await conn.execute(
+                    "SELECT state FROM r3a.activities WHERE activity_id=%s", (child_id,))).fetchone()
+                child_state = child["state"] if child else "NOT_FOUND"
+                terminal = child_state in {"COMPLETED", "BLOCKED", "CANCELLED"}
+                expired = deadline <= datetime.now(timezone.utc)
+                if not terminal and not expired:
+                    continue
+                await conn.execute(
+                    "UPDATE r3a.activities SET state='QUEUED',available_at=clock_timestamp(),exception=NULL,"
+                    "updated_at=clock_timestamp() WHERE activity_id=%s", (row["activity_id"],))
+                reason = ("resident objective reached terminal state" if terminal
+                          else "resident objective continuation timed out")
+                evidence = {"objective_activity_id": str(child_id), "objective_state": child_state,
+                            "timed_out": bool(expired and not terminal)}
+                event_id = await self._event(
+                    conn, "activity.handler.objective.ready", "activity", str(row["activity_id"]),
+                    row["machine_id"], row["machine_version"], "WAITING", "QUEUED", reason, evidence,
+                    correlation_id=uuid.UUID((row["input"] or {}).get("correlation_id")
+                                             or str(row["activity_id"])),
+                    causation_id=(child_id if child else None))
+                accepted = await self._transition_on_conn(
+                    conn, "activity", str(row["activity_id"]), row["machine_id"], row["machine_version"],
+                    "QUEUED", reason, evidence, event_id=event_id,
+                    causation_id=(child_id if child else None))
+                if not accepted:
+                    raise InvalidTransition(f"Cannot resume handler activity {row['activity_id']}")
+                await conn.execute("UPDATE r3a.activities SET latest_event_id=%s WHERE activity_id=%s",
+                                   (event_id, row["activity_id"]))
+                requeued += 1
+        return requeued
+
+    async def activity_execution_result(self, activity_id: str) -> dict[str, Any] | None:
+        """Read the durable resident activity result for a handler continuation."""
+        async with self.pool.connection() as conn:
+            return await (await conn.execute(
+                "SELECT activity_id,state,result,exception,updated_at,latest_event_id "
+                "FROM r3a.activities WHERE activity_id=%s", (uuid.UUID(activity_id),))).fetchone()
+
     async def claim_activity(self, owner: str, lease_seconds: float,
                              resource_id: str = "foundation.observer") -> dict[str, Any] | None:
         async with self.pool.connection() as conn, conn.transaction():

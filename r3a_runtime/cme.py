@@ -112,6 +112,7 @@ from .module_extensions import (ModuleExtensionError, resolve_activity_handler,
                                 validate_activity_handler_action,
                                 validate_activity_handler_action_request,
                                 validate_activity_handler_continuation,
+                                validate_activity_handler_objective_submission,
                                 validate_activity_handler_payload,
                                 validate_executor_configuration)
 
@@ -616,6 +617,7 @@ class CME:
                    "activity_id": str(activity["activity_id"]), "attempt_id": str(activity["attempt_id"]),
                    "correlation_id": str(event_input.get("correlation_id") or activity["activity_id"]),
                    "activity_type": activity["activity_type"], "idempotency_key": activity["idempotency_key"],
+                   "execution_principal": str(event_input.get("resident_id") or self.module_id),
                    "input": event_input.get("activity_input", event_input),
                    "evidence": event_input.get("activity_evidence", []),
                    "checkpoint": activity.get("checkpoint") or {},
@@ -746,6 +748,16 @@ class CME:
             if pending_action is not None:
                 action_result = await self._dispatch_registered_handler_action(
                     activity, resolved, handler, pending_action)
+                if isinstance(action_result, dict) and action_result.get("_awaiting_objective"):
+                    awaiting = action_result["_awaiting_objective"]
+                    pending_action["awaiting_objective"] = awaiting
+                    wait_checkpoint = {"handler": binding, "handler_checkpoint": handler_checkpoint,
+                                       "pending_action": pending_action,
+                                       "action_history": action_history}
+                    _validate_bounded_handler_state(wait_checkpoint)
+                    await self.store.park_handler_for_objective(
+                        activity, wait_checkpoint, awaiting["activity_id"], awaiting["deadline"])
+                    return
                 continuation = action_result
                 action_history.append({"action_id": pending_action["action"]["action_id"],
                                        "action_sha256": pending_action["action_sha256"],
@@ -793,8 +805,13 @@ class CME:
             if result.get("outcome") == "action_required":
                 if len(action_history) >= MAX_HANDLER_ACTIONS_PER_ACTIVITY:
                     raise ModuleExtensionError("handler activity exceeded the 100 action continuation limit")
-                action = validate_activity_handler_action(result.get("action"))
-                self._validate_registered_handler_action(action, resolved, handler)
+                raw_action = result.get("action")
+                if (isinstance(raw_action, dict)
+                        and raw_action.get("contract_id") == "r3a.activity-handler.objective-submission"):
+                    action = validate_activity_handler_objective_submission(raw_action)
+                else:
+                    action = validate_activity_handler_action(raw_action)
+                    self._validate_registered_handler_action(action, resolved, handler)
                 if next_handler_checkpoint is None:
                     raise ModuleExtensionError(
                         "a handler action requires a durable checkpoint before CME dispatch")
@@ -814,7 +831,7 @@ class CME:
                 progress_update = {"phase": "handler.action.requested", "at": utcnow().isoformat(),
                                    "handler_id": handler["handler_id"],
                                    "action_id": action["action_id"],
-                                   "operation_id": action["operation_id"],
+                                   "operation_id": action.get("operation_id", action["contract_id"]),
                                    "action_sha256": action_digest}
                 if progress is not None:
                     progress_update["progress"] = progress
@@ -863,18 +880,112 @@ class CME:
         elif durable_work is not None:
             raise ValueError("read-only and Steward actions cannot attach a durable work item")
 
+    def _validate_handler_objective_submission(self, action: dict[str, Any]) -> dict[str, Any]:
+        """Validate a CME control-operation request without treating it as a capability."""
+        checked = validate_activity_handler_objective_submission(action)
+        if (checked["event_kind"] == "notification") != (checked["notification_envelope"] is not None):
+            raise ValueError("notification objective submission requires exactly one notification envelope")
+        if checked["event_kind"] == "objective" and checked["notification_envelope"] is not None:
+            raise ValueError("ordinary objective submission cannot carry a notification envelope")
+        return checked
+
+    async def _dispatch_handler_objective_submission(self, activity: dict[str, Any],
+                                                    resolved: dict[str, Any],
+                                                    handler: dict[str, Any],
+                                                    action: dict[str, Any],
+                                                    pending: dict[str, Any]) -> dict[str, Any]:
+        """Submit through CME's existing objective control path and return its durable result."""
+        checked = self._validate_handler_objective_submission(action)
+        parent_id = str(activity["activity_id"])
+        binding = pending.get("handler") or {}
+        action_id = checked["action_id"]
+        idempotency_key = (f"r3a.handler-objective:{parent_id}:{binding.get('module_id')}:"
+                           f"{handler['handler_id']}:{action_id}")
+        awaiting = pending.get("awaiting_objective")
+        if awaiting is not None:
+            if not isinstance(awaiting, dict) or not isinstance(awaiting.get("activity_id"), str):
+                raise ModuleExtensionError("durable handler objective reference is malformed")
+            try:
+                deadline = datetime.fromisoformat(str(awaiting["deadline"]).replace("Z", "+00:00"))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ModuleExtensionError("durable handler objective deadline is malformed") from exc
+            if deadline <= datetime.now(timezone.utc):
+                child = await self.store.activity_execution_result(awaiting["activity_id"])
+                return validate_activity_handler_continuation({
+                    "contract_id": "r3a.activity-handler.continuation", "contract_version": "1.0.0",
+                    "action_id": action_id, "outcome": "failed",
+                    "invocation": {"activity_id": awaiting["activity_id"],
+                                   "state": child.get("state") if child else "NOT_FOUND",
+                                   "result": child.get("result") if child else None},
+                    "evidence": [],
+                    "error": {"type": "TimeoutError", "message": "resident objective continuation timed out",
+                              "effect_disposition": "KNOWN_PENDING",
+                              "reconciliation_ref": idempotency_key}})
+
+        # This invokes the canonical directory, authorization, route selection and durable
+        # objective store. It never calls a model provider directly.
+        submitted = await self._control_request("resident.objective.submit", {
+            "target_resident_id": checked["target_resident_id"],
+            "objective": checked["objective"],
+            "event_kind": checked["event_kind"],
+            "task_class": checked["task_class"],
+            "required_capabilities": checked["required_capabilities"],
+            "required_modalities": checked["required_modalities"],
+            "acceptance_criteria": checked["acceptance_criteria"],
+            "notification_envelope": checked["notification_envelope"],
+        }, idempotency_key,
+            _caller_resident_id=str((activity.get("input") or {}).get("resident_id") or self.module_id))
+        child_id = str(submitted["activity_id"])
+        if awaiting is not None and child_id != awaiting["activity_id"]:
+            raise ModuleExtensionError("objective submission replay resolved to a different durable activity")
+        child = await self.store.activity_execution_result(child_id)
+        if child is None:
+            raise RuntimeError("CME accepted objective submission but its durable activity is unavailable")
+        if child["state"] not in {"COMPLETED", "BLOCKED", "CANCELLED"}:
+            if awaiting is not None:
+                return {"_awaiting_objective": awaiting}
+            deadline = datetime.now(timezone.utc) + timedelta(seconds=checked["timeout_seconds"])
+            return {"_awaiting_objective": {"activity_id": child_id,
+                                             "deadline": deadline.isoformat()}}
+        completed = child["state"] == "COMPLETED"
+        result = child.get("result")
+        evidence = result.get("evidence", []) if isinstance(result, dict) else []
+        if not isinstance(evidence, list):
+            evidence = []
+        return validate_activity_handler_continuation({
+            "contract_id": "r3a.activity-handler.continuation", "contract_version": "1.0.0",
+            "action_id": action_id, "outcome": "succeeded" if completed else "failed",
+            "invocation": {"activity_id": child_id, "state": child["state"], "result": result,
+                           "exception": child.get("exception"),
+                           "latest_event_id": str(child["latest_event_id"])
+                           if child.get("latest_event_id") else None},
+            "evidence": evidence,
+            "error": None if completed else {
+                "type": "ResidentObjectiveError",
+                "message": f"resident objective ended in {child['state']}",
+                "effect_disposition": "KNOWN_TERMINAL",
+                "reconciliation_ref": child_id}})
+
     async def _dispatch_registered_handler_action(self, activity: dict[str, Any],
                                                   resolved: dict[str, Any],
                                                   handler: dict[str, Any],
                                                   pending: dict[str, Any]) -> dict[str, Any]:
-        action = validate_activity_handler_action(pending.get("action"))
-        self._validate_registered_handler_action(action, resolved, handler)
+        raw_action = pending.get("action")
+        if (isinstance(raw_action, dict)
+                and raw_action.get("contract_id") == "r3a.activity-handler.objective-submission"):
+            action = self._validate_handler_objective_submission(raw_action)
+        else:
+            action = validate_activity_handler_action(raw_action)
         digest = hashlib.sha256(json.dumps(
             action, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
         if pending.get("action_sha256") != digest:
             raise ModuleExtensionError("durable handler action digest does not match its request")
         if pending.get("config_revision") != self.settings.source_digest:
             raise ModuleExtensionError("durable handler action configuration revision changed before execution")
+        if action.get("contract_id") == "r3a.activity-handler.objective-submission":
+            return await self._dispatch_handler_objective_submission(
+                activity, resolved, handler, action, pending)
+        self._validate_registered_handler_action(action, resolved, handler)
         activity_id = str(activity["activity_id"])
         attempt_id = pending.get("attempt_id")
         if not isinstance(attempt_id, str) or not attempt_id:
@@ -1237,7 +1348,8 @@ class CME:
         return await self.invoke_capability(request)
 
     async def _control_request(self, operation: str, payload: dict[str, Any],
-                               idempotency_key: str) -> dict[str, Any]:
+                               idempotency_key: str, *,
+                               _caller_resident_id: str | None = None) -> dict[str, Any]:
         if operation in {"diagnostics.status", "diagnostics.events"}:
             from .diagnostics import DiagnosticProjection
             return await DiagnosticProjection(self.settings, self.store).handle(
@@ -1665,26 +1777,30 @@ class CME:
             requested_route = payload.get("route_id")
             event_kind = str(payload.get("event_kind", "objective"))
             target_resident_id = payload.get("target_resident_id")
+            caller_resident_id = _caller_resident_id or self.module_id
             resident_profile = None
             requested_activity_id = payload.get("requested_activity_id", payload.get("activity_id"))
             if target_resident_id is not None:
-                if (not isinstance(target_resident_id, str) or not target_resident_id.strip()
-                        or target_resident_id == self.module_id):
-                    raise ValueError("target_resident_id must be a distinct canonical resident identity")
+                if not isinstance(target_resident_id, str) or not target_resident_id.strip():
+                    raise ValueError("target_resident_id must be a canonical resident identity")
                 activity_id = str(requested_activity_id or uuid.uuid5(
                     uuid.NAMESPACE_URL, f"r3a.resident.objective:{idempotency_key}"))
                 delegation_auth = None
-                if event_kind != "conversation":
+                if event_kind != "conversation" and target_resident_id != caller_resident_id:
                     delegation_auth = await self._authorize_capability(
                         "resident.delegate", activity_id=activity_id,
                         request_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"resident.delegate:{idempotency_key}")),
                         context={"target_resident_id": target_resident_id,
                                  "intake": operation},
-                        resident_id=self.module_id)
-                resident_profile, selected_role = await self._resolve_resident_execution_profile(
-                    target_resident_id, activity_id=activity_id,
-                    idempotency_key=idempotency_key)
-                execute_context = {"resident_profile": resident_profile}
+                        resident_id=caller_resident_id)
+                if target_resident_id == self.module_id:
+                    selected_role = self.settings.model_role_for_task(task_class)
+                else:
+                    resident_profile, selected_role = await self._resolve_resident_execution_profile(
+                        target_resident_id, activity_id=activity_id,
+                        idempotency_key=idempotency_key)
+                execute_context = ({"resident_profile": resident_profile}
+                                   if resident_profile is not None else {"resident_id": target_resident_id})
                 if delegation_auth is not None:
                     execute_context["delegation_audit_event_id"] = delegation_auth["audit_event_id"]
                 target_auth = await self._authorize_capability(
@@ -1728,7 +1844,8 @@ class CME:
                 payload.get("acceptance_criteria", []), payload.get("engineering_assignment"),
                 payload.get("depends_on_activity_ids"),
                 activity_id, task_class, resident_id=target_resident_id or self.module_id,
-                resident_profile=resident_profile)
+                resident_profile=resident_profile,
+                notification_envelope=payload.get("notification_envelope"))
         if operation == "config.reload":
             if any(not task.done() for task in self.active_activities.values()):
                 raise RuntimeError("Config reload waits for in-flight activity to reach a safe boundary")
@@ -4024,6 +4141,7 @@ class CME:
             await self.store.ensure_observer_activity()
             await self.store.recover_expired_activities()
             await self._requeue_ready_model_activities()
+            await self.store.requeue_ready_handler_continuations()
             for waiting in await self.store.waiting_dependency_activities():
                 await self.store.requeue_dependency_activity(waiting["activity_id"])
             while len(self.active_activities) < self.settings.worker_concurrency:

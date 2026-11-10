@@ -47,6 +47,8 @@ _ACTIVITY_HANDLER_ACTION_REQUEST = (
     Path(__file__).with_name("schemas") / "activity-handler-action-request.v1.schema.json")
 _ACTIVITY_HANDLER_CONTINUATION = (
     Path(__file__).with_name("schemas") / "activity-handler-continuation.v1.schema.json")
+_ACTIVITY_HANDLER_OBJECTIVE_SUBMISSION = (
+    Path(__file__).with_name("schemas") / "activity-handler-objective-submission.v1.schema.json")
 
 
 def _validate(value: Any, schema_path: Path, label: str) -> dict[str, Any]:
@@ -182,6 +184,12 @@ def validate_activity_handler_action_request(value: Any) -> dict[str, Any]:
 def validate_activity_handler_continuation(value: Any) -> dict[str, Any]:
     """Validate the durable action receipt sent back to a handler on resume."""
     return _validate(value, _ACTIVITY_HANDLER_CONTINUATION, "activity handler continuation")
+
+
+def validate_activity_handler_objective_submission(value: Any) -> dict[str, Any]:
+    """Validate a versioned CME-mediated objective submission from a registered handler."""
+    return _validate(value, _ACTIVITY_HANDLER_OBJECTIVE_SUBMISSION,
+                     "activity handler objective submission")
 
 
 def _validate_schema_declaration(schema: Any, field: str, depth: int = 0) -> None:

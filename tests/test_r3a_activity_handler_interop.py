@@ -42,6 +42,7 @@ from r3a_runtime.module_extensions import (
     validate_activity_handler_action,
     validate_activity_handler_action_request,
     validate_activity_handler_continuation,
+    validate_activity_handler_objective_submission,
     validate_activity_handler_payload,
 )
 from r3a_runtime.provider_runtime import ProviderProcessManager
@@ -175,6 +176,73 @@ def test_v11_action_and_continuation_are_versioned_while_v10_consumer_remains_va
                     "action_id": "read-1", "outcome": "succeeded", "invocation": {},
                     "evidence": [], "error": None}
     assert validate_activity_handler_continuation(continuation) == continuation
+
+
+def test_generic_objective_submission_contract_is_versioned_and_fail_closed():
+    action = {"contract_id": "r3a.activity-handler.objective-submission",
+              "contract_version": "1.0.0", "action_id": "review-evt-1",
+              "target_resident_id": "resident.fixture", "objective": "Review the source record",
+              "event_kind": "objective", "task_class": "objective_reasoning",
+              "required_capabilities": [], "required_modalities": [],
+              "acceptance_criteria": [], "notification_envelope": None, "timeout_seconds": 3600}
+    assert validate_activity_handler_objective_submission(action) == action
+    for field, value in (("target_resident_id", ""), ("timeout_seconds", 0),
+                         ("event_kind", "engineering"), ("contract_version", "2.0.0")):
+        invalid = {**action, field: value}
+        with pytest.raises(ModuleExtensionError, match="objective submission is invalid"):
+            validate_activity_handler_objective_submission(invalid)
+
+
+def test_generic_objective_submission_parks_and_resumes_with_durable_result():
+    async def run():
+        from r3a_runtime.cme import CME
+
+        sample = _v11_handler_fixture()
+        handler = sample["module_manifest"]["activity_handler"]
+        manifest = {"module_id": sample["module_manifest"]["module_id"],
+                    "module_version": sample["module_manifest"]["module_version"],
+                    "artifact_digest": sample["module_manifest"]["artifact"]["artifact_sha256"]}
+        resolved = {"handler": handler, "module": {"manifest": manifest},
+                    "module_id": manifest["module_id"], "module_version": manifest["module_version"],
+                    "artifact_digest": manifest["artifact_digest"]}
+        activity = _cme_activity(sample)
+        action = {"contract_id": "r3a.activity-handler.objective-submission",
+                  "contract_version": "1.0.0", "action_id": "review-evt-1",
+                  "target_resident_id": "resident.fixture", "objective": "Review the source record",
+                  "event_kind": "objective", "task_class": "objective_reasoning",
+                  "required_capabilities": [], "required_modalities": [],
+                  "acceptance_criteria": [], "notification_envelope": None, "timeout_seconds": 3600}
+        digest = hashlib.sha256(json.dumps(action, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        pending = {"handler": {"module_id": manifest["module_id"]}, "action": action,
+                   "action_sha256": digest, "attempt_id": activity["attempt_id"],
+                   "config_revision": "config-r1"}
+        cme = object.__new__(CME)
+        cme.settings = SimpleNamespace(source_digest="config-r1")
+        child_id = "00000000-0000-4000-8000-000000000204"
+        cme._control_request = AsyncMock(return_value={"activity_id": child_id})
+        cme.store = SimpleNamespace(activity_execution_result=AsyncMock(return_value={
+            "activity_id": child_id, "state": "RUNNING", "result": None,
+            "exception": None, "latest_event_id": None}))
+
+        waiting = await cme._dispatch_registered_handler_action(activity, resolved, handler, pending)
+        assert waiting["_awaiting_objective"]["activity_id"] == child_id
+        assert cme._control_request.await_count == 1
+        assert cme._control_request.await_args.args[0] == "resident.objective.submit"
+        assert cme._control_request.await_args.kwargs["_caller_resident_id"] == "resident.fixture"
+
+        pending["awaiting_objective"] = waiting["_awaiting_objective"]
+        cme.store.activity_execution_result.return_value = {
+            "activity_id": child_id, "state": "COMPLETED",
+            "result": {"decision": {"status": "healthy"}, "evidence": [{"source_id": "e1"}]},
+            "exception": None, "latest_event_id": "00000000-0000-4000-8000-000000000205"}
+        receipt = await cme._dispatch_registered_handler_action(activity, resolved, handler, pending)
+        assert receipt["outcome"] == "succeeded"
+        assert receipt["invocation"]["activity_id"] == child_id
+        assert receipt["invocation"]["result"]["decision"]["status"] == "healthy"
+        assert receipt["evidence"] == [{"source_id": "e1"}]
+        assert cme._control_request.await_args.args[2] == cme._control_request.await_args_list[0].args[2]
+
+    asyncio.run(run())
 
 
 def test_v11_handler_action_round_trip_persists_intent_and_receipt_before_resume():
