@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/module_extensions.py
 Component: R3A-MODULE-EXTENSION-CONTRACTS
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-10T01:09:23Z
 Created By: Codex GPT-6
 Purpose: Validate resident-executor bindings and durable activity-handler declarations.
@@ -15,8 +15,8 @@ Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Resolve r
 Changed: 2026-11-10T01:26:34Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Validate configured binding targets against declared executor roles and immutable digests.
 Supersedes: None
 Contracts: r3a.resident.module-binding.v1; r3a.resident.execution-profile@1.0.0; r3a.activity-handler.v1; r3a.activity-intake.v1.
-Tests: tests/test_r3a_module_extensions.py
-History/Predecessor: Prior revision at commit 6eb7718, blob a1c351df83d9c6b6d1e377be7a15315b7c72dd9f.
+Tests: tests/test_r3a_module_extensions.py; tests/test_r3a_module_extension_lifecycle.py
+History/Predecessor: Prior revision at commit 76a9ad352e892f22cb0ee5a684a6cc358e5155b3, blob 71c045a2c15e879add0c97737af770198c96beab.
 """
 from __future__ import annotations
 
@@ -138,6 +138,21 @@ def validate_activity_handler(value: Any) -> dict[str, Any]:
     if handler["recovery"]["mode"] == "checkpointed" and not handler["recovery"]["checkpoint_contract"]:
         raise ModuleExtensionError("checkpointed recovery requires a checkpoint contract")
     return handler
+
+
+def validate_activity_handler_payload(handler: Any, kind: str, value: Any) -> Any:
+    """Validate a handler request/result/progress/checkpoint against its declared schema."""
+    checked = validate_activity_handler(handler)
+    schema_fields = {"request": "request_schema", "result": "result_schema",
+                     "progress": "progress_schema", "checkpoint": "checkpoint_schema"}
+    field = schema_fields.get(kind)
+    if field is None:
+        raise ModuleExtensionError("activity handler payload kind is unsupported")
+    try:
+        validate_json(value, checked[field], path=f"$.{kind}")
+    except CapabilityContractError as exc:
+        raise ModuleExtensionError(f"activity handler {kind} payload is invalid: {exc}") from exc
+    return value
 
 
 def _validate_schema_declaration(schema: Any, field: str, depth: int = 0) -> None:

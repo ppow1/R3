@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_module_extensions.py
 Component: TEST-R3A-MODULE-EXTENSION-CONTRACTS
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-10T01:09:23Z
 Created By: Codex GPT-6
 Purpose: Permanently verify generic resident and durable activity-handler module declarations.
@@ -16,7 +16,7 @@ Changed: 2026-11-10T01:26:34Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify bo
 Supersedes: None
 Contracts: r3a.resident.module-binding.v1; r3a.resident.executor@1.0.0; r3a.activity-handler.v1.
 Tests: python3 -m pytest -q tests/test_r3a_module_extensions.py
-History/Predecessor: Prior revision at commit 6eb7718, blob cfef25e4e3aadb15a37808cdd2cf59075f278389.
+History/Predecessor: Prior revision at commit 76a9ad352e892f22cb0ee5a684a6cc358e5155b3, blob aa03f95ca2828d714538dabb65067bd691a8af31.
 """
 from __future__ import annotations
 
@@ -35,6 +35,7 @@ from r3a_runtime.module_extensions import (
     resolve_activity_handler,
     resolve_resident_binding,
     validate_activity_handler,
+    validate_activity_handler_payload,
     validate_executor_configuration,
     validate_resident_binding,
     validate_resident_bindings,
@@ -335,6 +336,16 @@ class TestActivityHandler:
         assert resolved["handler"]["handler_id"] == "example.inventory-handler"
         assert resolved["artifact_digest"] == "c" * 64
         assert "authorization" not in resolved
+
+    def test_request_result_progress_and_checkpoint_are_checked_by_declared_schemas(self):
+        assert validate_activity_handler_payload(HANDLER, "request", {"scope": "unit"}) == {"scope": "unit"}
+        assert validate_activity_handler_payload(HANDLER, "result", {"changed": 2}) == {"changed": 2}
+        assert validate_activity_handler_payload(HANDLER, "progress", {"phase": "scan"}) == {"phase": "scan"}
+        assert validate_activity_handler_payload(HANDLER, "checkpoint", {"cursor": 3}) == {"cursor": 3}
+        for kind, invalid in (("request", {}), ("result", {"changed": "two"}),
+                              ("progress", {"phase": 3}), ("checkpoint", {"cursor": True})):
+            with pytest.raises(ModuleExtensionError, match="payload is invalid"):
+                validate_activity_handler_payload(HANDLER, kind, invalid)
 
     def test_missing_ambiguous_inactive_and_incompatible_handler_fail_closed(self):
         active = registered_module("example.inventory", handler=HANDLER)
