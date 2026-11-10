@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_module_contracts.py
 Component: R3A-MODULE-CONTRACT-TESTS
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-08
 Created By: R3A Coordinator
 Purpose: Verify generic semantic module dependency range matching.
@@ -11,10 +11,11 @@ Observability: Assertions cover accepted/rejected version ranges and malformed c
 Dependencies: r3a_runtime.module_contracts.
 Authority: Steward Directive — Coordinator Next Integration Cycle.
 Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | Validate the shared module dependency range contract.
+Changed: 2026-11-10T02:02:46Z | R3A-MODULAR-PLUGINS-46 | Preserve synthetic-to-explicit manifest promotion for v1.1.0 declarations.
 Supersedes: None.
 Contracts: r3a.module-manifest.v1.
 Tests: tests/test_r3a_module_contracts.py.
-History/Predecessor: New file.
+History/Predecessor: New file; prior revision recorded in Git.
 """
 import pytest
 
@@ -76,6 +77,9 @@ def test_legacy_manifest_promotion_requires_same_identity_artifact_and_bindings(
            "configuration_ref": "capability_operations[].configuration",
            "migration_contract": "r3a.stateless-provider.v1", "recovery_policy": "operation-contract.v1"}
     assert is_legacy_manifest_promotion(old, new)
+    new_v11 = {**new, "manifest_contract": "r3a.module-manifest.v1@1.1.0",
+               "resident_executor": {"contract_id": "r3a.resident.executor", "contract_version": "1.0.0"}}
+    assert is_legacy_manifest_promotion(old, new_v11)
     assert not is_legacy_manifest_promotion(old, {**new, "artifact_digest": "b" * 64})
     assert not is_legacy_manifest_promotion(old, {**new, "dependencies": [{"module_id": "other",
                                                                            "version_range": "^1.0.0"}]})

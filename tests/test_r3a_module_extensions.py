@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_module_extensions.py
 Component: TEST-R3A-MODULE-EXTENSION-CONTRACTS
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-10T01:09:23Z
 Created By: Codex GPT-6
 Purpose: Permanently verify generic resident and durable activity-handler module declarations.
@@ -13,10 +13,11 @@ Authority: AD-024; Modular Plugins #46; fixture acceptance only.
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Add extensible executor and handler contract tests.
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify authoritative binding resolution against active role declarations and pinned artifacts.
 Changed: 2026-11-10T01:26:34Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify bootstrap binding registration and fail-closed role/digest matching.
+Changed: 2026-11-10T02:02:46Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Test v1.0/v1.1 manifest schema selection and fail-closed unsupported versions.
 Supersedes: None
 Contracts: r3a.resident.module-binding.v1; r3a.resident.executor@1.0.0; r3a.activity-handler.v1.
 Tests: python3 -m pytest -q tests/test_r3a_module_extensions.py
-History/Predecessor: Prior revision at commit 76a9ad352e892f22cb0ee5a684a6cc358e5155b3, blob aa03f95ca2828d714538dabb65067bd691a8af31.
+History/Predecessor: Prior revision at commit 76a9ad352e892f22cb0ee5a684a6cc358e5155b3, blob aa03f95ca2828d714538dabb65067bd691a8af31; immediate predecessor recorded in Git.
 """
 from __future__ import annotations
 
@@ -99,7 +100,7 @@ def bootstrap_config(tmp_path: Path, *, include_binding: bool = True) -> Path:
     manifest = json.loads(manifest_path.read_text())
     operation = manifest["operation"]
     manifest["module_manifest"] = {
-        "contract_id": "r3a.module-manifest.v1", "contract_version": "1.0.0",
+        "contract_id": "r3a.module-manifest.v1", "contract_version": "1.1.0",
         "module_id": operation["provider"]["provider_id"],
         "module_version": operation["provider"]["provider_version"], "owner": "fixture-owner",
         "binding": {"contract_id": "r3a.capability-provider.v1", "protocol_major": 1,
@@ -178,7 +179,7 @@ def provider_operation(module_id="executor.orbit", version="1.0.0", digest="a" *
 
 def module_manifest(*, module_id="executor.orbit", version="1.0.0", digest="a" * 64):
     return {
-        "contract_id": "r3a.module-manifest.v1", "contract_version": "1.0.0",
+        "contract_id": "r3a.module-manifest.v1", "contract_version": "1.1.0",
         "module_id": module_id, "module_version": version, "owner": "fixture-owner",
         "binding": {"contract_id": "r3a.capability-provider.v1", "protocol_major": 1,
                     "protocol_min_minor": 0, "protocol_max_minor": 0,
@@ -246,6 +247,48 @@ class TestResidentBinding:
         assert [item["resident_id"] for item in bindings] == ["resident:alpha", "resident:beta"]
         assert all("grant" not in item and "authorized" not in item for item in bindings)
 
+    def test_module_manifest_v10_remains_valid_but_rejects_v11_role_fields(self):
+        declaration = module_manifest()
+        declaration["contract_version"] = "1.0.0"
+        declaration.pop("resident_executor")
+        operation = provider_operation()
+        old_contract = validate_module_manifest(
+            declaration, operation,
+            {"artifact_sha256": "a" * 64,
+             "configuration_schema": {"schema_id": "fixture.config.v1"}})
+        assert old_contract["contract_version"] == "1.0.0"
+        assert "resident_executor" not in old_contract
+
+        declaration["resident_executor"] = module_manifest()["resident_executor"]
+        with pytest.raises(CapabilityContractError, match="unknown fields"):
+            validate_module_manifest(
+                declaration, operation,
+                {"artifact_sha256": "a" * 64,
+                 "configuration_schema": {"schema_id": "fixture.config.v1"}})
+
+    @pytest.mark.parametrize("contract_version", ["1.0.1", "1.2.0", "2.0.0", "not-semver"])
+    def test_module_manifest_unknown_patch_minor_or_major_fails_closed(self, contract_version):
+        declaration = module_manifest()
+        declaration["contract_version"] = contract_version
+        with pytest.raises(CapabilityContractError, match="contract version is unsupported"):
+            validate_module_manifest(
+                declaration, provider_operation(),
+                {"artifact_sha256": "a" * 64,
+                 "configuration_schema": {"schema_id": "fixture.config.v1"}})
+
+    def test_module_manifest_v11_requires_exact_pinned_digest_and_role_contracts(self):
+        declaration = module_manifest()
+        operation = provider_operation()
+        with pytest.raises(CapabilityContractError, match="artifact digest"):
+            validate_module_manifest(declaration, operation,
+                                     {"artifact_sha256": "b" * 64,
+                                      "configuration_schema": {"schema_id": "fixture.config.v1"}})
+        declaration["resident_executor"]["contract_version"] = "2.0.0"
+        with pytest.raises(CapabilityContractError, match="contract_version"):
+            validate_module_manifest(declaration, operation,
+                                     {"artifact_sha256": "a" * 64,
+                                      "configuration_schema": {"schema_id": "fixture.config.v1"}})
+
     def test_provider_registry_manifest_retains_generic_executor_and_handler_roles(self):
         from types import SimpleNamespace
         from r3a_runtime.provider_runtime import ProviderProcessManager
@@ -266,6 +309,7 @@ class TestResidentBinding:
                              "configuration_schema": {"schema_id": "fixture.config.v1"}})
         runtime = object.__new__(ProviderProcessManager)
         stored = runtime._manifest(operation)
+        assert stored["manifest_contract"] == "r3a.module-manifest.v1@1.1.0"
         assert stored["resident_executor"] == declared["resident_executor"]
         assert stored["activity_handler"] == declared["activity_handler"]
 

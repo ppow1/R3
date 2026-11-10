@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/provider_runtime.py
 Component: R3A-CAPABILITY-MODULE-RUNTIME
-File Revision: 1.4.0
+File Revision: 1.4.1
 Created: 2026-11-07
 Created By: Codex GPT-6
 Purpose: Supervise generic manifest-declared capability provider processes.
@@ -15,6 +15,7 @@ Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-002 | Close admission and drain in-
 Changed: 2026-11-08 | R3A-MODULAR-RUNTIME | Restore the versioned typed output/evidence provider result after JSON transport.
 Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | Reconcile live manifests, activate declared dependencies, and observe provider health.
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Preserve generic resident-executor and activity-handler declarations in registry manifests.
+Changed: 2026-11-10T02:02:46Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Preserve the exact declared module-manifest contract version in registry projections.
 Supersedes: None.
 Contracts: MOD-001–MOD-010; module.lifecycle v2; r3a.capability-provider.v1.
 Tests: tests/test_r3a_capability_integration_demo.py; tests/test_r3a_module_extensions.py.
@@ -113,7 +114,7 @@ class ProviderProcessManager:
         if declared is not None:
             binding = declared["binding"]
             artifact = declared["artifact"]
-            result = {"manifest_contract": "r3a.module-manifest.v1@1.0.0",
+            result = {"manifest_contract": f"{declared['contract_id']}@{declared['contract_version']}",
                     "module_id": declared["module_id"], "module_version": declared["module_version"],
                     "contract_id": binding["contract_id"], "protocol_major": binding["protocol_major"],
                     "protocol_minor": PROTOCOL_MINOR, "protocol_min_minor": binding["protocol_min_minor"],

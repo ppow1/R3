@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3a_runtime/capability_contracts.py
 # Component: R3A-CAPABILITY-CONTRACTS
-# File Revision: 1.0.1
+# File Revision: 1.0.2
 # Created: Unknown (legacy)
 # Created By: Unknown (legacy)
 # Purpose: Validate typed capability operations, provider manifests, invocations, and module registration metadata.
@@ -9,9 +9,9 @@
 # Observability: Stable contract validation failures before registration or invocation.
 # Dependencies: Python standard library; versioned JSON schemas under r3a_runtime/schemas.
 # Authority: Existing R3A capability-provider architecture; AD-024 permits additive module role metadata.
-# Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Validate optional resident-executor and durable activity-handler module declarations.
+# Changed: 2026-11-10T02:02:46Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Select the declared module-manifest minor schema and reject role metadata under v1.0.0.
 # Supersedes: None
-# Contracts: r3a.capability-operation.v1; r3a.capability-invocation.v1; r3a.module-manifest.v1; AD-024 role contracts.
+# Contracts: r3a.capability-operation.v1; r3a.capability-invocation.v1; r3a.module-manifest.v1@1.0.0 and @1.1.0; AD-024 role contracts.
 # Tests: tests/test_r3a_capability_contracts.py; tests/test_r3a_module_extensions.py.
 # History/Predecessor: Prior source at integration commit 9a41d7e9647d37c2b7dc6f2aca3be3f5f82ccfe9, blob cedb0e412df130e1db842a8ef116085cc6c8cbc8.
 """Canonical R3A capability contracts, provider interface, and dynamic registry.
@@ -242,15 +242,17 @@ def validate_operation(descriptor: Any) -> dict[str, Any]:
 def validate_module_manifest(module_manifest: Any, operation: dict[str, Any],
                              source_manifest: dict[str, Any]) -> dict[str, Any]:
     """Validate optional module lifecycle metadata attached to an operation manifest."""
-    schema = _load_schema("module-manifest.v1.schema.json")
     if not isinstance(module_manifest, dict):
         raise CapabilityContractError("module manifest must be an object")
-    # The role-specific schemas remain independently versioned contracts. Validate
-    # the shared manifest envelope here, then validate each optional role extension
-    # with its own strict contract helper below.
-    envelope = {key: value for key, value in module_manifest.items()
-                if key not in {"resident_executor", "activity_handler"}}
-    validate_json(envelope, schema)
+    contract = (module_manifest.get("contract_id"), module_manifest.get("contract_version"))
+    manifest_schemas = {
+        ("r3a.module-manifest.v1", "1.0.0"): "module-manifest.v1.schema.json",
+        ("r3a.module-manifest.v1", "1.1.0"): "module-manifest.v1.1.schema.json",
+    }
+    schema_name = manifest_schemas.get(contract)
+    if schema_name is None:
+        raise CapabilityContractError("module manifest contract version is unsupported")
+    validate_json(module_manifest, _load_schema(schema_name))
     try:
         from .module_extensions import (ModuleExtensionError, validate_activity_handler,
                                         validate_resident_executor_declaration)
