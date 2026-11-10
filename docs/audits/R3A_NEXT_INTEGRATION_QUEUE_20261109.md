@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/audits/R3A_NEXT_INTEGRATION_QUEUE_20261109.md
 Component: R3A-AUDIT-INTEGRATION-QUEUE
-File Revision: 1.0.10
+File Revision: 1.0.11
 Created: 2026-11-10T01:26:06Z
 Created By: Codex GPT-6, Independent Auditor V2
 Purpose: Record independently approved source candidates and their integration gates for Coordinator V2.
@@ -22,10 +22,11 @@ Changed: 2026-11-10T15:55:38Z | R3A-AUDIT-BACKLOG-CONTINUATION | Codex GPT-6 | C
 Changed: 2026-11-10T15:55:38Z | R3A-AUDIT-BACKLOG-CONTINUATION | Codex GPT-6 | Confirm #50 Bitwarden provider source is already integrated and independently source-reviewed; retain live retrieval dependencies outside the integration queue.
 Changed: 2026-11-10T15:55:38Z | R3A-AUDIT-BACKLOG-CONTINUATION | Codex GPT-6 | Clarify that the known notification digest failure is specific to PR #59's v1.2.1 package pin, not standalone #48 SHA 471c2cf.
 Changed: 2026-11-10T16:20:20Z | R3A-AUDIT-PR59-REVIEW | Codex GPT-6 | Remove PR #59 from the integration queue pending digest, host/resource scope, and cross-workstream role merge resolution.
+Changed: 2026-11-10T16:30:13Z | R3A-AUDIT-PR52-53-BACKLOG | Codex GPT-6 | Verify integrated PR #52/#53 source and add notification module-ownership correction to blocked follow-ups.
 Supersedes: None
 Contracts: R3A integration policy; AD-024; approved module, authorization, state and Website contracts.
 Tests: N/A; queue record only. Candidate tests are in the linked compliance matrix.
-History/Predecessor: Prior revision 1.0.9 at commit 50aa67d488ee4a2d7f5864eb19390cf53c4425c0; earlier revisions are preserved in Git history.
+History/Predecessor: Prior revision 1.0.10 at commit 11d038e2c50deef16c9df5f3ad268a3b5de6c73e; earlier revisions are preserved in Git history.
 -->
 # R3A Next Integration Queue — 2026-11-09
 
@@ -42,6 +43,7 @@ Current active review dispositions: **#46 de60bc14 PASS and queued; #43 935515e 
 ## Blocked and failed follow-up candidates (not integration queue entries)
 
 - **PR #59 Live Modular Integration / `2cc3fe3aabad88c95a5e6489c633cb01472f7c7f`: BLOCKED.** Exact PR tree full suite independently reran: 489 passed, 10 skipped, 1 notification digest failure, 34 subtests; focused package/lifecycle/capability/notification run: 14 passed, 1 failed on expected `107ea3b...` versus actual `8f658460...`. Package `build`/`verify` passed with deterministic bundle SHA-256 `3c5441e...`. Combined PR #59 trees with current Coordinator `c62bb28`, #43 `935515e`, and #46 `de60bc1` are each clean; the #46+#59 contract/package/lifecycle focused tree passed 59 tests. However #43 `935515e` and #46 `de60bc1` conflict in six shared CME/config/DB/module-contract/test files. The declared host target is not enforced: CME invocation supplies `target: {}` and provider uses only the configured host. Owners: #48 correct artifact pin; Coordinator #51 choose/reconcile role code and record an authorized scope disposition or submit reviewed enforcement. Keep module disabled. Review communicated to PR #59, #51, and #56.
+- **Notification module-ownership correction / integrated AP1 #52 source:** current Coordinator `c62bb28` still has `notification.ingest` special handling in `r3a_runtime/cme.py`, a source-specific adapter in `r3a_runtime/config.py`, and Grace-specific objective/event synthesis in `r3a_runtime/db.py`. Generic registered activity-handler dispatch exists, but this notification workflow does not use it. This is an AD-024 current-target gap, not a retroactive failure of the Nov 7 source. Owner #48 with Coordinator #51: use the existing capability/provider and `r3a.activity-handler.v1` contracts; retain generic CME auth/scheduling/ledger/diagnostics; add permanent registry-driven replacement/disable and idempotency/provenance/acknowledgment regressions. No new scheduler or core-owned domain handler. Blocked pending a pushed correction SHA.
 - **#43 executor-role binding P0 / SHA `935515e1fe0de9f9b26e9d43cac182045db56526`: PASS source.** Issue #43 comment 6771679125. Use the current-base #46 Q-01 SHA for integration rather than duplicate stale-base replay. Managed HR/directory and authorization acceptance remain Coordinator-owned.
 - **Website #51 / SHA `134518a4308bc767f5dbc7ea7a25418d1f51b5d1`: FAIL.** Generic toolbar still hardcodes “Assign work to Grace” at `web/steward-workspace-api.mjs:450`. Website owner must neutralize/remove and add non-Grace mounted-client regression. Comment 6771679555.
 - **HR #58 / SHA `97d75c92a6925d8b8efb63cf9d45f0c186288c6f`: FAIL.** Mutable packet owner/authority metadata permits reassignment of Security-owned grants; cyclic local `$ref` raises `RecursionError`. HR owner to fix service and shared validator with regressions. Focused tests 51 passed/1 disposable-PostgreSQL skip; comment 6771680557.
