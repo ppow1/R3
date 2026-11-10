@@ -112,6 +112,38 @@ Use HTTP `Authorization: Bearer <resident-credential>` and `Content-Type: applic
 | `hr.read` | `{"scope_ref":"r3:marie","resident_id":"r3:marie"}` | Read Marie's **public** projection; scope must equal resident ID |
 | `hr.save` | `{"scope_ref":"r3:marie","record":{...},"expected_revision":1}` | Authorized create/update; scope must equal record's resident ID; omit expected_revision **only for a new record** |
 
+### Provenance-bearing directory principal association
+
+The source adapter also defines `associate_authority_principal_with_provenance`.
+It is registered only when the trusted native host injects a directory evidence
+resolver; without that resolver the operation is absent. The resolver accepts
+only an opaque `evidence_ref` and must return a fresh, server-derived snapshot
+that binds the exact HR `resident_id` to one active R3A principal, active office,
+office role, binding revision, snapshot digest, and source references. Request
+data cannot supply or override any identity, office, principal, revision, or
+source claim.
+
+Its exact authority is `resource_id=r3:hr`, `action=hr.save`,
+`operation=write`, and `scope_ref=r3:<exact HR resident_id>`. The request requires
+the expected current HR revision, evidence reference, and idempotency key. The
+operation rejects stale revisions, stale or mismatched directory evidence,
+inactive bindings/offices, duplicate principals, and idempotency-key reuse with
+different content. The HR record must also have status `active`; a row still in
+`onboarding` is rejected until an authorized HR decision updates it through
+`hr.save`. On success it increments the HR record revision and commits
+the association, provenance, local audit/history event, and idempotency response
+in the same existing HR SQLite database transaction. The existing governed
+gateway remains responsible for authenticated actor derivation, exact grant
+enforcement, and its authority audit event.
+
+This source contract is **not active merely because it is implemented here**.
+The deployed native tool release must wire the trusted resolver into
+`register_hr_governed_tools`, confirm the exact scoped grant, and deploy the
+versioned release before the operation appears in `/v1/tools`. No directory
+resolver, grant, or personnel decision is inferred from an HR dossier. The
+resolver's evidence must come from the live authoritative R3A directory and
+onboarding procedure; an operator may not fabricate an association.
+
 For `hr.save`, the record object must follow the full record contract above, including `fields` and `extensions` entries as `{"value": ..., "classification": "public|request|confidential"}`. The governed adapter declares an object schema with no extra properties at the params level.
 
 Successful governed response: `{"ok":true,"result":{"status":"ok","authorization":{"principal_id":"resident:Grace","grant_id":"...","resource_id":"r3:hr","action":"hr.read","operation":"read","scope_ref":"r3:marie"},"correlation_id":"...","result":{...}}}`. An authorization denial is HTTP 403. An uncertain write may return HTTP 409; do not retry blindly. A 500 may represent failed execution or an uncertain write; inspect evidence before action.
