@@ -1,7 +1,7 @@
 # R3 CONTROLLED TEST SOURCE
 # File: tests/test_r3a_notification_source_plugin.py
 # Component: R3A-NOTIFICATION-SOURCE-REGRESSION
-# File Revision: 1.0.1
+# File Revision: 1.0.2
 # Created: Unknown (legacy)
 # Created By: Unknown (legacy)
 # Purpose: Verify notification source provenance, generic intake projection, and handler registration.
@@ -10,6 +10,7 @@
 # Dependencies: r3a_plugins.notification_source; capability and activity-handler contracts.
 # Authority: Issue #48; no production source or service access.
 # Changed: 2026-11-10T18:53:48Z | R3A-CORE-FREEZE-CORRECTION | Codex GPT-6 | Verify notification-owned activity type and handler declaration with N1 compatibility.
+# Changed: 2026-11-10 | R3A-COORDINATOR-FS01 | Coordinator | Exercise the notification activity through generic CME handler resolution and dispatch.
 # Supersedes: None.
 # Contracts: r3a.notification-intake.v1; r3a.activity-intake.v1; r3a.activity-handler.v1.
 # Tests: This test module.
@@ -17,6 +18,7 @@
 """Domain tests for the notification source adapter, independent of CME intake."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -25,13 +27,15 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from r3a_plugins.notification_source import plugin
 from r3a_runtime.capability_contracts import (CapabilityRegistry, normalize_provider_result,
                                               validate_module_manifest, validate_operation)
 from r3a_runtime.config import _validate_plugin_config, load_settings
 from r3a_runtime.module_extensions import resolve_activity_handler
+from r3a_runtime.cme import CME
 from r3a_runtime.notifications import same_notification_input, validate_notification_envelope
 from tests.test_r3a_modular_autonomy import make_config
 
@@ -252,6 +256,52 @@ class NotificationSourceAdapterTests(unittest.TestCase):
         self.assertEqual("r3a.notification.event-review", resolved["handler"]["handler_id"])
         legacy = json.loads((PACKAGE / "manifest.json").read_text())
         self.assertEqual("r3a.notification-intake", legacy["operation"]["output_schema"]["properties"]["contract_id"]["const"])
+
+    def test_notification_activity_routes_through_generic_cme_handler_dispatch(self):
+        async def scenario():
+            package_manifest = json.loads((PACKAGE / "manifest.activity-intake.json").read_text())
+            module = validate_module_manifest(package_manifest["module_manifest"],
+                                              package_manifest["operation"], package_manifest)
+            row = {"module_id": module["module_id"], "module_version": module["module_version"],
+                   "lifecycle_state": "ACTIVE",
+                   "manifest": {"module_id": module["module_id"], "module_version": module["module_version"],
+                                "artifact_digest": module["artifact"]["artifact_sha256"],
+                                "capability_refs": module["capability_refs"],
+                                "activity_handler": module["activity_handler"]}}
+            cme = CME.__new__(CME)
+            cme.store = SimpleNamespace(rows=AsyncMock(return_value=[row]),
+                                        record_progress=AsyncMock(), finish_activity=AsyncMock(),
+                                        block_activity=AsyncMock())
+            cme.settings = SimpleNamespace(source_digest="config-notification-test")
+            cme.module_id = "resident.grace"
+            cme.module_version = "0.0.0"
+            cme._authorization_decision = AsyncMock(return_value=SimpleNamespace(
+                decision_id="decision-test", audit_event_id="audit-test", policy_revision="policy-test"))
+            cme._registered_module_call = AsyncMock(return_value={"result": {
+                "outcome": "completed", "progress": {"phase": "reviewed"},
+                "checkpoint": {"source_id": "r3a.institution-events",
+                               "source_event_id": str(EVENT_ID)}}})
+            notification = {"source_id": "r3a.institution-events", "source_event_id": str(EVENT_ID)}
+            activity = {"activity_id": str(uuid.uuid4()), "attempt_id": str(uuid.uuid4()),
+                        "idempotency_key": f"notification:r3a.institution-events:{EVENT_ID}",
+                        "activity_type": "notification.event.review",
+                        "input": {"correlation_id": str(CORRELATION_ID), "resident_id": "resident.grace",
+                                  "activity_input": {"event_kind": "notification",
+                                                     "notification": notification},
+                                  "activity_evidence": []},
+                        "checkpoint": {}}
+            resolved = await cme._registered_handler("notification.event.review")
+            self.assertEqual("r3a.notification.event-review", resolved["handler"]["handler_id"])
+            await cme._run_registered_activity(activity, resolved)
+            cme._registered_module_call.assert_awaited_once()
+            call = cme._registered_module_call.await_args
+            self.assertEqual("r3a.notification-activity-intake", call.args[0])
+            self.assertEqual("notification.event.review", call.args[3]["activity_type"])
+            self.assertEqual(notification, call.args[3]["input"]["notification"])
+            self.assertEqual(2, cme._authorization_decision.await_count)
+            cme.store.finish_activity.assert_awaited_once()
+
+        asyncio.run(scenario())
 
     def test_generic_projection_rejects_mismatched_evidence_and_bad_lifecycle(self):
         with patch.dict(os.environ, {"R3A_NOTIFICATION_SOURCE_DSN": "fixture-secret"}):

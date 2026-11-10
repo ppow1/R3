@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_activity_intake_consumer.py
 Component: R3A-GENERIC-ACTIVITY-INTAKE-REGRESSION
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-09
 Created By: Codex GPT-6
 Purpose: Verify authorized generic activity intake remains durable and idempotent.
@@ -12,6 +12,7 @@ Dependencies: r3a_runtime.cme; r3a_runtime.db; shared activity-intake contracts.
 Authority: AD-024; Autonomy / CME Issue #43.
 Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT-6 | Cover non-Grace activity intake persistence and idempotency.
 Changed: 2026-11-10T18:53:48Z | R3A-CORE-FREEZE-CORRECTION | Codex GPT-6 | Validate canonical provider artifact hashes across checkout line endings.
+Changed: 2026-11-10 | R3A-COORDINATOR-FS01 | Coordinator | Verify notification.event.review preserves its identity through generic CME intake and durable storage.
 Supersedes: None.
 Contracts: r3a.activity-intake.v1; r3a.activity-handler.v1.
 Tests: This test module.
@@ -158,6 +159,17 @@ class ActivityIntakeControlTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("durable-activity-1", result["activity_id"])
         self.assertEqual("audit-1", result["source_authorization"]["audit_event_id"])
 
+    async def test_notification_event_review_uses_the_generic_durable_intake_boundary(self):
+        intake = copy.deepcopy(self.intake)
+        intake["activity"]["activity_type"] = "notification.event.review"
+        self.cme.invoke_capability.return_value = invocation_result(intake, self.provider)
+        result = await self.cme._control_request(
+            "activity.intake.accept", {"operation_id": "source.read", "input": {"event_id": "event-123"}},
+            self.key)
+        self.cme.store.submit_activity_intake.assert_awaited_once_with(
+            intake, self.cme.invoke_capability.return_value)
+        self.assertEqual("durable-activity-1", result["activity_id"])
+
     async def test_rejects_mutating_provider_before_invocation(self):
         self.cme.settings.capability_registry.descriptor["effect_class"] = "external_write"
         with self.assertRaisesRegex(PermissionError, "read-only"):
@@ -278,8 +290,8 @@ class ActivityIntakePersistenceTests(unittest.IsolatedAsyncioTestCase):
         provider = {"provider_id": "source.module", "provider_version": "1.0.0",
                     "artifact_sha256": "a" * 64}
         intake = valid_notification_intake()
-        intake["activity"].update(activity_type="billing.invoice.review", task_class="operations.review",
-                                   input={"invoice_id": "invoice-001"})
+        intake["activity"].update(activity_type="notification.event.review", task_class="operations.review",
+                                   input={"event_kind": "notification", "notification": {"event_id": "event-001"}})
         intake["provenance"].update(module_id=provider["provider_id"],
                                     module_version=provider["provider_version"],
                                     artifact_sha256=provider["artifact_sha256"])
@@ -293,9 +305,9 @@ class ActivityIntakePersistenceTests(unittest.IsolatedAsyncioTestCase):
 
         accepted = await store.submit_activity_intake(intake, result)
         persisted = store.pool.connection_value.activity
-        self.assertEqual("billing.invoice.review", accepted["activity_type"])
-        self.assertEqual("billing.invoice.review", persisted["activity_type"])
-        self.assertEqual({"invoice_id": "invoice-001"}, persisted["input"]["activity_input"])
+        self.assertEqual("notification.event.review", accepted["activity_type"])
+        self.assertEqual("notification.event.review", persisted["activity_type"])
+        self.assertEqual(intake["activity"]["input"], persisted["input"]["activity_input"])
         self.assertEqual(intake, persisted["input"]["activity_intake"])
         self.assertEqual("activity_intake", persisted["input"]["event_kind"])
 
