@@ -26,6 +26,7 @@ import os
 import signal
 import socket
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import psycopg
@@ -33,6 +34,7 @@ import psycopg
 from .config import Settings, load_settings
 from .control import control_request
 from .db import Store
+from .timestamp_presentation import format_timestamp
 
 
 def systemd_notify(message: str) -> None:
@@ -61,6 +63,10 @@ class Ring0:
         self.child_started_at: float | None = None
         self.repo_root = Path(__file__).resolve().parent.parent
 
+    def _log(self, message: str, *, error: bool = False) -> None:
+        timestamp = format_timestamp(datetime.now(timezone.utc), self.settings.presentation_timezone)
+        print(f"{timestamp} ring0 {message}", file=sys.stderr if error else sys.stdout, flush=True)
+
     async def _ensure_store(self) -> Store | None:
         if self.store is not None:
             return self.store
@@ -70,7 +76,7 @@ class Ring0:
             self.store = store
             return store
         except Exception as exc:
-            print(f"ring0 database observation unavailable: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            self._log(f"database observation unavailable: {type(exc).__name__}: {exc}", error=True)
             return None
 
     async def _record(self, component: str, pid: int, state: str, health: str,
@@ -87,8 +93,7 @@ class Ring0:
             await store.record_process_state(component, pid, state, health, reason,
                                              details or {}, initial=initial)
         except Exception as exc:
-            print(f"ring0 could not persist {component} {state}: {type(exc).__name__}: {exc}",
-                  file=sys.stderr, flush=True)
+            self._log(f"could not persist {component} {state}: {type(exc).__name__}: {exc}", error=True)
 
     async def _heartbeat(self, state: str, details: dict | None = None) -> None:
         store = await self._ensure_store()
@@ -102,8 +107,7 @@ class Ring0:
                                           "healthy" if state == "RUNNING" else "degraded",
                                           details or {})
         except Exception as exc:
-            print(f"ring0 heartbeat persistence unavailable: {type(exc).__name__}: {exc}",
-                  file=sys.stderr, flush=True)
+            self._log(f"heartbeat persistence unavailable: {type(exc).__name__}: {exc}", error=True)
 
     async def _start_cme(self) -> None:
         self.child = await asyncio.create_subprocess_exec(
@@ -115,7 +119,7 @@ class Ring0:
         )
         self.last_child_pid = self.child.pid
         self.child_started_at = asyncio.get_running_loop().time()
-        print(f"ring0 launched cme pid={self.child.pid}", flush=True)
+        self._log(f"launched cme pid={self.child.pid}")
 
     async def _stop_cme(self) -> None:
         child = self.child
@@ -199,7 +203,7 @@ class Ring0:
                 continue
 
             reason = details.get("reason", "CME unavailable")
-            print(f"ring0 detected cme failure: {reason}", file=sys.stderr, flush=True)
+            self._log(f"detected cme failure: {reason}", error=True)
             if self.ready_recorded:
                 await self._record("ring0", os.getpid(), "DEGRADED", "degraded",
                                    "CME health check failed", details)
@@ -225,8 +229,7 @@ class Ring0:
             try:
                 await self._start_cme()
             except Exception as exc:
-                print(f"ring0 could not create CME process: {type(exc).__name__}: {exc}",
-                      file=sys.stderr, flush=True)
+                self._log(f"could not create CME process: {type(exc).__name__}: {exc}", error=True)
 
         await self._record("ring0", os.getpid(), "STOPPING", "stopping", "Ring 0 shutdown requested")
         await self._stop_cme()

@@ -79,7 +79,7 @@ chmod 0600 "$state_root/postgresql.conf" "$state_root/pg_hba.conf" "$state_root/
 cat >"$unit_root/r3a-ap0-m1-postgres.service" <<EOF
 [Unit]
 Description=Isolated R3A AP0-M1 PostgreSQL cluster
-After=default.target
+After=basic.target
 
 [Service]
 Type=simple

@@ -21,7 +21,7 @@ from typing import Any, Protocol, runtime_checkable
 OPERATION_CONTRACT_ID = "r3a.capability-operation.v1"
 INVOCATION_CONTRACT_ID = "r3a.capability-invocation.v1"
 CONTRACT_VERSION = "1.0.0"
-EFFECT_CLASSES = frozenset({"read", "isolated_write", "external_write"})
+EFFECT_CLASSES = frozenset({"read", "isolated_write", "external_write", "steward_read", "steward_write"})
 _SCHEMA_DIR = Path(__file__).with_name("schemas")
 
 
@@ -204,7 +204,15 @@ def validate_operation(descriptor: Any) -> dict[str, Any]:
     for field in ("input_schema", "output_schema", "target_scope_schema"):
         validate_schema_definition(descriptor[field], path=f"$.{field}")
     validate_schema_definition(descriptor["evidence"]["schema"], path="$.evidence.schema")
-    if descriptor["effect_class"] != "read" and not descriptor["recovery"]["idempotency_required"]:
+    if descriptor["effect_class"] in {"steward_read", "steward_write"}:
+        if descriptor["contract_version"] != "1.1.0":
+            raise CapabilityContractError("Steward effects require capability-operation.v1 contract 1.1.0")
+        principals = descriptor["caller_constraints"]["allowed_principals"]
+        if not principals or descriptor["caller_constraints"]["allowed_residents"] or descriptor["caller_constraints"]["allowed_services"]:
+            raise CapabilityContractError("Steward effects must be restricted to explicit Steward principals")
+    elif descriptor["contract_version"] != "1.0.0":
+        raise CapabilityContractError("capability-operation.v1 1.1.0 is reserved for Steward operations")
+    if descriptor["effect_class"] in {"isolated_write", "external_write", "steward_write"} and not descriptor["recovery"]["idempotency_required"]:
         raise CapabilityContractError("write operations must require a stable idempotency key")
     if descriptor["recovery"]["idempotency_required"] and not descriptor["recovery"]["replay_safe"]:
         if descriptor["recovery"]["reconciliation_operation_id"] is None:
@@ -213,6 +221,32 @@ def validate_operation(descriptor: Any) -> dict[str, Any]:
             if disposition != "never":
                 raise CapabilityContractError("non-replayable operation without reconciliation must never retry")
     return copy.deepcopy(descriptor)
+
+
+def validate_module_manifest(module_manifest: Any, operation: dict[str, Any],
+                             source_manifest: dict[str, Any]) -> dict[str, Any]:
+    """Validate optional module lifecycle metadata attached to an operation manifest."""
+    schema = _load_schema("module-manifest.v1.schema.json")
+    validate_json(module_manifest, schema)
+    provider = operation["provider"]
+    if (module_manifest["module_id"] != provider["provider_id"]
+            or module_manifest["module_version"] != provider["provider_version"]):
+        raise CapabilityContractError("module manifest identity/version does not match operation provider")
+    binding = module_manifest["binding"]
+    if (binding["entrypoint"] != provider["entrypoint"]
+            or binding["protocol_min_minor"] > binding["protocol_max_minor"]):
+        raise CapabilityContractError("module binding does not match provider or has an invalid protocol range")
+    artifact = module_manifest["artifact"]
+    if (artifact["artifact_sha256"] != provider["artifact_sha256"]
+            or artifact["artifact_sha256"] != source_manifest.get("artifact_sha256")):
+        raise CapabilityContractError("module artifact digest does not match the pinned provider artifact")
+    config_schema = source_manifest.get("configuration_schema", {})
+    config_schema_id = config_schema.get("schema_id") if isinstance(config_schema, dict) else None
+    if module_manifest["configuration"]["schema_ref"] != config_schema_id:
+        raise CapabilityContractError("module configuration schema reference does not match the external schema")
+    if operation["operation_id"] not in module_manifest["capability_refs"]:
+        raise CapabilityContractError("module manifest does not reference its operation")
+    return copy.deepcopy(module_manifest)
 
 
 def validate_invocation_request(request: Any, descriptor: dict[str, Any]) -> dict[str, Any]:
@@ -224,6 +258,27 @@ def validate_invocation_request(request: Any, descriptor: dict[str, Any]) -> dic
     if request["operation_contract_version"] != descriptor["contract_version"]:
         raise CapabilityContractError("invocation operation contract version is unsupported")
     constraints = descriptor["caller_constraints"]
+    if descriptor["effect_class"] in {"steward_read", "steward_write"}:
+        if request["contract_version"] != "1.1.0" or request["operation_contract_version"] != "1.1.0":
+            raise CapabilityContractError("Steward effects require invocation and operation contract 1.1.0")
+    if descriptor["effect_class"] in {"steward_read", "steward_write"}:
+        if request["activity_id"] is not None or request["attempt_id"] is not None or request["work_order"] is not None or request.get("budget_reservation") is not None:
+            raise CapabilityContractError("Steward operation cannot be attached to resident activity work")
+    elif request["activity_id"] is None or request["attempt_id"] is None:
+        caller = request["caller"]
+        # A direct, authenticated principal may make a read-only request without
+        # manufacturing resident activity lineage. CME still applies the normal
+        # capability grant check and writes an invocation/audit record. Resident,
+        # service, and effectful calls retain their durable activity requirements.
+        direct_principal_read = (
+            descriptor["effect_class"] == "read"
+            and isinstance(caller.get("principal_id"), str)
+            and bool(caller["principal_id"].strip())
+            and caller.get("resident_id") is None
+            and caller.get("service_id") is None
+        )
+        if not direct_principal_read:
+            raise CapabilityContractError("activity_id and attempt_id are required outside direct Steward operations")
     caller = request["caller"]
     for field, caller_key in (("allowed_principals", "principal_id"),
                               ("allowed_residents", "resident_id"),
@@ -295,7 +350,7 @@ def validate_invocation_result(result: Any, descriptor: dict[str, Any]) -> dict[
             not result["authorization"]["decision_id"] or not result["authorization"]["audit_event_id"]):
         raise CapabilityContractError("completed authorization requires decision and audit references")
     if result["outcome"] == "SUCCEEDED":
-        expected_disposition = "NOT_STARTED" if descriptor["effect_class"] == "read" else "COMMITTED"
+        expected_disposition = "NOT_STARTED" if descriptor["effect_class"] in {"read", "steward_read"} else "COMMITTED"
         if result["effect_disposition"] != expected_disposition:
             raise CapabilityContractError("successful result has an invalid effect disposition")
     if result["outcome"] == "UNKNOWN" and result["effect_disposition"] != "UNKNOWN":
@@ -392,43 +447,96 @@ class CapabilityRegistry:
     """Single in-process dynamic registry. Discovery makes no authorization decision."""
 
     def __init__(self) -> None:
-        self._operations: dict[str, RegisteredOperation] = {}
+        self._operations: dict[tuple[str, str, str], RegisteredOperation] = {}
+        self._active: dict[str, tuple[str, str, str]] = {}
+        self._provider_states: dict[tuple[str, str], tuple[str, dict[str, Any]]] = {}
 
     def register(self, descriptor: dict[str, Any], configuration: dict[str, Any], *,
                  legacy_manifest: dict[str, Any] | None = None) -> RegisteredOperation:
         checked = validate_operation(descriptor)
         operation_id = checked["operation_id"]
-        if operation_id in self._operations:
-            raise CapabilityContractError(f"operation already registered: {operation_id}")
+        provider = checked["provider"]
+        identity = (operation_id, provider["provider_id"], provider["provider_version"])
+        if identity in self._operations:
+            raise CapabilityContractError(f"operation provider version already registered: {identity}")
         if not isinstance(configuration, dict):
             raise CapabilityContractError("provider configuration must be an object")
         registered = RegisteredOperation(checked, copy.deepcopy(configuration), copy.deepcopy(legacy_manifest))
-        self._operations[operation_id] = registered
+        self._operations[identity] = registered
+        self._active.setdefault(operation_id, identity)
+        self._provider_states.setdefault((provider["provider_id"], provider["provider_version"]),
+                                         ("registered", {}))
         return self._copy(registered)
 
-    def discover(self, *, include_disabled: bool = False) -> tuple[dict[str, Any], ...]:
+    def set_provider_state(self, provider_id: str, provider_version: str, state: str,
+                           diagnostic: dict[str, Any] | None = None) -> None:
+        """Record an observed provider binding state without changing authorization."""
+        if not any(item.descriptor["provider"]["provider_id"] == provider_id
+                   and item.descriptor["provider"]["provider_version"] == provider_version
+                   for item in self._operations.values()):
+            raise KeyError(f"unknown provider: {provider_id}@{provider_version}")
+        self._provider_states[(provider_id, provider_version)] = (state, copy.deepcopy(diagnostic or {}))
+
+    def discover(self, *, include_disabled: bool = False,
+                 include_versions: bool = False) -> tuple[dict[str, Any], ...]:
         """Return stable operation identity plus a separate human presentation projection."""
         records = []
-        for item in sorted(self._operations.values(), key=lambda x: x.descriptor["operation_id"]):
+        items = self._operations.values() if include_versions else (
+            self._operations[key] for key in self._active.values())
+        for item in sorted(items, key=lambda x: (x.descriptor["operation_id"],
+                                                 x.descriptor["provider"]["provider_version"])):
             descriptor = item.descriptor
             if descriptor["lifecycle"]["desired_state"] == "disabled" and not include_disabled:
                 continue
+            provider_key = (descriptor["provider"]["provider_id"],
+                            descriptor["provider"]["provider_version"])
+            state, diagnostic = self._provider_states.get(provider_key, ("registered", {}))
             records.append({"descriptor": copy.deepcopy(descriptor),
                             "presentation": item.presentation_projection(),
-                            "registry_observation": {"state": "registered", "health": "not_probed",
+                            "registry_observation": {"state": state,
+                                                     "diagnostic": copy.deepcopy(diagnostic),
+                                                     "health": "not_probed",
                                                      "provider_availability": "not_probed",
                                                      "observed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}})
         return tuple(records)
 
-    def resolve(self, operation_id: str, contract_version: str = CONTRACT_VERSION) -> RegisteredOperation:
-        operation = self._operations.get(operation_id)
+    def resolve(self, operation_id: str, contract_version: str = CONTRACT_VERSION, *,
+                include_stopped: bool = False) -> RegisteredOperation:
+        identity = self._active.get(operation_id)
+        operation = self._operations.get(identity) if identity else None
         if operation is None:
             raise KeyError(f"unknown operation: {operation_id}")
         if operation.descriptor["contract_version"] != contract_version:
             raise CapabilityContractError("operation contract version mismatch")
         if operation.descriptor["lifecycle"]["desired_state"] != "enabled":
             raise CapabilityContractError("operation is disabled")
+        provider = operation.descriptor["provider"]
+        state = self._provider_states.get((provider["provider_id"], provider["provider_version"]),
+                                          ("registered", {}))[0]
+        if not include_stopped and state in {"STOPPED", "FAILED", "INCOMPATIBLE"}:
+            raise CapabilityContractError(f"provider is {state.lower()}")
         return self._copy(operation)
+
+    def resolve_provider(self, operation_id: str, provider_version: str) -> RegisteredOperation:
+        """Resolve an installed implementation version for lifecycle management."""
+        matches = [item for key, item in self._operations.items()
+                   if key[0] == operation_id and key[2] == provider_version]
+        if len(matches) != 1:
+            raise KeyError(f"unknown or ambiguous operation provider: {operation_id}@{provider_version}")
+        return self._copy(matches[0])
+
+    def activate_provider(self, operation_id: str, provider_version: str) -> RegisteredOperation:
+        """Select a previously discovered provider version after readiness succeeds."""
+        candidate = self.resolve_provider(operation_id, provider_version)
+        if candidate.descriptor["lifecycle"]["desired_state"] != "enabled":
+            raise CapabilityContractError("operation is disabled")
+        provider = candidate.descriptor["provider"]
+        state = self._provider_states.get((provider["provider_id"], provider["provider_version"]),
+                                          ("registered", {}))[0]
+        if state not in {"ACTIVE", "registered", "INSTALLED"}:
+            raise CapabilityContractError(f"provider is not ready for activation ({state})")
+        self._active[operation_id] = (operation_id, provider["provider_id"], provider["provider_version"])
+        return candidate
 
     @staticmethod
     def _copy(operation: RegisteredOperation) -> RegisteredOperation:
@@ -437,7 +545,7 @@ class CapabilityRegistry:
                                    copy.deepcopy(operation.legacy_manifest))
 
     def __len__(self) -> int:
-        return len(self._operations)
+        return len(self._active)
 
 
 def legacy_read_only_operation(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -487,4 +595,6 @@ def operation_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         raise CapabilityContractError("legacy capability_id must match operation_id")
     if "read_only" in manifest and manifest["read_only"] is not (descriptor["effect_class"] == "read"):
         raise CapabilityContractError("legacy read_only projection conflicts with canonical effect_class")
+    if "module_manifest" in manifest:
+        validate_module_manifest(manifest["module_manifest"], descriptor, manifest)
     return descriptor

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.steward-capability-discovery.v1",
+  "title": "Authenticated Steward capability discovery response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "operations", "authorization_evaluated", "effect", "audit_event_id", "correlation_id", "freshness", "observed_at"],
+  "properties": {
+    "contract": { "const": "r3a.steward-capability-discovery.v1" },
+    "operations": { "type": "array", "items": { "type": "object" } },
+    "authorization_evaluated": { "const": false },
+    "effect": { "const": "none; discovery does not authorize invocation" },
+    "audit_event_id": { "type": "string", "minLength": 1 },
+    "correlation_id": { "type": "string", "format": "uuid" },
+    "freshness": { "const": "current" },
+    "observed_at": { "type": "string", "format": "date-time" }
+  }
+}

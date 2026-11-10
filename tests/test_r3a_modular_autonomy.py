@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_modular_autonomy.py
 Component: R3A-AP1-MODULAR-AUTONOMY-REGRESSION
-File Revision: 1.4.0
+File Revision: 1.4.1
 Created: 2026-11-06T23:19:46Z
 Created By: Codex GPT-6
 Purpose: Permanently verify versioned autonomy contracts, external model roles, readiness routing, deferral, and authorization-provider compatibility.
@@ -19,6 +19,7 @@ Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Verify vers
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Verify external escalation policy version, registered routes, authorization identity and per-activity token limits.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Verify grant provider receives activity scope for external invocation authorization.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Verify task-class role defaults, reject autonomic reasoning, preserve vision routing, and forbid cross-class fallback.
+Changed: 2026-11-08 | R3A-CONTEXT-RECOVERY | R3A Coordinator | Verify resident requests use the larger bounded frame without relaxing provider limits.
 Supersedes: None.
 Contracts: AP0-003–010; R3A-019; MOD-006; r3a.contract-envelope.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1.
 Tests: This test module.
@@ -43,6 +44,7 @@ from r3a_runtime.contracts import (ActivityDependencySet, ContractEnvelope, Cont
                                    ReadinessObservation, resolve_role)
 from r3a_runtime.cme import CME, ModelRoleUnavailable
 from r3a_runtime.diagnostics import project_resource_readiness
+from r3a_runtime.protocol import MAX_RESIDENT_EXECUTION_FRAME_BYTES
 from r3a_runtime.protocol import ModuleProtocolServer, request as module_request
 
 
@@ -204,6 +206,65 @@ class VersionedEnvelopeTests(unittest.TestCase):
 
 
 class ModelRoleConfigAndRoutingTests(unittest.TestCase):
+    def test_unrelated_bootstrap_revision_preserves_only_identical_model_contracts(self):
+        async def scenario():
+            with TemporaryDirectory() as directory:
+                settings = load_settings(make_config(Path(directory)))
+                from r3a_runtime.config import sanitized_config
+                prior = sanitized_config(settings)
+                cme = CME.__new__(CME)
+                cme.settings = settings
+                cme.store = type("Store", (), {
+                    "config_revision_config": AsyncMock(return_value=prior)})()
+                self.assertTrue(await cme._model_contract_compatible("old-bootstrap-revision"))
+                changed = json.loads(json.dumps(prior))
+                changed["grace"]["routes"][0]["model"] = "different-model"
+                cme.store.config_revision_config = AsyncMock(return_value=changed)
+                self.assertFalse(await cme._model_contract_compatible("old-bootstrap-revision"))
+        asyncio.run(scenario())
+
+    def test_action_schema_offers_only_explicitly_discovered_residents(self):
+        from r3a_runtime.grace_module import resident_action_schema
+        available = [{"resident_id": "r3:canonical-vicky"}]
+        schema = resident_action_schema([], available_residents=available)
+        self.assertIn("delegate_to_resident", schema["properties"]["action"]["enum"])
+        self.assertEqual(schema["properties"]["delegation"]["properties"]["target_resident_id"]["enum"],
+                         ["r3:canonical-vicky"])
+        absent = resident_action_schema([], available_residents=[])
+        self.assertNotIn("delegate_to_resident", absent["properties"]["action"]["enum"])
+
+    def test_resident_execution_routes_are_role_based_and_not_resident_roster_data(self):
+        with TemporaryDirectory() as directory:
+            path = make_config(Path(directory))
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["resident_execution"] = {
+                "contract_id": "r3a.resident.execution-routing", "contract_version": "1.0.0",
+                "office_role_routes": [
+                    {"office_role": "Engineering Manager", "model_role_id": "resident.primary"},
+                    {"office_role": "Manager of Human Resources", "model_role_id": "resident.primary"},
+                ]}
+            path.write_text(json.dumps(value), encoding="utf-8")
+            settings = load_settings(path)
+            self.assertEqual(settings.model_role_for_office("Engineering Manager").route_id,
+                             "primary-route")
+            self.assertEqual(settings.model_role_for_office("Manager of Human Resources").route_id,
+                             "primary-route")
+            self.assertEqual(sanitized_config(settings)["resident_execution"]["office_role_routes"],
+                             value["resident_execution"]["office_role_routes"])
+
+    def test_resident_execution_routes_reject_unknown_or_non_reasoning_roles(self):
+        for role_id in ("resident.missing", "resident.autonomic"):
+            with self.subTest(role_id=role_id), TemporaryDirectory() as directory:
+                path = make_config(Path(directory))
+                value = json.loads(path.read_text(encoding="utf-8"))
+                value["resident_execution"] = {
+                    "contract_id": "r3a.resident.execution-routing", "contract_version": "1.0.0",
+                    "office_role_routes": [{"office_role": "Engineering Manager",
+                                             "model_role_id": role_id}]}
+                path.write_text(json.dumps(value), encoding="utf-8")
+                with self.assertRaises(ConfigurationError):
+                    load_settings(path)
+
     def test_roles_are_external_and_model_assignment_change_changes_revision(self):
         with TemporaryDirectory() as first_dir, TemporaryDirectory() as second_dir:
             first = load_settings(make_config(Path(first_dir)))
@@ -575,9 +636,9 @@ class ExistingModuleRpcCompatibilityTests(unittest.IsolatedAsyncioTestCase):
             cme = CME(settings, authorization_provider=Provider())
             captured = {}
 
-            async def fake_request(socket, module_id, version, operation, payload, timeout):
+            async def fake_request(socket, module_id, version, operation, payload, timeout, **options):
                 captured.update(socket=socket, module_id=module_id, version=version,
-                                operation=operation, payload=payload, timeout=timeout)
+                                operation=operation, payload=payload, timeout=timeout, **options)
                 return {"ok": True, "result": {}}
 
             payload = {"activity_type": "grace.objective", "activity_id": "activity-1",
@@ -586,6 +647,7 @@ class ExistingModuleRpcCompatibilityTests(unittest.IsolatedAsyncioTestCase):
                 await cme._module_call("execute", payload, timeout=30)
             self.assertEqual(captured["operation"], "execute")
             self.assertEqual(captured["module_id"], "resident.grace")
+            self.assertEqual(captured["max_message_bytes"], MAX_RESIDENT_EXECUTION_FRAME_BYTES)
             envelope = ContractEnvelope.from_dict(
                 captured["payload"]["contract_envelope"], expected_contract="r3a.resident.execution")
             self.assertEqual(envelope.activity_id, "activity-1")

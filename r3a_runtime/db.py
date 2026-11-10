@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/db.py
 Component: R3A-POSTGRES-PERSISTENCE
-File Revision: 1.9.0
+File Revision: 1.14.2
 Created: 2026-11-06T15:06:00Z
 Created By: Codex GPT-6
 Purpose: Provide PostgreSQL migrations, versioned state transitions, events, registries, and activity recovery.
@@ -26,17 +26,24 @@ Changed: 2026-11-07T04:36:29Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Add resum
 Changed: 2026-11-07T04:41:59Z | R3A-AP1-M1-DIAGNOSTICS | Codex GPT-6 | Generalize concurrent index validation for event and activity ordering indexes.
 Changed: 2026-11-07T05:28:24Z | AP2-IMPLEMENTATION | Codex GPT-6 | Allow generic state-machine transition events to preserve caller-supplied correlation and causation lineage.
 Changed: 2026-11-07T05:45:10Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist authorized work orders and guard terminal order completion with independent verifier evidence.
+Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | R3A Coordinator | Audit and persist a safe legacy-to-versioned module manifest promotion.
 Changed: 2026-11-07T05:52:05Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist stable objective correlation and immutable Grace proposal revisions in existing activity checkpoints/events.
 Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Persist authorization decision and audit identities as separate provenance fields.
+Changed: 2026-11-08 | AP1-K1 | Codex GPT-6 | Add grant validation for explicit-principal Steward access modes.
 Changed: 2026-11-07T13:20:00Z | R3A-AP2-CAPABILITY-INTEGRATION | Codex GPT-6 | Store canonical invocation authorization in a nonreserved evidence column and verify durable SQL recovery against isolated PostgreSQL.
+Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Persist validated generic activity-intake source lineage and evidence through the existing durable activity/event ledger.
+Changed: 2026-11-10T00:34:18Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Add exact-grant revocation to the existing CME grant store with durable audit evidence.
+Changed: 2026-11-10 | #51 | Bound retry recovery for failed conversation activities.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Persist typed Engineering assignments in durable Grace inbox intake without relaxing AP1 acceptance criteria.
 Changed: 2026-11-07T15:16:00Z | R3A-AP1-AP2-AUTONOMY | Codex GPT-6 | Park objective dependencies durably, requeue after prerequisite completion, and expose bounded lineage evidence.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Snapshot the configured escalation policy on each durable objective so continuation uses its original budget and allowed routes.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Persist activity-scoped capability grants and atomically reserve per-activity external invocation budgets.
+Changed: 2026-11-07 | R3A-AP1-N1 | Codex GPT-6 | Import identified institution events as correlated Grace notifications with durable lifecycle events.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Persist objective task class and selected role with durable intake for route-safe recovery.
 Changed: 2026-11-07 | R3A-AP1-CME-OBSERVER-QUEUE | Codex GPT-6 | Keep one pending durable observer activity instead of replenishing an existing backlog.
+Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-002 | Codex GPT-6 | Add versioned generic module replacement transitions while retaining immutable lifecycle machine v1.
 Supersedes: None.
-Contracts: AP0-003–010; R3A-019; R3A-011/R3A-012; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1; r3a.engineering-work-order.v1; r3a.capability-invocation.v1.
+Contracts: AP0-003–010; R3A-019; R3A-011/R3A-012; AP0-M1 D2/D4/D6/D7/D9; STM-001–STM-007; module.lifecycle v2; r3a.model-role.v1; r3a.model-readiness.v2; r3a.model-readiness-provider.v1; r3a.engineering-work-order.v1; r3a.capability-invocation.v1.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_engineering.py; tests/test_r3a_capability_integration_demo.py.
 History/Predecessor: Prior revision at AP2 commit 600020fd81b4b1e5ed4d938f95592560963a616d, blob a71a534e88a20df82ae2ea7989ca706dbb283c6e; earlier baseline blob f2cffbc6f44a47b10f6262ee469bd310ca652683.
 """
@@ -58,13 +65,23 @@ from psycopg_pool import AsyncConnectionPool
 from .config import Settings, sanitized_config
 from .acceptance import (OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
                          OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, validate_required_criteria)
+from .notifications import (INSTITUTION_EVENT_SOURCE, institution_event_envelope,
+                            same_notification_input, validate_notification_envelope)
+from .notification_delivery import (delivery_visible_to, route_notification, transition_delivery,
+                                    validate_delivery_envelope)
 from .contracts import ActivityDependencySet, ReadinessObservation, parse_timestamp
 from .authorization import AuthorizationDecision
+from .module_contracts import is_legacy_manifest_promotion
 from .engineering import (EngineeringProposal, EngineeringWorkOrder, VerificationResult,
                           proposal_digest, validate_completion, validate_engineering_assignment)
+from .capability_contracts import CapabilityContractError, validate_json
 
 
 IMPLEMENTATION_REVISION = os.environ.get("R3A_IMPLEMENTATION_REVISION", "working-tree")
+MAX_ACTIVITY_INTAKE_BYTES = 512 * 1024
+MAX_CONVERSATION_ATTEMPTS = 8
+ACTIVITY_INTAKE_SCHEMA = json.loads(
+    (Path(__file__).with_name("schemas") / "activity-intake.v1.schema.json").read_text(encoding="utf-8"))
 
 
 class InvalidTransition(RuntimeError):
@@ -73,6 +90,20 @@ class InvalidTransition(RuntimeError):
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def activity_failure_outcome(recovery_policy: str, event_kind: str,
+                             attempt_count: int) -> tuple[str, dict[str, Any]]:
+    """Bound chat recovery while retaining the configured policy for other work."""
+    safe = recovery_policy == "idempotent"
+    exhausted = event_kind == "conversation" and attempt_count >= MAX_CONVERSATION_ATTEMPTS
+    if exhausted:
+        safe = False
+    details: dict[str, Any] = {"safe_to_resume": safe}
+    if exhausted:
+        details.update({"retry_limit_reached": True,
+                        "retry_limit": MAX_CONVERSATION_ATTEMPTS})
+    return ("RECOVERING" if safe else "BLOCKED"), details
 
 
 def _concurrent_index_spec(sql: str) -> tuple[str, str, str]:
@@ -194,6 +225,17 @@ class Store:
             await self._event(conn, "config.activated", "config", revision_id, "config.lifecycle", 1,
                               None, "ACTIVE", "configuration activated", {"digest": self.settings.source_digest})
         return revision_id
+
+    async def config_revision_config(self, revision_id: str) -> dict[str, Any] | None:
+        """Return a previously persisted sanitized bootstrap snapshot for compatibility checks."""
+        async with self.pool.connection() as conn:
+            row = await (await conn.execute(
+                "SELECT config FROM r3a.config_revisions WHERE revision_id=%s", (revision_id,)
+            )).fetchone()
+        if row is None:
+            return None
+        value = row["config"]
+        return json.loads(value) if isinstance(value, str) else value
 
     async def seed_machines(self) -> list[tuple[str, int, str]]:
         loaded = []
@@ -483,9 +525,9 @@ class Store:
         )).fetchone()
         if row:
             await conn.execute(
-                "UPDATE r3a.runtime_entities SET state=%s,details=%s,config_revision=%s,version=version+1,updated_at=clock_timestamp() "
+                "UPDATE r3a.runtime_entities SET machine_id=%s,machine_version=%s,state=%s,details=%s,config_revision=%s,version=version+1,updated_at=clock_timestamp() "
                 "WHERE entity_type=%s AND entity_id=%s",
-                (next_state, json.dumps(evidence or {}), current["revision_id"] if current else None,
+                (machine_id, machine_version, next_state, json.dumps(evidence or {}), current["revision_id"] if current else None,
                  entity_type, entity_id),
             )
         else:
@@ -566,7 +608,7 @@ class Store:
     async def register_capability(self, capability_id: str, owner: str, access_mode: str,
                                   contract_version: str = "1.0.0", metadata: dict[str, Any] | None = None,
                                   health: str = "available") -> None:
-        if access_mode not in {"read_only", "read_write"}:
+        if access_mode not in {"read_only", "read_write", "steward_read", "steward_write"}:
             raise ValueError("Unsupported capability access mode")
         if health not in {"available", "not_probed", "degraded", "unavailable"}:
             raise ValueError("Unsupported capability provider availability")
@@ -583,11 +625,15 @@ class Store:
                                activity_id: str | None = None) -> uuid.UUID:
         async with self.pool.connection() as conn, conn.transaction():
             found = await (await conn.execute(
-                "SELECT access_mode FROM r3a.capability_registry WHERE capability_id=%s", (capability_id,)
+                "SELECT access_mode,metadata FROM r3a.capability_registry WHERE capability_id=%s", (capability_id,)
             )).fetchone()
             if found is None:
                 raise KeyError(f"Capability is not registered: {capability_id}")
-            if found["access_mode"] != "read_only" and activity_id is None:
+            if found["access_mode"] in {"steward_read", "steward_write"}:
+                principals = found["metadata"].get("allowed_steward_principals", [])
+                if activity_id is not None or module_id not in principals:
+                    raise PermissionError("Steward capability grants must name an explicitly allowed Steward principal")
+            elif found["access_mode"] != "read_only" and activity_id is None:
                 raise PermissionError("effectful capability grants must be scoped to one durable activity")
             scope = {"activity_id": str(uuid.UUID(activity_id))} if activity_id is not None else {}
             active = await (await conn.execute(
@@ -607,6 +653,42 @@ class Store:
                               None, None, None, "ACTIVE", reason,
                               {"module_id": module_id, "grant_id": str(grant_id), "scope": scope})
             return grant_id
+
+    async def revoke_capability(self, grant_id: str, reason: str) -> dict[str, Any]:
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 1000:
+            raise ValueError("capability revocation reason must be nonempty text of at most 1000 characters")
+        try:
+            parsed_grant_id = uuid.UUID(grant_id)
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise ValueError("grant_id must be a UUID") from exc
+        async with self.pool.connection() as conn, conn.transaction():
+            row = await (await conn.execute(
+                "SELECT grant_id,module_id,capability_id,scope,revoked_at "
+                "FROM r3a.capability_grants WHERE grant_id=%s FOR UPDATE",
+                (parsed_grant_id,),
+            )).fetchone()
+            if row is None:
+                raise KeyError(f"Capability grant not found: {parsed_grant_id}")
+            if row["revoked_at"] is not None:
+                return {"grant_id": str(row["grant_id"]), "module_id": row["module_id"],
+                        "capability_id": row["capability_id"], "scope": row["scope"],
+                        "revoked_at": row["revoked_at"], "already_revoked": True}
+            updated = await (await conn.execute(
+                "UPDATE r3a.capability_grants SET revoked_at=clock_timestamp() "
+                "WHERE grant_id=%s AND revoked_at IS NULL RETURNING revoked_at",
+                (parsed_grant_id,),
+            )).fetchone()
+            if updated is None:
+                raise RuntimeError("Capability grant changed during revocation")
+            await self._event(
+                conn, "capability.revoked", "capability", row["capability_id"],
+                None, None, "ACTIVE", "REVOKED", reason,
+                {"module_id": row["module_id"], "grant_id": str(parsed_grant_id),
+                 "scope": row["scope"]},
+            )
+            return {"grant_id": str(parsed_grant_id), "module_id": row["module_id"],
+                    "capability_id": row["capability_id"], "scope": row["scope"],
+                    "revoked_at": updated["revoked_at"], "already_revoked": False}
 
     async def require_capability(self, module_id: str, capability_id: str,
                                  activity_id: str | None = None) -> None:
@@ -983,24 +1065,48 @@ class Store:
                               health: str = "unknown", diagnostic: dict[str, Any] | None = None) -> None:
         async with self.pool.connection() as conn, conn.transaction():
             existing = await (await conn.execute(
-                "SELECT artifact_digest,manifest FROM r3a.module_registry WHERE module_id=%s AND module_version=%s FOR UPDATE",
+                "SELECT artifact_digest,manifest,lifecycle_state FROM r3a.module_registry "
+                "WHERE module_id=%s AND module_version=%s FOR UPDATE",
                 (manifest["module_id"], manifest["module_version"]),
             )).fetchone()
             if existing and existing["artifact_digest"].strip() != manifest["artifact_digest"]:
                 raise RuntimeError("An installed module version is immutable; use a new version for a different artifact")
+            if existing and existing["manifest"] != manifest:
+                if not is_legacy_manifest_promotion(existing["manifest"], manifest):
+                    raise RuntimeError("An installed module manifest is immutable; publish a new module version")
+                prior_digest = hashlib.sha256(json.dumps(existing["manifest"], sort_keys=True,
+                                                         separators=(",", ":")).encode()).hexdigest()
+                next_digest = hashlib.sha256(json.dumps(manifest, sort_keys=True,
+                                                        separators=(",", ":")).encode()).hexdigest()
+                await conn.execute(
+                    "UPDATE r3a.module_registry SET manifest=%s,observed_at=clock_timestamp() "
+                    "WHERE module_id=%s AND module_version=%s",
+                    (json.dumps(manifest), manifest["module_id"], manifest["module_version"]))
+                await self._event(
+                    conn, "module.manifest.promoted", "module",
+                    f"{manifest['module_id']}@{manifest['module_version']}",
+                    "module.lifecycle", 2, existing["lifecycle_state"], existing["lifecycle_state"],
+                    "promoted synthesized lifecycle metadata to the declared versioned module manifest",
+                    {"manifest_contract": manifest["manifest_contract"],
+                     "previous_manifest_sha256": prior_digest,
+                     "current_manifest_sha256": next_digest,
+                     "artifact_digest": manifest["artifact_digest"]})
             await conn.execute(
                 "INSERT INTO r3a.module_registry(module_id,module_version,contract_id,protocol_major,protocol_minor,"
                 "artifact_ref,artifact_digest,manifest,lifecycle_state,health,observed_at,diagnostic) "
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,clock_timestamp(),%s) "
                 "ON CONFLICT(module_id,module_version) DO UPDATE SET "
-                "health=EXCLUDED.health,observed_at=clock_timestamp(),diagnostic=EXCLUDED.diagnostic",
+                "health=EXCLUDED.health,observed_at=clock_timestamp(),"
+                "diagnostic=CASE WHEN EXCLUDED.diagnostic='{}'::jsonb "
+                "THEN r3a.module_registry.diagnostic ELSE EXCLUDED.diagnostic END",
                 (manifest["module_id"], manifest["module_version"], manifest["contract_id"],
                  manifest["protocol_major"], manifest["protocol_minor"], manifest["artifact_ref"],
                  manifest["artifact_digest"], json.dumps(manifest), lifecycle, health, json.dumps(diagnostic or {})),
             )
 
     async def module_state(self, module_id: str, module_version: str, lifecycle: str,
-                           health: str, diagnostic: dict[str, Any] | None = None) -> None:
+                           health: str, diagnostic: dict[str, Any] | None = None,
+                           *, machine_version: int = 1) -> None:
         async with self.pool.connection() as conn, conn.transaction():
             entity_id = f"{module_id}@{module_version}"
             prior = await (await conn.execute(
@@ -1015,10 +1121,10 @@ class Store:
                 )
                 return
             if not prior and lifecycle != "INSTALLED":
-                await self._transition_on_conn(conn, "module", entity_id, "module.lifecycle", 1,
+                await self._transition_on_conn(conn, "module", entity_id, "module.lifecycle", machine_version,
                                                "INSTALLED", "module installation observed",
                                                {"version": module_version}, initial=True)
-            accepted = await self._transition_on_conn(conn, "module", entity_id, "module.lifecycle", 1,
+            accepted = await self._transition_on_conn(conn, "module", entity_id, "module.lifecycle", machine_version,
                                                       lifecycle, "module lifecycle observed",
                                                       {"version": module_version, "health": health,
                                                        **(diagnostic or {})},
@@ -1041,10 +1147,10 @@ class Store:
             )
 
     async def record_module_replacement(self, module_id: str, old_version: str,
-                                        new_version: str) -> None:
+                                        new_version: str, *, machine_version: int = 1) -> None:
         async with self.pool.connection() as conn, conn.transaction():
             await self._event(conn, "module.replaced", "module",
-                              f"{module_id}@{old_version}", "module.lifecycle", 1,
+                              f"{module_id}@{old_version}", "module.lifecycle", machine_version,
                               "STOPPED", "STOPPED", "module replacement completed",
                               {"module_id": module_id, "old_version": old_version,
                                "new_version": new_version})
@@ -1094,18 +1200,42 @@ class Store:
                                      engineering_assignment: dict[str, Any] | None = None,
                                      depends_on_activity_ids: Any = None,
                                      requested_activity_id: str | None = None,
-                                     task_class: str = "objective_reasoning") -> dict[str, Any]:
+                                     task_class: str = "objective_reasoning",
+                                     notification_envelope: dict[str, Any] | None = None,
+                                     resident_id: str | None = None,
+                                     resident_profile: dict[str, Any] | None = None) -> dict[str, Any]:
         """Durably enqueue one objective/notification; duplicate keys return the same activity."""
         if not objective.strip() or len(objective) > 4000:
             raise ValueError("event content must contain 1 to 4000 characters")
         if not idempotency_key.strip() or len(idempotency_key) > 200:
             raise ValueError("idempotency_key must contain 1 to 200 characters")
-        if event_kind not in {"objective", "notification"}:
-            raise ValueError("event_kind must be objective or notification")
+        if event_kind not in {"objective", "notification", "conversation"}:
+            raise ValueError("event_kind must be objective, notification, or conversation")
+        if (event_kind == "notification") != (notification_envelope is not None):
+            raise ValueError("notification event kind requires exactly one versioned notification envelope")
+        if notification_envelope is not None:
+            notification_envelope = validate_notification_envelope(notification_envelope)
+        if event_kind == "conversation" and (notification_envelope is not None or engineering_assignment is not None):
+            raise ValueError("conversation turns cannot carry notification or Engineering assignments")
         if event_kind != "objective" and depends_on_activity_ids:
             raise ValueError("only objectives may depend on other activities")
         if task_class not in {"objective_reasoning", "vision"}:
             raise ValueError("Grace objective intake cannot use autonomic-only task classes")
+        resident_id = resident_id or self.settings.module_id
+        if not isinstance(resident_id, str) or not resident_id.strip():
+            raise ValueError("resident_id must be a canonical resident identity")
+        if resident_id == self.settings.module_id:
+            if resident_profile is not None:
+                raise ValueError("primary resident objectives do not accept a delegated execution profile")
+        else:
+            if not isinstance(resident_profile, dict):
+                raise ValueError("non-primary resident objectives require a directory-backed execution profile")
+            from .grace_module import validate_resident_profile
+            resident_profile = validate_resident_profile(
+                resident_profile, resident_id=resident_id, config_revision=self.settings.source_digest)
+            if resident_profile["office_role"] not in {
+                    item.office_role for item in self.settings.resident_office_routes}:
+                raise ValueError("resident office role has no configured execution route")
         dependencies = ActivityDependencySet.from_value(depends_on_activity_ids)
         selected_activity_id = uuid.UUID(requested_activity_id) if requested_activity_id else uuid.uuid4()
         if dependencies and str(selected_activity_id) in dependencies.activity_ids:
@@ -1125,8 +1255,10 @@ class Store:
             if acceptance_criteria:
                 raise ValueError("Engineering assignments use their own typed acceptance criteria")
             acceptance_criteria = []
-        else:
+        elif notification_envelope is None and event_kind != "conversation":
             acceptance_criteria = validate_required_criteria(acceptance_criteria)
+        else:
+            acceptance_criteria = []
         if role_id is None and self.settings.model_roles:
             if route_id is None:
                 role_id = self.settings.model_role_for_task(task_class).role_id
@@ -1158,7 +1290,11 @@ class Store:
                                                 "contract_version": OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION,
                                                 "criteria": acceptance_criteria},
                        "engineering_assignment": engineering_assignment,
+                       "resident_id": resident_id,
+                       "resident_profile": resident_profile,
                        "role_config_revision": self.settings.source_digest if selected_role_id else None}
+        if notification_envelope is not None:
+            event_input["notification"] = notification_envelope
         policy = self.settings.reasoning_escalation
         if policy is not None:
             event_input["reasoning_escalation"] = {
@@ -1193,6 +1329,8 @@ class Store:
                     "criteria": []})
                 prior_input.setdefault("role_config_revision", None)
                 prior_input.setdefault("engineering_assignment", None)
+                prior_input.setdefault("resident_id", self.settings.module_id)
+                prior_input.setdefault("resident_profile", None)
                 if not dependencies:
                     prior_input.setdefault("dependencies", None)
                     if prior_input.get("dependencies") is None:
@@ -1202,7 +1340,10 @@ class Store:
                     prior_input.pop("requested_activity_id", None)
                 prior_input.pop("authorized_capability", None)
                 prior_input.pop("correlation_id", None)
-                if (existing["activity_type"] != "grace.objective" or prior_input != event_input
+                # Notifications and conversations share the legacy Grace objective
+                # executor; semantic intake type is independently versioned in input.
+                if (existing["activity_type"] != "grace.objective"
+                        or not same_notification_input(prior_input, event_input)
                         or (requested_activity_id and str(existing["activity_id"]) != str(selected_activity_id))):
                     raise ValueError("idempotency key already belongs to a different request")
                 return {**existing, "duplicate": True}
@@ -1220,7 +1361,8 @@ class Store:
                 elif any(dependency_states.get(value) != "COMPLETED"
                          for value in dependencies.activity_ids):
                     state = "WAITING"
-            correlation_id = uuid.uuid4()
+            correlation_id = (uuid.UUID(notification_envelope["correlation_id"])
+                              if notification_envelope else uuid.uuid4())
             durable_input = {**event_input, "correlation_id": str(correlation_id)}
             config = await (await conn.execute(
                 "SELECT revision_id FROM r3a.config_current WHERE singleton=true"
@@ -1228,12 +1370,16 @@ class Store:
             await conn.execute(
                 "INSERT INTO r3a.activities(activity_id,activity_type,idempotency_key,machine_id,machine_version,state,"
                 "available_at,recovery_policy,config_revision,input) "
+                # Conversation turns use the existing Grace objective executor and
+                # model/artifact contract. Their distinct intake semantics are
+                # preserved in input.event_kind without a per-resident module fork.
                 "VALUES (%s,'grace.objective',%s,'activity.generic',1,%s,clock_timestamp(),'idempotent',%s,%s)",
                 (activity_id, idempotency_key, state, config["revision_id"] if config else None,
                  json.dumps(durable_input)),
             )
-            event_type = ("grace.notification.received" if event_kind == "notification"
-                          else "grace.objective.received")
+            event_type = ("grace.notification.received" if event_kind == "notification" else
+                          "steward.conversation.turn.received" if event_kind == "conversation" else
+                          "grace.objective.received")
             initial_reason = ("Grace objective parked awaiting prerequisite activities"
                               if state == "WAITING" else
                               "Grace objective has an unfulfillable prerequisite"
@@ -1243,11 +1389,17 @@ class Store:
                                          {"idempotency_key": idempotency_key, "objective_sha256": hashlib.sha256(objective.encode()).hexdigest(),
                                           "event_kind": event_kind, "route_id": selected_route_id,
                                           "role_id": selected_role_id,
+                                          "resident_id": resident_id,
+                                          "resident_profile_ref": (resident_profile.get("directory_evidence", {}).get("snapshot_sha256")
+                                                                   if resident_profile else None),
                                           "required_capabilities": list(required_capabilities),
                                          "required_modalities": list(required_modalities),
                                           "dependencies": dependencies.to_dict() if dependencies else None,
-                                          "acceptance_contract": event_input["acceptance_contract"]},
-                                         correlation_id=correlation_id)
+                                          "acceptance_contract": event_input["acceptance_contract"],
+                                          "notification": notification_envelope},
+                                         correlation_id=correlation_id,
+                                         causation_id=(uuid.UUID(notification_envelope["event_id"])
+                                                       if notification_envelope else None))
             accepted = await self._transition_on_conn(conn, "activity", str(activity_id),
                                                        "activity.generic", 1, state,
                                                        initial_reason,
@@ -1262,6 +1414,327 @@ class Store:
                     "idempotency_key": idempotency_key, "attempt_count": 0, "duplicate": False,
                     "event_kind": event_kind, "route_id": selected_route_id,
                     "correlation_id": correlation_id, "received_event_id": event_id}
+
+    async def ingest_institution_event_notification(self, source_id: str, source_event_id: str,
+                                                    idempotency_key: str) -> dict[str, Any]:
+        """Import one existing event into Grace's durable activity path; never mutates the source."""
+        source = next((item for item in self.settings.notification_sources
+                       if item.source_id == source_id and item.enabled
+                       and item.adapter == "institution_events.v1"), None)
+        if source is None or source_id != INSTITUTION_EVENT_SOURCE:
+            raise PermissionError("notification source is not enabled by bootstrap configuration")
+        try:
+            source_uuid = uuid.UUID(source_event_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("source_event_id must be a UUID") from exc
+        events = await self.rows(
+            "SELECT event_id,event_type,schema_version,subject_type,subject_id,prior_state,next_state,"
+            "occurred_at,persisted_at,actor,correlation_id,reason,outcome,config_revision,implementation_revision,evidence "
+            "FROM r3a.institution_events WHERE event_id=%s", (source_uuid,))
+        if not events:
+            raise KeyError(f"institution event not found: {source_event_id}")
+        event = events[0]
+        if source.event_types and event["event_type"] not in source.event_types:
+            raise PermissionError("source event type is not enabled for notification intake")
+        received_at = datetime.now(timezone.utc).isoformat()
+        envelope = institution_event_envelope(event, received_at=received_at)
+        prior, next_state = event.get("prior_state"), event.get("next_state")
+        transition = (f"{prior} to {next_state}" if prior and next_state else
+                      f"new state {next_state}" if next_state else "no state transition")
+        objective = (f"Review this {envelope['severity']} service notification from {source_id}. "
+                     f"Source event {source_event_id} reports {event['event_type']} for "
+                     f"{event['subject_type']} {event['subject_id']} ({transition}): {event['reason']}. "
+                     "Decide whether follow-up is warranted. Return a concise evidence-grounded disposition "
+                     "and cite the notification evidence. Do not claim to perform external side effects.")
+        stable_key = idempotency_key or f"notification:{source_id}:{source_event_id}"
+        if stable_key != f"notification:{source_id}:{source_event_id}":
+            raise ValueError("notification idempotency key must bind the source identity and event ID")
+        return await self.submit_grace_objective(
+            objective, stable_key, event_kind="notification", notification_envelope=envelope,
+            acceptance_criteria=[])
+
+    async def submit_activity_intake(self, intake: dict[str, Any],
+                                     invocation_result: dict[str, Any]) -> dict[str, Any]:
+        """Persist a CME-authorized, source-independent activity intake in the durable activity ledger."""
+        validate_json(intake, ACTIVITY_INTAKE_SCHEMA, path="$.activity_intake")
+        if len(json.dumps(intake, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > MAX_ACTIVITY_INTAKE_BYTES:
+            raise CapabilityContractError("activity intake exceeds the 512 KiB durable envelope limit")
+        if intake["activity"]["activity_type"] != "grace.objective":
+            raise CapabilityContractError("this CME intake consumer currently accepts grace.objective activities only")
+        task_class = intake["activity"]["task_class"]
+        if task_class not in {"objective_reasoning", "vision"}:
+            raise CapabilityContractError("activity intake task_class is not eligible for Grace objective execution")
+        if (not isinstance(invocation_result, dict)
+                or invocation_result.get("contract_id") != "r3a.capability-invocation.v1"
+                or invocation_result.get("outcome") != "SUCCEEDED"
+                or not isinstance(invocation_result.get("provider"), dict)
+                or not isinstance(invocation_result.get("authorization"), dict)
+                or invocation_result["authorization"].get("allowed") is not True):
+            raise PermissionError("activity intake requires a successful authorized CME source invocation")
+        provider = invocation_result["provider"]
+        provenance = intake["provenance"]
+        if (provenance["module_id"] != provider.get("provider_id")
+                or provenance["module_version"] != provider.get("provider_version")
+                or provenance["artifact_sha256"] != provider.get("artifact_sha256")):
+            raise CapabilityContractError("activity intake provenance does not match its source invocation")
+
+        stable_key = intake["source"]["idempotency_key"]
+        correlation_value = intake["correlation_id"]
+        try:
+            correlation_id = uuid.UUID(correlation_value)
+        except ValueError:
+            correlation_id = uuid.uuid5(uuid.NAMESPACE_URL, f"r3a.correlation:{correlation_value}")
+        causation_value = intake["source"].get("causation_id") or intake["source"]["event_id"]
+        try:
+            causation_id = uuid.UUID(causation_value)
+        except ValueError:
+            causation_id = uuid.uuid5(uuid.NAMESPACE_URL, f"r3a.causation:{causation_value}")
+        activity_id = uuid.uuid5(uuid.NAMESPACE_URL, f"r3a.activity-intake:{intake['intake_id']}")
+
+        role = self.settings.model_role_for_task(task_class) if self.settings.model_roles else None
+        route_id = role.route_id if role else self.settings.default_model_route
+        role_id = role.role_id if role else None
+        if role_id and task_class not in role.task_classes:
+            raise CapabilityContractError("configured Grace model role does not allow the intake task class")
+        durable_input = {
+            "objective": intake["activity"]["objective"], "event_kind": "activity_intake",
+            "task_class": task_class, "route_id": route_id if role_id is None else None,
+            "role_id": role_id, "role_config_revision": self.settings.source_digest if role_id else None,
+            "required_capabilities": [], "required_modalities": [],
+            "acceptance_contract": {"contract_id": OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
+                                    "contract_version": OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION,
+                                    "criteria": []},
+            "engineering_assignment": None, "resident_id": self.settings.module_id,
+            "resident_profile": None, "activity_intake": intake,
+        }
+        evidence = {
+            "intake_id": intake["intake_id"], "source": intake["source"],
+            "source_provider": provider, "authorization": invocation_result["authorization"],
+            "source_invocation_id": invocation_result["invocation_id"],
+            "activity_evidence": intake["activity"]["evidence"],
+            "lifecycle_projection": intake["lifecycle_projection"],
+        }
+        async with self.pool.connection() as conn, conn.transaction():
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (stable_key,))
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"activity-intake:{intake['intake_id']}",))
+            existing = await (await conn.execute(
+                "SELECT activity_id,state,activity_type,idempotency_key,input,attempt_count "
+                "FROM r3a.activities WHERE idempotency_key=%s OR activity_id=%s FOR UPDATE",
+                (stable_key, activity_id)
+            )).fetchone()
+            if existing:
+                prior_input = dict(existing["input"] or {})
+                prior_notification = prior_input.get("notification")
+                same_legacy_source = (isinstance(prior_notification, dict)
+                                     and prior_notification.get("source_id") == intake["source"]["source_id"]
+                                     and prior_notification.get("source_event_id") == intake["source"]["event_id"])
+                if (existing["idempotency_key"] != stable_key
+                        or existing["activity_type"] != "grace.objective"
+                        or (prior_input.get("activity_intake") != intake and not same_legacy_source)):
+                    raise ValueError("activity-intake idempotency key is already bound to different source data")
+                return {**existing, "duplicate": True, "intake_id": intake["intake_id"]}
+
+            config = await (await conn.execute(
+                "SELECT revision_id FROM r3a.config_current WHERE singleton=true"
+            )).fetchone()
+            await conn.execute(
+                "INSERT INTO r3a.activities(activity_id,activity_type,idempotency_key,machine_id,machine_version,state,"
+                "available_at,recovery_policy,config_revision,input) "
+                "VALUES (%s,'grace.objective',%s,'activity.generic',1,'QUEUED',clock_timestamp(),'idempotent',%s,%s)",
+                (activity_id, stable_key, config["revision_id"] if config else None,
+                 json.dumps(durable_input)),
+            )
+            event_id = await self._event(
+                conn, intake["lifecycle_projection"]["received"], "activity", str(activity_id),
+                "activity.generic", 1, None, "QUEUED", "authorized source activity accepted by CME",
+                {**evidence, "objective_sha256": hashlib.sha256(
+                    intake["activity"]["objective"].encode("utf-8")).hexdigest()},
+                correlation_id=correlation_id, causation_id=causation_id)
+            accepted = await self._transition_on_conn(
+                conn, "activity", str(activity_id), "activity.generic", 1, "QUEUED",
+                "authorized source activity accepted by CME", evidence,
+                initial=True, correlation_id=correlation_id, causation_id=causation_id)
+            if not accepted:
+                raise InvalidTransition("generic activity intake could not enter QUEUED")
+            await conn.execute("UPDATE r3a.activities SET latest_event_id=%s WHERE activity_id=%s",
+                               (event_id, activity_id))
+            return {"activity_id": activity_id, "state": "QUEUED", "activity_type": "grace.objective",
+                    "idempotency_key": stable_key, "intake_id": intake["intake_id"],
+                    "attempt_count": 0, "duplicate": False, "event_id": event_id,
+                    "correlation_id": correlation_id}
+
+    async def enqueue_notification_deliveries(self, notification: dict[str, Any],
+                                              directory: dict[str, Any],
+                                              policy: dict[str, Any]) -> list[dict[str, Any]]:
+        """Persist idempotent recipient delivery records in the CME event ledger."""
+        deliveries = route_notification(notification, directory, policy)
+        persisted = []
+        async with self.pool.connection() as conn, conn.transaction():
+            for delivery in deliveries:
+                delivery = validate_delivery_envelope(delivery)
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                                   (delivery["idempotency_key"],))
+                existing = await (await conn.execute(
+                    "SELECT evidence FROM r3a.institution_events "
+                    "WHERE event_type='grace.notification.delivery.queued' "
+                    "AND evidence->>'delivery_id'=%s LIMIT 1", (delivery["delivery_id"],)
+                )).fetchone()
+                if existing:
+                    persisted.append({**existing["evidence"], "duplicate": True})
+                    continue
+                await self._event(
+                    conn, "grace.notification.delivery.queued", "notification_delivery",
+                    delivery["delivery_id"], "r3a.notification-delivery", 1, None, "queued",
+                    "CME queued a recipient-scoped notification delivery",
+                    {**delivery, "directory_snapshot_sha256": directory["source"]["snapshot_sha256"]},
+                    event_id=uuid.uuid5(uuid.NAMESPACE_URL, delivery["idempotency_key"]),
+                    correlation_id=uuid.UUID(delivery["correlation_id"]),
+                    causation_id=uuid.UUID(delivery["notification_event_id"]))
+                persisted.append({**delivery, "duplicate": False})
+        return persisted
+
+    async def transition_notification_delivery(self, delivery_id: str, operation: str, *,
+                                               principal_id: str, request: Any,
+                                               decision: AuthorizationDecision,
+                                               directory: dict[str, Any],
+                                               disposition: str | None = None,
+                                               resolution_evidence_refs: list[str] | None = None) -> dict[str, Any]:
+        """Append an authorized acknowledgment/resolution to the CME event ledger."""
+        try:
+            delivery_uuid = uuid.UUID(delivery_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("delivery_id must be a UUID") from exc
+        event_type = {"acknowledge": "grace.notification.delivery.acknowledged",
+                      "resolve": "grace.notification.delivery.resolved"}.get(operation)
+        if event_type is None:
+            raise ValueError("notification delivery operation must be acknowledge or resolve")
+        async with self.pool.connection() as conn, conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                               (f"notification-delivery:{delivery_id}",))
+            rows = await (await conn.execute(
+                "SELECT event_type,evidence FROM r3a.institution_events "
+                "WHERE subject_type='notification_delivery' AND subject_id=%s "
+                "ORDER BY persisted_at DESC,event_id DESC FOR UPDATE", (str(delivery_uuid),)
+            )).fetchall()
+            if not rows:
+                raise KeyError(f"notification delivery not found: {delivery_id}")
+            latest_evidence = rows[0]["evidence"]
+            fields = ("contract_id", "contract_version", "delivery_id", "idempotency_key",
+                      "notification_event_id", "source_id", "source_event_id", "correlation_id",
+                      "recipient", "severity", "urgency", "requires_action", "status", "created_at",
+                      "acknowledged_at", "resolved_at", "resolution_disposition", "evidence_refs")
+            delivery = validate_delivery_envelope({key: latest_evidence[key] for key in fields})
+            # Replays of one authorization request return its already-appended outcome.
+            request_id = getattr(request, "request_id", None)
+            if request_id:
+                for row in rows:
+                    evidence = row["evidence"]
+                    if evidence.get("authorization_request_id") == request_id:
+                        return {**evidence, "duplicate": True}
+            updated = transition_delivery(delivery, operation, principal_id=principal_id,
+                                         request=request, decision=decision, directory=directory,
+                                         disposition=disposition,
+                                         resolution_evidence_refs=resolution_evidence_refs)
+            await self._event(
+                conn, event_type, "notification_delivery", str(delivery_uuid),
+                "r3a.notification-delivery", 1, delivery["status"], updated["status"],
+                f"Recipient {operation}d the notification delivery",
+                {**updated, "authorization_request_id": request_id,
+                 "authorization_decision_id": decision.decision_id,
+                 "authorization_audit_event_id": decision.audit_event_id,
+                 "authorization_provider_id": decision.provider_id,
+                 "actor_id": principal_id},
+                event_id=uuid.uuid5(uuid.NAMESPACE_URL,
+                                    f"notification-delivery:{delivery_id}:{operation}:{request_id}"),
+                correlation_id=uuid.UUID(delivery["correlation_id"]),
+                causation_id=uuid.UUID(delivery["notification_event_id"]))
+            return updated
+
+    async def notification_delivery_history(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Return the latest durable delivery projection; callers must authorize/filter recipients."""
+        if not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("notification history limit must be between 1 and 500")
+        rows = await self.rows(
+            "SELECT DISTINCT ON (subject_id) subject_id,evidence FROM r3a.institution_events "
+            "WHERE subject_type='notification_delivery' "
+            "AND event_type LIKE 'grace.notification.delivery.%' "
+            "ORDER BY subject_id,persisted_at DESC,event_id DESC LIMIT %s", (limit,))
+        return [dict(row["evidence"]) for row in rows]
+
+    async def notification_delivery_inbox(self, principal_id: str, directory: dict[str, Any],
+                                          request: Any, decision: AuthorizationDecision, *,
+                                          limit: int = 100) -> list[dict[str, Any]]:
+        """Read only the caller's recipient-scoped items after CME grants read authority."""
+        if (getattr(request, "resident_id", None) != principal_id
+                or getattr(request, "capability_id", None) != "notification.delivery.read"
+                or decision.allowed is not True
+                or decision.correlation_id != request.correlation_id
+                or not decision.audit_event_id):
+            raise PermissionError("matching CME notification.delivery.read authorization is required")
+        deliveries = await self.notification_delivery_history(limit=limit)
+        visible = []
+        for evidence in deliveries:
+            fields = ("contract_id", "contract_version", "delivery_id", "idempotency_key",
+                      "notification_event_id", "source_id", "source_event_id", "correlation_id",
+                      "recipient", "severity", "urgency", "requires_action", "status", "created_at",
+                      "acknowledged_at", "resolved_at", "resolution_disposition", "evidence_refs")
+            delivery = validate_delivery_envelope({key: evidence[key] for key in fields})
+            if delivery_visible_to(delivery, principal_id, directory):
+                visible.append({**delivery,
+                                "authorization_decision_id": decision.decision_id,
+                                "authorization_audit_event_id": decision.audit_event_id})
+        return visible
+
+    async def acknowledge_notification(self, activity: dict[str, Any]) -> None:
+        """Record acknowledgment only after Grace returned an actual reasoning response."""
+        envelope = (activity.get("input") or {}).get("notification")
+        if not isinstance(envelope, dict):
+            return
+        async with self.pool.connection() as conn, conn.transaction():
+            exists = await (await conn.execute(
+                "SELECT 1 FROM r3a.institution_events WHERE event_type='grace.notification.acknowledged' "
+                "AND subject_type='activity' AND subject_id=%s LIMIT 1", (str(activity["activity_id"]),)
+            )).fetchone()
+            if exists:
+                return
+            await self._event(conn, "grace.notification.acknowledged", "activity",
+                              str(activity["activity_id"]), "activity.generic", 1, "RUNNING", "RUNNING",
+                              "Grace returned a reasoning response to the notification",
+                              {"source_id": envelope["source_id"],
+                               "source_event_id": envelope["source_event_id"],
+                               "payload_ref": envelope["payload_ref"]},
+                              correlation_id=uuid.UUID(envelope["correlation_id"]),
+                              causation_id=uuid.UUID(envelope["event_id"]))
+
+    async def _notification_actionable(self, conn, activity: dict[str, Any], attempt_id: uuid.UUID) -> None:
+        envelope = (activity.get("input") or {}).get("notification")
+        if not isinstance(envelope, dict):
+            return
+        await self._event(
+            conn, "grace.notification.actionable", "activity", str(activity["activity_id"]),
+            "activity.generic", 1, activity["state"], "RUNNING",
+            "CME made the notification available to Grace",
+            {"source_id": envelope["source_id"], "source_event_id": envelope["source_event_id"],
+             "attempt_id": str(attempt_id), "payload_ref": envelope["payload_ref"]},
+            correlation_id=uuid.UUID(envelope["correlation_id"]),
+            causation_id=uuid.UUID(envelope["event_id"]))
+
+    async def _notification_outcome(self, conn, activity: dict[str, Any], outcome: str,
+                                    details: dict[str, Any]) -> None:
+        envelope = (activity.get("input") or {}).get("notification")
+        if not isinstance(envelope, dict):
+            return
+        await self._event(
+            conn, f"grace.notification.{outcome}", "activity", str(activity["activity_id"]),
+            "activity.generic", 1, "RUNNING", "COMPLETED" if outcome == "resolved" else "BLOCKED",
+            f"Grace notification {outcome}",
+            {"source_id": envelope["source_id"], "source_event_id": envelope["source_event_id"],
+             "payload_ref": envelope["payload_ref"], "details": details},
+            correlation_id=uuid.UUID(envelope["correlation_id"]),
+            causation_id=uuid.UUID(envelope["event_id"]))
 
     async def requeue_blocked_activities(self) -> int:
         async with self.pool.connection() as conn, conn.transaction():
@@ -1302,6 +1775,8 @@ class Store:
                                                       "activity.generic", 1, "BLOCKED", reason, details)
             if not accepted:
                 raise InvalidTransition(f"Cannot block activity {activity['activity_id']}")
+            await self._notification_outcome(conn, activity, "blocked",
+                                              {"reason": reason, **(details or {})})
 
     async def defer_activity(self, activity: dict[str, Any], reason: str,
                              retry_after_seconds: float, details: dict[str, Any] | None = None) -> None:
@@ -1377,6 +1852,7 @@ class Store:
                                                        {"attempt_id": str(attempt_id), "lease_owner": owner})
             if not accepted:
                 raise InvalidTransition(f"Cannot claim activity {row['activity_id']}")
+            await self._notification_actionable(conn, row, attempt_id)
             await conn.execute("UPDATE r3a.activities SET latest_event_id=%s WHERE activity_id=%s",
                                (event_id, row["activity_id"]))
             row.update({"attempt_id": attempt_id, "attempt_count": row["attempt_count"] + 1,
@@ -1454,6 +1930,7 @@ class Store:
             await self._schedule_observer_activity_on_conn(
                 conn, delay_seconds=self.settings.observer_interval_seconds,
                 reason="next observer activity scheduled")
+            await self._notification_outcome(conn, activity, "resolved", result)
 
     async def recover_expired_activities(self) -> int:
         async with self.pool.connection() as conn, conn.transaction():
@@ -1498,12 +1975,17 @@ class Store:
                             retry_seconds: float) -> None:
         async with self.pool.connection() as conn, conn.transaction():
             row = await (await conn.execute(
-                "SELECT recovery_policy FROM r3a.activities WHERE activity_id=%s FOR UPDATE",
+                "SELECT recovery_policy,attempt_count,input FROM r3a.activities WHERE activity_id=%s FOR UPDATE",
                 (activity["activity_id"],),
             )).fetchone()
-            safe = row and row["recovery_policy"] == "idempotent"
-            next_state = "RECOVERING" if safe else "BLOCKED"
-            details = {"type": type(exc).__name__, "message": str(exc)[:2000], "safe_to_resume": bool(safe)}
+            safe = bool(row and row["recovery_policy"] == "idempotent")
+            event_input = row["input"] if row and isinstance(row["input"], dict) else {}
+            next_state, retry_details = activity_failure_outcome(
+                row["recovery_policy"] if row else "", event_input.get("event_kind", "objective"),
+                int(row["attempt_count"] or 0) if row else 0)
+            safe = retry_details["safe_to_resume"]
+            details = {"type": type(exc).__name__, "message": str(exc)[:2000],
+                       **retry_details}
             await conn.execute(
                 "UPDATE r3a.activities SET state=%s,available_at=clock_timestamp()+(%s * interval '1 second'),"
                 "lease_owner=NULL,lease_until=NULL,exception=%s,updated_at=clock_timestamp() "
@@ -1532,6 +2014,211 @@ class Store:
     async def rows(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         async with self.pool.connection() as conn:
             return await (await conn.execute(sql, params)).fetchall()
+
+    async def create_steward_conversation(self, principal_id: str, resident_id: str,
+                                          resident_display_name: str,
+                                          directory_snapshot_sha256: str,
+                                          directory_invocation_id: str,
+                                          client_conversation_id: str) -> dict[str, Any]:
+        """Create an idempotent conversation owned by an authenticated AP3 principal."""
+        owner = principal_id.strip()
+        if (not owner or len(owner) > 256 or not resident_id.strip()
+                or re.fullmatch(r"[0-9a-f]{64}", directory_snapshot_sha256) is None
+                or not directory_invocation_id):
+            raise ValueError("canonical principal and resident identities are required")
+        client_id = uuid.UUID(client_conversation_id)
+        conversation_id = uuid.uuid5(uuid.NAMESPACE_URL,
+                                     f"r3a.steward.conversation:{owner}:{client_id}")
+        async with self.pool.connection() as conn, conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                               (f"steward-conversation:{owner}:{client_id}",))
+            inserted = await conn.execute(
+                "INSERT INTO r3a.steward_conversations(conversation_id,owner_principal_id,resident_id,resident_display_name,"
+                "directory_snapshot_sha256,directory_invocation_id,client_conversation_id) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(owner_principal_id,client_conversation_id) DO NOTHING",
+                (conversation_id, owner, resident_id, resident_display_name, directory_snapshot_sha256,
+                 directory_invocation_id, client_id))
+            row = await (await conn.execute(
+                "SELECT conversation_id,owner_principal_id,resident_id,resident_display_name,directory_snapshot_sha256,"
+                "directory_invocation_id,title,created_at,updated_at "
+                "FROM r3a.steward_conversations WHERE owner_principal_id=%s AND client_conversation_id=%s",
+                (owner, client_id))).fetchone()
+            if row["resident_id"] != resident_id:
+                raise PermissionError("idempotent conversation key is already bound to another resident")
+            created = inserted.rowcount == 1
+            if created:
+                await self._event(conn, "steward.conversation.created", "steward_conversation",
+                                  str(row["conversation_id"]), None, None, None, "created",
+                                  "authenticated conversation created",
+                                  {"owner_principal_id": owner, "resident_id": resident_id,
+                                   "directory_snapshot_sha256": directory_snapshot_sha256,
+                                   "directory_invocation_id": directory_invocation_id,
+                                   "client_conversation_id": str(client_id)})
+            return {**row, "conversation_id": str(row["conversation_id"]),
+                    "created": created,
+                    "created_at": row["created_at"].isoformat(),
+                    "updated_at": row["updated_at"].isoformat()}
+
+    async def list_steward_conversations(self, principal_id: str, resident_id: str) -> list[dict[str, Any]]:
+        rows = await self.rows(
+            "SELECT c.conversation_id,c.resident_id,c.resident_display_name,c.title,c.created_at,c.updated_at,"
+            "count(m.message_id) AS message_count FROM r3a.steward_conversations c "
+            "LEFT JOIN r3a.steward_conversation_messages m USING(conversation_id) "
+            "WHERE c.owner_principal_id=%s AND c.resident_id=%s "
+            "GROUP BY c.conversation_id ORDER BY c.updated_at DESC LIMIT 100",
+            (principal_id, resident_id))
+        return [{**row, "conversation_id": str(row["conversation_id"]),
+                 "created_at": row["created_at"].isoformat(),
+                 "updated_at": row["updated_at"].isoformat()} for row in rows]
+
+    async def accept_steward_message(self, principal_id: str, conversation_id: str,
+                                     message_id: str, body: str) -> dict[str, Any]:
+        """Durably accept one user turn and return its earlier transcript for CME scheduling."""
+        conversation_uuid, message_uuid = uuid.UUID(conversation_id), uuid.UUID(message_id)
+        text = body.strip()
+        if not text or len(text) > 2000:
+            raise ValueError("message text must contain 1 to 2000 characters")
+        async with self.pool.connection() as conn, conn.transaction():
+            conversation = await (await conn.execute(
+                "SELECT resident_id FROM r3a.steward_conversations WHERE conversation_id=%s "
+                "AND owner_principal_id=%s FOR UPDATE", (conversation_uuid, principal_id))).fetchone()
+            if conversation is None:
+                raise PermissionError("conversation is unavailable to this Steward principal")
+            existing = await (await conn.execute(
+                "SELECT message_id,sender_kind,body,delivery_state,activity_id,created_at FROM r3a.steward_conversation_messages "
+                "WHERE conversation_id=%s AND message_id=%s FOR UPDATE",
+                (conversation_uuid, message_uuid))).fetchone()
+            if existing:
+                if existing["body"] != text or existing["sender_kind"] != "steward":
+                    raise ValueError("message id was already used for different content")
+                transcript = await (await conn.execute(
+                    "SELECT sender_kind,body FROM r3a.steward_conversation_messages "
+                    "WHERE conversation_id=%s AND sequence_no < (SELECT sequence_no FROM r3a.steward_conversation_messages WHERE message_id=%s) "
+                    "ORDER BY sequence_no DESC LIMIT 20", (conversation_uuid, message_uuid))).fetchall()
+                return {"message_id": str(existing["message_id"]), "activity_id": str(existing["activity_id"])
+                        if existing["activity_id"] else None, "duplicate": True,
+                        "resident_id": conversation["resident_id"],
+                        "transcript": [{"role": "assistant" if item["sender_kind"] == "resident" else "user",
+                                        "content": item["body"]} for item in reversed(transcript)]}
+            pending = await (await conn.execute(
+                "SELECT m.message_id FROM r3a.steward_conversation_messages m "
+                "LEFT JOIN r3a.activities a ON a.activity_id=m.activity_id "
+                "WHERE m.conversation_id=%s AND m.sender_kind='steward' "
+                "AND m.delivery_state IN ('accepted','processing') "
+                "AND (a.activity_id IS NULL OR a.state NOT IN ('COMPLETED','BLOCKED')) LIMIT 1",
+                (conversation_uuid,))).fetchone()
+            if pending:
+                raise RuntimeError("the previous Grace turn is still processing")
+            history = await (await conn.execute(
+                "SELECT sender_kind,body FROM r3a.steward_conversation_messages "
+                "WHERE conversation_id=%s ORDER BY sequence_no DESC LIMIT 20", (conversation_uuid,))).fetchall()
+            await conn.execute(
+                "INSERT INTO r3a.steward_conversation_messages(message_id,conversation_id,sender_kind,sender_id,body,delivery_state) "
+                "VALUES (%s,%s,'steward',%s,%s,'accepted')",
+                (message_uuid, conversation_uuid, principal_id, text))
+            await conn.execute("UPDATE r3a.steward_conversations SET updated_at=clock_timestamp() WHERE conversation_id=%s",
+                               (conversation_uuid,))
+            await self._event(conn, "steward.conversation.message.accepted", "steward_conversation",
+                              str(conversation_uuid), None, None, None, "message_accepted",
+                              "authenticated Steward message durably accepted",
+                              {"owner_principal_id": principal_id, "message_id": str(message_uuid),
+                               "body_sha256": hashlib.sha256(text.encode()).hexdigest()})
+            return {"message_id": str(message_uuid), "activity_id": None, "duplicate": False,
+                    "resident_id": conversation["resident_id"],
+                    "transcript": [{"role": "assistant" if item["sender_kind"] == "resident" else "user",
+                                    "content": item["body"]} for item in reversed(history)]}
+
+    async def link_steward_message_activity(self, principal_id: str, message_id: str,
+                                            activity_id: str) -> None:
+        async with self.pool.connection() as conn, conn.transaction():
+            row = await conn.execute(
+                "UPDATE r3a.steward_conversation_messages m SET activity_id=%s,delivery_state='processing' "
+                "FROM r3a.steward_conversations c WHERE m.conversation_id=c.conversation_id "
+                "AND c.owner_principal_id=%s AND m.message_id=%s AND (m.activity_id IS NULL OR m.activity_id=%s)",
+                (uuid.UUID(activity_id), principal_id, uuid.UUID(message_id), uuid.UUID(activity_id)))
+            if row.rowcount != 1:
+                existing = await (await conn.execute(
+                    "SELECT activity_id FROM r3a.steward_conversation_messages WHERE message_id=%s",
+                    (uuid.UUID(message_id),))).fetchone()
+                if not existing or str(existing["activity_id"]) != activity_id:
+                    raise PermissionError("message activity could not be bound to its owner")
+
+    async def get_steward_conversation_messages(self, principal_id: str,
+                                               conversation_id: str) -> list[dict[str, Any]]:
+        conversation_uuid = uuid.UUID(conversation_id)
+        async with self.pool.connection() as conn, conn.transaction():
+            rows = await (await conn.execute(
+                "SELECT m.message_id,m.sender_kind,m.sender_id,m.body,m.delivery_state,m.activity_id,m.created_at,c.resident_id,"
+                "a.state AS activity_state,a.result,a.exception,c.resident_display_name FROM r3a.steward_conversation_messages m "
+                "JOIN r3a.steward_conversations c USING(conversation_id) "
+                "LEFT JOIN r3a.activities a ON a.activity_id=m.activity_id "
+                "WHERE c.conversation_id=%s AND c.owner_principal_id=%s ORDER BY m.sequence_no",
+                (conversation_uuid, principal_id))).fetchall()
+            persisted_resident_replies = {
+                str(row["activity_id"]) for row in rows
+                if row["sender_kind"] == "resident" and row["activity_id"] is not None
+            }
+            projected = []
+            for row in rows:
+                state = row["delivery_state"]
+                assistant_projection = None
+                if row["sender_kind"] == "steward" and row["activity_state"] == "COMPLETED":
+                    result = row["result"] if isinstance(row["result"], dict) else {}
+                    decision = result.get("decision") if isinstance(result.get("decision"), dict) else {}
+                    response_text = decision.get("assessment") or result.get("model_content")
+                    assistant_id = uuid.uuid5(uuid.NAMESPACE_URL,
+                                               f"r3a.steward.reply:{row['message_id']}")
+                    if isinstance(response_text, str) and response_text:
+                        await conn.execute(
+                            "INSERT INTO r3a.steward_conversation_messages(message_id,conversation_id,sender_kind,sender_id,body,delivery_state,activity_id) "
+                            "VALUES (%s,%s,'resident',%s,%s,'completed',%s) ON CONFLICT(message_id) DO NOTHING",
+                            (assistant_id, conversation_uuid, row["resident_id"], response_text, row["activity_id"]))
+                        state = "completed"
+                elif row["sender_kind"] == "steward" and row["activity_state"] == "BLOCKED":
+                    state = "blocked"
+                    error = row["exception"] if isinstance(row["exception"], dict) else {}
+                    failure = str(error.get("reason") or "Grace could not complete this turn.")[:500]
+                    assistant_id = uuid.uuid5(uuid.NAMESPACE_URL,
+                                               f"r3a.steward.reply:{row['message_id']}")
+                    await conn.execute(
+                        "INSERT INTO r3a.steward_conversation_messages(message_id,conversation_id,sender_kind,sender_id,body,delivery_state,activity_id) "
+                        "VALUES (%s,%s,'resident',%s,%s,'blocked',%s) ON CONFLICT(message_id) DO NOTHING",
+                        (assistant_id, conversation_uuid, row["resident_id"], failure, row["activity_id"]))
+                else:
+                    response_text = None
+                if row["sender_kind"] == "steward" and row["activity_state"] == "COMPLETED" \
+                        and str(row["activity_id"]) not in persisted_resident_replies \
+                        and isinstance(response_text, str) and response_text:
+                    assistant_projection = {"message_id": str(assistant_id),
+                                            "sender": {"kind": "resident", "id": row["resident_id"],
+                                                       "display_name": row["resident_display_name"]},
+                                            "text": response_text, "delivery_state": "completed",
+                                            "activity_id": str(row["activity_id"]),
+                                            "created_at": row["created_at"].isoformat()}
+                elif row["sender_kind"] == "steward" and row["activity_state"] == "BLOCKED" \
+                        and str(row["activity_id"]) not in persisted_resident_replies:
+                    assistant_projection = {"message_id": str(assistant_id),
+                                            "sender": {"kind": "resident", "id": row["resident_id"],
+                                                       "display_name": row["resident_display_name"]},
+                                            "text": failure, "delivery_state": "blocked",
+                                            "activity_id": str(row["activity_id"]),
+                                            "created_at": row["created_at"].isoformat()}
+                projected.append({"message_id": str(row["message_id"]),
+                                  "sender": {"kind": "resident" if row["sender_kind"] == "resident" else "steward",
+                                             "id": row["sender_id"],
+                                             "display_name": row["sender_id"] if row["sender_kind"] == "resident" else None},
+                                  "text": row["body"], "delivery_state": state,
+                                  "activity_id": str(row["activity_id"]) if row["activity_id"] else None,
+                                  "created_at": row["created_at"].isoformat()})
+                if assistant_projection is not None:
+                    projected.append(assistant_projection)
+            if not rows:
+                exists = await (await conn.execute(
+                    "SELECT 1 FROM r3a.steward_conversations WHERE conversation_id=%s AND owner_principal_id=%s",
+                    (conversation_uuid, principal_id))).fetchone()
+                if not exists:
+                    raise PermissionError("conversation is unavailable to this Steward principal")
+            return projected
 
     async def snapshot(self, *, include_events: bool = True) -> dict[str, Any]:
         async with self.pool.connection() as conn:

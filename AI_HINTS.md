@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.1.0
+File Revision: 1.0.9
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -14,16 +14,15 @@ Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-001 | ChatGPT GPT-6 | Add concise dev
 Changed: 2026-11-06T03:39:05Z | R3A-BASELINE-001 | Codex GPT-6 | Add the R3A architecture baseline index.
 Changed: 2026-11-06T03:49:54Z | R3A-BASELINE-001 | Codex GPT-6 | Record documentation review scope accurately.
 Changed: 2026-11-06T05:02:18Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Require R3A roadmap compliance in engineering session bootstrap.
+Changed: 2026-11-08 UTC | CHARACTER-ARCHITECTURE | Codex GPT-6 | Index resident dossier architecture and source inventory.
 Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-001 | ChatGPT GPT-6 | Index manifest-driven deployment runbook and scripts
 Changed: 2026-11-04 UTC | R3-GRANT-RUNBOOK-MIGRATION | ChatGPT GPT-6 | Direct all new grant/delegation runbooks to R3
 Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Index resident avatar implementation notes
 Changed: 2026-10-31 UTC | R3-COMMS-001 | ChatGPT GPT-6 | Index mandatory Comms incident capture
-Changed: 2026-11-07T21:44:36Z | AP3-M1 | Codex GPT-6 | Index the Steward authentication/session contract and portal prototype.
-Changed: 2026-11-07T23:43:25Z | AP3-M1 | Codex GPT-6 | Link website session/principal schema and integration instructions.
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Manual source/index review; no automated tests run.
-History/Predecessor: Git blob a076a5ad0a13433a4e4ad1ccf7b8f029a5c6d06d at commit db46df7a04c694f0e7508d181a3a65b296cc6d16.
+History/Predecessor: Git blob 7747ef612528c990621bfb9e907473ac68da925a
 -->
 # AI_HINTS.md — Riverview 3
 
@@ -58,7 +57,7 @@ Start with [the hints index](hints/README.md). Keep this root file short; put de
 - [R3A architecture baseline, AP0 specification, roadmap, and contracts](docs/architecture/R3A_ARCHITECTURE_CHARTER.md)
 - [Deployment and command execution](hints/deployment.md) — [manifest-driven runbook](docs/runbooks/R3_MANIFEST_DEPLOYMENT.md) and [deployment scripts](scripts/deployment/Deploy-R3.ps1) (currently plan-only; no live activation)
 - [Resident avatar system](hints/resident-avatar-system.md) — replaceable website avatar runtime, browser animation API, and pending authorized backend connection
-- [AP3 Steward access](docs/architecture/R3A_AP3_STEWARD_ACCESS.md) — authenticated ingress/session boundary, CME authorization delegation, and transport availability.
-- [Steward website session contract](docs/architecture/R3A_STEWARD_WEBSITE_SESSION_CONTRACT.md) — versioned principal/session schema, browser operation IDs, and integration guidance for #51.
+- [Resident character architecture](docs/architecture/R3A_RESIDENT_CHARACTER_ARCHITECTURE.md) — versioned dossiers, modular prompts, and [Coordinator/Autonomy integration handoff](docs/architecture/R3A_RESIDENT_CHARACTER_INTEGRATION_HANDOFF.md)
+- [Resident source inventory](docs/architecture/resident-source-inventory.md) — identity and HR database authority findings, roster discrepancy, source confidence, and protected-source limits
 
 When asked to add material to AI_HINTS, update a focused `hints/` document and add or adjust a concise pointer here only if needed.

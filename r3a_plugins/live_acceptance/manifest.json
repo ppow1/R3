@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "plugin_id": "r3a.acceptance-oversized-result",
+  "plugin_version": "1.0.0",
+  "artifact_ref": "oversized_result.py",
+  "artifact_sha256": "03d73a050d4040967a3244097cc7dcf04d2b6a56bec3f102dc05170d91c7dffa",
+  "configuration_schema": {
+    "schema_id": "r3a.acceptance-oversized-result.config.v1",
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "provider": {
+    "provider_id": "r3a.acceptance-oversized-result",
+    "provider_version": "1.0.0",
+    "entrypoint": "r3a_plugins.live_acceptance.oversized_result:create_provider",
+    "artifact_sha256": "03d73a050d4040967a3244097cc7dcf04d2b6a56bec3f102dc05170d91c7dffa"
+  },
+  "operation": {
+    "contract_id": "r3a.capability-operation.v1",
+    "contract_version": "1.0.0",
+    "operation_id": "acceptance.oversized-result.read",
+    "operation_revision": "1.0.0",
+    "provider": {
+      "provider_id": "r3a.acceptance-oversized-result",
+      "provider_version": "1.0.0",
+      "entrypoint": "r3a_plugins.live_acceptance.oversized_result:create_provider",
+      "artifact_sha256": "03d73a050d4040967a3244097cc7dcf04d2b6a56bec3f102dc05170d91c7dffa"
+    },
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "output_schema": {
+      "type": "object"
+    },
+    "effect_class": "read",
+    "caller_constraints": {
+      "allowed_principals": [],
+      "allowed_residents": [
+        "resident.grace"
+      ],
+      "allowed_services": []
+    },
+    "target_scope_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "required_grants": [
+      "acceptance.oversized-result.read"
+    ],
+    "evidence": {
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      },
+      "verification_obligations": []
+    },
+    "recovery": {
+      "idempotency_required": false,
+      "idempotency_scope": "invocation",
+      "replay_safe": true,
+      "reconciliation_operation_id": null
+    },
+    "execution": {
+      "timeout_seconds": 30,
+      "retry_disposition": "safe_retry"
+    },
+    "lifecycle": {
+      "desired_state": "enabled"
+    },
+    "resident_tool": {
+      "name": "Oversized acceptance result",
+      "description": "Acceptance-only frame overflow probe."
+    }
+  },
+  "module_manifest": {
+    "contract_id": "r3a.module-manifest.v1",
+    "contract_version": "1.0.0",
+    "module_id": "r3a.acceptance-oversized-result",
+    "module_version": "1.0.0",
+    "owner": "R3A Live Modular Acceptance",
+    "binding": {
+      "contract_id": "r3a.capability-provider.v1",
+      "protocol_major": 1,
+      "protocol_min_minor": 0,
+      "protocol_max_minor": 0,
+      "entrypoint": "r3a_plugins.live_acceptance.oversized_result:create_provider"
+    },
+    "dependencies": [],
+    "configuration": {
+      "schema_ref": "r3a.acceptance-oversized-result.config.v1",
+      "configuration_ref": "config.json"
+    },
+    "capability_refs": [
+      "acceptance.oversized-result.read"
+    ],
+    "resource_refs": [],
+    "state_namespace": "r3a.acceptance-oversized-result",
+    "migration_contract": "none.v1",
+    "recovery_policy": "idempotent.v1",
+    "artifact": {
+      "artifact_ref": "oversized_result.py",
+      "artifact_sha256": "03d73a050d4040967a3244097cc7dcf04d2b6a56bec3f102dc05170d91c7dffa"
+    }
+  }
+}

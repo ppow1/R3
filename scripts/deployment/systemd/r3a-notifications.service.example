@@ -1,0 +1,20 @@
+[Unit]
+Description=R3A Notifications module
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=r3a-notifications
+Group=r3a-notifications
+EnvironmentFile=/etc/r3a/notifications.env
+ExecStart=/opt/r3a/venv/bin/r3a-notifications --config /etc/r3a/notifications.json --host 127.0.0.1 --port 18480
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/r3a-notifications
+
+[Install]
+WantedBy=multi-user.target

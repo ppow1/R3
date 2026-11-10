@@ -2,7 +2,7 @@
 R3 CONTROLLED TEST SOURCE
 File: tests/test_r3a_steward_access.py
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.2.0
+File Revision: 1.2.3
 Created: 2026-11-07T21:37:42Z
 Created By: Codex GPT-6
 Purpose: Verify Steward assertion validation, opaque sessions, revocation, CSRF origin policy, and CME identity delegation.
@@ -25,6 +25,9 @@ Changed: 2026-11-07T23:53:17Z | AP3-M1/AP3-M2 | Codex GPT-6 | Verify provider re
 Changed: 2026-11-07T23:57:23Z | AP3-M1/#51 | Codex GPT-6 | Verify the prototype operation returns correlated CME activity and audit evidence through the shared session.
 Changed: 2026-11-08T00:01:13Z | AP3-M1/#51 | Codex GPT-6 | Verify /api/v1 cookie sharing, Origin-protected Website mutations, and generic CME registry discovery.
 Changed: 2026-11-08T13:45:00Z | AP3-M1/#51 | Codex GPT-6 | Verify existing R3 portal session binding to the shared revocable AP3 session.
+Changed: 2026-11-09T16:32:39Z | R3A-AUTH-INDEPENDENCE-001 | Codex GPT-6 | Use the R3A-only cookie namespace in session tests and guard published examples against R3 cookie collisions.
+Changed: 2026-11-09T17:06:17Z | R3A-AUTH-INDEPENDENCE-SECURE-LAN | Codex GPT-6 | Assert the target R3A configuration requires Secure cookies for LAN authentication.
+Changed: 2026-11-09T19:23:00Z | AP3-R3A-010-LAN-IP | Codex GPT-6 | Verify the native session cookie is limited to the R3A path and is not sent to R3 authentication routes.
 Supersedes: None.
 Contracts: r3a.identity-provider.v1; r3a.steward-principal.v1; r3a.steward-session.v1; r3a.capability-invocation.v1.
 Tests: python -m unittest tests.test_r3a_steward_access.
@@ -34,15 +37,17 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 import time
 import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 
 from r3a_runtime.steward_access import (
     AccessUnavailable, HmacIngressIdentityProvider, IdentityAssertion, R3AccountSessionIdentityProvider,
@@ -92,12 +97,33 @@ def config():
                                                   "secret_id": "test-secret"}, "assertion_max_age_seconds": 60},
             "secret_provider_manifest": "/etc/r3a/test/manifest.json",
             "secret_provider_config": "/etc/r3a/test/provider.json",
-            "session": {"cookie_name": "r3_steward_session", "lifetime_seconds": 600,
+            "session": {"cookie_name": "r3a_steward_session", "lifetime_seconds": 600,
                         "connect_timeout_seconds": 3, "secure_cookie": False,
                         "allowed_origins": ["http://testserver"]},
             "cme": {"control_socket": "/tmp/r3a-cme.sock", "request_timeout_seconds": 5,
                     "health_stale_after_seconds": 30},
             "remote_transport": {"state": "unavailable", "public_exposure": False}}
+
+
+class CookieNamespaceContractTests(unittest.TestCase):
+    def test_published_configs_use_r3a_cookie_namespace(self):
+        examples = ("steward_access.config.example.json",
+                    "steward_access.r3-portal.config.example.json")
+        for name in examples:
+            with self.subTest(name=name):
+                path = Path(__file__).parents[1] / "r3a_plugins" / name
+                cookie_name = json.loads(path.read_text(encoding="utf-8"))["session"]["cookie_name"]
+                self.assertTrue(cookie_name.startswith("r3a_"))
+                self.assertNotIn(cookie_name, {"r3_steward_session", "rv_account_session",
+                                               "rv_account_csrf"})
+                self.assertNotEqual("steward:pat", json.loads(path.read_text(encoding="utf-8"))
+                                     .get("identity", {}).get("steward_principal_id"))
+
+    def test_target_steward_config_requires_secure_cookie(self):
+        path = Path(__file__).parents[1] / "r3a_plugins" / "steward_access.config.example.json"
+        session = json.loads(path.read_text(encoding="utf-8"))["session"]
+        self.assertEqual("r3a_steward_session", session["cookie_name"])
+        self.assertIs(session["secure_cookie"], True)
 
 
 def assertion_headers(*, issuer="test-ingress", subject="steward:test", assertion_id=None,
@@ -184,9 +210,13 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
         async def website_private(principal=Depends(require_steward_principal)):
             return principal
 
-        @app.post("/api/v1/notifications/private")
+        @app.post("/api/v1/steward/notifications/private")
         async def website_mutation(principal=Depends(require_steward_principal)):
             return principal
+
+        @app.get("/api/v1/auth/session")
+        async def r3_account_route(request: Request):
+            return {"r3a_cookie_received": "r3a_steward_session" in request.cookies}
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                      base_url="http://testserver") as client:
@@ -194,7 +224,7 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
                                          headers={"Origin": "http://testserver",
                                                   "X-Correlation-ID": str(uuid.uuid4())})
             self.assertEqual(200, response.status_code)
-            self.assertIn("Path=/api/v1", response.headers["set-cookie"])
+            self.assertIn("Path=/api/v1/steward", response.headers["set-cookie"])
             payload = response.json()
             self.assertEqual("r3a.steward-session.v1", payload["contract"])
             self.assertEqual({"contract": "r3a.steward-principal.v1",
@@ -204,11 +234,14 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(1, len(replacement.calls))
             self.assertEqual("steward:replacement",
                              next(iter(self.store.sessions.values()))["principal_id"])
+            r3_session = await client.get("/api/v1/auth/session")
+            self.assertEqual(200, r3_session.status_code)
+            self.assertFalse(r3_session.json()["r3a_cookie_received"])
             website_identity = await client.get("/api/v1/steward/r3a/private")
             self.assertEqual(200, website_identity.status_code)
             self.assertEqual("steward:replacement", website_identity.json()["principal_id"])
-            self.assertEqual(403, (await client.post("/api/v1/notifications/private")).status_code)
-            mutation = await client.post("/api/v1/notifications/private",
+            self.assertEqual(403, (await client.post("/api/v1/steward/notifications/private")).status_code)
+            mutation = await client.post("/api/v1/steward/notifications/private",
                                          headers={"Origin": "http://testserver"})
             self.assertEqual(200, mutation.status_code)
             self.assertEqual("steward:replacement", mutation.json()["principal_id"])
@@ -319,7 +352,7 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("r3a.steward-principal.v1", response.json()["principal"]["contract"])
         self.assertEqual([], response.json()["factor_refs"])
         self.assertTrue(self.secret_provider.leases[-1].closed)
-        token = self.client.cookies.get("r3_steward_session")
+        token = self.client.cookies.get("r3a_steward_session")
         self.assertIsNotNone(token)
         digest = hashlib.sha256(token.encode()).hexdigest()
         self.assertIn(digest, self.store.sessions)
@@ -342,6 +375,24 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(200, ended.status_code)
         self.assertEqual(401, (await self.client.get("/api/v1/steward/status")).status_code)
         self.assertEqual("steward.state.read_denied", self.store.events[-1]["event_type"])
+
+    async def test_expired_durable_session_is_denied_and_audited(self):
+        response = await self.client.post("/api/v1/steward/session", headers=assertion_headers())
+        self.assertEqual(200, response.status_code)
+        token = self.client.cookies.get("r3a_steward_session")
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        self.store.sessions[digest]["expires_at"] = datetime.now(timezone.utc) - timedelta(seconds=1)
+
+        status = await self.client.get("/api/v1/steward/session")
+        operation = await self.client.post("/api/v1/steward/operations/invoke",
+                                           headers={"Origin": "http://testserver"},
+                                           json={"request": {"contract_id": "r3a.capability-invocation.v1"}})
+
+        self.assertEqual(401, status.status_code)
+        self.assertEqual(401, operation.status_code)
+        event_types = [event["event_type"] for event in self.store.events]
+        self.assertIn("steward.session.access_denied", event_types)
+        self.assertIn("steward.operation.denied", event_types)
 
     async def test_session_assertion_replay_is_denied(self):
         headers = assertion_headers(assertion_id="same-ingress-assertion")
@@ -441,7 +492,7 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(redirect_handler().redirect_request(None, None, 302, "redirect", {}, "https://outside.invalid"))
             self.assertEqual("steward@example.org", started.json()["principal"]["principal_id"])
             self.assertNotIn("opaque-r2-cookie", started.headers["set-cookie"])
-            self.assertTrue(started.cookies.get("r3_steward_session"))
+            self.assertTrue(started.cookies.get("r3a_steward_session"))
             self.assertIn("httponly", started.headers["set-cookie"].lower())
             self.assertIn("samesite=strict", started.headers["set-cookie"].lower())
             current = await client.get("/api/v1/steward/session")
@@ -498,6 +549,30 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
                                                       "Cookie": "rv_account_session=opaque"})
             self.assertEqual(503, response.status_code)
             self.assertEqual({}, self.store.sessions)
+
+    async def test_authentication_unavailable_with_audit_store_outage_returns_503(self):
+        class UnavailableProvider:
+            contract_id = "r3a.identity-provider.v1"
+            contract_version = "1.0.0"
+
+            def authenticate(self, request, *, correlation_id):
+                raise AccessUnavailable("identity_provider_unavailable")
+
+        def unavailable_audit(**_event):
+            raise AccessUnavailable("session_store_unavailable")
+
+        self.store.audit = unavailable_audit
+        access = StewardAccess(config(), self.store, UnavailableProvider())
+        app = FastAPI()
+        app.include_router(access.router())
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://testserver") as client:
+            response = await client.post("/api/v1/steward/session",
+                                         headers={"Origin": "http://testserver"})
+
+        self.assertEqual(503, response.status_code)
+        self.assertEqual("Steward audit state unavailable", response.json()["detail"])
+        self.assertEqual({}, self.store.sessions)
 
     async def test_account_portal_config_is_loopback_only_and_does_not_require_bitwarden(self):
         import json
@@ -561,6 +636,33 @@ class StewardAccessTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(Exception, "secure_cookie_required_for_remote_transport"):
                 load_access_config(handle.name)
         os.environ.pop("R3A_TEST_STEWARD_DSN", None)
+
+    async def test_remote_transport_rejects_http_origin_even_with_secure_cookie(self):
+        import json
+        import tempfile
+        cfg = config()
+        cfg["remote_transport"]["state"] = "configured"
+        cfg["session"]["secure_cookie"] = True
+        with patch.dict(os.environ, {"R3A_TEST_STEWARD_DSN": "postgresql://not-used"}):
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8") as handle:
+                json.dump(cfg, handle)
+                handle.flush()
+                with self.assertRaisesRegex(AccessUnavailable,
+                                            "https_origin_required_for_remote_transport"):
+                    load_access_config(handle.name)
+
+    async def test_remote_transport_accepts_private_https_origin_with_secure_cookie(self):
+        import json
+        import tempfile
+        cfg = config()
+        cfg["remote_transport"]["state"] = "configured"
+        cfg["session"]["secure_cookie"] = True
+        cfg["session"]["allowed_origins"] = ["https://steward.lan.example:8443"]
+        with patch.dict(os.environ, {"R3A_TEST_STEWARD_DSN": "postgresql://not-used"}):
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8") as handle:
+                json.dump(cfg, handle)
+                handle.flush()
+                self.assertEqual(cfg, load_access_config(handle.name))
 
 
 if __name__ == "__main__":

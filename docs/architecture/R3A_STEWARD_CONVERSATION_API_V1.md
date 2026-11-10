@@ -1,0 +1,57 @@
+<!--
+R3 CONTROLLED DOCUMENT
+File: docs/architecture/R3A_STEWARD_CONVERSATION_API_V1.md
+Component: R3A-STEWARD-CONVERSATION
+File Revision: 1.1.0
+Created: Unknown (legacy)
+Created By: Unknown (legacy)
+Purpose: Define the Website-to-CME direct Steward conversation adapter and authorization boundary.
+Execution Model: Same-origin Website API over AP3 sessions and CME durable activities.
+Observability: Conversation/message persistence, execution authorization, CME activity and inference evidence.
+Dependencies: AP3 Steward sessions; CME; PostgreSQL; institutional directory; configured resident execution profile and route.
+Authority: R3A Steward conversation API; CME execution authorization remains enforced.
+Changed: 2026-11-10T00:14:15Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Correct direct-chat authorization to require target execution without resident delegation; document separate V2 and R3A grant stores.
+Supersedes: Revision 1.0.0 in Git blob a659fd9afed274116f67709b16d784405904ba2c; corrects its conflation of direct Steward chat with resident delegation.
+Contracts: r3a.steward-conversation.v1; r3a.resident.execution-profile@1.0.0; resident.objective.execute; resident.delegate.
+Tests: tests/test_r3a_steward_conversations.py.
+History/Predecessor: Git blob a659fd9afed274116f67709b16d784405904ba2c.
+-->
+# R3A Steward Conversation API v1
+
+Status: coordinator implementation on `integration/r3a-unified-20261109`; source revision `f514d3d` is the prior managed baseline. The API is a same-origin adapter over AP3 session verification and CME durable activities.
+
+## Authority and flow
+
+- AP3 validates the existing `rv_account_session` portal session, required Steward role, expiration/revocation, and same-origin mutation requests. It supplies the session's canonical `principal_id`; callers cannot choose an owner identity.
+- CME reads residents only through the configured `institutional.directory.discover` capability invocation, using normal CME grant checks and the registered provider. An authenticated-principal read has no resident activity lineage; CME records the invocation and audit decision directly and still requires an active grant for that canonical principal. The roster includes all returned directory records; direct Steward chat availability is evaluated separately and requires a configured office-role route plus `resident.objective.execute` authorization for the target resident. `resident.delegate` is reserved for CME handoffs initiated as resident delegation and is not required when the Steward directly opens a conversation with a resident. CME uses the configured resident module manifest as the executable template, then binds a dynamically registered execution process to the exact directory principal through the validated execution profile. This existing path does not derive a principal/module alias from spelling or display name. The Website displays ineligible roster rows as disabled and does not imply onboarding when the directory supplies no onboarding evidence.
+- CME owns conversation records and messages in PostgreSQL schema `r3a`; each user turn is linked to one idempotent CME activity. CME resolves each selected resident through the authoritative directory and existing execution-profile/model-route contracts.
+- The Website never invokes a model endpoint or stores institutional conversation data locally. Its browser client uses the existing `r3a.steward-workspace-web.v1` contract and same-origin opaque cookie.
+
+## HTTP routes
+
+All routes require an active authenticated AP3 session. Mutations require a configured allowed `Origin`. API responses set no-store security headers.
+
+| Method and path | Behavior |
+|---|---|
+| `GET /api/v1/steward/residents` | Returns every resident in the current measured directory snapshot with provenance. Roster membership does not imply onboarding or chat eligibility. Each row carries separate `onboarding_status`, `execution_status`, `authorization_status`, `chat_available`, and `chat_status` fields; when the directory has no onboarding evidence, onboarding status is `unknown`. |
+| `GET /api/v1/steward/conversations?resident_id=…` | Lists the authenticated principal's conversations for one resident. |
+| `POST /api/v1/steward/conversations` | Idempotently creates a conversation using `{resident_id, client_conversation_id}`. |
+| `GET /api/v1/steward/conversations/{conversation_id}/messages` | Returns durable transcript, activity IDs and delivery state; a completed CME result is projected as the resident message. |
+| `POST /api/v1/steward/conversations/{conversation_id}/messages` | Accepts `{client_message_id, text}` and enqueues one resident turn. Reuse the same client ID on retry. Returns `202` while CME works. |
+| `GET /api/v1/steward/about` | Authenticated read-only Website/build/runtime/module health projection for Settings/About. |
+
+The Website responds `401` for missing/expired sessions, `403` for denied identity/operation, `409` while a prior turn in that conversation is still processing, `422` for invalid input/current directory mismatch, and `503` when configured CME/DB/provider services are unavailable.
+
+## Persistence and execution
+
+Migration `017_steward_conversations.sql` adds `r3a.steward_conversations` and `r3a.steward_conversation_messages`. Conversation ownership is keyed by canonical session principal and resident ID. Creation pins the measured directory snapshot digest and invocation ID. Message IDs are client-supplied UUIDs; activity idempotency binds conversation and message IDs. The transcript is bounded before it is included in the activity input.
+
+Each turn enters the generic CME control operation `resident.objective.submit` with `event_kind=conversation` and the conversation's selected canonical resident ID. CME schedules and persists the turn through its durable activity path. For any selected resident, CME requires a current directory record, a configured office-role route, and `resident.objective.execute` authorization for the directory principal. `resident.delegate` remains required for non-conversation handoffs from a resident to another resident, but direct Steward conversation turns do not use that delegation grant. CME then uses the registered resident executable as a template and starts a dynamic module process keyed by that canonical directory principal with the validated execution profile. The Website has no resident-specific route. User and assistant messages both retain the CME activity reference. Database owner checks prevent one Steward principal from reading another principal's conversations.
+
+Riverview V2's `resident.conversation.send` grant and R3A CME's `r3a.capability_grants` are separate stores. The V2 grant does not create or satisfy an R3A CME execution grant. R3A's active `capability_grants` provider currently accepts the local global or activity-ID scope model; its grant rows do not carry the V2 delegation policy, expiry, or use-limit fields.
+
+`diagnostics.status` and `diagnostics.events` are read-only CME control operations used by the Website. The status result includes the managed process's captured implementation revision; the Website separately reports its own build revision. These operations use the configured AP3 CME control socket and do not require a second `R3A_CONFIG` file.
+
+## Acceptance boundary
+
+Unit/contract tests do not establish an authenticated browser session, actual model completion, refresh/restart persistence, or resident activation. Those require the real native Website session, a current measured directory record, a configured office-role route, and an effective target execution grant. For this generic path, CME uses the configured resident module manifest as a template and registers an execution process under the canonical directory principal from the validated profile; the base module ID need not equal that directory principal. Missing session, route, or target execution grant is returned as unavailable/denied; no identity or grant is synthesized. The current R3A deployment has no active `resident.objective.execute` grant for `resident:grace`. Its absence is the remaining CME authorization gate for Grace chat; an R2/R3 V2 `resident.conversation.send` grant does not satisfy it.

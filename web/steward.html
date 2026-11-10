@@ -2,16 +2,17 @@
 R3 CONTROLLED DOCUMENT
 File: web/steward.html
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-07T21:43:17Z
 Created By: Codex GPT-6
-Purpose: Provide a same-origin, touch-friendly Steward session and CME operation interface.
+Purpose: Provide a same-origin R3A Steward sign-in entry, session status, and CME operation interface.
 Execution Model: Browser calls the optional same-origin Steward API; identity assertion is supplied by configured ingress.
 Observability: Shows current session, freshness, operation response, and correlation/audit identifiers.
 Dependencies: /api/v1/steward/session; /api/v1/steward/status; /api/v1/steward/operations/invoke.
 Authority: AP3-M1 Issue #49; no public access default.
 Changed: 2026-11-07T21:43:17Z | AP3-M1 | Codex GPT-6 | Add the mobile-friendly authenticated access surface.
 Changed: 2026-11-07T21:48:11Z | AP3-M1 | Codex GPT-6 | Load controls from same-origin script under a restrictive CSP.
+Changed: 2026-11-09T18:10:00Z | AP3/R3A-010 | R3A Coordinator | Route sign-in to the R3A-native login and governed enrollment form.
 Supersedes: None.
 Contracts: r3a.steward-session.v1; r3a.steward-operation-result.v1; r3a.steward-access-status.v1.
 Tests: tests/test_r3a_steward_access.py; remote interface verification awaits configured transport.
@@ -46,15 +47,16 @@ History/Predecessor: New file; initial publication recorded in Git.
 <body>
 <main>
   <h1>Steward Access</h1>
-  <p>Authenticated operations use the existing identity ingress and CME grants. Session freshness and service availability are checked on each request.</p>
+  <p>Sign in with the R3A Steward identity. CME checks current session authority and grants for each operation.</p>
   <section aria-labelledby="session-heading">
     <h2 id="session-heading">Session</h2>
     <p id="session-state" class="state" aria-live="polite">Status not checked.</p>
     <div class="actions">
-      <button id="begin" type="button">Begin session</button>
+      <button id="begin" type="button">Sign in</button>
       <button id="refresh" type="button">Refresh status</button>
       <button id="end" type="button">End session</button>
     </div>
+    <p><a href="/login">Open R3A sign in or enrollment</a></p>
   </section>
   <section aria-labelledby="operation-heading">
     <h2 id="operation-heading">Authorized CME operation</h2>

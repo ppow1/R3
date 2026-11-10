@@ -20,7 +20,7 @@ History/Predecessor: New file; initial publication recorded in Git.
 // Mock fetch never supplies live institutional data.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp, notificationPresentation} from '../web/steward-workspace-api.mjs';
+import {StewardWorkspaceApi, WorkspaceApiError, WORKSPACE_CONTRACT, formatPresentationTimestamp, notificationPresentation, residentProgressLabel, residentChatStatusLabel, conversationHistoryLoadingLabel, conversationPollState} from '../web/steward-workspace-api.mjs';
 
 function response(status, payload, headers = {}) {
   return {
@@ -46,18 +46,18 @@ test('conversation discovery uses same-origin session and versioned contract hea
   assert.equal('Authorization' in call[1].headers, false);
 });
 
-test('desktop and mobile consume the shared opaque cookie session lifecycle', async () => {
+test('workspace client cannot manually activate a second session and can revoke the website session', async () => {
   const requests = [];
   const api = new StewardWorkspaceApi(async (...args) => {
     requests.push(args);
-    const state = args[1].method === 'POST' ? 'authenticated' : args[1].method === 'DELETE' ? 'revoked' : 'authenticated';
+    const state = args[1].method === 'DELETE' ? 'revoked' : 'authenticated';
     return response(200, {contract: 'r3a.steward-session.v1', state, correlation_id: 'session-correlation'});
   });
-  assert.equal((await api.startSession()).state, 'authenticated');
+  assert.equal(api.startSession, undefined);
   assert.equal((await api.session()).state, 'authenticated');
   assert.equal((await api.endSession()).state, 'revoked');
-  assert.deepEqual(requests.map(request => request[0]), Array(3).fill('/api/v1/steward/session'));
-  assert.deepEqual(requests.map(request => request[1].method), ['POST', 'GET', 'DELETE']);
+  assert.deepEqual(requests.map(request => request[0]), Array(2).fill('/api/v1/steward/session'));
+  assert.deepEqual(requests.map(request => request[1].method), ['GET', 'DELETE']);
   assert.ok(requests.every(request => request[1].credentials === 'same-origin' && request[1].cache === 'no-store'));
   assert.ok(requests.every(request => !('Authorization' in request[1].headers)));
 });
@@ -108,6 +108,28 @@ test('new conversation creation routes the selected authoritative resident with 
   assert.equal(call[1].credentials, 'same-origin');
   assert.deepEqual(JSON.parse(call[1].body), {resident_id: 'resident:grace', client_conversation_id: 'request-1'});
   assert.equal(result.conversation.resident_id, 'resident:grace');
+});
+
+test('resident progress presentation uses the dynamically selected resident name', () => {
+  assert.equal(residentProgressLabel('Grace'), 'Grace is working on this turn through managed CME…');
+  assert.equal(residentProgressLabel('Vicky'), 'Vicky is working on this turn through managed CME…');
+  assert.equal(residentProgressLabel('  '), 'Selected resident is working on this turn through managed CME…');
+});
+
+test('history polling keeps loaded messages visible and stops with an explicit timeout state', () => {
+  assert.equal(conversationHistoryLoadingLabel(true), 'Loading durable conversation history…');
+  assert.equal(conversationHistoryLoadingLabel(false), null);
+  assert.equal(conversationPollState(20).continuePolling, true);
+  const timeout = conversationPollState(21);
+  assert.equal(timeout.continuePolling, false);
+  assert.match(timeout.message, /Automatic refresh is paused/);
+});
+
+test('resident roster labels chat eligibility from CME readiness evidence', () => {
+  assert.equal(residentChatStatusLabel({chat_available: true}), 'chat available');
+  assert.equal(residentChatStatusLabel({chat_available: false, chat_status: 'required_execution_grant_missing'}), 'chat unavailable · execution authorization missing');
+  assert.equal(residentChatStatusLabel({chat_available: false, chat_status: 'office_role_route_unavailable'}), 'chat unavailable · no configured office route');
+  assert.equal(residentChatStatusLabel({chat_available: false}), 'chat unavailable · eligibility not confirmed');
 });
 
 test('notification acknowledgment uses the #48 delivery route and idempotency key', async () => {

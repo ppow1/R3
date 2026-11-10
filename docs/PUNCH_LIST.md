@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/PUNCH_LIST.md
 Component: DOCS-PUNCH-LIST-MD
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: Unknown (legacy)
 Created By: Unknown (legacy)
 Purpose: R3 project governance and planning reference
@@ -11,6 +11,7 @@ Observability: N/A
 Dependencies: R3 repository
 Authority: Existing document authority unchanged; see body
 Changed: 2026-11-01 UTC | R3-COMMS-003 | ChatGPT GPT-6 | Track dashboard Comms5 saturation and temporary restart recovery
+Changed: 2026-11-10T01:31:53Z | R3-COMMS-005 | Codex GPT-6 | Track the R3A Website resident-directory provider artifact path failure.
 Supersedes: None (see body for substantive charter revisions)
 Contracts: hints/file-provenance.md
 Tests: Not run (metadata-only)
@@ -56,3 +57,5 @@ Status: initial working list; items are requirements or investigations, not veri
 | R3-P023 | P1 | R/3 configuration file inventory and ownership registry | Discover and inventory **all R/3 configuration files** across repositories, active releases, hosts, services and runtime/state directories (especially JSON, but include YAML, TOML, INI, environment files and other formats). Record canonical path, environment/host, purpose, consuming service/module, owner/maintainer, who needs read/change access, sensitivity/secrets references, source-of-truth versus generated/deployed copy, version/change history, validation and restart/reload requirements, and the authoritative location/procedure for changing each setting. Identify duplicates, obsolete configurations and drift without altering them. Design a searchable, maintainable registry with a future authenticated website configuration-management interface; **inventory and planning only for now, no configuration edits or website implementation.** | Open |
 
 | R3-P024 | P1 | Unified integration baseline, release registry, and modular deployment contracts | Establish an authoritative, machine-readable registry of each R/3 component's repository/commit, contract/API version, dependencies, tested integration baseline, immutable release artifact, active host/service, configuration reference, migration requirements, health/acceptance results, and rollback target. Allow independent feature branches but require integration compatibility gates before promotion; reconcile Grace/Chat, website, HR/native tools without discarding live uncommitted work. Consolidate effective systemd service ownership to prevent override-order regressions. Design modular release boundaries where feasible, publish a single approved deployment manifest, and document a repeatable promotion/rollback procedure. Derive requirements from the current integration incident; do not delay the Chat repair for speculative framework work. | Open |
+
+| R3-P025 | P0 | R3A Website resident discovery provider path mismatch | Keep each configured provider manifest and digest pin aligned with the exact source checkout imported by the managed CME worker. Verify the authenticated Website roster path reaches the registered authoritative directory provider after config reload; preserve CME grant enforcement and fail-closed behavior. Add and run `tests/test_r3a_deployed_provider_artifact_bindings.py` against the deployed bootstrap. Record provider activation, directory provenance, and Website acceptance evidence on Issue #51. | Provider active on config revision `ddb8de5e…`; binding, conversation (6), and Website (20) regressions pass; authenticated roster/live chat acceptance pending |

@@ -36,7 +36,7 @@ from typing import Any
 from .config import Settings
 from .control import ControlServer
 from .contracts import ContractValidationError, parse_timestamp
-from .db import Store
+from .db import IMPLEMENTATION_REVISION, Store
 
 
 def _json_default(value: Any) -> Any:
@@ -152,6 +152,7 @@ class DiagnosticProjection:
                      for row in snapshot["resources"]]
         return {"observed_at": now.isoformat(), "instance_id": self.settings.instance_id,
                 "source": "postgresql", "source_freshness": "fresh",
+                "implementation_revision": IMPLEMENTATION_REVISION,
                 "configuration": snapshot["configuration"], "processes": processes,
                 "modules": module_health, "resources": resources,
                 "activities": activities,

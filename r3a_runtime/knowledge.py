@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/knowledge.py
 Component: R3A-KNOWLEDGE-RETRIEVAL
-File Revision: 1.0.6
+File Revision: 1.1.0
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Retrieve relevant evidence from explicitly configured knowledge sources and preserve its source digest.
@@ -15,9 +15,10 @@ Changed: 2026-11-06T18:26:37Z | R3A-019 | Codex GPT-6 | Match source-state phras
 Changed: 2026-11-06T18:54:42Z | R3A-019 | Codex GPT-6 | Keep each transition set together as one answerable, source-traceable knowledge fact.
 Changed: 2026-11-06T19:01:13Z | R3A-019 | Codex GPT-6 | Treat after/following a state as an explicit source-state transition query.
 Changed: 2026-11-06T19:16:11Z | R3A-019 | Codex GPT-6 | Resolve explicit transitions.STATE references to that single state fact.
+Changed: 2026-11-07T21:57:39Z | AP1-K2 | Codex GPT-6 | Retrieve Markdown paragraphs with heading and line-range provenance.
 Supersedes: None.
 Contracts: R3A-019 knowledge grounding and retrieval; AP1 activity evidence lineage.
-Tests: tests/test_r3a_ap1.py retrieval and digest checks.
+Tests: tests/test_r3a_ap1.py and tests/test_r3a_institutional_knowledge.py retrieval, citation, and digest checks.
 History/Predecessor: Git blob ec02e7e4eae9944fe87335ac61f369e803957722 at commit 362510b7d32edd1eabdcb07c9677f1b6a47f2adf.
 """
 from __future__ import annotations
@@ -57,14 +58,111 @@ def _chunks(text: str) -> list[tuple[str, str]]:
     try:
         value = json.loads(text)
     except json.JSONDecodeError:
-        return [(f"paragraph.{index + 1}", part.strip())
-                for index, part in enumerate(re.split(r"\n\s*\n", text)) if part.strip()]
+        return _markdown_chunks(text)
     return _json_facts(value)
+
+
+def _markdown_chunks(text: str) -> list[tuple[str, str]]:
+    """Split Markdown into source-located paragraphs without caching document state."""
+    lines = text.splitlines()
+    headings: list[tuple[int, str, int]] = []
+    paragraphs: list[tuple[str, str]] = []
+    block: list[str] = []
+    block_start = 0
+    paragraph_counts: dict[tuple[tuple[int, str, int], ...], int] = {}
+    table_header: str | None = None
+    table_header_line = 0
+    fence_marker: tuple[str, int] | None = None
+    in_comment = False
+
+    def add_fact(content: str, start_line: int, end_line: int, kind: str) -> None:
+        section_key = tuple(headings)
+        paragraph_counts[section_key] = paragraph_counts.get(section_key, 0) + 1
+        section_path = "/".join(
+            f"h{level}.{re.sub(r'[^a-z0-9]+', '-', title.casefold()).strip('-') or 'untitled'}@L{line}"
+            for level, title, line in section_key
+        ) or "root"
+        paragraphs.append((
+            f"markdown.{section_path}.{kind}.{paragraph_counts[section_key]}@L{start_line}-L{end_line}",
+            content,
+        ))
+
+    def flush(end_line: int) -> None:
+        nonlocal block, block_start
+        content = "\n".join(part.strip() for part in block if part.strip()).strip()
+        if content:
+            add_fact(content, block_start, end_line, "paragraph")
+        block = []
+        block_start = 0
+
+    for number, line in enumerate(lines, start=1):
+        visible = line
+        if fence_marker is not None:
+            block.append(visible)
+            if re.match(rf"^\s*{re.escape(fence_marker[0])}{{{fence_marker[1]},}}\s*$", visible):
+                flush(number)
+                fence_marker = None
+            continue
+        if in_comment:
+            if "-->" in visible:
+                visible = visible.split("-->", 1)[1]
+                in_comment = False
+            else:
+                continue
+        if "<!--" in visible:
+            before, _, after = visible.partition("<!--")
+            visible = before
+            if "-->" in after:
+                visible += after.split("-->", 1)[1]
+            else:
+                in_comment = True
+        fence = re.match(r"^\s*(`{3,}|~{3,})", visible)
+        if fence:
+            flush(number - 1)
+            table_header = None
+            fence_marker = (fence.group(1)[0], len(fence.group(1)))
+            block_start = number
+            block.append(visible)
+            continue
+        heading = re.match(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$", visible)
+        if heading:
+            flush(number - 1)
+            table_header = None
+            level, title = len(heading.group(1)), heading.group(2).strip()
+            headings = [item for item in headings if item[0] < level]
+            headings.append((level, title, number))
+            continue
+        table_row = re.match(r"^\s*\|.*\|\s*$", visible)
+        if table_row:
+            flush(number - 1)
+            normalized = visible.strip()
+            if table_header is None:
+                table_header, table_header_line = normalized, number
+            elif re.fullmatch(r"\|[\s:|-]+\|", normalized) is None:
+                add_fact(f"{table_header}\n{normalized}", table_header_line, number, "table-row")
+            continue
+        table_header = None
+        if not visible.strip():
+            flush(number - 1)
+            continue
+        if re.match(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)", visible) and block:
+            flush(number - 1)
+        if not block:
+            block_start = number
+        block.append(visible)
+    flush(len(lines))
+    return paragraphs
 
 
 def retrieve(path: Path, source_id: str, query: str) -> list[dict[str, Any]]:
     """Return all matching source facts in relevance order, preserving precise source lineage."""
     raw = path.read_bytes()
+    return retrieve_bytes(raw, path.name, source_id, query)
+
+
+def retrieve_bytes(raw: bytes, source_name: str, source_id: str,
+                   query: str) -> list[dict[str, Any]]:
+    """Retrieve from one already-read document snapshot."""
     text = raw.decode("utf-8")
     query_terms = set(_WORD.findall(query.casefold()))
     if not query_terms:
@@ -96,7 +194,7 @@ def retrieve(path: Path, source_id: str, query: str) -> list[dict[str, Any]]:
     ranked = [item for item in ranked if item[0] == best_score]
     ranked.sort(key=lambda item: item[1])
     source_hash = hashlib.sha256(raw).hexdigest()
-    return [{"source_id": source_id, "source": path.name, "source_sha256": source_hash,
+    return [{"source_id": source_id, "source": source_name, "source_sha256": source_hash,
              "source_path": source_path, "matched_terms": matched, "content": excerpt,
              "sha256": hashlib.sha256(excerpt.encode("utf-8")).hexdigest()}
             for _, source_path, excerpt, matched in ranked]

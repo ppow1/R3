@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_capability_integration_demo.py
 Component: R3A-CAPABILITY-INTEGRATION-REGRESSION
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Verify canonical CME invocation, idempotent recovery, and independently gated completion.
@@ -11,8 +11,9 @@ Observability: Invocation traces, output artifacts, and verifier result assertio
 Dependencies: r3a_runtime.capability_contracts; r3a_runtime.cme.
 Authority: R3 Alpha AP2 capability integration and escalation continuity.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Distinguish first invocation creation from ambiguous recovery in the non-replayable path.
+Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Exercise AP0-M1 provider process installation, activation, immutable version replacement, replay, and deactivation.
 Supersedes: None.
-Contracts: r3a.capability-invocation.v1; r3a.engineering-work-order.v1; r3a.verification-result.v1.
+Contracts: r3a.capability-invocation.v1; r3a.engineering-work-order.v1; r3a.verification-result.v1; module.lifecycle v2.
 Tests: This test module.
 History/Predecessor: Existing AP2 capability integration regression.
 """
@@ -32,6 +33,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 if importlib.util.find_spec("psycopg") is None:
     pg_module = types.ModuleType("psycopg")
     pg_module.__spec__ = importlib.machinery.ModuleSpec("psycopg", loader=None)
@@ -49,11 +52,16 @@ if importlib.util.find_spec("psycopg_pool") is None:
         "__init__": lambda self, *args, **kwargs: None})
     sys.modules["psycopg_pool"] = pool_module
 
-from r3a_runtime.capability_contracts import CapabilityRegistry, validate_invocation_request
+from r3a_runtime.capability_contracts import (CapabilityRegistry, operation_from_manifest,
+                                              CapabilityProviderResult, validate_invocation_request)
 from r3a_runtime.cme import CME
+from r3a_runtime.config import _validate_plugin_config, load_settings
 from r3a_runtime.engineering import (CapabilityOperationRef, CriterionResult, EngineeringWorkOrder,
                                     VerificationResult, validate_completion)
 from r3a_runtime.db import utcnow
+from r3a_runtime.provider_runtime import ProviderProcessManager, _module_environment
+from r3a_runtime.capability_worker import CapabilityWorker
+from tests.test_r3a_modular_autonomy import make_config
 
 
 ACTIVITY = "11111111-1111-4111-8111-111111111111"
@@ -66,33 +74,120 @@ VERIFICATION = "77777777-7777-4777-8777-777777777777"
 
 
 def descriptor() -> dict:
-    provider = Path(__file__).parents[1] / "r3a_runtime/providers/isolated_workspace.py"
-    return {
-        "contract_id": "r3a.capability-operation.v1", "contract_version": "1.0.0",
-        "operation_id": "engineering.workspace.apply_patch", "operation_revision": "demo-v1",
-        "provider": {"provider_id": "r3a.isolated_workspace", "provider_version": "1.0.0",
-                     "entrypoint": "r3a_runtime.providers.isolated_workspace:create_provider",
-                     "artifact_sha256": hashlib.sha256(provider.read_bytes()).hexdigest()},
-        "input_schema": {"type": "object", "required": ["path", "content"], "additionalProperties": False,
-                         "properties": {"path": {"type": "string"}, "content": {"type": "string"}}},
-        "output_schema": {"type": "object", "required": ["path", "sha256", "bytes_written", "replayed"],
-                          "additionalProperties": False,
-                          "properties": {"path": {"type": "string"}, "sha256": {"type": "string"},
-                                         "bytes_written": {"type": "integer", "minimum": 0},
-                                         "replayed": {"type": "boolean"}}},
-        "effect_class": "isolated_write",
-        "caller_constraints": {"allowed_principals": ["resident.grace"],
-                                "allowed_residents": ["resident.grace"], "allowed_services": []},
-        "target_scope_schema": {"type": "object", "required": ["workspace_id"],
-                                "additionalProperties": False,
-                                "properties": {"workspace_id": {"type": "string", "enum": ["candidate-1"]}}},
-        "required_grants": ["engineering.workspace.apply_patch"],
-        "evidence": {"schema": {"type": "object"}, "verification_obligations": ["independent_digest_check"]},
-        "recovery": {"idempotency_required": True, "idempotency_scope": "work_order",
-                     "replay_safe": True, "reconciliation_operation_id": None},
-        "execution": {"timeout_seconds": 30, "retry_disposition": "safe_retry"},
-        "lifecycle": {"desired_state": "enabled"},
-        "resident_tool": {"name": "engineering_workspace_apply_patch", "description": "Apply one bounded file."}}
+    return operation_from_manifest(engineering_manifest())
+
+
+def engineering_manifest() -> dict:
+    path = Path(__file__).parents[1] / "r3a_plugins/engineering_workspace/manifest.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_engineering_operation_is_defined_by_external_versioned_manifest():
+    manifest = engineering_manifest()
+    operation = operation_from_manifest(manifest)
+    assert operation["operation_id"] == "engineering.workspace.apply_patch"
+    assert operation["provider"]["provider_version"] == manifest["plugin_version"]
+    assert manifest["module_manifest"]["module_id"] == operation["provider"]["provider_id"]
+    assert manifest["module_manifest"]["configuration"]["schema_ref"] == \
+        manifest["configuration_schema"]["schema_id"]
+    _validate_plugin_config({"workspace_root": "/tmp/r3a-engineering-workspace"},
+                            manifest["configuration_schema"], "engineering configuration")
+    with pytest.raises(ValueError, match="configuration"):
+        _validate_plugin_config({"workspace_root": "/tmp/workspace", "secret": "forbidden"},
+                                manifest["configuration_schema"], "engineering configuration")
+    incompatible = copy.deepcopy(manifest)
+    incompatible["module_manifest"]["binding"]["protocol_min_minor"] = 1
+    with pytest.raises(ValueError, match="protocol range"):
+        operation_from_manifest(incompatible)
+
+
+def test_provider_environment_forwards_only_manifest_authorized_database_references():
+    package = Path(__file__).resolve().parents[1] / "r3a_plugins/institutional_directory"
+    manifest = json.loads((package / "manifest.json").read_text())
+    operation = operation_from_manifest(manifest)
+    registry = CapabilityRegistry()
+    registered = registry.register(operation, json.loads((package / "config.example.json").read_text()),
+                                   legacy_manifest=manifest)
+    with patch.dict("os.environ", {"R3A_DIRECTORY_POSTGRES_DSN": "directory-secret-reference",
+                                    "R3A_TELEMETRY_DATABASE_DSN": "unrelated-database-secret"}):
+        environment = _module_environment(registered)
+    assert environment["R3A_DIRECTORY_POSTGRES_DSN"] == "directory-secret-reference"
+    assert "R3A_TELEMETRY_DATABASE_DSN" not in environment
+
+
+def test_provider_lifecycle_restores_only_durably_active_modules():
+    async def scenario():
+        operation = SimpleNamespace(descriptor={
+            "operation_id": "institutional.directory.discover",
+            "lifecycle": {"desired_state": "enabled"},
+            "provider": {"provider_id": "r3a.institutional-directory", "provider_version": "1.1.1"},
+        }, legacy_manifest={})
+        class Registry:
+            def __init__(self):
+                self.states = []
+            def discover(self, **_kwargs):
+                return [{"descriptor": operation.descriptor}]
+            def resolve_provider(self, *_args):
+                return operation
+            def set_provider_state(self, *args):
+                self.states.append(args)
+        class Store:
+            def __init__(self, resume):
+                self.resume = resume
+            async def register_module(self, *_args, **_kwargs):
+                return None
+            async def rows(self, *_args, **_kwargs):
+                return [{"lifecycle_state": "STOPPED",
+                         "diagnostic": {"resume_on_start": self.resume}}]
+            async def module_state(self, *_args, **_kwargs):
+                return None
+        manifest = {"module_id": "r3a.institutional-directory", "module_version": "1.1.1",
+                    "protocol_major": 1, "protocol_min_minor": 0, "protocol_max_minor": 0,
+                    "artifact_digest": "a" * 64}
+        for resume, expected in ((True, 1), (False, 0)):
+            registry, store = Registry(), Store(resume)
+            runtime = ProviderProcessManager(SimpleNamespace(), store, registry)
+            runtime._manifest = lambda _operation: manifest
+            runtime.activate = AsyncMock(return_value={"state": "ACTIVE"})
+            await runtime.install_all()
+            assert runtime.activate.await_count == expected
+
+    asyncio.run(scenario())
+
+
+def test_generic_provider_worker_round_trips_typed_output_and_evidence():
+    async def scenario():
+        output = {"schema_id": "knowledge.results.v1", "results": [{"source_id": "knowledge.policy"}]}
+        evidence = [{"evidence_id": "knowledge.policy", "document_sha256": "a" * 64}]
+        worker = CapabilityWorker("r3a.knowledge", "1.1.0", "fixture:create_provider",
+                                  Path("/unused"), "a" * 64)
+        worker.state = "ACTIVE"
+        worker.provider = SimpleNamespace(invoke=lambda _arguments, *, context:
+                                           CapabilityProviderResult(output, evidence))
+        wire = await worker.handle("execute", {"arguments": {"query": "policy"}, "context": {}})
+        assert {"contract_id": "r3a.capability-provider-result.v1",
+                "contract_version": "1.0.0", "output": output, "evidence": evidence} == \
+            wire["provider_result"]
+        json.dumps(wire)
+
+        manager = ProviderProcessManager.__new__(ProviderProcessManager)
+        manager._lock = asyncio.Lock()
+        manager.processes = {}
+        binding = SimpleNamespace(module_id="r3a.knowledge", version="1.1.0",
+                                  socket=Path("/unused"), admission_open=True,
+                                  inflight=0, drained=asyncio.Event())
+        binding.drained.set()
+        manager.processes[(binding.module_id, binding.version)] = binding
+        manager._ensure_active = AsyncMock(return_value=binding)
+        operation = SimpleNamespace(descriptor={"execution": {"timeout_seconds": 2}})
+        with patch("r3a_runtime.provider_runtime.request",
+                   new=AsyncMock(return_value={"result": wire})):
+            restored = await manager.invoke(operation, {"query": "policy"}, context={})
+        assert isinstance(restored, CapabilityProviderResult)
+        assert output == restored.output
+        assert evidence == restored.evidence
+
+    asyncio.run(scenario())
 
 
 def work_order() -> EngineeringWorkOrder:
@@ -121,6 +216,7 @@ class DurableFixtureStore:
         self.invocations = {}
         self.fail_finish_once = True
         self.order_transitions = []
+        self.modules = {}
 
     async def get_engineering_work_order(self, order_id):
         return {"state": self.order_state, "details": {"work_order": self.order.to_dict()}}
@@ -138,7 +234,7 @@ class DurableFixtureStore:
         return copy.deepcopy(value)
 
     async def finish_capability_invocation(self, key, digest, result):
-        if self.fail_finish_once:
+        if self.fail_finish_once and result["outcome"] == "SUCCEEDED":
             self.fail_finish_once = False
             raise RuntimeError("simulated process interruption after provider commit")
         value = self.invocations[key]
@@ -154,8 +250,233 @@ class DurableFixtureStore:
         self.order_transitions.append((state, details, verification))
         return True
 
+    async def rows(self, query, params=()):
+        row = self.modules.get(tuple(params))
+        return ([{"artifact_digest": row["artifact_digest"], "lifecycle_state": row["lifecycle_state"]}]
+                if row else [])
+
+    async def register_module(self, manifest, lifecycle="INSTALLED", health="unknown", diagnostic=None):
+        key = manifest["module_id"], manifest["module_version"]
+        self.modules[key] = {"artifact_digest": manifest["artifact_digest"], "lifecycle_state": lifecycle}
+
+    async def module_state(self, module_id, version, lifecycle, health, diagnostic=None, *, machine_version=1):
+        self.modules[(module_id, version)]["lifecycle_state"] = lifecycle
+
+    async def record_module_replacement(self, module_id, old_version, new_version, *, machine_version=1):
+        pass
+
+
+class ProviderLifecycleFixtureStore:
+    """Lifecycle state/event stand-in for the durable Store module contract."""
+    def __init__(self):
+        self.modules = {}
+        self.transitions = []
+        self.replacements = []
+
+    async def rows(self, query, params=()):
+        row = self.modules.get(tuple(params))
+        if row is None:
+            return []
+        if "artifact_digest" in query:
+            return [{"artifact_digest": row["artifact_digest"], "lifecycle_state": row["lifecycle_state"]}]
+        if "health" in query:
+            return [{"lifecycle_state": row["lifecycle_state"], "health": row["health"],
+                     "observed_at": row["observed_at"], "diagnostic": copy.deepcopy(row["diagnostic"])}]
+        return [{"lifecycle_state": row["lifecycle_state"]}]
+
+    async def register_module(self, manifest, lifecycle="INSTALLED", health="unknown", diagnostic=None):
+        key = manifest["module_id"], manifest["module_version"]
+        prior = self.modules.get(key)
+        if prior and prior["artifact_digest"] != manifest["artifact_digest"]:
+            raise RuntimeError("module version is immutable")
+        self.modules[key] = {"artifact_digest": manifest["artifact_digest"],
+                             "lifecycle_state": prior["lifecycle_state"] if prior else lifecycle,
+                             "health": prior["health"] if prior else health,
+                             "observed_at": None,
+                             "diagnostic": prior["diagnostic"] if prior else copy.deepcopy(diagnostic or {})}
+
+    async def module_state(self, module_id, version, lifecycle, health, diagnostic=None, *, machine_version=1):
+        key = module_id, version
+        row = self.modules[key]
+        previous = row["lifecycle_state"]
+        allowed = {"INSTALLED": {"INSTALLED", "ACTIVATING", "STOPPED", "INCOMPATIBLE"},
+                   "ACTIVATING": {"ACTIVE", "FAILED", "INCOMPATIBLE", "STOPPING"},
+                   "ACTIVE": {"STOPPING", "FAILED", "REPLACING"},
+                   "STOPPING": {"STOPPED", "FAILED"},
+                   "STOPPED": {"ACTIVATING", "REPLACING", "INCOMPATIBLE"},
+                   "FAILED": {"ACTIVATING", "STOPPED", "REPLACING"},
+                   "INCOMPATIBLE": {"ACTIVATING", "STOPPED"},
+                   "REPLACING": {"ACTIVE", "STOPPING", "FAILED", "INCOMPATIBLE"}}
+        if lifecycle != previous and lifecycle not in allowed[previous]:
+            raise ValueError(f"invalid lifecycle transition: {previous} -> {lifecycle}")
+        row["lifecycle_state"] = lifecycle
+        row["health"] = health
+        row["observed_at"] = "fixture-observation"
+        row["diagnostic"] = copy.deepcopy(diagnostic or {})
+        self.transitions.append((key, previous, lifecycle, health, diagnostic or {}))
+
+    async def record_module_replacement(self, module_id, old_version, new_version, *, machine_version=1):
+        self.replacements.append((module_id, old_version, new_version))
+
 
 class IsolatedCapabilityIntegrationTests(unittest.TestCase):
+    def test_registered_engineering_provider_process_can_be_replaced_and_stopped(self):
+        async def scenario(root: Path):
+            bootstrap = make_config(root)
+            config = json.loads(bootstrap.read_text(encoding="utf-8"))
+            engineering_root = Path(__file__).parents[1] / "r3a_plugins/engineering_workspace"
+            engineering_config = root / "engineering-workspace.json"
+            engineering_config.write_text(json.dumps({"workspace_root": str(root)}), encoding="utf-8")
+            telemetry_root = Path(__file__).parents[1] / "r3a_plugins/octominer_telemetry"
+            config["module"]["capabilities"].extend([
+                "engineering.workspace.apply_patch", "infrastructure.octominer.telemetry.read"])
+            config["capability_operations"] = [
+                {"manifest": str(engineering_root / "manifest.json"),
+                 "configuration": str(engineering_config)},
+                {"manifest": str(telemetry_root / "manifest.json"),
+                 "configuration": str(telemetry_root / "config.example.json")},
+            ]
+            bootstrap.write_text(json.dumps(config), encoding="utf-8")
+            settings = load_settings(bootstrap)
+            registry = settings.capability_registry
+            first_registered = registry.resolve_provider("engineering.workspace.apply_patch", "1.0.0")
+            first = first_registered.descriptor
+            first_manifest = copy.deepcopy(first_registered.legacy_manifest)
+            second = copy.deepcopy(first)
+            second["provider"]["provider_version"] = "1.0.1"
+            replacement_artifact = (Path(__file__).parents[1] /
+                                    "r3a_plugins/engineering_workspace/replacement_test_fixture.py")
+            second["provider"]["entrypoint"] = (
+                "r3a_plugins.engineering_workspace.replacement_test_fixture:create_provider")
+            second["provider"]["artifact_sha256"] = hashlib.sha256(
+                replacement_artifact.read_bytes()).hexdigest()
+            second_manifest = copy.deepcopy(first_manifest)
+            second_manifest["plugin_version"] = "1.0.1"
+            second_manifest["artifact_ref"] = "replacement_test_fixture.py"
+            second_manifest["artifact_sha256"] = second["provider"]["artifact_sha256"]
+            second_manifest["supporting_artifacts"] = [{
+                "artifact_ref": "provider.py",
+                "artifact_sha256": first["provider"]["artifact_sha256"]
+            }]
+            second_manifest["provider"].update(second["provider"])
+            second_manifest["operation"]["operation_revision"] = "1.0.1"
+            second_manifest["operation"]["provider"].update(second["provider"])
+            second_manifest["module_manifest"]["module_version"] = "1.0.1"
+            second_manifest["module_manifest"]["binding"]["entrypoint"] = second["provider"]["entrypoint"]
+            second_manifest["module_manifest"]["artifact"] = {
+                "artifact_ref": "replacement_test_fixture.py",
+                "artifact_sha256": second["provider"]["artifact_sha256"]}
+            second = operation_from_manifest(second_manifest)
+            second_manifest["_provider_artifact_path"] = str(replacement_artifact)
+            second_manifest["_pinned_artifact_paths"] = {
+                str(replacement_artifact): second["provider"]["artifact_sha256"],
+                **first_manifest["_pinned_artifact_paths"]}
+            registry.register(second, {"workspace_root": str(root)}, legacy_manifest=second_manifest)
+            with patch.dict("os.environ", {"R3A_TELEMETRY_DATABASE_DSN": "must-not-cross-module-boundary",
+                                            "R3A_OCTOMINER_SSH_HOST": "telemetry-host"}):
+                telemetry = registry.resolve("infrastructure.octominer.telemetry.read")
+                module_env = _module_environment(telemetry)
+            self.assertNotIn("R3A_TELEMETRY_DATABASE_DSN", module_env)
+            self.assertEqual("telemetry-host", module_env["R3A_OCTOMINER_SSH_HOST"])
+            self.assertTrue(telemetry.legacy_manifest["_pinned_artifact_paths"])
+            self.assertTrue(all(len(digest) == 64 and Path(path).is_file()
+                                for path, digest in telemetry.legacy_manifest["_pinned_artifact_paths"].items()))
+            store = ProviderLifecycleFixtureStore()
+            runtime = ProviderProcessManager(settings, store, registry)
+            cme = CME.__new__(CME)
+            cme.settings = settings
+            cme.store = store
+            cme.provider_runtime = runtime
+            telemetry_discovery = await cme._control_request(
+                "capability.discover", {"operation_id": "infrastructure.octominer.telemetry.read"},
+                "discover-telemetry-manifest")
+            self.assertFalse(telemetry_discovery["authorization_evaluated"])
+            self.assertEqual("infrastructure.octominer.telemetry.read",
+                             telemetry_discovery["operations"][0]["descriptor"]["operation_id"])
+            telemetry_install = await cme._control_request(
+                "capability.module.install",
+                {"operation_id": "infrastructure.octominer.telemetry.read"},
+                "install-telemetry-manifest")
+            self.assertTrue(telemetry_install["installed"])
+            install = await cme._control_request(
+                "capability.module.install",
+                {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.0"},
+                "install-engineering-v1")
+            self.assertTrue(install["installed"])
+            install_new = await cme._control_request(
+                "capability.module.install",
+                {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.1"},
+                "install-engineering-v1.0.1")
+            self.assertTrue(install_new["installed"])
+            installed = await store.rows("lifecycle_state", ("r3a.isolated_workspace", "1.0.0"))
+            self.assertEqual("INSTALLED", installed[0]["lifecycle_state"])
+
+            old = registry.resolve_provider("engineering.workspace.apply_patch", "1.0.0")
+            await cme._control_request(
+                "capability.module.activate",
+                {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.0"},
+                "activate-engineering-v1")
+            context = {"invocation_id": "lifecycle-fixture", "effect_class": "isolated_write",
+                       "target": {"workspace_id": "candidate-1"},
+                       "work_order": {"workspace_id": "candidate-1", "allowed_paths": ["artifacts/**"]}}
+            result = await runtime.invoke(old, {"path": "artifacts/result.txt", "content": "R3A module lifecycle\n"}, context)
+            self.assertFalse(result["replayed"])
+
+            replacement = await cme._control_request(
+                "capability.module.replace",
+                {"operation_id": "engineering.workspace.apply_patch",
+                 "old_module_id": "r3a.isolated_workspace", "old_version": "1.0.0",
+                 "new_provider_version": "1.0.1"},
+                "replace-engineering-provider")
+            self.assertTrue(replacement["replaced"])
+            active = registry.resolve("engineering.workspace.apply_patch")
+            self.assertEqual("1.0.1", active.descriptor["provider"]["provider_version"])
+            self.assertNotEqual(first["provider"]["artifact_sha256"],
+                                active.descriptor["provider"]["artifact_sha256"])
+            self.assertEqual("infrastructure.octominer.telemetry.read",
+                             registry.resolve("infrastructure.octominer.telemetry.read").descriptor["operation_id"])
+            replacement_context = {**context, "invocation_id": "replacement-implementation"}
+            replacement_result = await runtime.invoke(
+                active, {"path": "artifacts/replacement.txt", "content": "new implementation\n"},
+                replacement_context)
+            replacement_bytes = b"replacement-provider: new implementation\n"
+            self.assertEqual(hashlib.sha256(replacement_bytes).hexdigest(), replacement_result["sha256"])
+            self.assertEqual(replacement_bytes, (root / "artifacts/replacement.txt").read_bytes())
+            replay = await runtime.invoke(
+                active, {"path": "artifacts/replacement.txt", "content": "new implementation\n"},
+                replacement_context)
+            self.assertTrue(replay["replayed"])
+            stopped = await store.rows("lifecycle_state", ("r3a.isolated_workspace", "1.0.0"))
+            self.assertEqual("STOPPED", stopped[0]["lifecycle_state"])
+            self.assertEqual([("r3a.isolated_workspace", "1.0.0", "1.0.1")], store.replacements)
+            status = await cme._control_request(
+                "capability.module.status",
+                {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.1"},
+                "status-engineering-v1.0.1")
+            self.assertEqual("1.0.1", status["provider_version"])
+            self.assertEqual("ACTIVE", status["module"]["lifecycle_state"])
+            self.assertEqual("healthy", status["module"]["health"])
+            self.assertEqual("fixture-observation", status["module"]["observed_at"])
+            self.assertEqual("r3a.capability-provider.v1",
+                             status["module"]["diagnostic"]["observed_contract"]["contract_id"])
+            await cme._control_request(
+                "capability.module.deactivate",
+                {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.1"},
+                "deactivate-engineering-v1.0.1")
+            stopped_new = await store.rows("lifecycle_state", ("r3a.isolated_workspace", "1.0.1"))
+            self.assertEqual("STOPPED", stopped_new[0]["lifecycle_state"])
+            replacement_states = [state for key, _previous, state, _health, _diagnostic in store.transitions
+                                  if key[0] == "r3a.isolated_workspace"]
+            self.assertIn("REPLACING", replacement_states)
+            self.assertEqual("STOPPED", replacement_states[-1])
+            with self.assertRaisesRegex(ValueError, "provider is stopped"):
+                registry.resolve("engineering.workspace.apply_patch")
+            self.assertEqual("infrastructure.octominer.telemetry.read",
+                             registry.resolve("infrastructure.octominer.telemetry.read").descriptor["operation_id"])
+
+        with tempfile.TemporaryDirectory(prefix="r3a-provider-lifecycle-") as temporary:
+            asyncio.run(scenario(Path(temporary)))
+
     def test_cme_discovery_exposes_registered_operations_without_authorizing(self):
         async def scenario():
             registered_descriptor = descriptor()
@@ -212,8 +533,8 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 "activity_id": ACTIVITY, "attempt_id": ATTEMPT, "correlation_id": CORRELATION,
                 "work_order": None, "evidence_purpose": "Read one registered capability fixture.",
                 "idempotency_key": None, "deadline": None, "config_revision": "cfg-demo"}
-            from r3a_runtime.providers import isolated_workspace
-            with patch.object(isolated_workspace, "create_provider", return_value=Reader()):
+            from r3a_plugins.engineering_workspace import provider as engineering_provider
+            with patch.object(engineering_provider, "create_provider", return_value=Reader()):
                 result = await instance._control_request(
                     "capability.invoke", {"request": request}, "control-idempotency")
             self.assertEqual("SUCCEEDED", result["outcome"])
@@ -248,6 +569,8 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             instance = CME.__new__(CME)
             instance.settings = SimpleNamespace(capability_registry=registry, source_digest="cfg-demo")
             instance.store = DurableFixtureStore(order)
+            instance.settings.data_dir = root / "r3a-data"
+            instance.provider_runtime = ProviderProcessManager(instance.settings, instance.store, registry)
             artifact = root / "artifacts/result.txt"
             authorization_observed = []
             async def authorize(*args, **kwargs):
@@ -293,6 +616,7 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             await instance.complete_engineering_work_order(order, verifier)
             self.assertEqual(["VERIFYING", "COMPLETED"], [x[0] for x in instance.store.order_transitions])
             self.assertEqual("PASS", instance.store.order_transitions[-1][2].outcome)
+            await instance.provider_runtime.close()
 
         with tempfile.TemporaryDirectory(prefix="r3a-capability-demo-") as temporary:
             asyncio.run(scenario(Path(temporary)))

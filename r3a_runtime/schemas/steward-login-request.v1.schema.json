@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.steward-login-request.v1",
+  "title": "R3A Steward login and governed enrollment request",
+  "type": "object",
+  "oneOf": [
+    {
+      "properties": {"intent": {"const": "login"}, "login_name": {"$ref": "#/$defs/loginName"}, "password": {"$ref": "#/$defs/password"}},
+      "required": ["intent", "login_name", "password"],
+      "additionalProperties": false
+    },
+    {
+      "properties": {"intent": {"const": "enroll"}, "login_name": {"$ref": "#/$defs/loginName"}, "password": {"$ref": "#/$defs/newPassword"}, "challenge": {"$ref": "#/$defs/challenge"}},
+      "required": ["intent", "login_name", "password", "challenge"],
+      "additionalProperties": false
+    },
+    {
+      "properties": {"intent": {"const": "recover"}, "login_name": {"$ref": "#/$defs/loginName"}, "password": {"$ref": "#/$defs/newPassword"}, "challenge": {"$ref": "#/$defs/challenge"}},
+      "required": ["intent", "login_name", "password", "challenge"],
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "loginName": {"type": "string", "minLength": 3, "maxLength": 254, "pattern": "^[A-Za-z0-9][A-Za-z0-9._@+-]{2,253}$"},
+    "password": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "newPassword": {"type": "string", "minLength": 14, "maxLength": 1024},
+    "challenge": {"type": "string", "minLength": 32, "maxLength": 128}
+  }
+}

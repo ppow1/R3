@@ -7,7 +7,7 @@
   "additionalProperties": false,
   "properties": {
     "contract_id": {"const": "r3a.capability-operation.v1"},
-    "contract_version": {"const": "1.0.0"},
+    "contract_version": {"enum": ["1.0.0", "1.1.0"]},
     "operation_id": {"type": "string", "pattern": "^[a-z][a-z0-9._:-]{2,127}$"},
     "operation_revision": {"type": "string", "minLength": 1},
     "provider": {
@@ -21,7 +21,7 @@
     },
     "input_schema": {"type": "object"},
     "output_schema": {"type": "object"},
-    "effect_class": {"type": "string", "enum": ["read", "isolated_write", "external_write"]},
+    "effect_class": {"type": "string", "enum": ["read", "isolated_write", "external_write", "steward_read", "steward_write"]},
     "caller_constraints": {
       "type": "object", "required": ["allowed_principals", "allowed_residents", "allowed_services"], "additionalProperties": false,
       "properties": {

@@ -171,6 +171,7 @@ class InstitutionalDirectoryProviderTests(unittest.TestCase):
         query, parameters = next((query, params) for query, params in self.fixture.statements
                                  if "office_bindings" in query)
         self.assertIn("%(resident_id)s", query)
+        self.assertIn("%(resident_id)s::text IS NULL", query)
         self.assertEqual("resident:grace", parameters["resident_id"])
         self.assertEqual(1, parameters["limit"])
 
@@ -181,19 +182,21 @@ class InstitutionalDirectoryProviderTests(unittest.TestCase):
         instance.settings = SimpleNamespace(capability_registry=registry,
                                             module_capabilities=(self.descriptor["operation_id"],),
                                             source_digest="cfg-directory-test")
-        instance._authorize_capability = AsyncMock(return_value={
-            "provider_id": "capability_grants", "decision_id": "directory-decision",
-            "audit_event_id": "directory-audit", "policy_revision": None,
-            "config_revision": "cfg-directory-test"})
-
-        class Provider:
-            def invoke(inner, arguments, *, context):
-                return self.provider.invoke(arguments, context=context)
-
-        provider_patch = patch.object(type(registry.resolve(self.descriptor["operation_id"])),
-                                      "load_provider", return_value=Provider())
+        instance.module_id = "resident.grace"
         env = patch.dict(os.environ, {"R3A_DIRECTORY_POSTGRES_DSN": "fixture"})
-        with env, provider_patch:
+        with env:
+            raw = self.provider.invoke({}, context={})
+            output, evidence = normalize_provider_result(raw, self.descriptor)
+            instance.invoke_capability = AsyncMock(return_value={
+                "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+                "invocation_id": "directory-invocation", "operation_id": self.descriptor["operation_id"],
+                "operation_contract_version": self.descriptor["contract_version"],
+                "provider": self.descriptor["provider"], "outcome": "SUCCEEDED",
+                "started_at": "2026-11-08T01:00:00Z", "finished_at": "2026-11-08T01:00:01Z",
+                "output": output, "evidence": evidence,
+                "authorization": {"provider_id": "capability_grants", "allowed": True,
+                                   "decision_id": "directory-decision", "audit_event_id": "directory-audit",
+                                   "policy_revision": None, "config_revision": "cfg-directory-test"}})
             result = __import__("asyncio").run(instance._invoke_resident_capability(
                 {"activity_id": "activity-1", "attempt_id": "attempt-1", "correlation_id": "corr-1"},
                 {"contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
@@ -203,7 +206,14 @@ class InstitutionalDirectoryProviderTests(unittest.TestCase):
         self.assertIn("engineering.assignment.execute",
                       {row["capability_id"] for row in result["output"]["capabilities"]})
         self.assertEqual("riverview_authority.directory", result["evidence"][0]["source_id"])
+        self.assertTrue(result["evidence"][0]["source_path"].startswith("capability."))
+        self.assertEqual(hashlib.sha256(result["evidence"][0]["content"].encode()).hexdigest(),
+                         result["evidence"][0]["sha256"])
+        self.assertEqual(64, len(result["evidence"][0]["source_sha256"]))
         self.assertTrue(result["authorization"]["audit_event_id"])
+        instance.invoke_capability.assert_awaited_once()
+        self.assertEqual("r3a.capability-invocation.v1",
+                         instance.invoke_capability.await_args.args[0]["contract_id"])
 
 
 if __name__ == "__main__":

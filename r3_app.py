@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.18
+# File Revision: 1.0.21
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Serve visual estate UI and authenticated, canonical R3A Steward API adapters
@@ -24,6 +24,10 @@
 # Changed: 2026-11-07T23:55:00Z | R3A-010 | Codex GPT-6 | Replace temporary bearer checks with the shared AP3 opaque session and version the objective result.
 # Changed: 2026-11-08T13:30:00Z | R3A-WEB-IDENTITY | Codex GPT-6 | Expose startup-captured build/version/environment identity for the Steward website.
 # Changed: 2026-11-08T14:30:00Z | R3A-010/#49/#51 | Codex GPT-6 | Publish an externally configured, same-host existing portal login URL in website identity metadata.
+# Changed: 2026-11-09T18:10:00Z | AP3/R3A-010 | R3A Coordinator | Add a same-origin native R3A login entry and suppress R3 portal discovery in native mode.
+# Changed: 2026-11-09T19:57:00Z | AP3/R3A-010-LIVE-LOGIN | R3A Coordinator | Route the R3A origin to native login and return authenticated users to the integrated workspace.
+# Changed: 2026-11-09T20:25:00Z | R3A-WEBSITE-WIDE-AUTH | R3A Coordinator | Enforce the shared Website session on engineering inventory and snapshot APIs.
+# Dependencies: web/steward-login.html; web/steward-login.js; independent AP3 native identity configuration.
 
 """R3 first vertical slice: shared read-only capabilities, not UI-owned logic.
 
@@ -45,11 +49,12 @@ import json
 import logging
 import re
 import urllib.parse
+from types import SimpleNamespace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 from fastapi import FastAPI, HTTPException, Body, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 ROOT = Path(os.environ.get("R3_REPO", Path(__file__).resolve().parent)).resolve()
@@ -95,7 +100,9 @@ def website_identity(request: Request):
     # The browser must visit the existing account portal on the same host so
     # its HttpOnly rv_account_session cookie is shared with this Website. Keep
     # the URL deployment-configured and reject cross-host/open-redirect values.
-    portal_url = os.environ.get("R3_STEWARD_PORTAL_LOGIN_URL", "").strip()
+    portal_url = (os.environ.get("R3_STEWARD_PORTAL_LOGIN_URL", "").strip()
+                  if os.environ.get("R3_WEBSITE_AUTH_MODE", "legacy").strip().lower() != "r3a-native"
+                  else "")
     parsed_portal_url = urllib.parse.urlsplit(portal_url) if portal_url else None
     if (parsed_portal_url and parsed_portal_url.scheme in {"http", "https"}
             and parsed_portal_url.hostname == request.url.hostname
@@ -143,9 +150,15 @@ async def _steward_settings(request: Request):
     """Validate the shared AP3 cookie session and resolve external R3A runtime settings."""
     config_path = os.environ.get("R3A_CONFIG")
     access = getattr(app.state, "steward_access", None)
-    if not access or not config_path:
-        raise HTTPException(503, "Steward operations are unavailable: shared AP3 session or runtime configuration is missing")
+    if not access:
+        raise HTTPException(503, "Steward operations are unavailable: shared AP3 session configuration is missing")
     await access.authenticated_principal(request, "steward.r3a.read_or_submit")
+    if not config_path:
+        access_config = getattr(access, "config", {})
+        socket_path = access_config.get("cme", {}).get("control_socket") if isinstance(access_config, dict) else None
+        if not isinstance(socket_path, str) or not Path(socket_path).is_absolute():
+            raise HTTPException(503, "Steward operations are unavailable: configured CME socket is missing")
+        return SimpleNamespace(control_socket=socket_path, diagnostics_socket=socket_path)
     try:
         from r3a_runtime.config import load_settings
         return load_settings(config_path)
@@ -153,14 +166,143 @@ async def _steward_settings(request: Request):
         raise HTTPException(503, f"R3A runtime configuration unavailable: {type(exc).__name__}") from exc
 
 
+async def _steward_principal(request: Request, action: str = "steward.r3a.read_or_submit"):
+    access = getattr(app.state, "steward_access", None)
+    if not access:
+        raise HTTPException(503, "Steward operations are unavailable: shared AP3 session is missing")
+    principal = await access.authenticated_principal(request, action)
+    return principal
+
+
+class StewardConversationCreate(BaseModel):
+    resident_id: str = Field(min_length=1, max_length=256)
+    client_conversation_id: str
+
+
+class StewardConversationMessage(BaseModel):
+    client_message_id: str
+    text: str = Field(min_length=1, max_length=2000)
+
+
+async def _website_control_request(request: Request, principal: dict, operation: str,
+                                   payload: dict, idempotency_key: str | None = None):
+    settings = await _steward_settings(request)
+    from r3a_runtime.control import control_request
+    try:
+        result = await control_request(settings.control_socket, operation,
+                                       {**payload, "principal_id": principal["principal_id"]},
+                                       idempotency_key=idempotency_key, timeout=8.0)
+        return {**result, "resource_contract": result.get("contract"),
+                "contract": "r3a.steward-workspace-web.v1"}
+    except RuntimeError as exc:
+        if str(exc).startswith("PermissionError:"):
+            raise HTTPException(403, "Steward operation denied") from exc
+        if "previous Grace turn is still processing" in str(exc):
+            raise HTTPException(409, "Grace is still processing the previous turn") from exc
+        if str(exc).startswith(("ValueError:", "LookupError:")):
+            raise HTTPException(422, "Steward request is invalid or unavailable") from exc
+        raise HTTPException(503, "Managed CME operation is unavailable") from exc
+    except Exception as exc:
+        raise HTTPException(503, f"Managed CME operation unavailable: {type(exc).__name__}") from exc
+
+
+@app.get("/api/v1/steward/residents")
+async def steward_residents(request: Request):
+    principal = await _steward_principal(request)
+    return await _website_control_request(request, principal, "steward.residents.discover", {},
+                                          f"website-residents:{principal['principal_id']}:{uuid.uuid4()}")
+
+
+@app.get("/api/v1/steward/conversations")
+async def steward_conversations(request: Request, resident_id: str):
+    if not resident_id or len(resident_id) > 256:
+        raise HTTPException(422, "resident_id is invalid")
+    principal = await _steward_principal(request)
+    return await _website_control_request(request, principal, "steward.conversation.list",
+                                          {"resident_id": resident_id})
+
+
+@app.post("/api/v1/steward/conversations", status_code=201)
+async def steward_create_conversation(body: StewardConversationCreate, request: Request):
+    principal = await _steward_principal(request)
+    try:
+        uuid.UUID(body.client_conversation_id)
+    except ValueError as exc:
+        raise HTTPException(422, "client_conversation_id must be a UUID") from exc
+    return await _website_control_request(
+        request, principal, "steward.conversation.create",
+        {"resident_id": body.resident_id,
+         "client_conversation_id": body.client_conversation_id},
+        f"website-conversation:{principal['principal_id']}:{body.client_conversation_id}")
+
+
+@app.get("/api/v1/steward/conversations/{conversation_id}/messages")
+async def steward_conversation_messages(conversation_id: str, request: Request):
+    principal = await _steward_principal(request)
+    try:
+        uuid.UUID(conversation_id)
+    except ValueError as exc:
+        raise HTTPException(422, "conversation_id must be a UUID") from exc
+    return await _website_control_request(request, principal, "steward.conversation.messages",
+                                          {"conversation_id": conversation_id})
+
+
+@app.post("/api/v1/steward/conversations/{conversation_id}/messages", status_code=202)
+async def steward_send_conversation_message(conversation_id: str, body: StewardConversationMessage,
+                                            request: Request):
+    principal = await _steward_principal(request, "steward.r3a.read_or_submit")
+    try:
+        uuid.UUID(conversation_id)
+        uuid.UUID(body.client_message_id)
+    except ValueError as exc:
+        raise HTTPException(422, "conversation_id and client_message_id must be UUIDs") from exc
+    return await _website_control_request(
+        request, principal, "steward.conversation.send",
+        {"conversation_id": conversation_id, "client_message_id": body.client_message_id,
+         "text": body.text},
+        f"website-message:{conversation_id}:{body.client_message_id}")
+
+
 @app.get("/api/v1/steward/r3a/status")
 async def steward_r3a_status(request: Request):
     settings = await _steward_settings(request)
     from r3a_runtime.control import control_request
     try:
-        return await control_request(settings.diagnostics_socket, "status", timeout=4.0)
+        return await control_request(settings.control_socket, "diagnostics.status", timeout=4.0)
     except Exception as exc:
         raise HTTPException(503, f"R3A diagnostics unavailable: {type(exc).__name__}") from exc
+
+
+@app.get("/api/v1/steward/about")
+async def steward_about(request: Request):
+    """Read-only, authenticated version and health projection for Settings/About."""
+    settings = await _steward_settings(request)
+    from r3a_runtime.control import control_request
+    try:
+        runtime = await control_request(settings.control_socket, "diagnostics.status", timeout=4.0)
+    except Exception as exc:
+        raise HTTPException(503, f"Managed runtime status unavailable: {type(exc).__name__}") from exc
+    modules = [{key: module.get(key) for key in
+                ("module_id", "module_version", "lifecycle_state", "health", "observed_at", "freshness")}
+               for module in runtime.get("modules", []) if isinstance(module, dict)]
+    processes = {item.get("component_id"): {
+        "state": item.get("state"), "health": item.get("health"),
+        "freshness": item.get("freshness"), "heartbeat_at": item.get("heartbeat_at")}
+        for item in runtime.get("processes", []) if isinstance(item, dict)}
+    grace = next((module for module in modules if module["module_id"] == "resident.grace"
+                  and module["lifecycle_state"] == "ACTIVE"), None)
+    return {"contract": "r3a.website-about.v1", "contract_version": "1.0.0",
+            "observed_at": runtime.get("observed_at"),
+            "integration_source_revision": os.environ.get("R3A_INTEGRATION_SOURCE_REVISION") or WEBSITE_BUILD_COMMIT,
+            "deployed_runtime_revision": runtime.get("implementation_revision"),
+            "website_build_revision": WEBSITE_BUILD_COMMIT,
+            "website_version": WEBSITE_BUILD_VERSION or "unknown",
+            "ring0": processes.get("ring0", {"health": "unknown"}),
+            "cme": processes.get("cme", {"health": "unknown"}),
+            "grace": {"module_id": "resident.grace",
+                      "version": grace.get("module_version") if grace else None,
+                      "health": grace.get("health") if grace else "unavailable"},
+            "modules": modules, "freshness": runtime.get("source_freshness", "unknown")}
 
 
 @app.get("/api/v1/steward/r3a/events")
@@ -168,7 +310,7 @@ async def steward_r3a_events(request: Request):
     settings = await _steward_settings(request)
     from r3a_runtime.control import control_request
     try:
-        return await control_request(settings.diagnostics_socket, "events", timeout=4.0)
+        return await control_request(settings.control_socket, "diagnostics.events", timeout=4.0)
     except Exception as exc:
         raise HTTPException(503, f"R3A event history unavailable: {type(exc).__name__}") from exc
 
@@ -179,8 +321,8 @@ async def steward_r3a_configuration(request: Request):
     from r3a_runtime.control import control_request
     try:
         current, history = await asyncio.gather(
-            control_request(settings.diagnostics_socket, "status", timeout=4.0),
-            control_request(settings.diagnostics_socket, "events", timeout=4.0),
+            control_request(settings.control_socket, "diagnostics.status", timeout=4.0),
+            control_request(settings.control_socket, "diagnostics.events", timeout=4.0),
         )
     except Exception as exc:
         raise HTTPException(503, f"R3A configuration diagnostics unavailable: {type(exc).__name__}") from exc
@@ -224,7 +366,9 @@ async def submit_grace_objective(request: GraceObjectiveRequest, http_request: R
 async def steward_no_store_headers(request, call_next):
     response = await call_next(request)
     if (request.url.path.startswith("/api/v1/steward/")
-            or request.url.path.startswith("/api/v1/notifications")):
+            or request.url.path.startswith("/api/v1/notifications")
+            or request.url.path.startswith("/api/v1/engineering/")
+            or request.url.path.startswith("/api/v1/snapshot")):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -252,16 +396,19 @@ def health():
     return {"service": "r3", "status": "running", "repository_present": (ROOT / ".git").exists(),
             "artwork_directory_present": ART.is_dir()}
 
-@app.get("/api/v1/engineering/branches")
-def branches():
+def _branch_inventory():
     lines = git("for-each-ref", "--format=%(refname:short)%09%(objectname)%09%(committerdate:iso8601)", "refs/heads/")
     return {"repository": "R3", "branches": [
         {"name": parts[0], "commit": parts[1], "last_commit_at": parts[2]}
         for line in lines.splitlines() if len(parts := line.split("\t")) == 3
     ], "activity_note": "Commit recency does not establish an active worker"}
 
-@app.get("/api/v1/engineering/worktrees")
-def worktrees():
+@app.get("/api/v1/engineering/branches")
+async def branches(request: Request):
+    await _steward_principal(request)
+    return _branch_inventory()
+
+def _worktree_inventory():
     raw = git("worktree", "list", "--porcelain")
     entries = []
     for block in raw.split("\n\n"):
@@ -270,6 +417,11 @@ def worktrees():
             entries.append({"path": fields["worktree"], "commit": fields.get("HEAD"),
                             "branch": fields.get("branch"), "locked": "locked" in block})
     return {"worktrees": entries, "activity_note": "A checked-out worktree is not proof of active execution"}
+
+@app.get("/api/v1/engineering/worktrees")
+async def worktrees(request: Request):
+    await _steward_principal(request)
+    return _worktree_inventory()
 
 LATEST_BROWSER_CAPTURE = None
 
@@ -299,6 +451,12 @@ VISUAL_NAME = "Riverview3_Visual_Concept_Library/backgrounds/R3_modern_estate_cl
 
 @app.get("/")
 def visual_home():
+    if os.environ.get("R3_WEBSITE_AUTH_MODE", "legacy").strip().lower() == "r3a-native":
+        return RedirectResponse("/login", status_code=302, headers={
+            "Cache-Control": "no-store",
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
+        })
     page = ROOT / "web" / "index.html"
     if not page.is_file():
         raise HTTPException(404, "Visual prototype not installed")
@@ -324,16 +482,42 @@ def resident_avatar_module():
 
 @app.get("/steward")
 def steward_access_page():
-    """Serve the same-origin mobile-friendly Steward access interface."""
-    page = ROOT / "web" / "steward.html"
+    """Serve the integrated Website workspace in native mode, else legacy AP3 access UI."""
+    native_mode = os.environ.get("R3_WEBSITE_AUTH_MODE", "legacy").strip().lower() == "r3a-native"
+    page = ROOT / "web" / ("index.html" if native_mode else "steward.html")
     if not page.is_file():
         raise HTTPException(404, "Steward access interface unavailable")
+    headers = {
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if not native_mode:
+        headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    return FileResponse(page, media_type="text/html", headers=headers)
+
+
+@app.get("/login")
+def native_steward_login_page():
+    """Serve the same-origin R3A credential and governed enrollment form."""
+    page = ROOT / "web" / "steward-login.html"
+    if not page.is_file():
+        raise HTTPException(404, "Steward login interface unavailable")
     return FileResponse(page, media_type="text/html", headers={
         "Cache-Control": "no-store",
         "Referrer-Policy": "no-referrer",
         "X-Content-Type-Options": "nosniff",
         "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
     })
+
+
+@app.get("/web/steward-login.js")
+def native_steward_login_script():
+    script = ROOT / "web" / "steward-login.js"
+    if not script.is_file():
+        raise HTTPException(404, "Steward login interface unavailable")
+    return FileResponse(script, media_type="text/javascript", headers={
+        "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"})
 
 
 @app.get("/web/steward.js")
@@ -406,8 +590,8 @@ def _base_snapshot():
             "background_rendering": "cover",
         },
         "engineering": {
-            "branches": branches()["branches"],
-            "worktrees": worktrees()["worktrees"],
+            "branches": _branch_inventory()["branches"],
+            "worktrees": _worktree_inventory()["worktrees"],
         },
         "privacy": {
             "credentials": "excluded",
@@ -460,17 +644,19 @@ def _validate_browser_capture(payload):
 
 
 @app.get("/api/v1/snapshot")
-def snapshot():
+async def snapshot(request: Request):
     """Return a bounded read-only snapshot, including the latest browser capture if available."""
+    await _steward_principal(request)
     result = _base_snapshot()
     result["browser"] = LATEST_BROWSER_CAPTURE or {"status": "not captured"}
     return result
 
 
 @app.post("/api/v1/snapshot")
-def capture_snapshot(browser: dict = Body(...)):
+async def capture_snapshot(request: Request, browser: dict = Body(...)):
     """Accept one bounded browser geometry capture and expose it through the snapshot API."""
     global LATEST_BROWSER_CAPTURE
+    await _steward_principal(request, "steward.website.snapshot.write")
     LATEST_BROWSER_CAPTURE = _validate_browser_capture(browser)
     result = _base_snapshot()
     result["browser"] = LATEST_BROWSER_CAPTURE

@@ -1,0 +1,113 @@
+{
+  "contract_id": "r3a.notification-module-config",
+  "contract_version": "1.1.0",
+  "dsn_env": "R3A_NOTIFICATION_MODULE_DSN",
+  "source_token_env": "R3A_NOTIFICATION_SOURCE_TOKEN",
+  "steward_token_env": "R3A_NOTIFICATION_STEWARD_TOKEN",
+  "steward_principal_env": "R3A_NOTIFICATION_STEWARD_PRINCIPAL",
+  "presentation_timezone": "America/New_York",
+  "website_base_url_env": "R3A_NOTIFICATION_WEBSITE_BASE_URL",
+  "source_ids": [
+    "r3a.institution-events"
+  ],
+  "subscriptions": [
+    {
+      "category": "resident_objective_completed",
+      "event_type": "activity.completed",
+      "urgency": "low",
+      "requires_action": false,
+      "filter": {
+        "activity_type": "grace.objective"
+      },
+      "recipient": {
+        "kind": "steward",
+        "office_role": "Steward"
+      }
+    },
+    {
+      "category": "resident_objective_blocked",
+      "event_type": "activity.blocked",
+      "urgency": "high",
+      "requires_action": true,
+      "filter": {
+        "activity_type": "grace.objective"
+      },
+      "recipient": {
+        "kind": "steward",
+        "office_role": "Steward"
+      }
+    },
+    {
+      "category": "independent_verification_failed",
+      "event_type": "engineering.verification.completed",
+      "urgency": "high",
+      "requires_action": true,
+      "filter": {
+        "evidence_equals": {
+          "outcome": "FAIL"
+        }
+      },
+      "recipient": {
+        "kind": "steward",
+        "office_role": "Steward"
+      }
+    },
+    {
+      "category": "steward_approval_required",
+      "event_type": "steward.approval.required",
+      "urgency": "high",
+      "requires_action": true,
+      "recipient": {
+        "kind": "steward",
+        "office_role": "Steward"
+      }
+    },
+    {
+      "category": "service_or_capability_unavailable",
+      "event_type": "process.failed",
+      "urgency": "critical",
+      "requires_action": true,
+      "recipient": {
+        "kind": "steward",
+        "office_role": "Steward"
+      }
+    },
+    {
+      "category": "service_or_capability_unavailable",
+      "event_type": "capability.unavailable",
+      "urgency": "high",
+      "requires_action": true,
+      "recipient": {
+        "kind": "steward",
+        "office_role": "Steward"
+      }
+    },
+    {
+      "category": "resident_delegation_completed",
+      "event_type": "resident.delegation.completed",
+      "urgency": "normal",
+      "requires_action": false,
+      "recipient": {
+        "kind": "steward",
+        "office_role": "Steward"
+      }
+    },
+    {
+      "category": "service_state_changed",
+      "event_type": "process.state_transition",
+      "urgency": "low",
+      "requires_action": false,
+      "filter": {
+        "evidence_equals": {
+          "prior_state": "STARTING",
+          "next_state": "RUNNING"
+        }
+      },
+      "recipient": {
+        "kind": "steward",
+        "office_role": "Steward"
+      }
+    }
+  ],
+  "ntfy": {"enabled": false}
+}

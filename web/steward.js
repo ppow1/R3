@@ -2,16 +2,17 @@
 R3 CONTROLLED SOURCE
 File: web/steward.js
 Component: R3A-AP3-STEWARD-ACCESS
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-07T21:46:03Z
 Created By: Codex GPT-6
-Purpose: Drive the same-origin Steward session, status, logout, and authorized operation controls.
+Purpose: Drive the same-origin Steward session, status, logout, authorized operation controls, and native login handoff.
 Execution Model: Browser-side fetch with same-origin credentials and no persistent bearer-token storage.
 Observability: Renders session freshness, service state, and correlated operation evidence as text.
 Dependencies: /api/v1/steward/session; /api/v1/steward/status; /api/v1/steward/operations/invoke.
 Authority: AP3-M1 Issue #49; CSP allows same-origin scripts only.
 Changed: 2026-11-07T21:46:03Z | AP3-M1 | Codex GPT-6 | Move controls to a same-origin script for a restrictive CSP.
 Changed: 2026-11-07T21:48:11Z | AP3-M1 | Codex GPT-6 | Show measured CME health in the session status line.
+Changed: 2026-11-09T18:10:00Z | AP3/R3A-010 | R3A Coordinator | Send new sign-in requests to the native R3A login interface.
 Supersedes: None.
 Contracts: r3a.steward-session.v1; r3a.steward-operation-result.v1; r3a.steward-access-status.v1.
 Tests: tests/test_r3a_steward_access.py; mobile transport verification awaits configured ingress.
@@ -40,14 +41,7 @@ async function refresh() {
   }
 }
 
-$('begin').addEventListener('click', async () => {
-  try {
-    show(await call('/api/v1/steward/session', {method: 'POST'}));
-    await refresh();
-  } catch (error) {
-    show({state: 'authentication_denied_or_unavailable', status: error.status || null});
-  }
-});
+$('begin').addEventListener('click', () => window.location.assign('/login'));
 $('refresh').addEventListener('click', refresh);
 $('end').addEventListener('click', async () => {
   try {

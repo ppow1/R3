@@ -43,6 +43,33 @@ class CapabilityContractTests(unittest.TestCase):
         self.assertEqual(self.descriptor["operation_id"], request["operation_id"])
         self.assertEqual("SUCCEEDED", result["outcome"])
 
+    def test_direct_principal_read_uses_grant_checked_lineage_without_fake_activity(self):
+        directory_manifest = json.loads(
+            (ROOT / "r3a_plugins/institutional_directory/manifest.json").read_text())
+        descriptor = operation_from_manifest(directory_manifest)
+        request = {
+            "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
+            "invocation_id": "directory-read-1", "operation_id": descriptor["operation_id"],
+            "operation_contract_version": descriptor["contract_version"],
+            "caller": {"principal_id": "steward:camrui", "resident_id": None, "service_id": None},
+            "target": {}, "input": {"limit": 250}, "activity_id": None, "attempt_id": None,
+            "correlation_id": "00000000-0000-4000-8000-000000000001", "work_order": None,
+            "budget_reservation": None, "evidence_purpose": "Discover chat-enabled residents",
+            "idempotency_key": "website-directory-read", "deadline": None,
+            "config_revision": "b" * 64,
+        }
+        checked = validate_invocation_request(request, descriptor)
+        self.assertEqual("steward:camrui", checked["caller"]["principal_id"])
+        self.assertIsNone(checked["activity_id"])
+        self.assertIsNone(checked["attempt_id"])
+
+        # The direct-read exception is principal scoped and read-only. It does not
+        # weaken lineage requirements for a provider service or a resident caller.
+        request["caller"] = {"principal_id": "service:website", "resident_id": None,
+                             "service_id": "website"}
+        with self.assertRaisesRegex(CapabilityContractError, "activity_id and attempt_id"):
+            validate_invocation_request(request, descriptor)
+
     def test_registry_discovers_without_grant_and_resolves_provider_interface(self):
         discovered = self.registry.discover()
         self.assertEqual(1, len(discovered))

@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/config.py
 Component: R3A-BOOTSTRAP-CONFIG
-File Revision: 1.6.0
+File Revision: 1.8.1
 Created: 2026-11-06T15:04:00Z
 Created By: Codex GPT-6
 Purpose: Strictly validate external R3A AP0-M1 bootstrap and operating settings.
@@ -21,9 +21,13 @@ Changed: 2026-11-07 | R3A-PLUG-001 | Codex GPT-6 | Load versioned capability plu
 Changed: 2026-11-07 | R3A-PLUG-002 | Codex GPT-6 | Validate plug-in configuration against each manifest's portable schema, without capability-specific host validation.
 Changed: 2026-11-07 | R3A-AP2-ESCALATED-REASONING | Codex GPT-6 | Add externally configured v1 escalation policy with per-activity request and completion-token budgets.
 Changed: 2026-11-07 | R3A-AP1-MODEL-ROUTING | Codex GPT-6 | Bind configured model roles to task classes and reject cross-class fallback.
+Changed: 2026-11-07 | R3A-AP1-N1 | Codex GPT-6 | Add externally configured versioned service-event notification sources.
+Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Preserve immutable provider-version registrations and pass resolved pinned artifact paths to the generic CME binding.
+Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | R3A Coordinator | Resolve module dependency ranges and reject missing providers or cycles.
+Changed: 2026-11-08 | R3A-CONTEXT-RECOVERY | R3A Coordinator | Configure route context windows while preserving legacy configuration digests.
 Supersedes: None.
 Contracts: AP0-001/008/009; R3A-019; Issue #46; AP0-M1 D7; r3a_runtime.contracts; hints/file-provenance.md.
-Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py.
+Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_context_recovery.py; tests/test_r3a_octominer_plugin.py.
 History/Predecessor: Git blob 189c6ef7ef3821f9140bddbeac8d04c177ca32ac at commit ad16700f1e94dd36c81cac5383f9f2e2771a98a1.
 """
 from __future__ import annotations
@@ -38,6 +42,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+from .timestamp_presentation import (DEFAULT_PRESENTATION_TIMEZONE,
+                                    TimestampPresentationError, resolve_timezone)
+
+from .module_contracts import validate_dependency_graph
 
 
 class ConfigurationError(ValueError):
@@ -52,6 +60,7 @@ class ModelRoute:
     model: str
     timeout_seconds: float
     max_tokens: int
+    context_window_tokens: int = 16384
 
 
 @dataclass(frozen=True)
@@ -97,6 +106,20 @@ class ReasoningEscalationPolicy:
     allowed_role_ids: tuple[str, ...]
     max_requests_per_activity: int
     max_completion_tokens_per_activity: int
+
+
+@dataclass(frozen=True)
+class NotificationSourceSettings:
+    source_id: str
+    adapter: str
+    enabled: bool
+    event_types: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ResidentOfficeRoute:
+    office_role: str
+    model_role_id: str
 
 
 def resolve_model_route(routes: tuple[ModelRoute, ...], default_route: str,
@@ -261,6 +284,9 @@ class Settings:
     authorization_provider: AuthorizationProviderSettings
     knowledge_sources: tuple[Path, ...]
     capability_registry: Any
+    notification_sources: tuple[NotificationSourceSettings, ...]
+    resident_office_routes: tuple[ResidentOfficeRoute, ...]
+    presentation_timezone: str = DEFAULT_PRESENTATION_TIMEZONE
 
     def model_route(self, route_id: str | None = None) -> ModelRoute:
         return resolve_model_route(self.model_routes, self.default_model_route, route_id)
@@ -272,6 +298,16 @@ class Settings:
         role = next((item for item in self.model_roles if item.role_id == role_id), None)
         if role is None or task_class not in role.task_classes:
             raise ConfigurationError(f"Configured model role does not serve task class: {task_class}")
+        return role
+
+    def model_role_for_office(self, office_role: str) -> ModelRole:
+        binding = next((item for item in self.resident_office_routes
+                        if item.office_role == office_role), None)
+        if binding is None:
+            raise ConfigurationError(f"No resident execution route is configured for directory office role: {office_role}")
+        role = next((item for item in self.model_roles if item.role_id == binding.model_role_id), None)
+        if role is None or "objective_reasoning" not in role.task_classes:
+            raise ConfigurationError(f"Resident execution model role is not configured for office role: {office_role}")
         return role
 
     @property
@@ -299,15 +335,57 @@ def load_settings(path: str | Path) -> Settings:
     if not isinstance(value, dict):
         raise ConfigurationError("bootstrap config must be a JSON object")
     expected_root = {"schema_version", "instance_id", "paths", "postgres", "module", "timing"}
-    extra = value.keys() - expected_root - {"grace", "authorization", "capability_plugins", "capability_operations"}
+    extra = value.keys() - expected_root - {
+        "grace", "authorization", "capability_plugins", "capability_operations", "notification_intake",
+        "resident_execution", "presentation_timezone"}
     missing = expected_root - value.keys()
     if missing or extra:
         raise ConfigurationError(f"root keys invalid; missing={sorted(missing)}, unknown={sorted(extra)}")
+    notification_sources = ()
+    if "notification_intake" in value:
+        intake = value["notification_intake"]
+        if not isinstance(intake, dict):
+            raise ConfigurationError("notification_intake must be an object")
+        _keys(intake, {"contract_id", "contract_version", "sources"}, "notification_intake")
+        if (intake["contract_id"] != "r3a.notification-intake"
+                or intake["contract_version"] != "1.0.0"):
+            raise ConfigurationError("unsupported notification intake configuration contract")
+        if not isinstance(intake["sources"], list):
+            raise ConfigurationError("notification_intake.sources must be an array")
+        sources = []
+        source_ids = set()
+        for index, item in enumerate(intake["sources"]):
+            where = f"notification_intake.sources[{index}]"
+            if not isinstance(item, dict):
+                raise ConfigurationError(f"{where} must be an object")
+            _keys(item, {"source_id", "adapter", "enabled", "event_types"}, where)
+            source_id = _text(item["source_id"], f"{where}.source_id")
+            if (len(source_id) > 150 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", source_id)
+                    or source_id in source_ids):
+                raise ConfigurationError(f"{where}.source_id must be unique and contract-safe")
+            source_ids.add(source_id)
+            adapter = _text(item["adapter"], f"{where}.adapter")
+            if adapter != "institution_events.v1":
+                raise ConfigurationError(f"{where}.adapter is unsupported")
+            if not isinstance(item["enabled"], bool):
+                raise ConfigurationError(f"{where}.enabled must be boolean")
+            event_types = item["event_types"]
+            if (not isinstance(event_types, list) or
+                    any(not isinstance(event_type, str) or not event_type.strip() for event_type in event_types)
+                    or len(set(event_types)) != len(event_types)):
+                raise ConfigurationError(f"{where}.event_types must be a unique text array")
+            sources.append(NotificationSourceSettings(source_id, adapter, item["enabled"], tuple(event_types)))
+        notification_sources = tuple(sources)
     if value["schema_version"] != 1:
         raise ConfigurationError("schema_version must equal 1")
     instance_id = _text(value["instance_id"], "instance_id")
     if not instance_id.startswith("r3a_") or not instance_id.replace("_", "").isalnum():
         raise ConfigurationError("instance_id must use the isolated r3a_<name> form")
+    presentation_timezone = value.get("presentation_timezone", DEFAULT_PRESENTATION_TIMEZONE)
+    try:
+        resolve_timezone(presentation_timezone)
+    except TimestampPresentationError as exc:
+        raise ConfigurationError(f"presentation_timezone is invalid: {exc}") from exc
 
     paths = value["paths"]
     if not isinstance(paths, dict):
@@ -418,7 +496,8 @@ def load_settings(path: str | Path) -> Settings:
             where = f"grace.routes[{index}]"
             if not isinstance(item, dict):
                 raise ConfigurationError(f"{where} must be an object")
-            _keys(item, {"route_id", "provider", "endpoint", "model", "timeout_seconds", "max_tokens"}, where)
+            route_keys = {"route_id", "provider", "endpoint", "model", "timeout_seconds", "max_tokens"}
+            _keys(item, route_keys | ({"context_window_tokens"} & item.keys()), where)
             route_id = _text(item["route_id"], f"{where}.route_id")
             if not re.fullmatch(r"[A-Za-z0-9._-]+", route_id) or route_id in route_ids:
                 raise ConfigurationError(f"{where}.route_id must be unique and use letters, numbers, dot, underscore or hyphen")
@@ -432,7 +511,13 @@ def load_settings(path: str | Path) -> Settings:
             max_tokens = item["max_tokens"]
             if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or not 64 <= max_tokens <= 512:
                 raise ConfigurationError(f"{where}.max_tokens must be an integer from 64 through 512")
-            parsed_routes.append(ModelRoute(route_id, provider, endpoint, model, timeout, max_tokens))
+            context_window = item.get("context_window_tokens", 16384)
+            if (isinstance(context_window, bool) or not isinstance(context_window, int)
+                    or not 1024 <= context_window <= 1_000_000 or context_window <= max_tokens):
+                raise ConfigurationError(
+                    f"{where}.context_window_tokens must exceed max_tokens and be from 1024 through 1000000")
+            parsed_routes.append(ModelRoute(route_id, provider, endpoint, model, timeout, max_tokens,
+                                            context_window))
         if default_model_route not in route_ids:
             raise ConfigurationError("grace.default_route must identify a configured route")
         model_routes = tuple(parsed_routes)
@@ -621,6 +706,40 @@ def load_settings(path: str | Path) -> Settings:
             reasoning_escalation = ReasoningEscalationPolicy(
                 contract_id, contract_version, enabled, grant, tuple(allowed), max_requests, max_tokens)
 
+    resident_office_routes: tuple[ResidentOfficeRoute, ...] = ()
+    resident_execution = value.get("resident_execution")
+    if resident_execution is not None:
+        if not isinstance(resident_execution, dict):
+            raise ConfigurationError("resident_execution must be an object")
+        _keys(resident_execution, {"contract_id", "contract_version", "office_role_routes"},
+              "resident_execution")
+        if (resident_execution["contract_id"] != "r3a.resident.execution-routing"
+                or resident_execution["contract_version"] != "1.0.0"):
+            raise ConfigurationError("resident_execution contract is unsupported")
+        raw_office_routes = resident_execution["office_role_routes"]
+        if not isinstance(raw_office_routes, list):
+            raise ConfigurationError("resident_execution.office_role_routes must be an array")
+        role_ids = {role.role_id for role in model_roles}
+        parsed_office_routes: list[ResidentOfficeRoute] = []
+        seen_office_roles: set[str] = set()
+        for index, item in enumerate(raw_office_routes):
+            where = f"resident_execution.office_role_routes[{index}]"
+            if not isinstance(item, dict):
+                raise ConfigurationError(f"{where} must be an object")
+            _keys(item, {"office_role", "model_role_id"}, where)
+            office_role = _text(item["office_role"], f"{where}.office_role")
+            model_role_id = _text(item["model_role_id"], f"{where}.model_role_id")
+            if office_role in seen_office_roles:
+                raise ConfigurationError(f"{where}.office_role must be unique")
+            if model_role_id not in role_ids:
+                raise ConfigurationError(f"{where}.model_role_id must reference a configured model role")
+            model_role = next(role for role in model_roles if role.role_id == model_role_id)
+            if "objective_reasoning" not in model_role.task_classes:
+                raise ConfigurationError(f"{where}.model_role_id must serve objective_reasoning")
+            seen_office_roles.add(office_role)
+            parsed_office_routes.append(ResidentOfficeRoute(office_role, model_role_id))
+        resident_office_routes = tuple(parsed_office_routes)
+
     authorization = value.get("authorization", {"provider_id": "capability_grants",
                                                     "contract_version": "1.0.0", "options": {}})
     if not isinstance(authorization, dict):
@@ -644,7 +763,9 @@ def load_settings(path: str | Path) -> Settings:
     from .capability_contracts import (CapabilityContractError, CapabilityRegistry,
                                        operation_from_manifest)
     capability_registry = CapabilityRegistry()
-    plugin_ids: set[str] = set()
+    plugin_ids: set[tuple[str, str, str]] = set()
+    configured_provider_versions: dict[str, set[str]] = {}
+    declared_module_dependencies: list[tuple[str, dict[str, Any]]] = []
     if "capability_plugins" in value and "capability_operations" in value:
         raise ConfigurationError("use one capability_operations registry input; capability_plugins is a compatibility alias")
     raw_plugins = value.get("capability_operations", value.get("capability_plugins", []))
@@ -667,7 +788,8 @@ def load_settings(path: str | Path) -> Settings:
         if not isinstance(manifest, dict):
             raise ConfigurationError(f"{where}.manifest must contain an object")
         optional_manifest = {"supporting_artifacts", "operation", "provider", "contract_id",
-                             "contract_version", "capability_id", "tool", "entrypoint", "read_only"}
+                             "contract_version", "capability_id", "tool", "entrypoint", "read_only",
+                             "module_manifest"}
         _keys(manifest, required_manifest | (optional_manifest & manifest.keys()),
               f"{where}.manifest")
         if manifest["schema_version"] != 1:
@@ -701,6 +823,7 @@ def load_settings(path: str | Path) -> Settings:
             raise ConfigurationError(f"{where}.supporting_artifacts must be an array")
         seen_support: set[str] = set()
         pinned_digests = {artifact_digest}
+        artifact_paths = {artifact_digest: artifact_path}
         for support in support_files:
             if not isinstance(support, dict) or set(support) != {"artifact_ref", "artifact_sha256"}:
                 raise ConfigurationError(f"{where}.supporting_artifacts entry is invalid")
@@ -715,20 +838,45 @@ def load_settings(path: str | Path) -> Settings:
                     or hashlib.sha256(support_path.read_bytes()).hexdigest() != support_hash):
                 raise ConfigurationError(f"{where} supporting artifact digest does not match")
             pinned_digests.add(support_hash)
+            artifact_paths[support_hash] = support_path
         try:
             operation = operation_from_manifest(manifest)
             operation_id = operation["operation_id"]
             capability_id = manifest.get("capability_id", operation_id)
-            if capability_id in plugin_ids or capability_id not in capabilities:
-                raise CapabilityContractError("operation_id must be unique and explicitly declared in module.capabilities")
+            provider = operation["provider"]
+            configured_provider_versions.setdefault(provider["provider_id"], set()).add(
+                provider["provider_version"])
+            module_manifest = manifest.get("module_manifest")
+            if module_manifest is not None:
+                if set(module_manifest["capability_refs"]) - set(capabilities):
+                    raise CapabilityContractError(
+                        "module manifest declares a capability outside module.capabilities")
+                declared_module_dependencies.append((where, module_manifest))
+            plugin_identity = (capability_id, provider["provider_id"], provider["provider_version"])
+            if plugin_identity in plugin_ids or capability_id not in capabilities:
+                raise CapabilityContractError("operation provider version must be unique and operation_id declared in module.capabilities")
             if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", capability_id):
                 raise CapabilityContractError("operation_id is invalid")
             if operation["provider"]["artifact_sha256"] not in pinned_digests:
                 raise CapabilityContractError("operation provider digest must pin a declared artifact")
+            # Internal resolved path is carried only to the CME binding layer; it is not
+            # an external manifest field and never becomes an authorization decision.
+            manifest["_provider_artifact_path"] = str(artifact_paths[operation["provider"]["artifact_sha256"]])
+            # The worker protocol accepts {artifact_path: expected_digest}; keep
+            # this map distinct from the digest->Path lookup used during loading.
+            manifest["_pinned_artifact_paths"] = {str(path): digest
+                                                  for digest, path in artifact_paths.items()}
             capability_registry.register(operation, plugin_config, legacy_manifest=manifest)
         except (CapabilityContractError, KeyError, TypeError) as exc:
             raise ConfigurationError(f"{where}.manifest operation contract is invalid: {exc}") from exc
-        plugin_ids.add(capability_id)
+        plugin_ids.add(plugin_identity)
+
+    try:
+        validate_dependency_graph(
+            configured_provider_versions,
+            [manifest for _where, manifest in declared_module_dependencies])
+    except ValueError as exc:
+        raise ConfigurationError(f"Module dependency contract is invalid: {exc}") from exc
 
     timing = value["timing"]
     if not isinstance(timing, dict):
@@ -792,6 +940,9 @@ def load_settings(path: str | Path) -> Settings:
         authorization_provider=authorization_provider,
         knowledge_sources=knowledge_sources,
         capability_registry=capability_registry,
+        notification_sources=notification_sources,
+        resident_office_routes=resident_office_routes,
+        presentation_timezone=presentation_timezone,
     )
 
 
@@ -808,6 +959,7 @@ def sanitized_config(settings: Settings) -> dict[str, Any]:
     """Return non-secret effective values suitable for durable config history."""
     return {
         "instance_id": settings.instance_id,
+        "presentation_timezone": settings.presentation_timezone,
         "database": {"name": settings.database, "user": settings.database_user,
                      "socket_dir": str(settings.database_socket_dir), "port": settings.database_port},
         "paths": {"data_dir": str(settings.data_dir), "control_socket": str(settings.control_socket),
@@ -822,10 +974,22 @@ def sanitized_config(settings: Settings) -> dict[str, Any]:
         "authorization": {"provider_id": settings.authorization_provider.provider_id,
                           "contract_version": settings.authorization_provider.contract_version,
                           "options": _redact_provider_options(settings.authorization_provider.options)},
+        "notification_intake": {"contract_id": "r3a.notification-intake", "contract_version": "1.0.0",
+                                "sources": [{"source_id": source.source_id, "adapter": source.adapter,
+                                             "enabled": source.enabled,
+                                             "event_types": list(source.event_types)}
+                                            for source in settings.notification_sources]},
+        "resident_execution": {"contract_id": "r3a.resident.execution-routing",
+                               "contract_version": "1.0.0",
+                               "office_role_routes": [{"office_role": route.office_role,
+                                                       "model_role_id": route.model_role_id}
+                                                      for route in settings.resident_office_routes]},
         "grace": ({"default_route": settings.default_model_route,
                    "routes": [{"route_id": route.route_id, "provider": route.provider,
                                "endpoint": route.endpoint, "model": route.model,
-                               "timeout_seconds": route.timeout_seconds, "max_tokens": route.max_tokens}
+                               "timeout_seconds": route.timeout_seconds, "max_tokens": route.max_tokens,
+                               **({"context_window_tokens": route.context_window_tokens}
+                                  if route.context_window_tokens != 16384 else {})}
                               for route in settings.model_routes],
                    "knowledge_sources": [str(path) for path in settings.knowledge_sources],
                    "role_registry": ({"schema_version": 1, "default_role": settings.default_model_role,

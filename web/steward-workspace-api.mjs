@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: web/steward-workspace-api.js
 Component: R3A-STEWARD-WORKSPACE-CLIENT
-File Revision: 1.0.5
+File Revision: 1.0.10
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Same-origin client for versioned resident conversation and notification contracts
@@ -15,6 +15,11 @@ Changed: 2026-11-08 | R3A-007/R3A-010 | Show exact unmounted API state and rende
 Changed: 2026-11-08 | #48/#51 | Render canonical notification details, recipient lifecycle, service deep links, and cursor-paged history.
 Changed: 2026-11-08 | #49/#51 | Refresh directory on shared session establishment and clear resident conversation view on revocation/401.
 Changed: 2026-11-08 | #51 | Gate creation on current resident selection and expose request progress accessibly.
+Changed: 2026-11-09 | R3A-WEBSITE-WIDE-AUTH | R3A Coordinator | Inherit global Website authentication, redirect expired sessions, and remove chat sign-in/session activation controls.
+Changed: 2026-11-09 | R3A-LOGIN-REDIRECT-LOOP | R3A Coordinator | Recheck only the canonical session after operation 401; preserve authenticated Website navigation on scoped denials.
+Changed: 2026-11-09 | R3A-STEWARD-CHAT-ROSTER | R3A Coordinator | Render all dynamic roster rows and disable chat when the current response does not establish availability.
+Changed: 2026-11-09 | R3A-STEWARD-CHAT-READINESS | R3A Coordinator | Show the evidence-backed route or authorization reason for disabled roster entries.
+Changed: 2026-11-10 | #51 | Keep loaded history visible during polling and pause refresh after a bounded wait.
 Tests: tests/test_steward_workspace_api.mjs uses mocked fetch only as a labeled development test
 */
 
@@ -74,6 +79,34 @@ export function notificationPresentation(notification, timezone = '') {
   };
 }
 
+export function residentProgressLabel(displayName) {
+  const name = typeof displayName === 'string' && displayName.trim()
+    ? displayName.trim()
+    : 'Selected resident';
+  return `${name} is working on this turn through managed CME…`;
+}
+
+export function conversationHistoryLoadingLabel(isInitialLoad) {
+  return isInitialLoad ? 'Loading durable conversation history…' : null;
+}
+
+export function conversationPollState(polls, maxPolls = 20) {
+  const continuePolling = Number.isInteger(polls) && polls <= maxPolls;
+  return {
+    continuePolling,
+    message: continuePolling
+      ? 'Resident is working on this turn through managed CME…'
+      : 'This turn is still processing. Automatic refresh is paused; reload the conversation to check again.',
+  };
+}
+
+export function residentChatStatusLabel(resident) {
+  if (resident?.chat_available === true) return 'chat available';
+  if (resident?.chat_status === 'required_execution_grant_missing') return 'chat unavailable · execution authorization missing';
+  if (resident?.chat_status === 'office_role_route_unavailable') return 'chat unavailable · no configured office route';
+  return 'chat unavailable · eligibility not confirmed';
+}
+
 export class StewardWorkspaceApi {
   constructor(fetchImpl = globalThis.fetch) {
     if (typeof fetchImpl !== 'function') throw new TypeError('A fetch implementation is required');
@@ -99,6 +132,7 @@ export class StewardWorkspaceApi {
     if (!response.ok) {
       const code = payload.error?.code || payload.code || (response.status === 401 ? 'session_required' : 'request_failed');
       const message = payload.error?.message || payload.detail || `Workspace request failed (${response.status})`;
+      if (response.status === 401) globalThis.window?.r3aCheckWebsiteSession?.();
       throw new WorkspaceApiError(message, {status: response.status, code, correlationId});
     }
     if (contract && payload.contract !== contract) {
@@ -108,7 +142,6 @@ export class StewardWorkspaceApi {
   }
 
   session({signal} = {}) { return this.request('/api/v1/steward/session', {signal, contract: 'r3a.steward-session.v1'}); }
-  startSession({signal} = {}) { return this.request('/api/v1/steward/session', {method: 'POST', signal, contract: 'r3a.steward-session.v1'}); }
   endSession({signal} = {}) { return this.request('/api/v1/steward/session', {method: 'DELETE', signal, contract: 'r3a.steward-session.v1'}); }
   accessStatus({signal} = {}) { return this.request('/api/v1/steward/status', {signal, contract: 'r3a.steward-access-status.v1'}); }
   capabilityDiscovery({signal} = {}) { return this.request('/api/v1/steward/capabilities', {signal, contract: 'r3a.steward-capability-discovery.v1'}); }
@@ -180,48 +213,34 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   let loaded = false;
   let directoryAvailable = false;
   let creatingConversation = false;
-  const authorizedResidentIds = new Set();
+  const chatAvailableResidentIds = new Set();
+  const residentNames = new Map();
   let pendingConversationId = null;
   let pendingMessage = null;
   const newConversationButton = root.getElementById('chat-new');
+  const processingPolls = new Map();
+  const maxProcessingPolls = 20;
   function syncNewConversationButton() {
-    newConversationButton.disabled = !directoryAvailable || !selectedResident || !authorizedResidentIds.has(selectedResident) || creatingConversation;
+    newConversationButton.disabled = !directoryAvailable || !selectedResident || !chatAvailableResidentIds.has(selectedResident) || creatingConversation;
     newConversationButton.setAttribute('aria-busy', String(creatingConversation));
-    newConversationButton.title = creatingConversation ? 'Conversation creation in progress' : newConversationButton.disabled ? 'Select an authorized resident from the current directory' : 'Start a persistent conversation with the selected resident';
+    newConversationButton.title = creatingConversation ? 'Conversation creation in progress' : newConversationButton.disabled ? 'Select a resident whose current directory record is available for chat' : 'Start a persistent conversation with the selected resident';
   }
 
   const unavailable = error => {
     const message = error instanceof WorkspaceApiError ? error.message : 'Resident conversation service unavailable';
     const missing = error?.status === 404 ? 'Authoritative resident directory and conversation APIs are not mounted on this website service. ' : '';
-    setText(status, `${error?.status === 401 ? 'Sign in through the Steward session service. ' : missing}${message}${error?.correlationId ? ` · correlation ${error.correlationId}` : ''}`);
-    status.dataset.state = error?.status === 401 ? 'unauthenticated' : 'unavailable';
+    setText(status, `${error?.status === 401 ? 'This request was unauthorized (401); checking Website session separately. ' : missing}${message}${error?.correlationId ? ` · correlation ${error.correlationId}` : ''}`);
+    status.dataset.state = error?.status === 401 ? 'unauthorized' : 'unavailable';
     if (error?.status === 401) {
-      directoryAvailable = false;
-      loaded = false;
-      selectedResident = '';
-      selectedConversation = '';
-      pendingMessage = null;
-      composer.value = '';
-      residentSelect.disabled = true;
-      residentSelect.replaceChildren(new Option('Sign in to load residents', ''));
-      conversationList.replaceChildren();
-      messageList.replaceChildren();
-      composer.disabled = true;
-      sendButton.disabled = true;
-      syncNewConversationButton();
-      const signIn = root.createElement('button');
-      signIn.type = 'button';
-      signIn.className = 'chat-sign-in';
-      signIn.textContent = 'Open Steward sign-in';
-      signIn.setAttribute('aria-label', 'Open the shared Steward session panel to sign in');
-      signIn.addEventListener('click', () => root.getElementById('nav-steward')?.click());
-      status.appendChild(signIn);
+      globalThis.window?.r3aCheckWebsiteSession?.();
     }
   };
 
   async function loadMessages(conversationId) {
+    const changingConversation = selectedConversation !== conversationId;
     selectedConversation = conversationId;
-    setText(messageList, 'Loading durable conversation history…');
+    const loadingLabel = conversationHistoryLoadingLabel(changingConversation || !messageList.childNodes.length);
+    if (loadingLabel) setText(messageList, loadingLabel);
     try {
       const result = await api.messages(conversationId);
       messageList.replaceChildren();
@@ -233,10 +252,31 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
         messageList.appendChild(item);
       }
       if (!messageList.childNodes.length) setText(messageList, 'This conversation has no messages yet.');
-      setText(status, `History loaded from service · ${result.freshness || 'freshness unknown'}`);
-      status.dataset.state = result.freshness || 'unknown';
-      composer.disabled = false;
-      sendButton.disabled = false;
+      const processing = (result.messages || []).some(message => message.sender?.kind === 'steward' && message.delivery_state === 'processing');
+      const failed = (result.messages || []).some(message => message.sender?.kind === 'steward' && message.delivery_state === 'blocked');
+      composer.disabled = processing;
+      sendButton.disabled = processing;
+      if (processing) {
+        const polls = (processingPolls.get(conversationId) || 0) + 1;
+        processingPolls.set(conversationId, polls);
+        const pollState = conversationPollState(polls, maxProcessingPolls);
+        if (pollState.continuePolling) {
+          setText(status, residentProgressLabel(residentNames.get(selectedResident)));
+          setTimeout(() => { if (selectedConversation === conversationId) loadMessages(conversationId); }, 1500);
+        } else {
+          setText(status, pollState.message);
+          status.dataset.state = 'processing-timeout';
+        }
+      } else if (failed) {
+        processingPolls.delete(conversationId);
+        setText(status, 'Grace could not complete this turn. The service returned an explicit blocked result.');
+        status.dataset.state = 'blocked';
+      } else {
+        processingPolls.delete(conversationId);
+        setText(status, `History loaded from service · ${result.freshness || 'freshness unknown'}`);
+        status.dataset.state = result.freshness || 'unknown';
+      }
+      return result.messages || [];
     } catch (error) { unavailable(error); setText(messageList, 'History unavailable; no local transcript is shown.'); }
   }
 
@@ -262,29 +302,40 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     if (loaded) return;
     loaded = true;
     directoryAvailable = false;
-    authorizedResidentIds.clear();
+    chatAvailableResidentIds.clear();
+    residentNames.clear();
     selectedResident = '';
     syncNewConversationButton();
     residentSelect.disabled = true;
-    residentSelect.replaceChildren(new Option('Loading authorized residents…', ''));
+    residentSelect.replaceChildren(new Option('Loading institutional resident roster…', ''));
     try {
       const result = await api.residents();
       directoryAvailable = true;
       residentSelect.replaceChildren(new Option('Select a resident…', ''));
+      let unavailableCount = 0;
       for (const resident of result.residents || []) {
-        if (!resident.resident_id || resident.authorized === false) continue;
-        authorizedResidentIds.add(resident.resident_id);
-        residentSelect.add(new Option(resident.display_name || resident.resident_id, resident.resident_id));
+        if (!resident.resident_id) continue;
+        const chatAvailable = resident.chat_available === true;
+        if (chatAvailable) chatAvailableResidentIds.add(resident.resident_id);
+        else unavailableCount += 1;
+        residentNames.set(resident.resident_id, resident.display_name || resident.resident_id);
+        const onboarding = resident.onboarding_status || 'unknown';
+        const readiness = residentChatStatusLabel(resident);
+        const option = new Option(`${resident.display_name || resident.resident_id} · ${readiness} · onboarding ${onboarding}`, resident.resident_id);
+        option.disabled = !chatAvailable;
+        residentSelect.add(option);
       }
-      residentSelect.disabled = false;
+      residentSelect.disabled = !residentSelect.options.length;
       syncNewConversationButton();
-      setText(status, result.freshness === 'current' ? 'Resident directory loaded from the institutional directory.' : `Directory source ${result.freshness || 'unknown'}`);
+      setText(status, result.freshness === 'current'
+        ? `Institutional resident roster loaded · ${unavailableCount} resident(s) currently unavailable for chat.`
+        : `Directory source ${result.freshness || 'unknown'}`);
       status.dataset.state = result.freshness || 'unknown';
-      if (!residentSelect.options.length) setText(status, 'No authorized residents were returned by the institutional directory.');
+      if (!residentSelect.options.length) setText(status, 'The institutional directory returned no resident records.');
     } catch (error) {
       loaded = false;
       directoryAvailable = false;
-      residentSelect.replaceChildren(new Option(error?.status === 401 ? 'Sign in to load residents' : 'Resident directory unavailable', ''));
+      residentSelect.replaceChildren(new Option('Resident directory unavailable', ''));
       residentSelect.disabled = true;
       syncNewConversationButton();
       unavailable(error);
@@ -330,13 +381,13 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
       setText(status, `Message accepted by service · ${result.message.delivery_state || 'state unknown'}${result.correlation_id ? ` · correlation ${result.correlation_id}` : ''}`);
       await loadMessages(selectedConversation);
     } catch (error) { unavailable(error); }
-    finally { sendButton.disabled = !selectedConversation; }
+    finally { sendButton.disabled = !selectedConversation || composer.disabled; }
   });
   root.getElementById('nav-chat')?.addEventListener('click', () => loadResidents());
   root.addEventListener?.('r3:steward-session-established', () => {
     loaded = false; directoryAvailable = false; selectedResident = ''; selectedConversation = '';
-    pendingConversationId = null; pendingMessage = null; authorizedResidentIds.clear();
-    residentSelect.disabled = true; residentSelect.replaceChildren(new Option('Loading authorized residents…', ''));
+    pendingConversationId = null; pendingMessage = null; chatAvailableResidentIds.clear();
+    residentSelect.disabled = true; residentSelect.replaceChildren(new Option('Loading institutional resident roster…', ''));
     conversationList.replaceChildren(); messageList.replaceChildren(); composer.value = '';
     composer.disabled = true; sendButton.disabled = true; syncNewConversationButton();
     loadResidents();
@@ -344,8 +395,8 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   root.addEventListener?.('r3:steward-session-revoked', () => {
     loaded = false; directoryAvailable = false; selectedResident = ''; selectedConversation = '';
     pendingConversationId = null; pendingMessage = null; composer.value = '';
-    authorizedResidentIds.clear(); residentSelect.disabled = true;
-    residentSelect.replaceChildren(new Option('Sign in to load residents', ''));
+    chatAvailableResidentIds.clear(); residentSelect.disabled = true;
+    residentSelect.replaceChildren(new Option('Website session required', ''));
     conversationList.replaceChildren(); messageList.replaceChildren();
     composer.disabled = true; sendButton.disabled = true; syncNewConversationButton();
     setText(status, 'Steward session revoked · conversation data cleared from this view.'); status.dataset.state = 'unauthenticated';
@@ -354,6 +405,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     if (selectedResident && directoryAvailable) loadConversations();
     else { loaded = false; loadResidents(); }
   });
+  if (root.documentElement?.dataset.r3aAuthVerified === 'true') loadResidents();
 }
 
 export function mountNotificationInbox({api = new StewardWorkspaceApi(), root = document} = {}) {
@@ -465,8 +517,8 @@ export function mountNotificationInbox({api = new StewardWorkspaceApi(), root = 
       if (!append) list.replaceChildren();
       if (olderControl) olderControl.disabled = false;
       const unavailable = error.status === 404 ? 'Recipient notification inbox API is not mounted on this website service. ' : '';
-      setText(status, `${error.status === 401 ? 'Sign in through the Steward session service. ' : unavailable}${append ? 'Older notification history unavailable; previously loaded records are retained. ' : ''}${error.message}${error.correlationId ? ` · correlation ${error.correlationId}` : ''}`);
-      status.dataset.state = error.status === 401 ? 'unauthenticated' : 'unavailable';
+      setText(status, `${error.status === 401 ? 'This notification request was unauthorized (401); Website session is checked separately. ' : unavailable}${append ? 'Older notification history unavailable; previously loaded records are retained. ' : ''}${error.message}${error.correlationId ? ` · correlation ${error.correlationId}` : ''}`);
+      status.dataset.state = error.status === 401 ? 'unauthorized' : 'unavailable';
     }
   }
   root.getElementById('nav-notifications')?.addEventListener('click', refresh);
