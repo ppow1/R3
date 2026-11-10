@@ -183,6 +183,20 @@ class InstitutionalDirectoryProviderTests(unittest.TestCase):
                                             module_capabilities=(self.descriptor["operation_id"],),
                                             source_digest="cfg-directory-test")
         instance.module_id = "resident.grace"
+        instance.invoke_capability = AsyncMock()
+        request = {"contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
+                   "capability_id": self.descriptor["operation_id"], "arguments": {}}
+        activity = {"activity_id": "activity-1", "attempt_id": "attempt-1", "correlation_id": "corr-1"}
+        with self.assertRaisesRegex(PermissionError, "without an execution adapter"):
+            __import__("asyncio").run(instance._invoke_resident_capability(activity, request))
+        instance.invoke_capability.assert_not_awaited()
+
+        # This success path explicitly observes the registered provider as active
+        # and supplies CME's invocation adapter below. Registration alone is not
+        # treated as an executable provider.
+        provider = self.descriptor["provider"]
+        registry.set_provider_state(provider["provider_id"], provider["provider_version"], "ACTIVE",
+                                    {"health": "healthy", "evidence_ref": "test://provider-health"})
         env = patch.dict(os.environ, {"R3A_DIRECTORY_POSTGRES_DSN": "fixture"})
         with env:
             raw = self.provider.invoke({}, context={})
@@ -197,10 +211,7 @@ class InstitutionalDirectoryProviderTests(unittest.TestCase):
                 "authorization": {"provider_id": "capability_grants", "allowed": True,
                                    "decision_id": "directory-decision", "audit_event_id": "directory-audit",
                                    "policy_revision": None, "config_revision": "cfg-directory-test"}})
-            result = __import__("asyncio").run(instance._invoke_resident_capability(
-                {"activity_id": "activity-1", "attempt_id": "attempt-1", "correlation_id": "corr-1"},
-                {"contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
-                 "capability_id": self.descriptor["operation_id"], "arguments": {}}))
+            result = __import__("asyncio").run(instance._invoke_resident_capability(activity, request))
         self.assertEqual("succeeded", result["outcome"])
         self.assertEqual("r3a.institutional-directory.v1", result["output"]["schema_id"])
         self.assertIn("engineering.assignment.execute",

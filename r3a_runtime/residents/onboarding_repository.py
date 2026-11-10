@@ -109,7 +109,7 @@ class PostgresResidentOnboardingRepository:
 def _create_request(packet: dict[str, Any]) -> dict[str, Any]:
     """Compare only immutable request semantics during a create retry."""
     return {key: packet.get(key) for key in (
-        "packet_id", "create_idempotency_key", "resident_id", "request_context", "created_at")}
+        "packet_id", "create_idempotency_key", "request_context", "created_at")}
 
 
 def _event_request(event: dict[str, Any]) -> dict[str, Any]:

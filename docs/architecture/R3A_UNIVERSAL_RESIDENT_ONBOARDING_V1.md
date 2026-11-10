@@ -12,7 +12,7 @@ Authority: Steward directives in R3 Issue #58 comments 6768560524 and 6769020176
 Changed: 2026-11-10 | R3A-UNIVERSAL-RESIDENT-ONBOARDING | Codex GPT-6 | Specify reusable resident lifecycle packet and explicit external blockers.
 Supersedes: Narrow Vicky-only onboarding objective in the original Issue #58 body.
 Contracts: r3a.resident.onboarding-packet.v1; resident.onboarding machine v1.
-Tests: tests/test_r3a_resident_onboarding.py.
+Tests: tests/test_r3a_resident_onboarding.py; tests/test_r3a_resident_onboarding_postgres.py; tests/test_r3a_institutional_directory.py.
 History/Predecessor: Extends transfer record R3A_HR_VICKY_TRANSFER_MATRIX_2026-11-10.md.
 -->
 # Universal R3A resident onboarding packet and workflow v1
@@ -84,4 +84,4 @@ The synthetic Analyst fixture and tests create two different packets through the
 
 ## Deployment and acceptance boundary
 
-Source tests do not authorize or prove migration application, live HR reads/writes, directory writes, resident credentials, effective grants, module activation, Website chat, or live inference. Coordinator must review the additive migration/role grants and compose the service with authenticated R3A principal and authorization resolvers. HR must publish its personnel/appointment and resident-binding procedures plus the provenance writer. Security must identify resident credential/grant provisioning. Jessica/Character Architecture must provide its authoritative approval refs. Auditor review and Steward activation follow only after those evidence sources are available.
+The permanent integration test applies the current migration stack through 019 to a dedicated PostgreSQL 16.15 test database, exercises 019 rollback/re-upgrade and repository transaction/idempotency/revision/uniqueness/privacy behavior, and confirms populated-data rollback is refused. It is gated by `R3A_TEST_ONBOARDING_DSN` and rejects database names without `r3a_onboarding_test_` or nonlocal endpoints. These tests do not authorize or prove shared migration application, live HR reads/writes, directory writes, resident credentials, effective grants, module activation, Website chat, or live inference. Coordinator must review the additive migration/rollback and DB role grants, then compose the service with authenticated R3A principal and authorization resolvers. HR must publish its personnel/appointment and resident-binding procedures plus the provenance writer. Security must identify resident credential/grant provisioning. Jessica/Character Architecture must provide its authoritative approval refs. Auditor review and Steward activation follow only after those evidence sources are available.
