@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_capability_integration_demo.py
 Component: R3A-CAPABILITY-INTEGRATION-REGRESSION
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Verify canonical CME invocation, idempotent recovery, and independently gated completion.
@@ -12,10 +12,11 @@ Dependencies: r3a_runtime.capability_contracts; r3a_runtime.cme.
 Authority: R3 Alpha AP2 capability integration and escalation continuity.
 Changed: 2026-11-07 | AP2-ESCALATED-REASONING | Codex GPT-6 | Distinguish first invocation creation from ambiguous recovery in the non-replayable path.
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Exercise AP0-M1 provider process installation, activation, immutable version replacement, replay, and deactivation.
+Changed: 2026-11-10T01:35:58Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify generic executor and activity-handler declarations survive registration, replacement, activation, and deactivation.
 Supersedes: None.
 Contracts: r3a.capability-invocation.v1; r3a.engineering-work-order.v1; r3a.verification-result.v1; module.lifecycle v2.
 Tests: This test module.
-History/Predecessor: Existing AP2 capability integration regression.
+History/Predecessor: Existing AP2 capability integration regression; prior tracked blob 10dc99eb14a2d7365d71a8db84af131ed605c4e2.
 """
 from __future__ import annotations
 
@@ -293,7 +294,8 @@ class ProviderLifecycleFixtureStore:
                              "lifecycle_state": prior["lifecycle_state"] if prior else lifecycle,
                              "health": prior["health"] if prior else health,
                              "observed_at": None,
-                             "diagnostic": prior["diagnostic"] if prior else copy.deepcopy(diagnostic or {})}
+                             "diagnostic": prior["diagnostic"] if prior else copy.deepcopy(diagnostic or {}),
+                             "manifest": copy.deepcopy(manifest)}
 
     async def module_state(self, module_id, version, lifecycle, health, diagnostic=None, *, machine_version=1):
         key = module_id, version
@@ -325,6 +327,31 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             bootstrap = make_config(root)
             config = json.loads(bootstrap.read_text(encoding="utf-8"))
             engineering_root = Path(__file__).parents[1] / "r3a_plugins/engineering_workspace"
+            module_declaration = {}
+            module_declaration["resident_executor"] = {
+                "contract_id": "r3a.resident.executor", "contract_version": "1.0.0",
+                "execution_contract_range": {"contract_id": "r3a.resident.execution", "major": 1,
+                                             "min_minor": 0, "max_minor": 2}}
+            module_declaration["activity_handler"] = {
+                "contract_id": "r3a.activity-handler", "contract_version": "1.0.0",
+                "handler_id": "fixture.engineering-handler", "handler_version": "1.0.0",
+                "activity_types": ["fixture.engineering.reconcile"],
+                "activity_contract_range": {"contract_id": "r3a.activity-intake", "major": 1,
+                                             "min_minor": 0, "max_minor": 0},
+                "handler_contract_range": {"contract_id": "r3a.activity-handler", "major": 1,
+                                            "min_minor": 0, "max_minor": 0},
+                "request_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+                "result_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+                "progress_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+                "checkpoint_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+                "progress_semantics": "Progress observations are monotonic.",
+                "checkpoint_semantics": "Checkpoint resumes after the last committed item.",
+                "required_capabilities": [],
+                "resource_constraints": {"cpu_millis": 250, "memory_bytes": 134217728,
+                                         "max_concurrency": 1},
+                "state_namespace": "fixture.engineering", "migration_contract": "fixture.engineering-migration.v1",
+                "recovery": {"mode": "checkpointed", "idempotency_contract": "fixture.engineering-idempotency.v1",
+                             "checkpoint_contract": "fixture.engineering-checkpoint.v1"}}
             engineering_config = root / "engineering-workspace.json"
             engineering_config.write_text(json.dumps({"workspace_root": str(root)}), encoding="utf-8")
             telemetry_root = Path(__file__).parents[1] / "r3a_plugins/octominer_telemetry"
@@ -340,6 +367,9 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
             settings = load_settings(bootstrap)
             registry = settings.capability_registry
             first_registered = registry.resolve_provider("engineering.workspace.apply_patch", "1.0.0")
+            first_registered.legacy_manifest["module_manifest"].update(copy.deepcopy(module_declaration))
+            registry._operations[("engineering.workspace.apply_patch", "r3a.isolated_workspace", "1.0.0")] = \
+                first_registered
             first = first_registered.descriptor
             first_manifest = copy.deepcopy(first_registered.legacy_manifest)
             second = copy.deepcopy(first)
@@ -408,6 +438,14 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 {"operation_id": "engineering.workspace.apply_patch", "provider_version": "1.0.1"},
                 "install-engineering-v1.0.1")
             self.assertTrue(install_new["installed"])
+            expected_executor = module_declaration["resident_executor"]
+            expected_handler = module_declaration["activity_handler"]
+            installed_roles = store.modules[("r3a.isolated_workspace", "1.0.0")]["manifest"]
+            self.assertEqual(expected_executor, installed_roles["resident_executor"])
+            self.assertEqual(expected_handler, installed_roles["activity_handler"])
+            replacement_roles = store.modules[("r3a.isolated_workspace", "1.0.1")]["manifest"]
+            self.assertEqual(expected_executor, replacement_roles["resident_executor"])
+            self.assertEqual(expected_handler, replacement_roles["activity_handler"])
             installed = await store.rows("lifecycle_state", ("r3a.isolated_workspace", "1.0.0"))
             self.assertEqual("INSTALLED", installed[0]["lifecycle_state"])
 
@@ -465,6 +503,10 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 "deactivate-engineering-v1.0.1")
             stopped_new = await store.rows("lifecycle_state", ("r3a.isolated_workspace", "1.0.1"))
             self.assertEqual("STOPPED", stopped_new[0]["lifecycle_state"])
+            self.assertEqual(expected_executor,
+                             store.modules[("r3a.isolated_workspace", "1.0.1")]["manifest"]["resident_executor"])
+            self.assertEqual(expected_handler,
+                             store.modules[("r3a.isolated_workspace", "1.0.1")]["manifest"]["activity_handler"])
             replacement_states = [state for key, _previous, state, _health, _diagnostic in store.transitions
                                   if key[0] == "r3a.isolated_workspace"]
             self.assertIn("REPLACING", replacement_states)
