@@ -49,7 +49,7 @@ Changed: 2026-11-07T02:41:51Z | R3A-019-ACCEPTANCE-CORRECTION | Codex GPT-6 | Pe
 Changed: 2026-11-07T03:59:26Z | R3A-019-SUSTAINED-OPERATION | Codex GPT-6 | Block legacy or bypassed objectives that lack explicit acceptance criteria.
 Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Expose authorization decision identity separately from audit-event identity.
 Changed: 2026-11-07 | R3A-MODULAR-CONFORMANCE | Codex GPT-6 | Normalize typed provider output/evidence through existing CME invocation adapters.
-Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Execute model-authored Engineering proposals through durable CME work orders, unified invocation, independent verification and guarded completion.
+Changed: 2026-11-10 | R3A-FS03 | Codex GPT-6 | Remove module-owned Engineering workflow from CME; retain generic handler scheduling, authorization, invocation and recovery.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Return verifier identities explicitly to Grace so assessment citations match independently verified execution evidence.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Resume typed proposals from checkpoints, provide inspected artifact evidence to Grace, and advance the live work-order projection before gated completion.
 Changed: 2026-11-07 | R3A-AP2-AUTONOMY | Codex GPT-6 | Use the validated operation reference's target after proposal normalization during work-order authorization.
@@ -65,7 +65,7 @@ Changed: 2026-11-08 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Reconcile abse
 Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Consume versioned read-provider activity-intake envelopes through CME authorization and durable idempotent activity persistence.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; module.lifecycle v2; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
-Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_octominer_plugin.py; tests/test_r3a_telemetry_providers.py; tests/test_r3a_capability_contracts.py; tests/test_r3a_engineering.py.
+Tests: tests/test_r3a_engineering_handler.py; tests/test_r3a_activity_handler_interop.py; affected CME integration regressions.
 History/Predecessor: Immediate predecessor blob e503a741bf1cde59cfaa6ccd1e4183f6d12c3224 at base c62bb28d026e1c1cad99c90583f0debae067f2a1; prior modular and AP2 baselines retained.
 """
 from __future__ import annotations
@@ -96,10 +96,6 @@ from .readiness import (READINESS_PROVIDER_CONTRACT_ID, ReadinessCheckRequest,
 from .db import InvalidTransition, Store, utcnow
 from .capability_contracts import (validate_invocation_request, validate_invocation_result,
                                    CapabilityContractError, validate_json, normalize_provider_result)
-from .engineering import (CapabilityOperationRef, CriterionResult, EngineeringProposal,
-                          EngineeringWorkOrder, EngineeringAction, VerificationResult,
-                          proposal_digest, validate_completion, validate_engineering_assignment)
-from .engineering_verifier import verify_workspace_artifact
 from .diagnostics import make_server
 from .notifications import validate_notification_envelope
 from .acceptance import (AcceptanceCriteriaRequired, OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
@@ -609,13 +605,17 @@ class CME:
         handler = validate_activity_handler(resolved["handler"])
         module = resolved["module"]
         event_input = activity.get("input") or {}
+        handler_input = event_input.get("activity_input", event_input)
+        if isinstance(handler_input, dict) and event_input.get("objective") is not None:
+            handler_input = {**handler_input, "objective": event_input["objective"]}
+        execution_principal = self._handler_execution_principal(event_input, resolved["module_id"])
         payload = {"contract_id": "r3a.activity-handler.request",
                    "contract_version": handler["contract_version"],
                    "activity_id": str(activity["activity_id"]), "attempt_id": str(activity["attempt_id"]),
                    "correlation_id": str(event_input.get("correlation_id") or activity["activity_id"]),
                    "activity_type": activity["activity_type"], "idempotency_key": activity["idempotency_key"],
-                   "execution_principal": str(event_input.get("resident_id") or self.module_id),
-                   "input": event_input.get("activity_input", event_input),
+                   "execution_principal": execution_principal,
+                   "input": handler_input,
                    "evidence": event_input.get("activity_evidence", []),
                    "checkpoint": activity.get("checkpoint") or {},
                    "handler": {"handler_id": handler["handler_id"],
@@ -642,7 +642,7 @@ class CME:
                                       f"handler-execute:{resolved['module_id']}:{activity['attempt_id']}")),
             context={"dispatcher": "CME", "handler_id": handler["handler_id"],
                      "module_id": resolved["module_id"], "activity_type": activity["activity_type"]},
-            resident_id=event_input.get("resident_id") or self.module_id)
+            resident_id=execution_principal)
         decisions = [{"capability_id": "activity.handler.execute",
                       "decision_id": handler_decision.decision_id,
                       "audit_event_id": handler_decision.audit_event_id,
@@ -701,6 +701,18 @@ class CME:
                 {"handler": payload["handler"], "authorization": decisions, "result": result})
         else:
             raise ValueError("activity handler result outcome must be completed or blocked")
+
+    @staticmethod
+    def _handler_execution_principal(event_input: dict[str, Any], default_principal: str) -> str:
+        """Resolve the principal for generic registered-handler work before CME authorization."""
+        nested = event_input.get("activity_input")
+        principal = event_input.get("resident_id")
+        if principal is None and isinstance(nested, dict):
+            principal = nested.get("resident_id")
+        value = principal or default_principal
+        if not isinstance(value, str) or not value:
+            raise PermissionError("registered handler execution principal is invalid")
+        return value
 
     async def _run_registered_activity_with_actions(self, activity: dict[str, Any],
                                                     resolved: dict[str, Any],
@@ -988,8 +1000,11 @@ class CME:
         attempt_id = pending.get("attempt_id")
         if not isinstance(attempt_id, str) or not attempt_id:
             raise ModuleExtensionError("durable handler action lacks its originating attempt")
-        correlation_id = str((activity.get("input") or {}).get("correlation_id") or activity_id)
+        activity_input = activity.get("input") or {}
         binding = pending.get("handler") or {}
+        execution_principal = self._handler_execution_principal(
+            activity_input, resolved.get("module_id") or binding.get("module_id"))
+        correlation_id = str(activity_input.get("correlation_id") or activity_id)
         invocation_id = str(uuid.uuid5(
             uuid.UUID(activity_id),
             f"r3a.handler-action:{binding.get('module_id')}:{handler['handler_id']}:{action['action_id']}"))
@@ -1001,10 +1016,8 @@ class CME:
         request = {"contract_id": "r3a.capability-invocation.v1", "contract_version": "1.1.0",
                    "invocation_id": invocation_id, "operation_id": action["operation_id"],
                    "operation_contract_version": action["operation_contract_version"],
-                   "caller": {"principal_id": str((activity.get("input") or {}).get("resident_id")
-                                                    or resolved["module_id"]),
-                              "resident_id": str((activity.get("input") or {}).get("resident_id")
-                                                 or resolved["module_id"]),
+                   "caller": {"principal_id": execution_principal,
+                              "resident_id": execution_principal,
                               "service_id": None},
                    "target": action["target"], "input": action["input"],
                    "activity_id": activity_id, "attempt_id": attempt_id,
@@ -1660,7 +1673,7 @@ class CME:
             if not isinstance(request, dict):
                 raise ValueError("capability.invoke requires one canonical invocation request")
             if request.get("work_order") is not None:
-                raise ValueError("work-order invocations must be submitted by the AP2 Engineering adapter")
+                raise ValueError("durable work-item invocations must use the registered handler continuation")
             return await self.invoke_capability(request)
         if operation == "activity.intake.accept":
             operation_id = payload.get("operation_id")
@@ -1785,8 +1798,6 @@ class CME:
                     raise PermissionError("requested model role conflicts with directory office route")
                 if requested_route is not None and requested_route != selected_role.route_id:
                     raise PermissionError("requested model route conflicts with directory office route")
-                if payload.get("engineering_assignment") is not None:
-                    raise PermissionError("resident objective routing does not bypass CME Engineering work-order handlers")
             else:
                 activity_id = requested_activity_id
             roles = self.settings.model_roles
@@ -1811,7 +1822,7 @@ class CME:
                 str(selected_role.route_id), str(selected_role.role_id),
                 tuple(payload.get("required_capabilities", ())),
                 modalities,
-                payload.get("acceptance_criteria", []), payload.get("engineering_assignment"),
+                payload.get("acceptance_criteria", []), None,
                 payload.get("depends_on_activity_ids"),
                 activity_id, task_class, resident_id=target_resident_id or self.module_id,
                 resident_profile=resident_profile,
@@ -2032,7 +2043,6 @@ class CME:
             if (configured_role.role_id != event_input.get("role_id")
                     or configured_role.route_id != resident_profile["model_route_id"]):
                 raise PermissionError("durable resident profile does not match configured route binding")
-        engineering_assignment = event_input.get("engineering_assignment")
         acceptance_contract = event_input.get("acceptance_contract") or {
             "contract_id": OBJECTIVE_ACCEPTANCE_CONTRACT_ID,
             "contract_version": OBJECTIVE_ACCEPTANCE_CONTRACT_VERSION, "criteria": []}
@@ -2047,10 +2057,8 @@ class CME:
             validate_json(activity_intake, ACTIVITY_INTAKE_SCHEMA, path="$.activity_intake")
         acceptance_criteria = (validate_required_criteria(acceptance_contract.get("criteria"))
                                if event_input.get("event_kind") != "conversation"
-                               and engineering_assignment is None and notification is None
+                               and notification is None
                                and activity_intake is None else [])
-        if engineering_assignment is not None:
-            engineering_assignment = validate_engineering_assignment(engineering_assignment)
         saved = activity.get("checkpoint") or {}
         route_id = event_input.get("route_id")
         selected_role_id = event_input.get("role_id")
@@ -2122,13 +2130,6 @@ class CME:
         if not isinstance(reasoning_state, dict):
             raise RuntimeError("Persisted Grace reasoning continuation is malformed")
         available_tools, capability_limitations = await self._resident_capability_view(activity, resident_id)
-        available_engineering_operations = []
-        if engineering_assignment is not None and self.settings.capability_registry is not None:
-            available_engineering_operations = [
-                {**discovery["descriptor"], "presentation": discovery["presentation"],
-                 "registry_observation": discovery["registry_observation"]}
-                for discovery in self.settings.capability_registry.discover()
-                if discovery["descriptor"].get("effect_class") == "isolated_write"]
         evidence = saved.get("evidence", [])
         if not isinstance(evidence, list):
             raise RuntimeError("Persisted resident evidence is malformed")
@@ -2261,8 +2262,6 @@ class CME:
                 "available_tools": available_tools,
                 "capability_limitations": capability_limitations,
                 "available_residents": available_residents,
-                "engineering_assignment": engineering_assignment,
-                "available_engineering_operations": available_engineering_operations,
                 "reasoning_escalation": escalation_offer,
                 "conversation": reasoning_state.get("conversation", []),
                 "reasoning_state": reasoning_state,
@@ -2471,7 +2470,6 @@ class CME:
                 "rationale_sha256": hashlib.sha256(rationale.encode()).hexdigest()}
 
     async def invoke_capability(self, request: dict[str, Any], *,
-                                work_order: EngineeringWorkOrder | None = None,
                                 _approved_budget_reservation: dict[str, Any] | None = None,
                                 _provider_context: dict[str, Any] | None = None,
                                 _handler_work_item: dict[str, Any] | None = None,
@@ -2485,8 +2483,7 @@ class CME:
         checked = validate_invocation_request(request, descriptor)
         if _handler_work_item is not None and not _handler_action:
             raise PermissionError("durable handler work item is only accepted from the CME handler continuation path")
-        if _handler_action and (work_order is not None or _approved_budget_reservation is not None
-                                or _provider_context is not None):
+        if _handler_action and (_approved_budget_reservation is not None or _provider_context is not None):
             raise PermissionError("handler action cannot combine external CME authority contexts")
         order = None
         if _handler_work_item is not None:
@@ -2508,9 +2505,9 @@ class CME:
                     or not item.get("action_sha256")):
                 raise PermissionError("handler work item lineage does not match the canonical invocation")
             order = item["record"]
-        elif work_order is None:
+        else:
             if checked["work_order"] is not None:
-                raise PermissionError("effectful invocation requires its validated Engineering work order")
+                raise PermissionError("effectful invocation requires its registered handler work item")
             if descriptor["effect_class"] in {"read", "steward_read", "steward_write"}:
                 if checked.get("budget_reservation") is not None:
                     raise PermissionError("read and direct Steward invocations cannot reserve an external effect budget")
@@ -2519,33 +2516,11 @@ class CME:
                 if (reservation is None or _approved_budget_reservation != reservation
                         or reservation["activity_id"] != checked["activity_id"]):
                     raise PermissionError(
-                        "external invocation without a work order requires CME-approved activity budget reservation")
+                        "external invocation requires a CME-approved activity budget reservation")
             else:
-                raise PermissionError("isolated writes require their validated Engineering work order")
-        else:
-            if not isinstance(work_order, EngineeringWorkOrder):
-                raise TypeError("work_order must be a validated EngineeringWorkOrder")
-            order = work_order.to_dict()
-            if (checked["work_order"] != {"work_order_id": work_order.work_order_id,
-                                         "version": work_order.work_order_version}
-                    or checked["activity_id"] != work_order.activity_id
-                    or checked["attempt_id"] != work_order.attempt_id
-                    or checked["correlation_id"] != work_order.correlation_id
-                    or checked["caller"]["resident_id"] != work_order.resident_id
-                    or checked["config_revision"] != work_order.config_revision):
-                raise PermissionError("invocation lineage does not match its immutable Engineering work order")
-            if not any(ref.to_dict()["operation_id"] == descriptor["operation_id"]
-                       and ref.contract_version == descriptor["contract_version"]
-                       and ref.effect_class == descriptor["effect_class"]
-                       and ref.target == checked["target"] and ref.inputs == checked["input"]
-                       for ref in work_order.operation_refs):
-                raise PermissionError("operation, inputs, target, or effect are outside the authorized work order")
-            stored = await self.store.get_engineering_work_order(work_order.work_order_id)
-            if (stored is None or stored.get("state") != "EXECUTING"
-                    or stored.get("details", {}).get("work_order") != order):
-                raise PermissionError("invocation requires the matching durable EXECUTING work order")
+                raise PermissionError("isolated writes require their registered handler work item")
         if descriptor["effect_class"] == "external_write" and (
-                work_order is not None or checked.get("budget_reservation") is None
+                _handler_work_item is not None or checked.get("budget_reservation") is None
                 or _provider_context is None):
             raise PermissionError(
                 "external_write requires a CME-approved activity budget and internal configured provider context")
@@ -2554,18 +2529,16 @@ class CME:
         try:
             authorization = await self._authorize_capability(
                 descriptor["operation_id"],
-                activity_id=work_order.activity_id if work_order else checked["activity_id"],
-                attempt_id=work_order.attempt_id if work_order else checked["attempt_id"],
+                activity_id=checked["activity_id"],
+                attempt_id=checked["attempt_id"],
                 request_id=checked["invocation_id"], resident_id=caller_resident,
                 context={"dispatcher": "CME", "invocation_id": checked["invocation_id"],
                          "idempotency_key": checked["idempotency_key"],
                          "effect_class": descriptor["effect_class"],
                          "required_grants": descriptor["required_grants"],
                          "target": checked["target"],
-                         "work_order_id": (work_order.work_order_id if work_order else
-                                           _handler_work_item.get("work_id") if _handler_work_item else None),
-                         "work_order_version": work_order.work_order_version if work_order else
-                                               (1 if _handler_work_item else None),
+                         "work_order_id": _handler_work_item.get("work_id") if _handler_work_item else None,
+                         "work_order_version": 1 if _handler_work_item else None,
                          "config_revision": checked["config_revision"]})
         except PermissionError as exc:
             if _handler_action:
@@ -2639,24 +2612,6 @@ class CME:
         validate_invocation_result(result, descriptor)
         await self.store.finish_capability_invocation(persistence_key, canonical_digest, result)
         return result
-
-    async def complete_engineering_work_order(self, work_order: EngineeringWorkOrder,
-                                              verification: VerificationResult) -> bool:
-        """Let CME advance an Engineering order only after the independent PASS gate validates."""
-        if not isinstance(work_order, EngineeringWorkOrder) or not isinstance(verification, VerificationResult):
-            raise TypeError("CME completion requires typed work-order and verification contracts")
-        validate_completion(work_order, verification)
-        stored = await self.store.get_engineering_work_order(work_order.work_order_id)
-        if (stored is None or stored.get("state") != "VERIFYING"
-                or stored.get("details", {}).get("work_order") != work_order.to_dict()):
-            raise PermissionError("CME completion requires the matching durable VERIFYING work order")
-        return await self.store.transition_engineering_work_order(
-            work_order.work_order_id, "COMPLETED", work_order.activity_id, work_order.attempt_id,
-            work_order.correlation_id, "CME accepted independent verification PASS",
-            {"verification_id": verification.verification_id,
-             "verifier_id": verification.verifier_id,
-             "artifact_digests": list(verification.artifact_digests)},
-            work_order=work_order, verification=verification)
 
     def _resident_tools(self) -> tuple[dict[str, Any], ...]:
         tools = list(_RESIDENT_TOOLS)
@@ -2815,420 +2770,11 @@ class CME:
         return {"source_id": source_id, "source_path": source_id, "content": content,
                 "sha256": digest}
 
-    def _resident_result_from_verification(self, activity: dict[str, Any],
-                                           verification: VerificationResult) -> dict[str, Any]:
-        verification_value = verification.to_dict()
-        evidence_ref = f"verification:{verification.verification_id}"
-        failure_reasons = [
-            {"code": "criterion_failed" if result.status == "FAIL" else "criterion_inconclusive",
-             "message": result.rationale,
-             "evidence_refs": list(result.evidence_refs) or [evidence_ref]}
-            for result in verification.results if result.status != "PASS"
-        ]
-        if verification.outcome != "PASS" and not failure_reasons:
-            failure_reasons = [{"code": "verification_non_pass",
-                                "message": "Independent verification did not pass.",
-                                "evidence_refs": [evidence_ref]}]
-        return {
-            "contract_id": "r3a.resident.result", "contract_version": "1.0.0",
-            "activity_id": str(activity["activity_id"]),
-            "attempt_id": str(activity["attempt_id"]),
-            "correlation_id": str(activity["input"]["correlation_id"]),
-            "resident_id": self.module_id,
-            "config_revision": self.settings.source_digest,
-            "issued_at": verification.verified_at,
-            "issuer": {"component_id": "independent-verifier", "decision_ref": evidence_ref},
-            "outcome": verification.outcome,
-            "evidence": [{"evidence_ref": evidence_ref,
-                          "kind": "independent_verification", "content": verification_value}],
-            "failure_reasons": failure_reasons,
-            "completion_authority": False,
-        }
-
-    async def _resident_verification_decision(self, activity: dict[str, Any],
-                                              context: dict[str, Any],
-                                              resident_result: dict[str, Any],
-                                              conversation: list[dict[str, Any]]) -> dict[str, Any]:
-        """Ask Grace to choose a scoped correction or blocked disposition from durable feedback."""
-        decision_context = dict(context)
-        decision_context["resident_result"] = resident_result
-        decision_context["available_tools"] = []
-        decision_context["reasoning_escalation"] = {"enabled": False, "available_roles": []}
-        decision_context["conversation"] = list(conversation) + [{
-            "role": "user",
-            "content": json.dumps({"instruction": (
-                "This is the post-verification continuation decision for the same Engineering activity. "
-                "Inspect the supplied resident_result and its failure evidence. If one currently listed "
-                "Engineering operation can correct the failed criteria within this assignment, propose "
-                "one bounded correction. Otherwise return an engineering_assess decision with status "
-                "blocked. Do not assert completion or verification; CME and the independent verifier "
-                "retain those authorities."), "resident_result": resident_result}, separators=(",", ":")),
-        }]
-        decision_context["request_ref"] = str(uuid.uuid4())
-        return (await self._module_call("execute", decision_context,
-                                        timeout=context["model_route"]["timeout_seconds"] + 15))["result"]
-
     async def _lease_heartbeat(self, activity: dict[str, Any]) -> None:
         interval = max(1.0, self.settings.lease_seconds / 3.0)
         while True:
             await asyncio.sleep(interval)
             await self.store.renew_activity_lease(activity)
-
-    async def _run_engineering_activity(self, activity: dict[str, Any], context: dict[str, Any]) -> None:
-        """Run Grace proposal -> CME authorization/dispatch -> separate verifier -> CME completion."""
-        assignment = validate_engineering_assignment(context["engineering_assignment"])
-        if not context["available_engineering_operations"]:
-            raise PermissionError("no enabled isolated_write operation is available for this assignment")
-        prior = activity.get("checkpoint") or {}
-        state = dict(prior.get("engineering_state") or {})
-        conversation = list(state.get("conversation") or [])
-        model_turns = list(state.get("model_turns") or [])
-        base_checkpoint = {"activity_input": activity["input"], "model_route": context["model_route"],
-                           "config_revision": context["config_revision"],
-                           "selected_role_id": context.get("selected_role_id"),
-                           "route_decision": context.get("route_decision")}
-
-        async def checkpoint(phase: str, **items: Any) -> None:
-            state.update(items)
-            snapshot = {**base_checkpoint, "engineering_state": state}
-            await self.store.record_progress(activity,
-                {"phase": phase, "at": utcnow().isoformat(), **items}, snapshot)
-
-        proposal_value = state.get("proposal")
-        typed_proposal = None
-        if isinstance(proposal_value, dict) and proposal_value.get("contract_id") == "r3a.engineering-proposal":
-            typed_proposal = EngineeringProposal.from_dict(proposal_value)
-            if len(typed_proposal.proposed_operations) != 1:
-                raise ValueError("this isolated AP2 execution slice requires one bounded proposed operation")
-            saved_ref = typed_proposal.proposed_operations[0]
-            proposal_value = {"operation_id": saved_ref.operation_id,
-                              "contract_version": saved_ref.contract_version,
-                              "target": saved_ref.target, "inputs": saved_ref.inputs,
-                              "verification_plan": typed_proposal.verification_plan}
-        if proposal_value is None:
-            context["conversation"] = conversation
-            context["request_ref"] = str(uuid.uuid4())
-            await checkpoint("engineering.proposal.requested", request_ref=context["request_ref"])
-            response = (await self._module_call("execute", context,
-                         timeout=context["model_route"]["timeout_seconds"] + 15))["result"]
-            if response.get("action") != "propose_engineering" or not isinstance(response.get("engineering_proposal"), dict):
-                raise ValueError("Grace did not return a typed Engineering proposal action")
-            model_record = response.get("model") or {}
-            model_turns.append({"action": "propose_engineering", "request_ref": model_record.get("request_ref"),
-                                "result_ref": model_record.get("result_ref"),
-                                "request_sha256": model_record.get("request_sha256"),
-                                "result_sha256": model_record.get("result_sha256"),
-                                "usage": model_record.get("usage"), "content": response.get("model_content"),
-                                "observed_at": utcnow().isoformat()})
-            conversation.append({"role": "assistant", "content": response["model_content"]})
-            proposal_value = response["engineering_proposal"]
-            await checkpoint("engineering.proposal.received", proposal=proposal_value,
-                             model_turns=model_turns, conversation=conversation,
-                             proposal_rationale=response.get("rationale"),
-                             proposal_model=model_record)
-
-        descriptor = next((entry for entry in context["available_engineering_operations"]
-                           if entry.get("operation_id") == proposal_value.get("operation_id")
-                           and entry.get("contract_version") == proposal_value.get("contract_version")), None)
-        if descriptor is None or descriptor.get("effect_class") != "isolated_write":
-            raise PermissionError("Grace proposal does not resolve to a discovered enabled isolated_write operation")
-        operation = self.settings.capability_registry.resolve(
-            descriptor["operation_id"], descriptor["contract_version"])
-        validate_json(proposal_value["target"], descriptor["target_scope_schema"], path="$.target")
-        validate_json(proposal_value["inputs"], descriptor["input_schema"], path="$.input")
-        target_workspace = proposal_value["target"].get("workspace_id")
-        if target_workspace != assignment["workspace_id"]:
-            raise PermissionError("Grace proposal target is outside the institution-assigned workspace")
-        artifact_path = proposal_value["inputs"].get("path")
-        if not isinstance(artifact_path, str) or not any(
-                artifact_path == allowed or (allowed.endswith("**") and artifact_path.startswith(allowed[:-2]))
-                for allowed in assignment["allowed_paths"]):
-            raise PermissionError("Grace proposal output path is outside the institution-assigned allowlist")
-        operation_ref = CapabilityOperationRef(descriptor["operation_id"], descriptor["contract_version"],
-                                               descriptor["effect_class"], proposal_value["target"],
-                                               proposal_value["inputs"])
-        proposal = typed_proposal
-        if proposal is None:
-            model_ref = state.get("proposal_model") or {}
-            proposal_revision = int(state.get("proposal_revision", 1))
-            proposal = EngineeringProposal(
-                proposal_id=str(uuid.uuid5(uuid.UUID(str(activity["activity_id"])),
-                                           f"grace-engineering-proposal-v{proposal_revision}")),
-                proposal_revision=proposal_revision, activity_id=str(activity["activity_id"]),
-                attempt_id=str(activity["attempt_id"]),
-                correlation_id=str(activity["input"]["correlation_id"]),
-                resident_id=self.module_id, config_revision=self.settings.source_digest,
-                created_at=utcnow().isoformat(), objective=activity["input"]["objective"],
-                criteria=tuple(assignment["criteria"]), repository=assignment["repository"],
-                baseline_ref=assignment["baseline_ref"], scope=assignment,
-                proposed_operations=(operation_ref,),
-                verification_plan=proposal_value["verification_plan"],
-                reasoning_provenance={"route_id": context["route_id"],
-                                      "provider": model_ref.get("provider"),
-                                      "model": model_ref.get("name"),
-                                      "request_ref": model_ref.get("request_ref"),
-                                      "result_ref": model_ref.get("result_ref"),
-                                      "result_sha256": model_ref.get("result_sha256")})
-            proposal_value = proposal.to_dict()
-            await self.store.record_engineering_proposal(activity, proposal)
-            await checkpoint("engineering.proposal.validated", proposal=proposal_value,
-                             proposal_digest=proposal_digest(proposal))
-
-        proposal = typed_proposal or EngineeringProposal.from_dict(proposal_value)
-        order_id = str(uuid.uuid5(uuid.UUID(proposal.proposal_id), f"work-order:{proposal.proposal_revision}"))
-        durable_order = await self.store.get_engineering_work_order(order_id)
-        if durable_order is None:
-            request_id = str(uuid.uuid5(uuid.UUID(order_id), "authorization"))
-            decision = await self._authorization_decision(
-                descriptor["required_grants"][0], request_id=request_id,
-                activity_id=proposal.activity_id, attempt_id=proposal.attempt_id,
-                correlation_id=proposal.correlation_id,
-                context={"dispatcher": "CME", "purpose": "engineering_work_order_issue",
-                         "operation_id": descriptor["operation_id"], "target": operation_ref.target,
-                         "allowed_paths": assignment["allowed_paths"],
-                         "proposal_id": proposal.proposal_id,
-                         "proposal_digest": proposal_digest(proposal)})
-            if not decision.audit_event_id or not decision.decision_id:
-                raise PermissionError("authorization provider did not return durable audit and decision references")
-            work_order = EngineeringWorkOrder(
-                work_order_id=order_id, work_order_version=1, activity_id=proposal.activity_id,
-                attempt_id=proposal.attempt_id, correlation_id=proposal.correlation_id,
-                proposal_id=proposal.proposal_id, proposal_revision=proposal.proposal_revision,
-                proposal_digest=proposal_digest(proposal), resident_id=self.module_id,
-                config_revision=self.settings.source_digest, repository=assignment["repository"],
-                baseline_ref=assignment["baseline_ref"], workspace_id=assignment["workspace_id"],
-                allowed_paths=tuple(assignment["allowed_paths"]),
-                command_profiles=tuple(assignment["command_profiles"]),
-                operation_refs=(operation_ref,), authorization_decision_id=decision.decision_id,
-                authorization_audit_event_id=decision.audit_event_id,
-                authorization_provider_id=decision.provider_id, policy_revision=decision.policy_revision,
-                authorization_expires_at=None, criteria=tuple(assignment["criteria"]), issued_at=utcnow().isoformat())
-            await self.store.create_engineering_work_order(work_order.to_dict(), decision)
-            await checkpoint("engineering.work_order.authorized", work_order=work_order.to_dict(),
-                             work_order_id=order_id, authorization_audit_event_id=decision.audit_event_id)
-            durable_order = await self.store.get_engineering_work_order(order_id)
-        work_order = EngineeringWorkOrder.from_dict(durable_order["details"]["work_order"])
-        if durable_order["state"] == "AUTHORIZED":
-            await self.store.transition_engineering_work_order(
-                order_id, "EXECUTING", work_order.activity_id, str(activity["attempt_id"]),
-                work_order.correlation_id, "CME dispatched the authorized proposal", {
-                    "proposal_digest": work_order.proposal_digest, "execution_owner": "CME"})
-            durable_order["state"] = "EXECUTING"
-        elif durable_order["state"] not in {"EXECUTING", "VERIFYING", "COMPLETED"}:
-            raise RuntimeError(f"Engineering work order cannot resume from {durable_order['state']}")
-
-        invocation = None
-        if durable_order["state"] not in {"VERIFYING", "COMPLETED"}:
-            action_id = str(uuid.uuid5(uuid.UUID(order_id), "canonical-invocation-v1"))
-            action = EngineeringAction(
-                action_id=action_id, idempotency_key=f"{order_id}:{descriptor['operation_id']}:v1",
-                work_order_id=order_id, work_order_version=work_order.work_order_version,
-                activity_id=work_order.activity_id, attempt_id=work_order.attempt_id,
-                correlation_id=work_order.correlation_id, operation=operation_ref,
-                caller_id=self.module_id, requested_at=utcnow().isoformat(),
-                config_revision=self.settings.source_digest,
-                evidence_purpose="produce the bounded, independently verifiable Engineering artifact")
-            invocation = await self.invoke_capability(action.to_invocation_request(), work_order=work_order)
-            if invocation.get("outcome") != "SUCCEEDED":
-                raise RuntimeError("canonical Engineering capability did not succeed")
-            await checkpoint("engineering.execution.succeeded", invocation=invocation,
-                             invocation_id=action_id)
-
-        invocation = invocation or state.get("invocation")
-        if not isinstance(invocation, dict) or invocation.get("outcome") != "SUCCEEDED":
-            raise RuntimeError("durable successful invocation evidence is unavailable")
-        evidence_refs = [f"invocation:{invocation['invocation_id']}"]
-        evidence_refs.append(str(invocation["invocation_id"]))
-        authorization = invocation.get("authorization") or {}
-        if authorization.get("audit_event_id"):
-            evidence_refs.append(str(authorization["audit_event_id"]))
-        operation_for_verifier = {**descriptor, "configuration": operation.configuration}
-        verification = verify_workspace_artifact(
-            work_order, operation_for_verifier, operation.configuration["workspace_root"],
-            verifier_id=assignment["verifier_id"], verifier_version=assignment["verifier_version"],
-            policy_revision=assignment["policy_revision"])
-        artifact_path = operation_ref.inputs["path"]
-        artifact_file = (Path(operation.configuration["workspace_root"]) / artifact_path).resolve()
-        artifact_observation = {"path": artifact_path, "evidence_ref": f"workspace:{artifact_path}",
-                                "sha256": verification.artifact_digests[0]
-                                if verification.artifact_digests else None,
-                                "exists": artifact_file.is_file()}
-        if artifact_file.is_file() and artifact_file.stat().st_size <= 65536:
-            artifact_observation["content"] = artifact_file.read_text(encoding="utf-8")
-        execution_evidence = {"invocation": invocation,
-                              "artifact": artifact_observation,
-                              "independent_verification": verification.to_dict()}
-        evidence_refs.append(f"workspace:{artifact_path}")
-        if verification.verification_id:
-            evidence_refs.append("independent_verification")
-            evidence_refs.append(str(verification.verification_id))
-        await checkpoint("engineering.artifact.inspected", invocation=invocation,
-                         invocation_id=invocation["invocation_id"],
-                         execution_evidence=execution_evidence,
-                         verification_preview=verification.to_dict())
-        if state.get("grace_assessment") is None:
-            context["conversation"] = conversation + [
-                {"role": "user", "content": json.dumps({"engineering_execution_result": execution_evidence,
-                                                          "available_evidence_refs": evidence_refs,
-                                                          "instruction": "Assess the actual execution output against the assignment. State whether it is ready for independent verification or blocked; do not claim acceptance."}, separators=(",", ":"))}]
-            context["request_ref"] = str(uuid.uuid4())
-            response = (await self._module_call("execute", context,
-                         timeout=context["model_route"]["timeout_seconds"] + 15))["result"]
-            if response.get("action") != "engineering_assess":
-                raise ValueError("Grace did not return its required post-execution assessment")
-            assessment = response.get("engineering_assessment") or {}
-            model_ref = response.get("model") or {}
-            model_turns.append({"action": "engineering_assess", "request_ref": model_ref.get("request_ref"),
-                                "result_ref": model_ref.get("result_ref"),
-                                "request_sha256": model_ref.get("request_sha256"),
-                                "result_sha256": model_ref.get("result_sha256"),
-                                "usage": model_ref.get("usage"), "content": response.get("model_content"),
-                                "observed_at": utcnow().isoformat()})
-            await checkpoint("engineering.resident_assessed", grace_assessment=assessment,
-                             model_turns=model_turns, execution_evidence=execution_evidence,
-                             assessment_model=model_ref)
-        assessment = state["grace_assessment"]
-        if assessment.get("status") != "ready_for_verification":
-            if durable_order["state"] in {"EXECUTING", "AUTHORIZED"}:
-                await self.store.transition_engineering_work_order(
-                    order_id, "BLOCKED", work_order.activity_id, str(activity["attempt_id"]),
-                    work_order.correlation_id, "Grace assessed execution as blocked",
-                    {"grace_assessment": assessment, "invocation_id": invocation["invocation_id"]})
-            await self.store.block_activity(activity, "Grace reported Engineering execution blocked",
-                                            {"engineering_assessment": assessment,
-                                             "work_order_id": order_id,
-                                             "model_turns": model_turns,
-                                             "invocation": invocation})
-            return
-        if not set(assessment.get("evidence_refs", [])).issubset(set(evidence_refs)):
-            raise PermissionError("Grace assessment references execution evidence not returned by CME")
-        if durable_order["state"] == "COMPLETED":
-            result = {"work_order_id": order_id, "state": "COMPLETED",
-                      "verification": durable_order["details"].get("verification_result"),
-                      "grace_assessment": assessment, "model_turns": model_turns,
-                      "invocation": invocation}
-            await self.store.finish_activity(activity, result)
-            return
-        await checkpoint("engineering.verification.completed", verification=verification.to_dict(),
-                         verification_outcome=verification.outcome)
-        if durable_order["state"] == "EXECUTING":
-            await self.store.transition_engineering_work_order(
-                order_id, "VERIFYING", work_order.activity_id, str(activity["attempt_id"]),
-                work_order.correlation_id, "CME submitted artifact to independent verifier",
-                {"verification_id": verification.verification_id,
-                 "verification_outcome": verification.outcome,
-                 "artifact_digests": list(verification.artifact_digests)})
-        if verification.outcome != "PASS":
-            resident_result = self._resident_result_from_verification(activity, verification)
-            await checkpoint("engineering.verification_feedback.requested",
-                             resident_result=resident_result)
-            correction_count = int(state.get("verification_correction_count", 0))
-            if correction_count >= 1:
-                correction_response = {
-                    "action": "engineering_assess",
-                    "engineering_assessment": {
-                        "status": "blocked",
-                        "assessment": "The single bounded correction did not pass independent verification.",
-                        "evidence_refs": [resident_result["issuer"]["decision_ref"]]},
-                    "model": {},
-                    "model_content": "",
-                }
-            else:
-                correction_response = await self._resident_verification_decision(
-                    activity, context, resident_result, conversation)
-            correction_model = correction_response.get("model") or {}
-            model_turns.append({"action": correction_response.get("action"),
-                                "request_ref": correction_model.get("request_ref"),
-                                "result_ref": correction_model.get("result_ref"),
-                                "request_sha256": correction_model.get("request_sha256"),
-                                "result_sha256": correction_model.get("result_sha256"),
-                                "usage": correction_model.get("usage"),
-                                "content": correction_response.get("model_content"),
-                                "observed_at": utcnow().isoformat(),
-                                "resident_result_ref": resident_result["issuer"]["decision_ref"]})
-            correction_conversation = conversation + [
-                {"role": "user", "content": json.dumps({"resident_result": resident_result,
-                                                          "instruction": "Choose one scoped correction or block."},
-                                                         separators=(",", ":"))},
-                {"role": "assistant", "content": correction_response.get("model_content", "")},
-            ]
-            if correction_response.get("action") == "propose_engineering":
-                correction_proposal = correction_response.get("engineering_proposal")
-                if not isinstance(correction_proposal, dict):
-                    raise ValueError("Grace corrective action omitted its Engineering proposal")
-                descriptor = next((entry for entry in context["available_engineering_operations"]
-                                   if entry.get("operation_id") == correction_proposal.get("operation_id")
-                                   and entry.get("contract_version") == correction_proposal.get("contract_version")), None)
-                if descriptor is None or descriptor.get("effect_class") != "isolated_write":
-                    raise PermissionError("Grace corrective proposal is not a currently offered isolated_write operation")
-                operation = self.settings.capability_registry.resolve(
-                    descriptor["operation_id"], descriptor["contract_version"])
-                validate_json(correction_proposal["target"], descriptor["target_scope_schema"], path="$.target")
-                validate_json(correction_proposal["inputs"], descriptor["input_schema"], path="$.input")
-                if correction_proposal["target"].get("workspace_id") != assignment["workspace_id"]:
-                    raise PermissionError("Grace corrective target is outside the institution-assigned workspace")
-                correction_path = correction_proposal["inputs"].get("path")
-                if not isinstance(correction_path, str) or not any(
-                        correction_path == allowed or (allowed.endswith("**")
-                                                       and correction_path.startswith(allowed[:-2]))
-                        for allowed in assignment["allowed_paths"]):
-                    raise PermissionError("Grace corrective output is outside the institution-assigned allowlist")
-                proposal_revision = max(int(state.get("proposal_revision", 1)),
-                                        int((state.get("proposal") or {}).get("proposal_revision", 1))) + 1
-                state.update({"proposal": correction_proposal, "proposal_revision": proposal_revision,
-                              "proposal_rationale": correction_response.get("rationale"),
-                              "proposal_model": correction_model,
-                              "verification_correction_count": int(state.get("verification_correction_count", 0)) + 1,
-                              "resident_result": resident_result, "model_turns": model_turns,
-                              "conversation": correction_conversation})
-                for prior_key in ("grace_assessment", "execution_evidence", "verification_preview",
-                                  "verification_outcome", "invocation", "invocation_id"):
-                    state.pop(prior_key, None)
-                await checkpoint("engineering.corrective_proposal.selected",
-                                 resident_result=resident_result,
-                                 corrective_proposal=correction_proposal,
-                                 proposal_revision=proposal_revision,
-                                 model_turns=model_turns, conversation=correction_conversation,
-                                 correction_model=correction_model)
-                await self.store.transition_engineering_work_order(
-                    order_id, "BLOCKED", work_order.activity_id, str(activity["attempt_id"]),
-                    work_order.correlation_id, "Independent verification did not PASS; Grace proposed a new revision",
-                    {"verification_result": verification.to_dict(),
-                     "resident_result": resident_result,
-                     "corrective_proposal_revision": proposal_revision})
-                await self.store.fail_activity(
-                    activity, "Grace selected a scoped corrective proposal after failed verification", 0)
-                return
-            decision = correction_response.get("engineering_assessment")
-            if not isinstance(decision, dict) or decision.get("status") != "blocked":
-                decision = {"status": "blocked",
-                            "assessment": "Grace did not return a bounded corrective proposal; completion remains blocked.",
-                            "evidence_refs": [resident_result["issuer"]["decision_ref"]]}
-            await checkpoint("engineering.verification_feedback.decided",
-                             resident_result=resident_result,
-                             verification_feedback_decision=decision,
-                             model_turns=model_turns, conversation=correction_conversation,
-                             correction_model=correction_model)
-            await self.store.transition_engineering_work_order(
-                order_id, "BLOCKED", work_order.activity_id, str(activity["attempt_id"]),
-                work_order.correlation_id, "Independent verification did not PASS",
-                {"verification_result": verification.to_dict(),
-                 "resident_result": resident_result,
-                 "verification_feedback_decision": decision})
-            await self.store.block_activity(activity, "Independent Engineering verification did not pass",
-                                            {"work_order_id": order_id,
-                                             "verification": verification.to_dict(),
-                                             "resident_result": resident_result,
-                                             "verification_feedback_decision": decision,
-                                             "grace_assessment": assessment,
-                                             "model_turns": model_turns, "invocation": invocation})
-            return
-        await self.complete_engineering_work_order(work_order, verification)
-        await self.store.finish_activity(activity, {
-            "work_order_id": order_id, "work_order_state": "COMPLETED",
-            "proposal": proposal.to_dict(), "grace_rationale": state.get("proposal_rationale"),
-            "grace_assessment": assessment, "model_turns": model_turns,
-            "invocation": invocation, "verification": verification.to_dict()})
 
     async def _run_bound_resident_activity(self, activity: dict[str, Any],
                                            resolved: dict[str, Any]) -> None:
@@ -3411,13 +2957,6 @@ class CME:
                                    "authorization_audit_event_id": execution_authorization["audit_event_id"],
                                    "directory_snapshot_sha256": context["resident_profile"][
                                        "directory_evidence"]["snapshot_sha256"]})
-                if context.get("engineering_assignment") is not None:
-                    if resident_id != self.module_id:
-                        raise PermissionError("Engineering work-order execution is not yet a delegated resident handler")
-                    lease_task = asyncio.create_task(self._lease_heartbeat(activity),
-                                                     name=f"lease-heartbeat:{activity['activity_id']}")
-                    await self._run_engineering_activity(activity, context)
-                    return
                 model_route = context["model_route"]
                 reasoning_state = dict(context.get("reasoning_state") or {})
                 conversation = self._compact_resident_conversation(

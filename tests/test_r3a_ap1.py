@@ -69,7 +69,6 @@ from r3a_runtime.config import (ConfigurationError, ModelReadinessPolicy, ModelR
 from r3a_runtime.grace_module import GraceResident, resident_action_schema
 from r3a_runtime.knowledge import retrieve
 from r3a_runtime.diagnostics import DiagnosticProjection
-from r3a_runtime.engineering import CriterionResult, VerificationResult
 
 
 class ModelRouteTests(unittest.TestCase):
@@ -1246,63 +1245,10 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
 
 
 class ResidentVerificationFeedbackIntegrationTests(unittest.TestCase):
-    def _fixture(self):
-        cme = CME.__new__(CME)
-        cme.module_id = "resident.grace"
-        cme.settings = SimpleNamespace(source_digest="config-r1")
-        activity = {
-            "activity_id": "11111111-1111-4111-8111-111111111111",
-            "attempt_id": "22222222-2222-4222-8222-222222222222",
-            "input": {"correlation_id": "33333333-3333-4333-8333-333333333333"},
-        }
-        verification = VerificationResult(
-            verification_id="44444444-4444-4444-8444-444444444444",
-            activity_id=activity["activity_id"],
-            work_order_id="55555555-5555-4555-8555-555555555555",
-            work_order_version=1, verifier_id="independent.verifier", verifier_version="1.0.0",
-            policy_revision="policy-r1", artifact_digests=("sha256:" + "a" * 64,),
-            results=(CriterionResult("required-value", "FAIL", ("workspace:result.json",),
-                                     "Observed value differs from the assigned value."),),
-            verified_at="2026-11-08T01:20:00Z", outcome="FAIL")
-        return cme, activity, verification
-
-    def test_cme_builds_lineage_bound_non_authoritative_verifier_result(self):
-        cme, activity, verification = self._fixture()
-        result = cme._resident_result_from_verification(activity, verification)
-
-        self.assertEqual(result["contract_id"], "r3a.resident.result")
-        self.assertEqual(result["activity_id"], activity["activity_id"])
-        self.assertEqual(result["attempt_id"], activity["attempt_id"])
-        self.assertEqual(result["correlation_id"], activity["input"]["correlation_id"])
-        self.assertEqual(result["resident_id"], "resident.grace")
-        self.assertEqual(result["outcome"], "FAIL")
-        self.assertFalse(result["completion_authority"])
-        self.assertEqual(result["issuer"]["decision_ref"],
-                         "verification:" + verification.verification_id)
-        self.assertEqual(result["failure_reasons"][0]["evidence_refs"],
-                         ["workspace:result.json"])
-
-    def test_cme_delivers_result_to_grace_with_only_scoped_engineering_actions(self):
-        cme, activity, verification = self._fixture()
-        result = cme._resident_result_from_verification(activity, verification)
-        expected = {"action": "engineering_assess", "engineering_assessment": {
-            "status": "blocked", "assessment": "No safe correction is available.",
-            "evidence_refs": [result["issuer"]["decision_ref"]]}}
-        cme._module_call = AsyncMock(return_value={"result": expected})
-        context = {"activity_id": activity["activity_id"], "attempt_id": activity["attempt_id"],
-                   "correlation_id": activity["input"]["correlation_id"],
-                   "config_revision": "config-r1", "model_route": {"timeout_seconds": 1},
-                   "available_tools": [{"capability_id": "unrelated.tool"}],
-                   "reasoning_escalation": {"enabled": True}}
-
-        response = asyncio.run(cme._resident_verification_decision(activity, context, result, []))
-
-        self.assertEqual(response, expected)
-        payload = cme._module_call.await_args.args[1]
-        self.assertEqual(payload["resident_result"], result)
-        self.assertEqual(payload["available_tools"], [])
-        self.assertEqual(payload["reasoning_escalation"], {"enabled": False, "available_roles": []})
-        self.assertIn(result["issuer"]["decision_ref"], payload["conversation"][-1]["content"])
+    def test_engineering_workflow_and_verifier_decisions_are_not_owned_by_cme(self):
+        self.assertFalse(hasattr(CME, "_run_engineering_activity"))
+        self.assertFalse(hasattr(CME, "_resident_result_from_verification"))
+        self.assertFalse(hasattr(CME, "complete_engineering_work_order"))
 
     def test_cme_keeps_durable_reasoning_bookkeeping_out_of_resident_wire_frame(self):
         cme = CME.__new__(CME)
