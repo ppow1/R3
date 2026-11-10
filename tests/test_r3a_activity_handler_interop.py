@@ -150,7 +150,7 @@ def _cme_activity(sample: dict) -> dict:
         "input": {"correlation_id": "00000000-0000-4000-8000-000000000103",
                   "activity_input": copy.deepcopy(sample["activity_request"]),
                   "resident_id": "resident.fixture"},
-        "checkpoint": {},
+        "checkpoint": {"cursor": 0},
     }
 
 
@@ -202,6 +202,7 @@ def test_cme_dispatches_shared_fixture_and_records_authorized_result():
         assert dispatched.args[0] is provider_operation
         assert dispatched.args[1]["input"] == sample["activity_request"]
         assert dispatched.args[1]["request"]["operation"] == "execute"
+        assert dispatched.args[1]["request"]["payload"]["checkpoint"] == {"cursor": 0}
         assert dispatched.kwargs["context"]["handler"]["handler_id"] == resolved["handler"]["handler_id"]
         cme.store.record_progress.assert_awaited()
         cme.store.finish_activity.assert_awaited_once()

@@ -267,6 +267,11 @@ class ActivityIntakePersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("activity_intake", persisted["event_kind"])
         store._transition_on_conn.assert_awaited_once()
 
+        conflicting = copy.deepcopy(intake)
+        conflicting["activity"]["input"] = {"different": "source payload"}
+        with self.assertRaisesRegex(ValueError, "already bound to different source data"):
+            await store.submit_activity_intake(conflicting, result)
+
     async def test_persists_non_grace_activity_type_and_handler_input(self):
         provider = {"provider_id": "source.module", "provider_version": "1.0.0",
                     "artifact_sha256": "a" * 64}
