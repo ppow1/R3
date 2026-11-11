@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_activity_checkpoint_persistence.py
 Component: R3A-ACTIVITY-CHECKPOINT-PERSISTENCE-REGRESSION
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-10
 Created By: Codex GPT-6
 Purpose: Verify generic handler checkpoints persist through PostgreSQL progress updates and lease recovery.
@@ -13,9 +13,10 @@ Authority: Steward corrective directive, Autonomy / CME Issue #43.
 Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GPT-6 | Exercise atomic progress/checkpoint persistence and recovery against PostgreSQL.
 Supersedes: None.
 Contracts: r3a.activity-handler.v1; activity.generic v1; existing CME activity ledger.
-Tests: Isolated PostgreSQL 16; targeted digest/restart-replay checks 2 passed; focused checkpoint, Engineering, and verification suites 24 passed, 2 existing xfailed.
-Changed: 2026-11-11T21:52:57Z | R3A-STEP127-POSTGRES-REGRESSION | Codex GPT-6 | Preserve fixture settings across Store restart in the PostgreSQL regression.
-History/Predecessor: Git blob 38afccc75f5e3c10afd7897cefe5a3de568263dc at candidate commit b259a09b3e5372717f455170e9414d82af2eff6f.
+Tests: Isolated PostgreSQL 16; focused checkpoint, Engineering, verification, and frozen-digest compatibility regression: 25 passed, 2 existing xfailed.
+Changed: 2026-11-11T21:51:02Z | R3A-STEP127-POSTGRES-REGRESSION | Codex GPT-6 | Preserve fixture settings across Store restart in the PostgreSQL regression.
+Changed: 2026-11-11T21:57:36Z | R3A-STEP127-POSTGRES-REGRESSION | Codex GPT-6 | Cover frozen-digest upgrade compatibility.
+History/Predecessor: Git blob 4d206a799ee471028ba084142516dd82a71d62f3 at commit 4e5ca6201c3a78239e069530950a546a9f2c7273.
 """
 from __future__ import annotations
 
@@ -144,6 +145,29 @@ class ActivityCheckpointPostgresTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "idempotency key already belongs to a different canonical request"):
             await self.store.begin_capability_invocation(
                 changed_input, _capability_request_digest(changed_input), {})
+
+    async def test_frozen_digest_row_conflicts_with_candidate_deadline_omitting_digest(self):
+        first_request = {
+            "idempotency_key": f"frozen-directory-retry:{uuid.uuid4()}",
+            "invocation_id": str(uuid.uuid4()),
+            "operation_id": "institutional.directory.discover",
+            "correlation_id": str(uuid.uuid4()),
+            "deadline": "2099-01-01T00:00:00+00:00",
+            "input": {"resident_id": "resident:grace", "limit": 250},
+        }
+        frozen_digest = hashlib.sha256(json.dumps(
+            first_request, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        await self.store.begin_capability_invocation(first_request, frozen_digest, {})
+
+        # Reopen Store as the new code would after an upgrade. The persisted row
+        # has the frozen full-envelope digest; the candidate computes deadline-free.
+        await self.store.close()
+        self.store = Store(self.settings)
+        await self.store.open()
+        retry_request = {**first_request, "deadline": "2099-01-01T00:01:00+00:00"}
+        with self.assertRaisesRegex(ValueError, "idempotency key already belongs to a different canonical request"):
+            await self.store.begin_capability_invocation(
+                retry_request, _capability_request_digest(retry_request), {})
 
     async def test_handler_checkpoint_survives_progress_and_process_loss_retry(self):
         sample = fixture()
