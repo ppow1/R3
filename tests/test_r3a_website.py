@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_website.py
 Component: R3A-WEBSITE-API-TESTS
-File Revision: 1.1.0
+File Revision: 1.1.1
 Created: 2026-11-07T21:59:13Z
 Created By: Codex GPT-6
 Purpose: Verify shared-session gating, versioned objective forwarding, and website client assets.
@@ -109,9 +109,11 @@ class StewardWebsiteApiTests(unittest.TestCase):
     def test_settings_no_longer_claims_unimplemented_scope_or_registry_rows(self):
         with patch.dict(os.environ, {"R3_WEBSITE_AUTH_MODE": "r3a-native"}):
             page = self.client.get("/steward")
-        self.assertIn("scope-level inheritance, overrides, and configuration writes are not exposed", page.text)
+        self.assertIn("scope-level inheritance, overrides, configuration writes, and settings-scope grants are not exposed", page.text)
         self.assertNotIn("data-settings-scope", page.text)
         self.assertNotIn("Inherited value", page.text)
+        self.assertIn('id="settings-authorization"', page.text)
+        self.assertIn("CME checks operation grants", page.text)
         self.assertIn("Refresh effective values", page.text)
 
     def test_snapshot_runtime_projection_uses_diagnostics_contract_and_excludes_private_payloads(self):
