@@ -1,0 +1,43 @@
+{
+  "schema_id": "r3a.module-release-package.v2",
+  "schema_version": 2,
+  "module_id": "executor.orbit",
+  "module_version": "1.0.0",
+  "module_kind": "resident_executor",
+  "manifest_ref": "module-manifest.json",
+  "manifest_sha256": "df90f552ca280628f71c34170d786b1e91fd0f5eb9b966eb840c41960066ad35",
+  "artifact_digest": "29e690a7e20d457d497395125b0ea19868a10e844cd1a526641ab3871353f92d",
+  "files": [
+    {
+      "path": "orbit_worker/__init__.py",
+      "sha256": "92ac4ae872846de7fdfc38857f48738e8ab48ccaca08876bf3d2e7ae80f40157",
+      "size_bytes": 858
+    },
+    {
+      "path": "orbit_worker/worker.py",
+      "sha256": "fa97aaba4597d25a763d14e1db6567e59e0480230ff2665446d761f7693ae51e",
+      "size_bytes": 3499
+    }
+  ],
+  "process_binding": {
+    "contract_id": "r3a.module-process-binding.v1",
+    "contract_version": "1.0.0",
+    "process_kind": "jsonl",
+    "protocol_id": "r3a.module.v1",
+    "protocol_major": 1,
+    "protocol_min_minor": 0,
+    "protocol_max_minor": 0,
+    "runtime_id": "python3",
+    "entrypoint": "orbit_worker.worker",
+    "arguments_template": [
+      "--socket",
+      "{socket_path}",
+      "--module-id",
+      "{module_id}",
+      "--module-version",
+      "{module_version}",
+      "--config",
+      "{configuration_path}"
+    ]
+  }
+}

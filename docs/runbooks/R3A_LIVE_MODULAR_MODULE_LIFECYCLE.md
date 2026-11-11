@@ -100,3 +100,41 @@ Track these separately:
 Measure installation separately from package construction and verification. From the reviewed checkout, run `python3 scripts/measure_octominer_module_install.py`; it builds and verifies the deterministic archive, installs into a fresh temporary root, and prints per-phase and total elapsed seconds. This is a repeatable local baseline. For the managed window, time the install command and record start/end timestamps separately from config reload, activation, provider health, invocation, and rollback; do not report local staging time as managed integration time.
 
 Package and staging results do not imply managed live acceptance. Do not modify shared live services from an integration worktree. The managed install/config reload/activation sequence requires Coordinator approval and an Auditor review of the evidence bundle.
+
+## Generic process-module package v2 — isolated staging only
+
+`r3a.module-release-package.v2@2.0.0` and `r3a.module-process-binding.v1@1.0.0` are the shared candidate contracts from Modular Plugins #46 Step 84. The Grace input adapter only verifies the audited source-file pins and passes the manifest, process binding, and 12 files to the shared builder; it does not define another package schema or staging implementation. Source revision and external dependency notes are retained alongside the candidate input because the release descriptor currently has no source-revision or external-runtime-dependency fields. The package/staging contract does not register a module, issue a grant, or change CME lifecycle state.
+
+Build, verify, and stage the audited Grace candidate in an isolated root:
+
+```sh
+python3 scripts/build_grace_module_package.py build \
+  --spec r3a_modules/resident_grace/package_spec.json \
+  --source-root . \
+  --output artifacts/r3a-resident-grace-1.2.15.tar.gz
+python3 scripts/build_grace_module_package.py verify \
+  artifacts/r3a-resident-grace-1.2.15.tar.gz \
+  --expected-sha256 597992f7d0e81d3fd9fe3a8fa6237e0e1ba5b244fe2bf66ac174085984e5377f
+python3 scripts/build_grace_module_package.py install \
+  artifacts/r3a-resident-grace-1.2.15.tar.gz \
+  --expected-sha256 597992f7d0e81d3fd9fe3a8fa6237e0e1ba5b244fe2bf66ac174085984e5377f \
+  --install-root /path/to/isolated-module-stage
+```
+
+For a repeatable local staging-time sample, use a fresh isolated root and record host/Python version. This measures the CLI process plus local file verification/copy only; it is not managed CME installation time:
+
+```sh
+/usr/bin/time -f 'local_install_elapsed_seconds=%e' \
+  python3 scripts/build_grace_module_package.py install \
+  artifacts/r3a-resident-grace-1.2.15.tar.gz \
+  --expected-sha256 597992f7d0e81d3fd9fe3a8fa6237e0e1ba5b244fe2bf66ac174085984e5377f \
+  --install-root /tmp/r3a-package-measurement
+```
+
+The shared installer requires an external bundle SHA pin, validates every archive path and digest, rejects same-version/different-digest replacement, atomically stages the verified files under `.r3a-module-artifacts/<module-id>/<version>/<artifact-digest>`, and marks staged content read-only. The prior version remains available for rollback; installation never activates either version. The process-binding contract fixes the JSONL runtime, entrypoint, and argument placeholders; CME must still validate its selected binding/configuration and construct the supervised process command.
+
+**Current boundary:** CME does not yet consume this package-v2 process binding. Its existing resident activation path imports the configured runtime entrypoint and has a Grace-specific `--config` argument branch; the capability-operation loader is the current role-declaration ingestion path. Do not treat the package descriptor or local `--help` smoke as CME registration or live activation evidence. Coordinator and Modular Plugins must reconcile generic role registration, installed import-root selection, external configuration reference, and rollback readback with the canonical AP0-M1 lifecycle before managed launch. No package command edits CME configuration or authorizes a grant.
+
+There is also a manifest-contract blocker: the shared candidate packager validates a reduced manifest labeled `r3a.module-manifest.v1@1.2.0`; the audited source loader only accepts 1.0.0/1.1.0 and its standard v1.1 schema requires additional canonical fields. A strict expected-xfail in `tests/test_r3a_generic_module_package.py` records this mismatch. Keep the artifact as a package-format fixture until #46 reconciles the shared release manifest with the canonical module manifest, then remove/update the xfail and rerun acceptance.
+
+This package schema and `resident.grace@1.2.15` remain review candidates until #46 confirms the contract fields and the authoritative registry confirms the version is available. The current managed runtime must not install or activate this candidate based on local staging evidence.
