@@ -77,11 +77,11 @@ This candidate does not modify CME or its invocation validator. That preserves c
 
 ## Occurrence inventory and manual disposition
 
-The TSVs are exhaustive line scans of the named trees for `resident:<slug>` and `resident.<slug>` in tracked source/config/schema/test file types. They include path, line, literal, intended type, action/disposition and test/evidence pointer:
+The TSVs are exhaustive line scans of the named trees for `resident:<slug>` and `resident.<slug>` in tracked source/config/schema/test/documentation file types. The generated scan excludes the audit report and occurrence inventories themselves to avoid self-reference. They include path, line, literal, intended type, action/disposition and test/evidence pointer:
 
 - `R3A_RESIDENT_ID_OCCURRENCES_2CC3_20261111.tsv` — current integration baseline `2cc3fe3`.
 - `R3A_RESIDENT_ID_OCCURRENCES_A9DA_20261111.tsv` — active Grace correction worktree after this audit's edits.
-- `R3A_RESIDENT_ID_OCCURRENCES_INTEGRATION_CANDIDATE_20261111.tsv` — this candidate after reconciliation and corrections (**760 rows including header; SHA-256 `a841935915950f8fe9a00a47de5bd55d6a02ecfd1cefba0a6f39c315edd9b3c9`**).
+- `R3A_RESIDENT_ID_OCCURRENCES_INTEGRATION_CANDIDATE_20261111.tsv` — this candidate after reconciliation and corrections (**752 rows including header; SHA-256 `62e686bcad36e651c3baa5e0b1e37680b65fe5b7ca7d7c6a678ca7bac05bf164`**).
 
 The TSV field classifier is deliberately a candidate locator, not an authority: ambiguous `resident_id` fields are resolved against the owning contract and summarized above. Explicit negative fixtures that contain a deliberately swapped value remain negative tests. Provisional external source identifiers in the Grace dossier are evidence notes, not authoritative principal or module bindings, and remain unchanged pending the HR/directory owner's crosswalk.
 
