@@ -44,6 +44,7 @@ from r3a_runtime.residents import (
     project_for_grace_context_v1, validate_approved_context, HRPrincipalAssociationAdapter,
 )
 from r3a_runtime.residents.validation import validate_epistemic_span
+from r3a_runtime.resident_identity import resident_module_id, resident_principal_id
 from r3a_runtime.residents.legacy_import import extract_legacy_hr_candidates
 from r3a_runtime.capability_contracts import validate_schema_definition
 from r3a_runtime.residents.coordinator_integration import (
@@ -508,9 +509,15 @@ class ResidentDossierTests(unittest.TestCase):
             "verified_at": "2026-11-08T14:02:00Z",
         }
         self.assertIs(validate_identity_association(association), association)
+        self.assertEqual("resident:grace", resident_principal_id(
+            association["hr"]["authority_principal"]))
+        self.assertEqual("resident.grace", resident_module_id(association["runtime"]["profile_id"]))
         with self.assertRaises(ValueError):
             validate_identity_association({**association, "directory": {
                 **association["directory"], "principal_id": "resident:someone-else"}})
+        with self.assertRaisesRegex(ValueError, "executable resident module ID"):
+            validate_identity_association({**association, "runtime": {
+                **association["runtime"], "profile_id": "resident:grace"}})
         with self.assertRaises(ValueError):
             validate_identity_association({**association, "credential_ref": "credential://?token=secret"})
 
@@ -519,13 +526,13 @@ class ResidentDossierTests(unittest.TestCase):
         dossier["governance"]["approval_status"] = "active"
         identity = {"institutional_id": "r3:grace", "status": "authoritative", "revision": 7}
         context = load_runtime_context(institutional_id="r3:grace",
-            principal=RuntimePrincipal("resident.grace", "conversation", frozenset({"public", "institutional"}), "hr-authz:1"),
-            resolve_identity=lambda value: {**identity, "directory_resident_id": "resident.grace"}, load_dossier=lambda value: dossier,
+            principal=RuntimePrincipal("resident:grace", "conversation", frozenset({"public", "institutional"}), "hr-authz:1"),
+            resolve_identity=lambda value: {**identity, "directory_resident_id": "resident:grace"}, load_dossier=lambda value: dossier,
             defaults=DEFAULTS, overrides=[], provider_id="provider:test")
         self.assertEqual(context["resident_id"], "r3:grace")
         self.assertEqual(context["dossier_revision"], "1.0.0")
         self.assertFalse(context["authority_granted"])
-        validated = validate_runtime_character_context(context, directory_resident_id="resident.grace")
+        validated = validate_runtime_character_context(context, directory_resident_id="resident:grace")
         self.assertEqual(validated["classification_scope"], ["institutional", "public"])
         with self.assertRaises(PermissionError):
             load_runtime_context(institutional_id="missing", principal=RuntimePrincipal("p", "conversation", frozenset(), "hr-authz:2"),

@@ -10,6 +10,7 @@ from typing import Any, Callable
 from .configuration import resolve_personality
 from .prompts import compose_prompt
 from .validation import DIMENSIONS
+from ..resident_identity import resident_principal_id
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,12 @@ def load_runtime_context(*, institutional_id: str, principal: RuntimePrincipal,
     if (not canonical_id or identity.get("status") != "authoritative"
             or not identity.get("revision") or not identity.get("directory_resident_id")):
         raise PermissionError("authoritative HR identity and verified runtime crosswalk are required")
+    try:
+        resident_principal_id(identity.get("directory_resident_id"))
+        if principal.principal_id.startswith("resident."):
+            resident_principal_id(principal.principal_id)
+    except (AttributeError, ValueError) as exc:
+        raise PermissionError("directory and authenticated resident identity must use canonical principal IDs") from exc
     if not principal.principal_id or not principal.authorization_ref:
         raise PermissionError("authenticated principal and HR authorization reference are required")
     dossier = load_dossier(canonical_id)
@@ -81,6 +88,11 @@ def validate_runtime_character_context(bundle: Any, *, directory_resident_id: st
         raise ValueError("resident character context contract is incompatible")
     if bundle["directory_resident_id"] != directory_resident_id or bundle["identity_binding_status"] != "authoritative":
         raise ValueError("resident character context identity binding is not authoritative")
+    try:
+        resident_principal_id(directory_resident_id)
+        resident_principal_id(bundle["directory_resident_id"])
+    except ValueError as exc:
+        raise ValueError("directory resident identity must be a canonical principal") from exc
     if bundle["approval_status"] != "active" or bundle["authority_granted"] is not False:
         raise ValueError("inactive character context or authority-bearing context is forbidden")
     if not all(isinstance(bundle[key], str) and bundle[key] for key in

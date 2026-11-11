@@ -67,6 +67,7 @@ from r3a_runtime.cme import CME, _RESIDENT_TOOLS, _knowledge_answer_issues, _req
 from r3a_runtime.config import (ConfigurationError, ModelReadinessPolicy, ModelRole,
                                 ModelRoute, resolve_model_route)
 from r3a_runtime.grace_module import GraceResident, resident_action_schema
+from r3a_runtime.contracts import ContractEnvelope
 from r3a_runtime.knowledge import retrieve
 from r3a_runtime.diagnostics import DiagnosticProjection
 from r3a_runtime.engineering import CriterionResult, VerificationResult
@@ -861,7 +862,7 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "cannot report.*healthy"):
             asyncio.run(resident.handle("execute", payload))
 
-    def _profile(self, resident_id="resident.directory-bound-7"):
+    def _profile(self, resident_id="resident:directory-bound-7"):
         return {"contract_id": "r3a.resident.execution-profile", "contract_version": "1.0.0",
                 "resident_id": resident_id, "display_name": None,
                 "office_id": "office:directory-bound", "office_role": "role returned by directory",
@@ -880,13 +881,20 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         payload = self._payload([])
         payload.pop("route_id")
         payload["resident_profile"] = self._profile()
+        payload["resident_id"] = "resident:directory-bound-7"
+        payload["correlation_id"] = "correlation-directory-bound"
+        payload["contract_envelope"] = ContractEnvelope(
+            "r3a.resident.execution", "1.0.0", "request-directory-bound",
+            payload["activity_id"], payload["attempt_id"], payload["correlation_id"],
+            "resident:directory-bound-7", payload["config_revision"],
+            "2026-11-08T01:02:08Z", {"operation": "execute"}).to_dict()
 
         result = asyncio.run(resident.handle("execute", payload))
 
         request = resident._model_request.await_args.args[2]
         self.assertEqual(request["model"], "independent-resident-model")
         model_input = json.loads(request["messages"][-1]["content"])
-        self.assertEqual(model_input["resident_profile"]["resident_id"], "resident.directory-bound-7")
+        self.assertEqual(model_input["resident_profile"]["resident_id"], "resident:directory-bound-7")
         self.assertEqual(model_input["resident_profile"]["office_id"], "office:directory-bound")
         self.assertEqual(result["resident_profile"]["directory_evidence"]["snapshot_sha256"], "a" * 64)
 

@@ -4,7 +4,7 @@
   "invocation_id": "fixture-invocation-01",
   "operation_id": "infrastructure.octominer.telemetry.read",
   "operation_contract_version": "1.0.0",
-  "caller": {"principal_id": "resident.grace", "resident_id": "resident.grace", "service_id": null},
+  "caller": {"principal_id": "resident:grace", "resident_id": "resident.grace", "service_id": null},
   "target": {"source_ids": ["gpu.telemetry.octo-fixture"]},
   "input": {},
   "activity_id": "fixture-activity-01",

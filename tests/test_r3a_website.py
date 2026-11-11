@@ -315,7 +315,7 @@ class StewardWebsiteApiTests(unittest.TestCase):
                                    {"contract": "r3a.steward-conversation.v1",
                                     "message": {"message_id": message_id, "delivery_state": "processing"}}]) as control:
             created = self.client.post("/api/v1/steward/conversations", json={
-                "resident_id": "resident.grace", "client_conversation_id": client_conversation_id},
+                "resident_id": "resident:grace", "client_conversation_id": client_conversation_id},
                 headers={"Origin": "http://testserver"})
             sent = self.client.post(f"/api/v1/steward/conversations/{conversation_id}/messages", json={
                 "client_message_id": message_id, "text": "Please introduce yourself."},
@@ -331,6 +331,13 @@ class StewardWebsiteApiTests(unittest.TestCase):
         self.access.authenticated_principal.side_effect = HTTPException(401, "session required")
         response = self.client.get("/api/v1/steward/residents")
         self.assertEqual(response.status_code, 401)
+
+    def test_conversation_creation_rejects_executor_module_id_as_resident_principal(self):
+        response = self.client.post("/api/v1/steward/conversations", json={
+            "resident_id": "resident.grace",
+            "client_conversation_id": "bd295347-7a57-4d63-98ae-cd06ce34f446"},
+            headers={"Origin": "http://testserver"})
+        self.assertEqual(response.status_code, 422)
 
 
 if __name__ == "__main__":
