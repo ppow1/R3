@@ -3,14 +3,33 @@
 This module coordinates evidence references. It is not an HR, directory,
 credential, character, capability-grant, or runtime authority.
 """
+# R3 CONTROLLED SOURCE
+# File: r3a_runtime/residents/onboarding.py
+# Component: R3A-RESIDENT-ONBOARDING-WORKFLOW
+# File Revision: 1.0.0 (first controlled revision; legacy file had no provenance header)
+# Created: Unknown (legacy; first committed at e247f3f)
+# Created By: Unknown (legacy)
+# Purpose: Validate and coordinate resumable resident onboarding packets through authority-owned evidence ports.
+# Execution Model: Async R3A service; external authorization/evidence callbacks may be synchronous or awaitable.
+# Observability: Explicit authorization, evidence, revision, idempotency, and lifecycle failures.
+# Dependencies: Versioned packet schema/state machine; durable onboarding store; host-supplied authorities.
+# Authority: Issue #58; dispatch #61 comment 6808376918; AP4 R3A-015/R3A-021.
+# Changed: 2026-11-11T22:23:06Z | HRD-STEP-142 | Codex GPT-6 | Await async authority ports while preserving strict synchronous-port behavior.
+# Supersedes: None
+# Superseded By: None
+# Contracts: r3a.resident.onboarding.host-composition.v1; universal onboarding packet v1.
+# Tests: tests/test_r3a_resident_onboarding.py; tests/test_r3a_resident_onboarding_host.py
+# History/Predecessor: Commit 49cdf5e7fb082867c512b8c4890947faf7dd9a5c; prior blob 5cc5c1542007ec178b261c21a1b32c242dd34a16.
+
 from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import inspect
 import json
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Awaitable, Callable, Protocol
 import uuid
 
 from ..capability_contracts import validate_json, validate_schema_definition
@@ -138,6 +157,14 @@ class OnboardingStore(Protocol):
     async def get_packet(self, packet_id: str) -> dict[str, Any] | None: ...
     async def transition_packet(self, packet: dict[str, Any], *, expected_revision: int,
                                 event: dict[str, Any]) -> dict[str, Any]: ...
+
+
+async def _invoke_authority_port(callback: Callable[..., Any], *args: Any) -> Any:
+    """Invoke a trusted sync or async authority port from the async workflow."""
+    result = callback(*args)
+    if inspect.isawaitable(result):
+        result = await result
+    return result
 
 
 def validate_packet(packet: Any) -> dict[str, Any]:
@@ -381,9 +408,11 @@ class ResidentOnboardingService:
     """Authorize and persist packet transitions through injected R3A boundaries."""
 
     def __init__(self, store: OnboardingStore, *, authorize: Callable[
-            [OnboardingActor, str, dict[str, Any]], bool],
-            verify_domain_evidence: Callable[[OnboardingActor, str, dict[str, Any]], Any],
-            verify_activation_evidence: Callable[[OnboardingActor, dict[str, Any]], bool]):
+            [OnboardingActor, str, dict[str, Any]], bool | Awaitable[bool]],
+            verify_domain_evidence: Callable[
+                [OnboardingActor, str, dict[str, Any]], Any | Awaitable[Any]],
+            verify_activation_evidence: Callable[
+                [OnboardingActor, dict[str, Any]], bool | Awaitable[bool]]):
         if not callable(authorize) or not callable(verify_domain_evidence) or not callable(verify_activation_evidence):
             raise TypeError("server-side authorization and authoritative evidence validators are required")
         for method in ("create_packet", "get_packet", "transition_packet"):
@@ -419,7 +448,8 @@ class ResidentOnboardingService:
             uuid.UUID(correlation_id)
         except ValueError as exc:
             raise OnboardingError("correlation ID must be a UUID") from exc
-        if self._authorize(actor, "resident.onboarding.request", packet) is not True:
+        if await _invoke_authority_port(
+                self._authorize, actor, "resident.onboarding.request", packet) is not True:
             raise PermissionError("resident onboarding request grant denied")
         created = deepcopy(packet)
         now = created["created_at"]
@@ -449,7 +479,8 @@ class ResidentOnboardingService:
             raise KeyError("resident onboarding packet not found")
         if not isinstance(actor, OnboardingActor):
             raise PermissionError("server-authenticated onboarding actor is required")
-        if self._authorize(actor, "resident.onboarding.transition", packet) is not True:
+        if await _invoke_authority_port(
+                self._authorize, actor, "resident.onboarding.transition", packet) is not True:
             raise PermissionError("resident onboarding transition grant denied")
         try:
             uuid.UUID(correlation_id)
@@ -463,7 +494,8 @@ class ResidentOnboardingService:
             evidence_refs=evidence_refs, approval_ref=approval_ref,
             event_id=event_id,
         )
-        if target_state == "ACTIVE" and self._verify_activation_evidence(actor, packet) is not True:
+        if target_state == "ACTIVE" and await _invoke_authority_port(
+                self._verify_activation_evidence, actor, packet) is not True:
             raise PermissionError("current authoritative activation evidence could not be verified")
         if successor is packet:
             return packet
@@ -513,9 +545,11 @@ class ResidentOnboardingService:
                 raise PermissionError("only each field's authoritative owner may change its evidence")
         if actor.role != current_domain["owner"] and (metadata_changed or not changed_fields):
             raise PermissionError("only the domain owner may change domain status, approval, or metadata")
-        if self._authorize(actor, "resident.onboarding.domain.record", packet) is not True:
+        if await _invoke_authority_port(
+                self._authorize, actor, "resident.onboarding.domain.record", packet) is not True:
             raise PermissionError("resident onboarding domain evidence grant denied")
-        verified = self._verify_domain_evidence(actor, domain_id, domain)
+        verified = await _invoke_authority_port(
+            self._verify_domain_evidence, actor, domain_id, domain)
         if verified is not True and not isinstance(verified, dict):
             raise PermissionError("domain evidence was not confirmed by its authoritative owner")
         if not reason_ref or not correlation_id or not idempotency_key:

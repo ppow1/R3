@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3a_runtime/residents/onboarding_host.py
 # Component: R3A-RESIDENT-ONBOARDING-HOST
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-11T18:43:21Z
 # Created By: Codex GPT-6
 # Purpose: Compose resident onboarding with host-authenticated identity, authorization, authority verification, and Coordinator persistence.
@@ -10,10 +10,11 @@
 # Dependencies: R3A PostgreSQL pool; host actor resolver; R3A authorizer; domain and activation verifiers.
 # Authority: Steward Steps 74/81; R3A modular architecture and universal onboarding contracts.
 # Changed: 2026-11-11T18:43:21Z | HRD-STEP-74 | Codex GPT-6 | Add fail-closed versioned host-composition façade.
+# Changed: 2026-11-11T22:23:06Z | HRD-STEP-142 | Codex GPT-6 | Type host authorization and evidence ports as sync-or-async.
 # Supersedes: None
 # Contracts: r3a.resident.onboarding.host-composition.v1
 # Tests: tests/test_r3a_resident_onboarding_host.py
-# History/Predecessor: New file; publication recorded by Git commit.
+# History/Predecessor: Commit 49cdf5e7fb082867c512b8c4890947faf7dd9a5c; prior blob 51f2bffefd1f6a398e908955103a1f0b024f51d0.
 
 """Versioned host-composition boundary for the resident onboarding service.
 
@@ -38,6 +39,9 @@ class OnboardingCompositionError(RuntimeError):
 
 
 ActorResolver = Callable[[Any], OnboardingActor | Awaitable[OnboardingActor]]
+AuthorizationPort = Callable[..., bool | Awaitable[bool]]
+DomainEvidencePort = Callable[..., Any | Awaitable[Any]]
+ActivationEvidencePort = Callable[..., bool | Awaitable[bool]]
 
 
 @dataclass(frozen=True)
@@ -80,9 +84,9 @@ class ResidentOnboardingHost:
 
 
 def compose_resident_onboarding_host(*, pool: Any, actor_resolver: ActorResolver | None,
-                                     authorize: Callable[..., bool] | None,
-                                     verify_domain_evidence: Callable[..., Any] | None,
-                                     verify_activation_evidence: Callable[..., bool] | None,
+                                     authorize: AuthorizationPort | None,
+                                     verify_domain_evidence: DomainEvidencePort | None,
+                                     verify_activation_evidence: ActivationEvidencePort | None,
                                      ) -> ResidentOnboardingHost:
     """Compose the onboarding service only when all external gates are present.
 

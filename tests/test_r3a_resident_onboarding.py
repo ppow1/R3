@@ -1,4 +1,22 @@
 """Universal packet, authorization, revision, lifecycle, and privacy regressions."""
+# R3 CONTROLLED TEST
+# File: tests/test_r3a_resident_onboarding.py
+# Component: R3A-RESIDENT-ONBOARDING-TESTS
+# File Revision: 1.0.0 (first controlled revision; legacy file had no provenance header)
+# Created: Unknown (legacy; first committed at e618dd7)
+# Created By: Unknown (legacy)
+# Purpose: Verify reusable packet workflow, authority boundaries, persistence, privacy, and lifecycle behavior.
+# Execution Model: Isolated unittest/pytest suite with in-memory and private database fixtures.
+# Observability: Assertion outcomes; database tests use only explicit disposable DSNs.
+# Dependencies: R3A resident onboarding service, repositories, packet schema, and state machine.
+# Authority: Issue #58; dispatch #61 comment 6808376918; AP4 R3A-015/R3A-021.
+# Changed: 2026-11-11T22:23:06Z | HRD-STEP-142 | Codex GPT-6 | Cover awaitable host authorization and evidence ports.
+# Supersedes: None
+# Superseded By: None
+# Contracts: r3a.resident.onboarding.host-composition.v1; universal onboarding packet v1.
+# Tests: This module.
+# History/Predecessor: Commit 49cdf5e7fb082867c512b8c4890947faf7dd9a5c; prior blob 8823e107d747413b5a5ec32efb60003994e35680.
+
 from __future__ import annotations
 
 import asyncio
@@ -239,6 +257,66 @@ def _service(store, *, allowed=True):
 
 
 class ResidentOnboardingTests(unittest.TestCase):
+    def test_async_authority_ports_are_awaited_for_create_domain_and_activation(self):
+        async def run():
+            store = MemoryOnboardingStore()
+            calls = []
+
+            async def authorize(actor, action, packet):
+                calls.append(("authorize", action))
+                return True
+
+            async def verify_domain(actor, domain_id, domain):
+                calls.append(("domain", domain_id))
+                if domain_id == "identity" and domain["status"] == "verified":
+                    identity_field = next(field for field in domain["fields"]
+                                          if field["field_id"] == "canonical_principal")
+                    return {"resident_id": identity_field["value_ref"].removeprefix(
+                        "test://identity/")}
+                return True
+
+            async def verify_activation(actor, packet):
+                calls.append(("activation", packet["packet_id"]))
+                return True
+
+            service = ResidentOnboardingService(
+                store, authorize=authorize, verify_domain_evidence=verify_domain,
+                verify_activation_evidence=verify_activation)
+            hr = OnboardingActor("principal:hr-async", "HR", "session:hr-async")
+            packet = _new(str(uuid.uuid4()), None, "Synthetic Async Resident", "Analyst")
+            created = await service.create(packet, actor=hr,
+                correlation_id=str(uuid.uuid4()), reason_ref="test://reason/request",
+                evidence_refs=["test://request/source"])
+            pending = await service.transition(created["packet_id"], actor=hr,
+                target_state="IDENTITY_PENDING", expected_revision=1,
+                idempotency_key="async-identity-start", correlation_id=str(uuid.uuid4()),
+                reason_ref="test://reason/identity-start", evidence_refs=["test://hr/source"],
+                event_id=str(uuid.uuid4()))
+            resident_id = "r3:synthetic-async"
+            identity = _identity_domain(resident_id)
+            verified = await service.record_domain(pending["packet_id"], "identity",
+                domain=identity, actor=hr, expected_revision=2,
+                idempotency_key="async-identity-record", correlation_id=str(uuid.uuid4()),
+                reason_ref="test://reason/identity-verified", event_id=str(uuid.uuid4()))
+            self.assertEqual(resident_id, verified["resident_id"])
+
+            activation = _activation_packet()
+            store.packets[activation["packet_id"]] = activation
+            steward = OnboardingActor("principal:steward-async", "Steward", "session:steward-async")
+            active = await service.transition(activation["packet_id"], actor=steward,
+                target_state="ACTIVE", expected_revision=7,
+                idempotency_key="async-activation", correlation_id=str(uuid.uuid4()),
+                reason_ref="test://reason/activate", evidence_refs=["test://approval/steward"],
+                approval_ref="test://approval/steward", event_id=str(uuid.uuid4()))
+            self.assertEqual("ACTIVE", active["state"])
+            self.assertIn(("activation", activation["packet_id"]), calls)
+            self.assertIn(("domain", "identity"), calls)
+            self.assertIn(("authorize", "resident.onboarding.request"), calls)
+            self.assertIn(("authorize", "resident.onboarding.transition"), calls)
+            self.assertIn(("authorize", "resident.onboarding.domain.record"), calls)
+
+        asyncio.run(run())
+
     def test_schema_machine_vicky_and_second_resident_fixtures_validate(self):
         validate_json_schema_and_machine()
         vicky = json.loads((Path(__file__).parents[1] / "docs/onboarding/vicky.packet.json").read_text())
