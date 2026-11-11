@@ -1,0 +1,41 @@
+<!--
+R3 CONTROLLED DOCUMENT
+File: docs/architecture/R3A_NOTIFICATION_BACKLOG_STATUS_20261111.md
+Component: R3A-AP1-N1-NOTIFICATIONS
+File Revision: 1.0.0
+Created: 2026-11-11 UTC
+Purpose: Evidence-based recovery of Issue #48 charter, standing backlog, audit rework and operational gates.
+Authority: Issues #48 comments 6804151550 and 6804263101.
+Status: Source/workflow inventory; not a production acceptance record.
+-->
+# Notifications backlog status — 2026-11-11
+
+This snapshot recovers the original R3A-019 charter and the standing 2026-11-08 backlog from Issue #48. “Implemented” below means source or isolated evidence only unless the row explicitly says managed/live. No row implies production deployment.
+
+## Original AP1-N1 charter
+
+| Charter item | Evidence-based status | Next owner / action |
+|---|---|---|
+| Inspect and reuse event, inbox, activity, auth and provider contracts | **Implemented in source.** N1 reuses CME native event provenance, generic activity intake, registered provider operations, the existing CME capability registry, and notification-owned PostgreSQL lifecycle store. The current AP3 Website adapter derives caller identity from the authenticated session and sends the canonical CME invocation. | #48 keeps module source/tests aligned; #43/#46 own generic CME intake and capability contracts. |
+| Versioned source envelope, source identity, event ID/dedupe, timing, correlation, payload reference, provenance and lifecycle | **Implemented in source; managed config absent.** N1 intake and activity-intake schemas preserve source identity/idempotency, correlation, timestamps, payload reference/digest and provenance. Lifecycle projection includes received/actionable/acknowledged/resolved-or-blocked. | #48 owns source adapters and their manifests; Coordinator supplies a real approved source/config. |
+| Real source adapter and durable idempotent CME activity handling; Grace decides | **Source and historical isolated vertical slice verified.** The Nov 7 isolated run imported native CME event `19b87997-1a36-4b8a-bfd6-4f936529ba07` into activity `7151eae3-701a-4222-baa7-ac7167db1aae`, recovered after a CME restart, replayed idempotently, and recorded Grace's source-cited outcome. See #48 comment [6713347052](https://github.com/ppow1/R3/issues/48#issuecomment-6713347052). **Current managed source path remains unconfigured.** | Coordinator/#51 must provide authorized source binding/config, source DSN and exact grant; #48 then repeats a managed trace. |
+| Scoped read/ack/resolve grants, no upstream ack on receipt, evidence for actions/failures | **Provider ownership/auth source is implemented; write activation is blocked.** The read manifest requires exactly `notification.delivery.read`; recipient ownership and CME decision/audit references are enforced by provider/store. The current generic `steward_write` contract only accepts static explicit principal lists, so AP3 session-bound ack/resolve descriptors are not safely registerable. | #46 publishes reviewed generic CME-verified session-principal constraint; #51 integrates it; #48 registers only exact grants and reruns lifecycle authorization tests. |
+| Demonstrate real event through current running prototype, survive interruption and duplicate replay | **Passed historically in an isolated local R3A prototype; not managed/live accepted.** Runtime IDs and timestamps are in #48 comment 6713347052. Later Auditor review explicitly says managed event/delivery/ack acceptance is still blocked for lack of managed source config/grant/recipient evidence (#48 comment [6756373979](https://github.com/ppow1/R3/issues/48#issuecomment-6756373979)). | Coordinator provides an authorized managed window and non-secret evidence bundle; #48 performs only after configuration/grants exist. |
+| Regression for dedupe, restart/replay, authorization, outage, malformed payload, provenance and lifecycle | **Source tests exist; broad checkout integration has environment-sensitive pin failures.** Current notification/Website/provider/package suite: 57 passed, 5 skipped. The earlier integrated lifecycle suite and exact historical isolated trace are separate evidence. | #48 extends package/module regressions; #43/#46 own shared contract tests. Rerun full integration in the canonical Linux/project environment before integration acceptance. |
+
+## Standing backlog (2026-11-08)
+
+| Priority / item | Evidence-based status | Next owner / action |
+|---|---|---|
+| P0 — release-ready manifest/package, source adapter/config, grant, replay and recipient inbox actions | **Read provider package now staged as immutable source artifact** at `artifacts/r3a-notification-delivery-1.0.0.tar.gz`; SHA and install/rollback instructions are in `docs/runbooks/R3A_NOTIFICATION_DELIVERY_1_0_0_PACKAGE_HANDOFF.md`. Extracted-package registry test passes. **Managed source binding/grant, read grant activation and deployment are not evidenced.** | #48 requests exact-SHA audit; Coordinator/#51 owns authorized managed config, exact grant and lifecycle activation. |
+| P1 — trace actual ntfy senders, distinguish R2/R3 legacy, improve actionable message/deep links | **Partial source implementation only; no current live transport inventory or authenticated deep-link acceptance is recorded.** Existing R2/R3 delivery must remain available until replacement is proven. | #48 inventories approved source repos/config read-only; Website #51 owns target detail route; Steward/Coordinator supplies a real test delivery. |
+| P1 — Website notification center: latest 10+, full payload/status/source/severity/time/freshness and replay-safe actions | **Versioned inbox contract and session-bound route/provider source exist.** Website live OpenAPI previously returned 404 for notifications; the deployed route plus authenticated real delivery/action acceptance remains unverified. See #48 comments 6784311359 and 6784431578. | Website #51 integrates/deploys route; #48 provides installed read operation and grant; Coordinator verifies live authenticated inbox and lifecycle. |
+| P1 — ntfy mobile rich actions, reply, images/attachments and OS limits | **Not evidenced as tested.** No claim of reply/action/attachment support is made. | #48 verifies upstream ntfy/server docs and a controlled device; any callback must be authenticated and durable. |
+| P1 — phone VPN reachability | **Unresolved.** No VPN-on/Wi-Fi-off/cellular acceptance is recorded in this branch. | Remote Access #49 diagnoses a least-exposure route; #48 runs the approved phone matrix without weakening access. |
+| P2 — configurable routing, subscriptions, severity, quiet hours, escalation, templates, link base, retention, per-recipient settings | **Partial.** Existing source config supports subscriptions/categories and timezone, but a complete revisioned policy/admin surface and the listed controls are not evidenced. | #48 proposes additive versioned policy fields against current schema; Website #51 owns any admin UI; Coordinator validates activation and provenance. |
+
+## Current audit rework and release gate
+
+Auditor FAIL #48 comment [6803428149](https://github.com/ppow1/R3/issues/48#issuecomment-6803428149) identified a `store.py` supporting-artifact hash mismatch in the read manifest and reiterated the static `steward_write` AP3 principal limitation. This branch now sets the supporting pin to the canonical LF content hash and forces LF checkout for that pinned source file. A permanent regression asserts the canonical file hash; a deterministic package builder and extracted-package standard-registry install test are added. This candidate still needs commit/push and exact-SHA Auditor re-review.
+
+The AP3 write constraint remains a shared contract dependency, not a notification-side exception. The package deliberately declares only `notification.delivery.read`. No wildcard, hardcoded human, service identity substitution, or Website-provided principal authority is allowed. No managed bootstrap, grant, provider activation, Website deployment, live inbox, acknowledgment, or resolution was changed or verified in this workstream.

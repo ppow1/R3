@@ -5,6 +5,7 @@ import unittest
 import hashlib
 import json
 import copy
+import tarfile
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -15,6 +16,7 @@ from r3a_runtime.capability_contracts import (CapabilityContractError,
                                               validate_operation)
 from r3a_runtime.config import load_settings
 from r3a_plugins.notification_service.capability import NotificationDeliveryProvider
+from scripts.package_notification_module import build_package
 
 
 class NotificationCapabilityTests(unittest.TestCase):
@@ -28,11 +30,25 @@ class NotificationCapabilityTests(unittest.TestCase):
         self.assertEqual(operation["required_grants"], ["notification.delivery.read"])
         self.assertEqual(operation["provider"]["artifact_sha256"],
                          hashlib.sha256((manifest_path.parent / "capability.py").read_bytes()).hexdigest())
+        store_digest = hashlib.sha256(
+            (manifest_path.parent / "store.py").read_bytes().replace(b"\r\n", b"\n")
+        ).hexdigest()
+        self.assertEqual(manifest["supporting_artifacts"][0]["artifact_sha256"], store_digest)
 
     def test_inbox_operation_registers_through_standard_module_registry_config(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as temporary:
             temporary_root = Path(temporary)
+            staged_root = temporary_root / "installed"
+            package_path = temporary_root / "notification.tar.gz"
+            build_package(package_path)
+            with tarfile.open(package_path, "r:gz") as archive:
+                for member in archive.getmembers():
+                    if not member.isfile():
+                        continue
+                    target = staged_root / member.name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(archive.extractfile(member).read())
             data_dir = temporary_root / "data"
             data_dir.mkdir()
             operation_config = temporary_root / "notification-config.json"
@@ -63,7 +79,7 @@ class NotificationCapabilityTests(unittest.TestCase):
                            "restart_initial_seconds": 1, "restart_max_seconds": 5,
                            "worker_concurrency": 1},
                 "capability_operations": [{
-                    "manifest": str(root / "r3a_plugins" / "notification_service" / "manifest.read.json"),
+                    "manifest": str(staged_root / "r3a_plugins" / "notification_service" / "manifest.read.json"),
                     "configuration": str(operation_config),
                 }],
             }

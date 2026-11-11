@@ -15,7 +15,7 @@
   "artifact_ref": "capability.py",
   "artifact_sha256": "f7409526fe286738cb21c6e3be061f8841b51c7e1d013aa977731f2ed76c492f",
   "supporting_artifacts": [
-    {"artifact_ref": "store.py", "artifact_sha256": "65033d8522e26b40b75a25051666e3840ab3de8c086330f8c119c66638930eb6"}
+    {"artifact_ref": "store.py", "artifact_sha256": "059a1ef19c4f48e430b19a599062e5f91718fc27471af19680beeba9295c6992"}
   ],
   "capability_id": "notification.delivery.read",
   "provider": {
