@@ -2,23 +2,26 @@
 R3 CONTROLLED DOCUMENT
 File: docs/operations/bridge-v3-design.md
 Component: DEV-BRIDGE-V3-DESIGN
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-11T13:54:20Z
 Created By: Codex GPT-6
 Purpose: Define a reviewable poll, batch-routing, delivery, persistence, and provisioning design for the internal development bridge
 Execution Model: Design only; no service or executable bridge implementation
-Observability: Intended GitHub receipts and local SQLite health/session/event records; not implemented here
-Dependencies: Issues #61 and #62; verified Bridge v2 source and authorized Windows validation remain prerequisites
-Authority: Issue #62; R3 architecture charter and file provenance rules; no shared-service or grant authority
+Observability: CME lifecycle/activity diagnostics and event evidence are canonical; no new health/event store
+Dependencies: Issues #61 and #62; R3A module/activity/persistence contracts; verified Bridge v2 source and authorized Windows validation remain prerequisites
+Authority: Issues #62/#63; Step 10 dispatch 6797993717; R3A architecture charter and file provenance rules; no shared-service or grant authority
 Changed: 2026-11-11T13:54:20Z | R3-BRIDGE-V3-STEP7 | Codex GPT-6 | Record batch poll, target routing, lifecycle states, and acceptance evidence
+Changed: 2026-11-11T14:08:00Z | R3-BRIDGE-V3-STEP10 | Codex GPT-6 | Align Bridge v3 design with the existing R3A modular contracts
 Supersedes: None
 Contracts: docs/architecture/R3A_ARCHITECTURE_CHARTER.md; hints/file-provenance.md; Issue #62 requirements
 Tests: No executable implementation; design review only
-History/Predecessor: None; new file
+History/Predecessor: Git blob 204bf461d0567e8eb4e0f59eebe7efb243f2f904
 -->
 # Bridge v3 design and acceptance status
 
-This document is a design record for the internal GitHub-to-Codex development bridge. It does not define an R3A runtime module and does not claim any live capability. Bridge transports authorized assignments and provisions isolated development sessions; CME retains scheduling, authorization enforcement, persistence, and lifecycle responsibilities; residents retain implementation judgment. No identity, permission, or runtime authority is inferred from a dispatch comment.
+This document is a design and status record for Bridge v3 as an intended R3A capability module. Source implementation must use R3A's existing versioned capability-provider/module manifest, CME module lifecycle, durable activity/state/event store, authorization, health and diagnostics contracts. It must not add a second registry, lifecycle, authorization plane, or authoritative SQLite event store. Bridge transports authorized assignments; CME retains scheduling, enforcement, persistence, and lifecycle responsibilities; residents retain implementation judgment. No identity, permission, or runtime authority is inferred from a dispatch comment.
+
+See the [Bridge v3 modular compliance matrix](bridge-v3-modular-compliance.md) for verified contract paths, function mapping, and explicit gaps. The current source accepts `r3a.module-manifest.v1` versions 1.0.0, 1.1.0 and 1.2.0; new module declarations should use the newest accepted schema, 1.2.0, and be independently validated against the loader and activity-handler contracts.
 
 ## Poll cycle and visible countdown
 
@@ -37,7 +40,7 @@ The countdown is operator telemetry, not proof that GitHub is reachable or that 
 
 Each target registry entry should identify a stable session ID, configured terminal title and PID, Codex session ID when available, repository, branch, worktree, assigned issue/comment, and observed activity. Do not infer activity from an open window alone. Multiple target comments discovered in one poll cycle must not incur a full interval between dispatches.
 
-The durable comment key is `(repository, issue number, comment ID)`. Persist each transition transactionally in SQLite before external side effects. On restart, terminal states suppress replay. An attempt left uncertain after a crash is surfaced for operator review; it is never silently resent. Keep message bodies out of long-lived logs where possible; store safe summaries, IDs, result digests, and evidence links, never credentials.
+The stable dispatch identity is `(repository, issue number, comment ID)`. Durable module/activity state, retries, checkpoints, and event lineage belong to CME's existing persistence contracts. The Bridge module must not write directly to the institutional database. On restart, terminal activity and invocation records suppress replay; uncertain external effects remain explicit and follow the declared recovery contract. Keep message bodies out of long-lived records where possible; store safe summaries, IDs, result digests, and evidence references, never credentials.
 
 | Mode | Required behavior | Evidence needed |
 |---|---|---|
@@ -53,7 +56,7 @@ Provisioning must use structured process and Git APIs with fixed executable/argu
 
 ## Rollback and lifecycle
 
-Bridge v2 is the required rollback baseline, but its exact file, content digest, and launch/stop commands are not available in this Linux workspace. Do not modify or replace it until an authorized read-only copy is inspected and preserved with a cryptographic digest. Bridge v3 remains **design only** here; there are no start, stop, restart, or rollback commands to execute. Do not activate shared services or issue grants without the governing authorization.
+Bridge v2 is the required transport rollback baseline, but its exact file, content digest, and launch/stop commands are not available in this Linux workspace. Do not modify or replace it until an authorized read-only copy is inspected and preserved with a cryptographic digest. The Bridge module lifecycle must use CME's existing `module.lifecycle` v2 operations; module state transitions and diagnostic projections use existing R3A state/event contracts. No separate SQLite lifecycle or health store is allowed. Do not activate shared services or issue grants without the governing authorization.
 
 ## Acceptance ledger
 
@@ -64,7 +67,9 @@ Bridge v2 is the required rollback baseline, but its exact file, content digest,
 | Durable idempotency and uncertain result | Designed; not implemented | Duplicate comment suppressed across process restart; uncertain attempt held for review |
 | `QUEUE` versus `STEER` | Unverified in V2; v3 not implemented | Harmless tasks with durable state transitions and terminal/GitHub evidence |
 | Isolated worktree and titled Codex session | Designed; not implemented | Authorized provisioning demonstration with no overwrite and GitHub acknowledgment |
-| SQLite health/session/event registry | Requirement recorded; not implemented | Migration, restart recovery, safe export/snapshot, and read-only consumer contract |
-| R3A plugin lifecycle | Planned only; not an R3A module | Separate approved module contract integration and lifecycle tests |
+| Canonical R3A module manifest and lifecycle | Bridge implementation not yet present; existing loader accepts manifest 1.0.0–1.2.0 and CME owns `module.lifecycle` v2 | Digest-pinned v1.2.0 manifest/provider fixture; CME lifecycle and diagnostic tests |
+| Durable Bridge dispatch/session state | Not implemented; must use CME activities/checkpoints/events, not standalone SQLite | Versioned Bridge activity/handler contract and restart/recovery evidence |
+| SQLite health/session/event registry | Rejected as a second authoritative registry under the R3A persistence contract | Any adapter-local cache must be explicitly non-authoritative and separately approved |
+| R3A module lifecycle | Required for Bridge v3 from inception; existing CME lifecycle is authoritative | Manifest discovery, activation, health, deactivation, replacement/rollback contract tests |
 
-Source and runtime status, paths, and follow-up ownership are maintained in the [artifact registry](artifact-registry.md). Step 6 only acknowledged a distinct dispatch and did not test queue holding or duplicate suppression; see [Step 6](https://github.com/ppow1/R3/issues/61#issuecomment-6795617130) and the [Step 7 assignment](https://github.com/ppow1/R3/issues/61#issuecomment-6795946572). For V2 inspection access blocker and current evidence, see [Issue #62](https://github.com/ppow1/R3/issues/62).
+Source and runtime status, paths, and follow-up ownership are maintained in the [artifact registry](artifact-registry.md). Step 6 only acknowledged a distinct dispatch and did not test queue holding or duplicate suppression; see [Step 6](https://github.com/ppow1/R3/issues/61#issuecomment-6795617130), [Step 7](https://github.com/ppow1/R3/issues/61#issuecomment-6795946572), [Step 9](https://github.com/ppow1/R3/issues/61#issuecomment-6797949457), and [Step 10 architectural correction](https://github.com/ppow1/R3/issues/61#issuecomment-6797993717). For V2 inspection access blocker and current evidence, see [Issue #62](https://github.com/ppow1/R3/issues/62).
