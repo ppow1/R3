@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.0.6
+File Revision: 1.0.7
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -10,6 +10,8 @@ Execution Model: N/A
 Observability: N/A
 Dependencies: hints/README.md
 Authority: R3 engineering navigation, subordinate to approved charter
+Changed: 2026-11-11 UTC | B2-HANDOFF-001 | ChatGPT GPT-6 | Index external B-2 development control handoff
+History/Predecessor: Git blob c434f7feb31931f1ef57658ac4e55ed1bee09675
 Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-001 | ChatGPT GPT-6 | Add concise development bootstrap pointer
 Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-001 | ChatGPT GPT-6 | Index manifest-driven deployment runbook and scripts
 Changed: 2026-11-04 UTC | R3-GRANT-RUNBOOK-MIGRATION | ChatGPT GPT-6 | Direct all new grant/delegation runbooks to R3
@@ -47,6 +49,7 @@ Start with [the hints index](hints/README.md). Keep this root file short; put de
 
 - **New R3 feature development:** Start with [Development Bootstrap](hints/development-bootstrap.md) (startup phrase `R3 Bootstrap`), then follow [Development Governance and Definition of Done](hints/development-governance.md).
 
+- **External ChatGPT-to-Windows/Codex development bridge (B-2):** [operational handoff](docs/operations/development-bridge/B2_EXTERNAL_DEVELOPMENT_CONTROL_HANDOFF.md) and [November 11 executive summary](docs/operations/development-bridge/B2_2026-11-11_EXECUTIVE_SUMMARY.md). Use private GitHub Issue #61 to dispatch to verified Windows PowerShell/Codex targets, check execution receipts, and retrieve screenshot evidence. **This is development tooling outside Riverview, not an R3A runtime component.** See also [hints index](hints/README.md).
 - [Engineering and current handoff](hints/engineering.md)
 - [Institutional architecture and durable state](hints/architecture.md)
 - [Deployment and command execution](hints/deployment.md) — [manifest-driven runbook](docs/runbooks/R3_MANIFEST_DEPLOYMENT.md) and [deployment scripts](scripts/deployment/Deploy-R3.ps1) (currently plan-only; no live activation)
