@@ -35,6 +35,7 @@ from scripts.r3a_module_release_package import (
     install_package,
     verify_package,
 )
+from r3a_runtime.capability_contracts import validate_json
 
 
 def test_audited_grace_closure_builds_deterministically_and_installs_with_shared_binding():
@@ -89,6 +90,19 @@ def test_grace_adapter_fails_closed_when_audited_source_bytes_change(tmp_path):
     changed.write_bytes(changed.read_bytes() + b"\n# unreviewed change\n")
     with pytest.raises(ValueError, match="audited Grace source digest mismatch"):
         build_grace_package(DEFAULT_SPEC, source, tmp_path / "modified.tar.gz")
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "Shared package candidate's reduced 1.2 manifest does not validate against the audited standard module-manifest schema; #46 contract reconciliation required"
+))
+def test_packaged_manifest_is_accepted_by_the_audited_standard_module_manifest_contract():
+    with TemporaryDirectory() as temporary:
+        package = Path(temporary) / "grace.tar.gz"
+        record = build_grace_package(DEFAULT_SPEC, ROOT, package)
+        _, _, manifest = verify_package(package, expected_bundle_sha256=record["bundle_sha256"])
+        schema_path = ROOT / "r3a_runtime/schemas/module-manifest.v1.1.schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        validate_json(manifest, schema)
 
 
 def test_shared_installer_rejects_different_artifact_digest_for_same_version(tmp_path):
