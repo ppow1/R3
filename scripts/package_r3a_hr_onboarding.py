@@ -2,7 +2,7 @@
 # R3 CONTROLLED SOURCE
 # File: scripts/package_r3a_hr_onboarding.py
 # Component: R3A-HR-ONBOARDING-PACKAGING
-# File Revision: 1.0.1
+# File Revision: 1.0.2
 # Created: Unknown (legacy; first committed at e618dd7)
 # Created By: Unknown (legacy)
 # Purpose: Build and verify a deterministic, digest-pinned HR onboarding source handoff.
@@ -11,6 +11,7 @@
 # Dependencies: Python standard library; clean committed R3A worktree with approved Coordinator baseline ancestry.
 # Authority: Steward Steps 66/74; no shared deployment or migration authority.
 # Changed: 2026-11-11T18:43:21Z | HRD-STEP-74 | Codex GPT-6 | Include host-composition contract and tests in package evidence.
+# Changed: 2026-11-11T22:18:42Z | HRD-STEP-142 | Codex GPT-6 | Bind package verification metadata to the latest tested HR association source.
 # Supersedes: None; increments legacy file revision after provenance metadata was absent.
 # Contracts: r3a.hr-onboarding-package.v1; r3a.resident.onboarding.host-composition.v1
 # Tests: tests/test_r3a_hr_onboarding_package.py
@@ -104,9 +105,9 @@ ROLLBACK = {
     "forbidden": "Never drop populated packet/event tables, delete audit evidence, or use the disposable-test DROP SCHEMA setup against shared R3A",
 }
 TEST_EVIDENCE = {
-    "source_suite": "pytest focused HR/onboarding, PostgreSQL, dossier, grants, directory, capability, and Coordinator module-contract suites",
-    "result": "Combined source-focused suite: 145 passed, 2 DSN-gated PostgreSQL/checkpoint tests skipped, 12 subtests passed. The prior exact merged-tree checkpoint test separately passed (1 passed); migration 019 full-stack disposable PostgreSQL suite passed on the reconciled source before this host-only extension.",
-    "migration_019": "full migration stack apply/repeat, guarded rollback/re-upgrade, atomicity, multi-resident, revision/idempotency, privacy, immutable audit, and populated rollback refusal passed on private UTF-8 PostgreSQL 16",
+    "source_suite": "Step 135 focused HR association regression at code commit c094f7c, included in the package source revision",
+    "result": "Current evidence: /tmp/r3a-hr-development-venv/bin/pytest -q --tb=short tests/test_r3a_hr_association.py — 9 passed, 8 subtests passed. The combined source-focused suite was not rerun on this candidate; prior combined results apply only to the earlier reviewed revision.",
+    "migration_019": "Full migration stack apply/repeat, guarded rollback/re-upgrade, atomicity, multi-resident, revision/idempotency, privacy, immutable audit, and populated rollback refusal passed on private UTF-8 PostgreSQL 16 on the earlier reconciled source; migration SQL is unchanged and this suite was not rerun for Step 135.",
     "shared_database": "not used or changed",
 }
 

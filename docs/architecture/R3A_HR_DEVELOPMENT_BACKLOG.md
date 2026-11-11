@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_HR_DEVELOPMENT_BACKLOG.md
 Component: R3A-HR-DEVELOPMENT-BACKLOG
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: Unknown (legacy; predecessor committed before 2026-11-10)
 Created By: Unknown (legacy)
 Purpose: Track reusable HR onboarding deliverables, authority dependencies, and operational blockers.
@@ -13,6 +13,7 @@ Authority: Steward Steps 66/74/81; R3A architecture and roadmap governance.
 Changed: 2026-11-11T18:43:21Z | HRD-STEP-74/81 | Codex GPT-6 | Track host composition, installable package, roster policy, and end-to-end activation register.
 Changed: 2026-11-11T18:54:31Z | HRD-STEP-74 | Codex GPT-6 | Record verified wheel and exact install evidence.
 Changed: 2026-11-11T21:55:53Z | HRD-STEP-135 | Codex GPT-6 | Record malformed authoritative HR revision guard and exact test evidence.
+Changed: 2026-11-11T22:18:42Z | HRD-STEP-142 | Codex GPT-6 | Track exact-SHA source archive refresh and immutable wheel-version constraint.
 Supersedes: None; increments legacy document revision after provenance metadata was absent.
 Contracts: Universal Resident Onboarding v1; host-composition v1.
 Tests: Documentation cross-checked against R3A contracts and issue evidence.
@@ -21,7 +22,7 @@ History/Predecessor: Existing register predecessor in branch history; legacy fil
 
 # R3A HR Development Backlog and Dependency Register
 
-Updated 2026-11-11 from Issue #58 and Steps 61/74/81/135 dispatches #61 comments `6803213372`, `6804154755`, `6804261392`, and `6807891597`.
+Updated 2026-11-11 from Issue #58 and Steps 61/74/81/135/142 dispatches #61 comments `6803213372`, `6804154755`, `6804261392`, `6807891597`, and `6808376918`.
 
 | ID | Work / required evidence | Owner | Status | Next action |
 |---|---|---|---|---|
@@ -36,7 +37,7 @@ Updated 2026-11-11 from Issue #58 and Steps 61/74/81/135 dispatches #61 comments
 | HRD-09 | Authenticated Website resident directory and chat/persistence | Coordinator / Website #51 | PARTIAL platform path exists; Vicky not present in latest authenticated roster; chat not verified. Directory-provider test's inactive-provider fixture is corrected; registration alone remains fail-closed | After approved binding/runtime, authenticate through `/api/v1/steward/residents`, then prove resident chat turn and persistence |
 | HRD-10 | Independent acceptance review and institutional activation | Independent Auditor #56; Steward | BLOCKED until HRD-02..09 evidence exists | Auditor reviews packet/trace; Steward provides explicit activation approval after all checks pass |
 | HRD-11 | Migration, DB role grants, service composition and production deployment | Coordinator #51 | Active baseline `2cc3fe3aabad88c95a5e6489c633cb01472f7c7f` is an ancestor. Combined migration stack through 019, rollback/re-upgrade and transaction/privacy checks passed in private disposable PostgreSQL 16; shared migration remains unapplied. Step 74 implements the `r3a.resident.onboarding.host-composition.v1` façade; authenticated production API route and least-privilege DB grants remain absent. | Auditor reviews exact new SHA; Coordinator names host/service owner and authorizes DB role, route/release procedure and maintenance window before shared migration |
-| HRD-12 | Immutable installable onboarding runtime package and exact digest manifest | HR Development; Coordinator installs after approval | Step 74 built `r3a_ap0_runtime-0.1.0-py3-none-any.whl` from source `e247f3fba9c9affdbeac3293b77b91f904cbb27c`; SHA-256 `0886db886f360c44bceeec5cf1760e41c3357020cf100291b81bb6fa9b5d0860`. Isolated target install/import and required migration/rollback/schema/state-machine resource checks passed. The current exact-SHA source archive will be generated from the final committed handoff source. No managed installation/deployment authorized. | Publish wheel/archive checksums and request exact-SHA Auditor review; Coordinator installs only after release gates |
+| HRD-12 | Immutable installable onboarding runtime package and exact digest manifest | HR Development; Coordinator installs after approval | Step 142 active: refreshing deterministic source archive from current commit with current test evidence. Existing wheel `r3a_ap0_runtime-0.1.0-py3-none-any.whl` is source `e247f3fba9c9affdbeac3293b77b91f904cbb27c`, SHA-256 `0886db886f360c44bceeec5cf1760e41c3357020cf100291b81bb6fa9b5d0860`; it predates later HR source and is not exact for this candidate. Do not overwrite immutable version 0.1.0 with changed contents. No managed installation/deployment authorized. | Publish exact source archive+manifest and request exact-SHA Auditor review; Coordinator names/approves a new runtime artifact version and installs only after release gates |
 | HRD-13 | Universal HR roster, privacy, crosswalk and resident lifecycle policy | HR authority / Steward; HR Development supplies adapter/schema after policy approval | **BLOCKED.** Current R3A dossier contract requires HR-sensitive fields to stay governed and authorized projections only; no approved universal roster policy/source owner/projection contract is evidenced. | HR authority names owner and approves source-of-truth, lifecycle, data classification, disclosure, retention, correction, provenance and revision rules; then HRD implements generic adapter/tests |
 | HRD-14 | Universal Vicky activation and all-resident operational dependency register | HR Development plus each authoritative owner | Step 81 register created at `docs/architecture/R3A_HR_VICKY_ACTIVATION_BACKLOG.md`; records 19 ordered gates, current proof, owner, and next action, including the missing HR-owned universal roster/privacy policy. Vicky activation remains blocked. | Keep status evidence-linked; execute next source-owned work and do not infer missing decisions |
 | HRD-15 | Universal process backlog/maintenance | HR Development and each domain owner | Step 135 completed a fail-closed contract correction: the HR association adapter rejects missing, non-integer, boolean, and nonpositive authoritative HR revisions before directory resolution or write. Targeted tests: 9 passed, 8 subtests passed. Source commit `c094f7c`; backlog update follows. The existing wheel/archive predate this change and are not exact artifacts for the new source SHA. | Auditor reviews the exact final source SHA; Coordinator must use a rebuilt exact-SHA artifact only after existing release gates. Continue source-independent HR contract gaps while authority integrations remain unavailable. |
