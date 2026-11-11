@@ -4,6 +4,24 @@ The adapter writes only through an explicitly provenance-capable operation expos
 the authoritative HR host. It never writes an association into the dossier database.
 """
 
+# R3 CONTROLLED SOURCE
+# File: r3a_runtime/residents/hr_association.py
+# Component: R3A-HR-IDENTITY-ASSOCIATION
+# File Revision: 1.0.0 (first controlled revision; legacy file had no provenance header)
+# Created: Unknown (legacy)
+# Created By: Unknown (legacy)
+# Purpose: Validate and call the governed HR-to-directory association boundary.
+# Execution Model: In-process R3A adapter; authoritative write is delegated to HR host.
+# Observability: Explicit authorization, validation, conflict, and missing-operation failures.
+# Dependencies: R3A capability authorization; authenticated HR host; trusted directory evidence resolver.
+# Authority: Issue #58; Steward dispatch #61 comment 6807891597; R3A AP4 R3A-015/R3A-021.
+# Changed: 2026-11-11T21:53:48Z | HRD-STEP-135 | Codex GPT-6 | Reject malformed authoritative HR revisions before resolving evidence.
+# Supersedes: None
+# Superseded By: None
+# Contracts: R3A HR association adapter and riverview-authority.directory.v1 evidence.
+# Tests: tests/test_r3a_hr_association.py
+# History/Predecessor: Commit ac163ef3306522c9d2f0711a1d103ca6b514702f; prior blob 1d805242c49c889e813e95779b0109fae3c82c79.
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -107,7 +125,10 @@ class HRPrincipalAssociationAdapter:
         current = self.hr.read(principal, resident_id)
         if not isinstance(current, dict) or current.get("resident_id") != resident_id:
             raise PermissionError("existing authoritative HR record could not be resolved")
-        if current.get("revision") != expected_hr_revision:
+        current_revision = current.get("revision")
+        if type(current_revision) is not int or current_revision < 1:
+            raise RuntimeError("authoritative HR record revision is invalid; association blocked")
+        if current_revision != expected_hr_revision:
             raise RuntimeError("HR revision conflict; association must be re-read and re-reviewed")
         if current.get("status") != "active":
             raise PermissionError("active HR appointment decision is required before association")

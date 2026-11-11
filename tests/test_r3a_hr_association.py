@@ -1,4 +1,21 @@
 """R3A-side HR/directory association client contract and fail-closed tests."""
+# R3 CONTROLLED SOURCE
+# File: tests/test_r3a_hr_association.py
+# Component: R3A-HR-IDENTITY-ASSOCIATION-TESTS
+# File Revision: 1.0.0 (first controlled revision; legacy file had no provenance header)
+# Created: Unknown (legacy)
+# Created By: Unknown (legacy)
+# Purpose: Regress authorization, provenance, revision, and fail-closed HR association behavior.
+# Execution Model: Isolated unit tests with in-memory authority/host fixtures.
+# Observability: unittest assertion results; fixtures never contact live authorities.
+# Dependencies: r3a_runtime.residents.hr_association.
+# Authority: Issue #58; Steward dispatch #61 comment 6807891597; R3A AP4 R3A-015/R3A-021.
+# Changed: 2026-11-11T21:53:48Z | HRD-STEP-135 | Codex GPT-6 | Cover malformed HR revision types and prevent downstream calls.
+# Supersedes: None
+# Superseded By: None
+# Contracts: R3A HR association adapter.
+# Tests: python -m pytest -q tests/test_r3a_hr_association.py
+# History/Predecessor: Commit ac163ef3306522c9d2f0711a1d103ca6b514702f; prior blob 804bd97a241cfc1d04eca46ea029532bc9a239aa.
 from __future__ import annotations
 
 import copy
@@ -181,12 +198,26 @@ class HRAssociationAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "HR revision conflict"):
             self.adapter.associate(self.actor, **self.request)
         self.assertEqual(self.resolver_calls, [])
-
         self.hr.revision = 4
         self.hr.status = "onboarding"
         with self.assertRaisesRegex(PermissionError, "active HR appointment decision"):
             self.adapter.associate(self.actor, **self.request)
         self.assertEqual(self.resolver_calls, [])
+
+    def test_malformed_authoritative_revision_fails_closed_before_resolving_directory(self):
+        for current_revision, expected_revision in (
+            (True, 1), (False, 1), (0, 1), ("1", 1), (None, 1),
+        ):
+            with self.subTest(current_revision=current_revision):
+                self.hr.revision = current_revision
+                self.hr.status = "active"
+                with self.assertRaisesRegex(RuntimeError, "authoritative HR record revision is invalid"):
+                    self.adapter.associate(
+                        self.actor,
+                        **{**self.request, "expected_hr_revision": expected_revision},
+                    )
+                self.assertEqual(self.resolver_calls, [])
+                self.assertEqual(self.hr.calls, [])
 
     def test_vicky_onboarding_row_cannot_be_associated_without_appointment(self):
         hr = HRHostStub(status="onboarding", revision=1)
