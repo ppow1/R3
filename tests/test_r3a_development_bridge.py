@@ -205,6 +205,36 @@ def test_receipt_and_deduplication_survive_provider_cache_reopen():
         assert cache_path.stat().st_mode & 0o777 == 0o600
 
 
+@pytest.mark.parametrize("changes", [
+    {"target": "Coordinator"},
+    {"mode": "STEER"},
+    {"summary": "different immutable payload"},
+])
+def test_replay_with_changed_target_mode_or_payload_fails_closed_without_receipt(changes):
+    with TemporaryDirectory() as temporary:
+        cache = TransportAttemptCache(Path(temporary) / "attempts.sqlite3")
+        transport = MockTransport(safe_steer=True,
+                                  outcomes=[DeliveryReceipt("confirmed", "receipt:Live-Modular")])
+        original = _dispatch(130)
+        first_decision = route_batch([original], [{"target": "Live Modular", "state": "AVAILABLE"}])[0]
+        first = deliver_ready([first_decision], transport, cache)[0]
+        assert first.state == "DELIVERED"
+        assert first.receipt_ref == "receipt:Live-Modular"
+
+        replay_payload = {**original, **changes}
+        replay_target = replay_payload["target"]
+        replay_session_state = "BUSY" if replay_payload["mode"] == "STEER" else "AVAILABLE"
+        replay_decision = route_batch([replay_payload], [
+            {"target": replay_target, "state": replay_session_state}
+        ], safe_steer_available=replay_payload["mode"] == "STEER")[0]
+        replay = deliver_ready([replay_decision], transport, cache)[0]
+
+        assert replay.state == "IDEMPOTENCY_CONFLICT"
+        assert replay.receipt_ref is None
+        assert len(transport.deliveries) == 1
+        assert transport.deliveries[0][0] == "Live Modular"
+
+
 def test_crash_during_attempt_becomes_uncertain_and_requires_explicit_reconciliation():
     with TemporaryDirectory() as temporary:
         cache_path = Path(temporary) / "attempts.sqlite3"

@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -75,6 +76,10 @@ class DeliveryReceipt:
     reason: str | None = None
 
 
+class IdempotencyConflict(RuntimeError):
+    """An existing source identity was replayed with different immutable content."""
+
+
 class TransportAdapter(Protocol):
     """Host adapter boundary; active-session steer safety must be explicitly proven."""
 
@@ -112,10 +117,11 @@ class TransportAttemptCache:
         with self._connection() as connection:
             connection.execute("PRAGMA journal_mode=WAL")
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in {0, 1}:
+            if version not in {0, 1, 2}:
                 raise RuntimeError("transport attempt cache schema version is unsupported")
             connection.execute("""CREATE TABLE IF NOT EXISTS transport_attempts (
                 idempotency_key TEXT PRIMARY KEY,
+                dispatch_fingerprint TEXT,
                 target TEXT NOT NULL,
                 mode TEXT NOT NULL,
                 state TEXT NOT NULL CHECK (state IN ('ATTEMPTING','DELIVERED','UNCERTAIN','FAILED')),
@@ -123,12 +129,25 @@ class TransportAttemptCache:
                 reason TEXT,
                 updated_at TEXT NOT NULL
             )""")
-            connection.execute("PRAGMA user_version=1")
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(transport_attempts)")}
+            if "dispatch_fingerprint" not in columns:
+                connection.execute("ALTER TABLE transport_attempts ADD COLUMN dispatch_fingerprint TEXT")
+            connection.execute("PRAGMA user_version=2")
         self.path.chmod(0o600)
 
     def begin(self, decision: RouteDecision) -> tuple[bool, dict[str, Any]]:
         if decision.dispatch is None:
             raise ValueError("delivery attempt lacks its source dispatch")
+        dispatch = decision.dispatch
+        fingerprint_material = json.dumps({
+            "repository": dispatch.repository,
+            "issue_number": dispatch.issue_number,
+            "comment_id": dispatch.comment_id,
+            "target": dispatch.target,
+            "mode": dispatch.mode,
+            "summary": dispatch.summary,
+        }, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        fingerprint = hashlib.sha256(fingerprint_material.encode("utf-8")).hexdigest()
         now = datetime.now(timezone.utc).isoformat()
         with self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -136,6 +155,10 @@ class TransportAttemptCache:
                                      (decision.idempotency_key,)).fetchone()
             if row is not None:
                 prior = dict(row)
+                if prior.get("dispatch_fingerprint") != fingerprint:
+                    connection.commit()
+                    raise IdempotencyConflict(
+                        "source comment idempotency key was replayed with a different dispatch fingerprint")
                 if prior["state"] == "ATTEMPTING":
                     reason = "process restarted during transport attempt; reconcile before retry"
                     connection.execute(
@@ -147,10 +170,12 @@ class TransportAttemptCache:
                 return False, prior
             connection.execute(
                 "INSERT INTO transport_attempts "
-                "(idempotency_key,target,mode,state,updated_at) VALUES (?,?,?,'ATTEMPTING',?)",
-                (decision.idempotency_key, decision.target, decision.mode, now))
+                "(idempotency_key,dispatch_fingerprint,target,mode,state,updated_at) "
+                "VALUES (?,?,?,?,'ATTEMPTING',?)",
+                (decision.idempotency_key, fingerprint, decision.target, decision.mode, now))
             connection.commit()
-        return True, {"idempotency_key": decision.idempotency_key, "target": decision.target,
+        return True, {"idempotency_key": decision.idempotency_key,
+                      "dispatch_fingerprint": fingerprint, "target": decision.target,
                       "mode": decision.mode, "state": "ATTEMPTING", "receipt_ref": None,
                       "reason": None, "updated_at": now}
 
@@ -284,7 +309,13 @@ def deliver_ready(decisions: list[RouteDecision], adapter: TransportAdapter | No
                                         "STEER_PENDING", "adapter has no proven safe steer channel",
                                         decision.idempotency_key, decision.dispatch))
             continue
-        claimed, prior = cache.begin(decision)
+        try:
+            claimed, prior = cache.begin(decision)
+        except IdempotencyConflict as exc:
+            results.append(RouteDecision(decision.source_key, decision.target, decision.mode,
+                                         "IDEMPOTENCY_CONFLICT", str(exc),
+                                         decision.idempotency_key, decision.dispatch, None))
+            continue
         if not claimed:
             results.append(RouteDecision(decision.source_key, decision.target, decision.mode,
                                          prior["state"], "duplicate suppressed; reconcile prior attempt if uncertain",

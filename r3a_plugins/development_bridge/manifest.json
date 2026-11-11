@@ -3,7 +3,7 @@
   "plugin_id": "r3a.development-bridge",
   "plugin_version": "0.1.0",
   "artifact_ref": "provider.py",
-  "artifact_sha256": "b97a41e8dae48c880f5ce504d60cbd289906fa5713a405773b44f679c18077e8",
+  "artifact_sha256": "b208529353b2abf053ce051dab3644be46ebf5f54f5c3ef0ec6317678ed645e0",
   "configuration_schema": {
     "schema_id": "r3a.development-bridge.config.v1",
     "type": "object",
@@ -29,7 +29,7 @@
     "provider_id": "r3a.development-bridge",
     "provider_version": "0.1.0",
     "entrypoint": "r3a_plugins.development_bridge.provider:create_provider",
-    "artifact_sha256": "b97a41e8dae48c880f5ce504d60cbd289906fa5713a405773b44f679c18077e8"
+    "artifact_sha256": "b208529353b2abf053ce051dab3644be46ebf5f54f5c3ef0ec6317678ed645e0"
   },
   "module_manifest": {
     "contract_id": "r3a.module-manifest.v1",
@@ -58,7 +58,7 @@
     "recovery_policy": "cme-activity-and-transport-reconciliation.v1",
     "artifact": {
       "artifact_ref": "provider.py",
-      "artifact_sha256": "b97a41e8dae48c880f5ce504d60cbd289906fa5713a405773b44f679c18077e8"
+      "artifact_sha256": "b208529353b2abf053ce051dab3644be46ebf5f54f5c3ef0ec6317678ed645e0"
     },
     "environment": {
       "allowlist": [
@@ -195,7 +195,7 @@
       "provider_id": "r3a.development-bridge",
       "provider_version": "0.1.0",
       "entrypoint": "r3a_plugins.development_bridge.provider:create_provider",
-      "artifact_sha256": "b97a41e8dae48c880f5ce504d60cbd289906fa5713a405773b44f679c18077e8"
+      "artifact_sha256": "b208529353b2abf053ce051dab3644be46ebf5f54f5c3ef0ec6317678ed645e0"
     },
     "input_schema": {
       "type": "object",
