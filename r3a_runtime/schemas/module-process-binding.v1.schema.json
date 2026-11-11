@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.module-process-binding.v1@1.0.0",
+  "title": "R3A Module Process Binding v1",
+  "type": "object",
+  "required": ["contract_id", "contract_version", "process_kind", "protocol_id", "protocol_major", "protocol_min_minor", "protocol_max_minor", "runtime_id", "entrypoint", "arguments_template"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_id": {"const": "r3a.module-process-binding.v1"},
+    "contract_version": {"const": "1.0.0"},
+    "process_kind": {"const": "jsonl"},
+    "protocol_id": {"const": "r3a.module.v1"},
+    "protocol_major": {"type": "integer", "minimum": 1},
+    "protocol_min_minor": {"type": "integer", "minimum": 0},
+    "protocol_max_minor": {"type": "integer", "minimum": 0},
+    "runtime_id": {"const": "python3"},
+    "entrypoint": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.]*$"},
+    "arguments_template": {
+      "type": "array",
+      "minItems": 8,
+      "items": {"type": "string", "minLength": 1}
+    }
+  }
+}
