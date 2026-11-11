@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_RESIDENT_EXECUTION_PROFILE.md
 Component: R3A-RESIDENT-PROFILE
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-08T01:04:33Z
 Created By: Codex GPT-6
 Purpose: Specify the additive resident-side profile input used to bind a generic resident executor to directory identity and external model route configuration.
@@ -11,10 +11,11 @@ Observability: Profile lineage and route identity are included in resident infer
 Dependencies: r3a_plugins/institutional_directory/manifest.json; r3a_runtime/grace_module.py; future CME resident dispatch integration.
 Authority: R3A Multi-Resident Autonomy Steward directives. The profile grants no execution authority.
 Changed: 2026-11-08T01:04:33Z | R3A-MULTI-RESIDENT | Codex GPT-6 | Document generic resident execution-profile payload and current directory limitations.
+Changed: 2026-11-11 | R3A-RESIDENT-ID-AUDIT | Codex GPT-6 | Specify canonical resident principal separately from the executable module ID.
 Supersedes: None
 Contracts: Proposed r3a.resident.execution-profile@1.0.0; existing r3a.resident.execution.v1 remains unchanged.
 Tests: Fixture-based validation in tests/test_r3a_ap1.py; no live resident invocation.
-History/Predecessor: New controlled document; no predecessor.
+History/Predecessor: Prior integration-tree blob 95729a6b3e36e9e36cfbd32282faa24af0fa2141.
 -->
 # Resident execution profile
 
@@ -44,7 +45,7 @@ The profile is descriptive routing context. It is not a grant, capability list, 
 }
 ```
 
-The profile must match the executing module's resident identity and configuration revision. If an explicit activity route conflicts with the profile route, the resident rejects the request. The configured route must exist in the resident's loaded model settings. Durable conversation remains activity-scoped and supplied by CME; this profile creates no private session store.
+`resident_id` is the canonical institutional principal (`resident:<slug>`) resolved through the existing HR/directory association. It is not the executable module ID (`resident.<slug>`), which is carried in the module registry, binding, and process protocol. The approved binding joins those identities; it grants no authority. The execution envelope, profile, and activity target must carry the same canonical principal, while process selection continues to use the registered module ID. If an explicit activity route conflicts with the profile route, the resident rejects the request. The configured route must exist in the resident's loaded model settings. Durable conversation remains activity-scoped and supplied by CME; this profile creates no private session store.
 
 No candidate names, resident IDs, office assignments, responsibilities, operation IDs, or grants are embedded in code. The current directory operation contract exposes `resident_id`, nullable `display_name`, `office_id`, `office_role`, binding revision, and availability. It does **not** expose a separate office-responsibilities field; that remains an authoritative-directory contract gap. No responsibility text should be inferred beyond returned `office_role` until its owner provides an authoritative field.
 

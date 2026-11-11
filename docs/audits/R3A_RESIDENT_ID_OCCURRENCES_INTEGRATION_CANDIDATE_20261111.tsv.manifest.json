@@ -1,0 +1,21 @@
+{
+  "component": "R3A-RESIDENT-IDENTITY-AUDIT",
+  "created": "2026-11-11T12:30:44Z",
+  "created_by": "Codex GPT-6",
+  "dependencies": [
+    "R3A resident execution profile contract",
+    "R3A capability invocation contract",
+    "R3A HR and directory association contract"
+  ],
+  "file": "docs/audits/R3A_RESIDENT_ID_OCCURRENCES_INTEGRATION_CANDIDATE_20261111.tsv",
+  "file_revision": "1.0.0",
+  "content_sha256": "8a0b1062efddaae364e749759c866bcac7396fdcc227f5367318a92417955c35",
+  "row_count": 756,
+  "generated_at": "2026-11-11T12:36:00Z",
+  "history": "Generated from the tracked current integration candidate source tree based on 2cc3fe3aabad88c95a5e6489c633cb01472f7c7f.",
+  "observability": "One row per tracked-source occurrence with path, line, inferred identity type, disposition, test/evidence pointer and source line.",
+  "purpose": "Complete line-level inventory of resident principal and executable module ID occurrences in the reconciled current integration candidate.",
+  "supersedes": "None",
+  "tests": "Reviewed alongside docs/audits/R3A_RESIDENT_PRINCIPAL_MODULE_AUDIT_20261111.md; classifier output is a locator and manual contract disposition remains authoritative.",
+  "authority": "Steward Issue #43 assignment comment 6785046697; AD-024"
+}

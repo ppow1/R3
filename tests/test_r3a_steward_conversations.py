@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_steward_conversations.py
 Component: R3A-CME-CONVERSATION-TESTS
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: Unknown (legacy)
 Created By: Unknown (legacy)
 Purpose: Verify Website conversation dispatch, direct chat authorization, and resident handoff boundaries.
@@ -11,6 +11,7 @@ Observability: Assertion failures identify authorization and durable activity li
 Dependencies: r3a_runtime.cme; unittest mocks.
 Authority: R3A Steward conversation and resident execution contracts.
 Changed: 2026-11-10T00:14:15Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Assert direct Steward chat requires target execution but not resident-to-resident delegation.
+Changed: 2026-11-11 | R3A-RESIDENT-ID-AUDIT | Codex GPT-6 | Use canonical principal IDs for directory-backed resident profiles and conversation targets.
 Supersedes: None
 Contracts: r3a.steward-conversation.v1; r3a.resident.execution-profile@1.0.0; resident.delegate; resident.objective.execute.
 Tests: python -m unittest tests.test_r3a_steward_conversations.
@@ -35,6 +36,13 @@ class ConversationControlTests(unittest.TestCase):
         cme.settings = SimpleNamespace(module_id="resident.grace", source_digest="config-sha",
                                        model_roles=[])
         cme.store = SimpleNamespace()
+        role = SimpleNamespace(role_id="role.grace", route_id="route.grace",
+                               task_classes={"objective_reasoning"})
+        cme._resolve_resident_execution_profile = AsyncMock(return_value=(
+            {"resident_id": "resident:grace", "office_role": "Director of Operations",
+             "model_route_id": "route.grace",
+             "directory_evidence": {"snapshot_sha256": "a" * 64}}, role))
+        cme._authorize_capability = AsyncMock(return_value={"allowed": True})
         return cme
 
     def test_conversation_send_enqueues_one_durable_conversation_activity(self):
@@ -47,7 +55,7 @@ class ConversationControlTests(unittest.TestCase):
         message_id = str(uuid.uuid4())
         cme.store.accept_steward_message = AsyncMock(return_value={
             "message_id": message_id, "activity_id": None, "duplicate": False,
-            "resident_id": "resident.grace",
+            "resident_id": "resident:grace",
             "transcript": [{"role": "user", "content": "Earlier question"},
                            {"role": "assistant", "content": "Earlier answer"}],
         })
@@ -118,7 +126,7 @@ class ConversationControlTests(unittest.TestCase):
                                                     task_classes={"objective_reasoning"})]
         cme._authorize_capability = AsyncMock(side_effect=[
             {"audit_event_id": "delegate-audit"}, {"audit_event_id": "execute-audit"}])
-        profile = {"resident_id": "resident.vicky", "office_role": "engineering_manager",
+        profile = {"resident_id": "resident:vicky", "office_role": "engineering_manager",
                    "model_route_id": "route.eng", "directory_evidence": {"snapshot_sha256": "a" * 64}}
         role = SimpleNamespace(role_id="role.eng", route_id="route.eng",
                                task_classes={"objective_reasoning"})
@@ -127,11 +135,11 @@ class ConversationControlTests(unittest.TestCase):
                                                                     "state": "QUEUED"})
         result = asyncio.run(CME._control_request(cme, "resident.objective.submit", {
             "objective": "Complete an authorized resident objective", "event_kind": "objective",
-            "target_resident_id": "resident.vicky", "acceptance_criteria": [],
+            "target_resident_id": "resident:vicky", "acceptance_criteria": [],
             "task_class": "objective_reasoning"}, "vicky-turn-key"))
         self.assertEqual(result["activity_id"], "activity-vicky")
         self.assertEqual(cme.store.submit_grace_objective.await_args.kwargs["resident_id"],
-                         "resident.vicky")
+                         "resident:vicky")
         self.assertEqual(cme.store.submit_grace_objective.await_args.kwargs["resident_profile"], profile)
         self.assertEqual(cme._authorize_capability.await_args_list[0].args[0], "resident.delegate")
         self.assertEqual(cme._authorize_capability.await_args_list[1].args[0], "resident.objective.execute")
@@ -198,15 +206,15 @@ class ConversationControlTests(unittest.TestCase):
                        "source": {"availability": "measured", "freshness": "fresh",
                                   "snapshot_sha256": "a" * 64},
                        "residents": [
-                           {"resident_id": "resident.vicky", "display_name": "Vicky",
+                           {"resident_id": "resident:vicky", "display_name": "Vicky",
                             "office_id": "office.eng", "office_role": "engineering_manager"},
-                           {"resident_id": "resident.helen", "display_name": "Helen",
+                           {"resident_id": "resident:helen", "display_name": "Helen",
                             "office_id": "office.hr", "office_role": "human_resources_manager"}]}})
         cme.store.require_capability = AsyncMock()
         result = asyncio.run(CME._control_request(cme, "steward.residents.discover",
                                                   {"principal_id": "portal:steward-7"}, "discovery-key"))
         self.assertEqual([item["resident_id"] for item in result["residents"]],
-                         ["resident.vicky", "resident.helen"])
+                         ["resident:vicky", "resident:helen"])
         self.assertTrue(result["residents"][0]["chat_available"])
         self.assertFalse(result["residents"][1]["chat_available"])
         self.assertTrue(all(item["onboarding_status"] == "unknown" for item in result["residents"]))
@@ -215,7 +223,7 @@ class ConversationControlTests(unittest.TestCase):
         self.assertEqual(result["residents"][1]["execution_status"], "unavailable")
         self.assertEqual(result["residents"][1]["chat_status"], "office_role_route_unavailable")
         self.assertEqual(cme.store.require_capability.await_args_list[0].args,
-                         ("resident.vicky", "resident.objective.execute"))
+                         ("resident:vicky", "resident.objective.execute"))
 
     def test_directory_principal_route_is_independent_of_configured_module_id(self):
         cme = self.cme()

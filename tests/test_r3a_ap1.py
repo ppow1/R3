@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_ap1.py
 Component: R3A-AP1-TARGETED-TESTS
-File Revision: 1.11.0
+File Revision: 1.11.2
 Created: 2026-11-06 UTC (exact time not independently captured)
 Created By: Codex GPT-6
 Purpose: Verify AP1 model-route resolution and source-aware knowledge retrieval contracts.
@@ -43,6 +43,8 @@ Changed: 2026-11-08T01:42:00Z | R3A-MODULAR-RUNTIME | Codex GPT-6 | Verify older
 Changed: 2026-11-08T01:07:51Z | R3A-MULTI-RESIDENT | Codex GPT-6 | Verify a directory-bound resident uses its independent configured model route and identity context with profile lineage enforcement.
 Changed: 2026-11-08T02:44:52Z | R3A-AP1-EVIDENCE-FEEDBACK | Codex GPT-6 | Verify complete evidence inventory delivery, mandatory citation guidance, and provenance retention.
 Changed: 2026-11-08T02:49:00Z | R3A-AP1-EVIDENCE-FEEDBACK | Codex GPT-6 | Verify evidence records retain provider and invocation provenance.
+Changed: 2026-11-11 | R3A-RESIDENT-ID-AUDIT | Codex GPT-6 | Exercise canonical bound execution identity and nested durable conversation event recovery.
+Changed: 2026-11-11 | R3A-RESIDENT-ID-AUDIT | Codex GPT-6 | Reject an explicitly supplied executable ID in the resident principal field.
 Supersedes: None.
 Contracts: R3A-019; proposed r3a.resident.execution-profile@1.0.0; configured model routing and evidence provenance.
 Tests: This test module.
@@ -498,6 +500,11 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         resident = self._resident(response)
         payload = self._payload([handoff_tool, followup_tool])
         payload["activity_id"] = "same-activity-after-recovery"
+        payload["contract_envelope"] = ContractEnvelope(
+            "r3a.resident.execution", "1.0.0", "request-same-activity-after-recovery",
+            payload["activity_id"], payload["attempt_id"], payload["correlation_id"],
+            payload["resident_id"], payload["config_revision"],
+            "2026-11-08T01:02:08Z", {"operation": "execute"}).to_dict()
         payload["conversation"] = [
             {"role": "assistant", "content": "prior model action: handoff.dynamic"},
             {"role": "user", "content": json.dumps({"capability_result": {
@@ -720,15 +727,23 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         return resident
 
     def _payload(self, tools):
-        return {"activity_id": "activity-1", "attempt_id": "attempt-1", "request_ref": "request-1",
-                "config_revision": "config-1", "activity_type": "grace.objective",
+        payload = {"activity_id": "activity-1", "attempt_id": "attempt-1", "request_ref": "request-1",
+                "config_revision": "config-1", "resident_id": "resident:grace",
+                "correlation_id": "correlation-1", "activity_type": "grace.objective",
                 "objective": "Identify the valid successors from STOPPING", "evidence": [],
-                "available_tools": tools, "conversation": [], "route_id": "local"}
+                "available_tools": tools, "conversation": [], "route_id": "local",
+                "resident_profile": self._profile("resident:grace")}
+        payload["contract_envelope"] = ContractEnvelope(
+            "r3a.resident.execution", "1.0.0", "request-activity-1",
+            payload["activity_id"], payload["attempt_id"], payload["correlation_id"],
+            payload["resident_id"], payload["config_revision"],
+            "2026-11-08T01:02:08Z", {"operation": "execute"}).to_dict()
+        return payload
 
     def _resident_result(self):
         return {"contract_id": "r3a.resident.result", "contract_version": "1.0.0",
                 "activity_id": "activity-1", "attempt_id": "attempt-1",
-                "correlation_id": "correlation-1", "resident_id": "resident.grace",
+                "correlation_id": "correlation-1", "resident_id": "resident:grace",
                 "config_revision": "config-1", "issued_at": "2026-11-07T23:59:11Z",
                 "issuer": {"component_id": "independent-verifier", "decision_ref": "verification-17"},
                 "outcome": "FAIL",
@@ -862,13 +877,13 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "cannot report.*healthy"):
             asyncio.run(resident.handle("execute", payload))
 
-    def _profile(self, resident_id="resident:directory-bound-7"):
+    def _profile(self, resident_id="resident:directory-bound-7", model_route_id="local"):
         return {"contract_id": "r3a.resident.execution-profile", "contract_version": "1.0.0",
                 "resident_id": resident_id, "display_name": None,
                 "office_id": "office:directory-bound", "office_role": "role returned by directory",
                 "directory_evidence": {"source_id": "directory.snapshot.1", "snapshot_sha256": "a" * 64,
                                         "observed_at": "2026-11-08T01:02:08Z"},
-                "model_route_id": "directory-resident-route", "config_revision": "config-1"}
+                "model_route_id": model_route_id, "config_revision": "config-1"}
 
     def test_directory_bound_resident_uses_its_profile_route_and_identity_context(self):
         resident = self._resident(
@@ -880,8 +895,8 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         resident.settings.model_route = lambda route_id=None: profile_route
         payload = self._payload([])
         payload.pop("route_id")
-        payload["resident_profile"] = self._profile()
         payload["resident_id"] = "resident:directory-bound-7"
+        payload["resident_profile"] = self._profile("resident:directory-bound-7", "directory-resident-route")
         payload["correlation_id"] = "correlation-directory-bound"
         payload["contract_envelope"] = ContractEnvelope(
             "r3a.resident.execution", "1.0.0", "request-directory-bound",
@@ -898,6 +913,33 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         self.assertEqual(model_input["resident_profile"]["office_id"], "office:directory-bound")
         self.assertEqual(result["resident_profile"]["directory_evidence"]["snapshot_sha256"], "a" * 64)
 
+    def test_conversation_event_kind_is_recovered_from_nested_durable_activity_input(self):
+        resident = self._resident(
+            '{"action":"final","decision":{"assessment":"I can help with that.",'
+            '"status":"healthy","evidence_refs":[],"recommended_action":"none"}}')
+        payload = self._payload([])
+        payload.pop("route_id")
+        payload["activity_type"] = "grace.conversation"
+        payload["objective"] = "Please introduce yourself."
+        payload["activity_input"] = {"event_kind": "conversation"}
+
+        result = asyncio.run(resident.handle("execute", payload))
+
+        prompt = json.loads(resident._model_request.await_args.args[2]["messages"][-1]["content"])
+        self.assertEqual(prompt["event_kind"], "conversation")
+        self.assertEqual(result["event_kind"], "conversation")
+
+    def test_explicit_executor_module_id_is_rejected_as_resident_principal(self):
+        resident = self._resident(
+            '{"action":"final","decision":{"assessment":"Should not infer",'
+            '"status":"healthy","evidence_refs":[],"recommended_action":"none"}}')
+        payload = self._payload([])
+        payload["resident_id"] = "resident.grace"
+
+        with self.assertRaisesRegex(ValueError, "distinct types"):
+            asyncio.run(resident.handle("execute", payload))
+        resident._model_request.assert_not_awaited()
+
     def test_directory_bound_resident_rejects_profile_for_another_identity(self):
         resident = self._resident(
             '{"action":"final","decision":{"assessment":"blocked","status":"blocked",'
@@ -905,6 +947,13 @@ class ResidentCapabilityReasoningTests(unittest.TestCase):
         resident.module_id = "resident.directory-bound-7"
         payload = self._payload([])
         payload.pop("route_id")
+        payload["resident_id"] = "resident:directory-bound-7"
+        payload["correlation_id"] = "correlation-directory-bound"
+        payload["contract_envelope"] = ContractEnvelope(
+            "r3a.resident.execution", "1.0.0", "request-directory-bound",
+            payload["activity_id"], payload["attempt_id"], payload["correlation_id"],
+            payload["resident_id"], payload["config_revision"],
+            "2026-11-08T01:02:08Z", {"operation": "execute"}).to_dict()
         payload["resident_profile"] = self._profile("resident.other")
 
         with self.assertRaisesRegex(ValueError, "identity or configuration revision"):

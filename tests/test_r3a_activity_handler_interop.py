@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_activity_handler_interop.py
 Component: R3A-ACTIVITY-HANDLER-INTEROPERABILITY-TESTS
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-10T02:02:46Z
 Created By: Codex GPT-6
 Purpose: Validate the shared v1.1 module/handler fixture and provide CME dispatch tests for Autonomy #43 to consume.
@@ -14,10 +14,11 @@ Changed: 2026-11-10T02:02:46Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Add share
 Changed: 2026-11-10T02:07:18Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Avoid installing collection-time database stubs that leak across the full test suite.
 Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT-6 | Exercise CME discovery and resident bindings from the shared v1.1 manifest projection.
 Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GPT-6 | Assert CME commits handler progress and checkpoint in one durable ledger update.
+Changed: 2026-11-11 | R3A-RESIDENT-ID-AUDIT | Codex GPT-6 | Use canonical resident principals in identity, binding and execution-profile fixtures.
 Supersedes: None.
 Contracts: r3a.module-manifest.v1@1.0.0 and @1.1.0; r3a.activity-handler.v1@1.0.0.
 Tests: python3 -m pytest -q tests/test_r3a_activity_handler_interop.py
-History/Predecessor: Immediate predecessor blob 045e1633c734cbd2dd3ec41039e9314c064c7c93; CME dispatch and resident binding tests now run against the reconciled integration tree.
+History/Predecessor: Immediate predecessor blob 045e1633c734cbd2dd3ec41039e9314c064c7c93; this revision retains the reconciled integration tests and corrects principal-shaped fixture values.
 """
 from __future__ import annotations
 
@@ -150,7 +151,7 @@ def _cme_activity(sample: dict) -> dict:
         "activity_type": "billing.invoice.review",
         "input": {"correlation_id": "00000000-0000-4000-8000-000000000103",
                   "activity_input": copy.deepcopy(sample["activity_request"]),
-                  "resident_id": "resident.fixture"},
+                  "resident_id": "resident:fixture"},
         "checkpoint": {"cursor": 0},
     }
 
@@ -305,7 +306,7 @@ def test_cme_resolves_two_authoritative_resident_bindings_to_one_registered_exec
             config_path.write_text("{}", encoding="utf-8")
             bindings = []
             associations = {}
-            for resident_id in ("resident.alpha", "resident.beta"):
+            for resident_id in ("resident:alpha", "resident:beta"):
                 executor_config = root / f"{resident_id}.json"
                 executor_config.write_text('{"resident_model_route_id":"route.alpha"}', encoding="utf-8")
                 association = {"authority": "hr.directory", "record_id": resident_id,
@@ -367,14 +368,14 @@ def test_cme_resolves_two_authoritative_resident_bindings_to_one_registered_exec
                 resolved.append(await cme._resolve_resident_executor(activity))
                 await cme._run_bound_resident_activity(activity, resolved[-1])
             assert [item["execution_profile"]["resident_id"] for item in resolved] == [
-                "resident.alpha", "resident.beta"]
+                "resident:alpha", "resident:beta"]
             assert [item["binding_revision"] for item in resolved] == [
-                "binding-resident.alpha", "binding-resident.beta"]
+                "binding-resident:alpha", "binding-resident:beta"]
             assert [item["module_id"] for item in resolved] == [module["module_id"]] * 2
             calls = cme.provider_runtime.invoke.await_args_list
             assert len(calls) == 2
             assert {call.args[1]["request"]["payload"]["resident_id"] for call in calls} == {
-                "resident.alpha", "resident.beta"}
+                "resident:alpha", "resident:beta"}
             assert cme.store.finish_activity.await_count == 2
             assert cme._authorization_decision.await_count == 2
 
@@ -383,8 +384,8 @@ def test_cme_resolves_two_authoritative_resident_bindings_to_one_registered_exec
                 await cme._resolve_resident_executor({
                     "activity_id": "00000000-0000-4000-8000-000000000111",
                     "attempt_id": "00000000-0000-4000-8000-000000000211",
-                    "idempotency_key": "resident:resident.alpha",
-                    "input": {"resident_id": "resident.alpha"}})
+                    "idempotency_key": "review:resident:alpha",
+                    "input": {"resident_id": "resident:alpha"}})
             assert cme.provider_runtime.invoke.await_count == 2
 
     asyncio.run(run())
@@ -406,7 +407,7 @@ def test_cme_rejects_stale_directory_association_before_authorization():
             legacy_manifest={"module_manifest": sample["module_manifest"],
                              "configuration_schema": sample["source_manifest"]["configuration_schema"]})
         projection = ProviderProcessManager._manifest(object.__new__(ProviderProcessManager), registered)
-        association = {"authority": "hr.directory", "record_id": "resident.alpha",
+        association = {"authority": "hr.directory", "record_id": "resident:alpha",
                        "record_revision": "directory-current"}
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -415,7 +416,7 @@ def test_cme_rejects_stale_directory_association_before_authorization():
             executor_config = root / "executor.json"
             executor_config.write_text("{}", encoding="utf-8")
             binding = {"contract_id": "r3a.resident.module-binding", "contract_version": "1.0.0",
-                       "resident_id": "resident.alpha", "module_id": module["module_id"],
+                       "resident_id": "resident:alpha", "module_id": module["module_id"],
                        "module_version": module["module_version"],
                        "artifact_digest": module["artifact"]["artifact_sha256"],
                        "execution_contract_range": {"contract_id": "r3a.resident.execution", "major": 1,
@@ -424,7 +425,7 @@ def test_cme_rejects_stale_directory_association_before_authorization():
                        "configuration_revision": hashlib.sha256(executor_config.read_bytes()).hexdigest(),
                        "identity_association": {**association, "record_revision": "directory-stale"}}
             profile = ({"contract_id": "r3a.resident.execution-profile", "contract_version": "1.0.0",
-                        "resident_id": "resident.alpha", "display_name": "Alpha", "office_id": "office-a",
+                        "resident_id": "resident:alpha", "display_name": "Alpha", "office_id": "office-a",
                         "office_role": "reviewer", "directory_evidence": {
                             "source_id": "hr.directory", "snapshot_sha256": "a" * 64,
                             "observed_at": datetime.now(timezone.utc).isoformat()},
@@ -441,7 +442,7 @@ def test_cme_rejects_stale_directory_association_before_authorization():
             cme._authorization_decision = AsyncMock()
             activity = {"activity_id": "00000000-0000-4000-8000-000000000301",
                         "attempt_id": "00000000-0000-4000-8000-000000000302",
-                        "idempotency_key": "resident:alpha", "input": {"resident_id": "resident.alpha"}}
+                        "idempotency_key": "resident:alpha", "input": {"resident_id": "resident:alpha"}}
             with pytest.raises(ModuleExtensionError, match="identity/HR association"):
                 await cme._resolve_resident_executor(activity)
             cme._authorization_decision.assert_not_awaited()

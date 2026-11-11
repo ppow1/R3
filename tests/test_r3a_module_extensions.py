@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_module_extensions.py
 Component: TEST-R3A-MODULE-EXTENSION-CONTRACTS
-File Revision: 1.0.4
+File Revision: 1.0.5
 Created: 2026-11-10T01:09:23Z
 Created By: Codex GPT-6
 Purpose: Permanently verify generic resident and durable activity-handler module declarations.
@@ -14,6 +14,7 @@ Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Add exten
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify authoritative binding resolution against active role declarations and pinned artifacts.
 Changed: 2026-11-10T01:26:34Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify bootstrap binding registration and fail-closed role/digest matching.
 Changed: 2026-11-10T02:02:46Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Test v1.0/v1.1 manifest schema selection and fail-closed unsupported versions.
+Changed: 2026-11-11 | R3A-RESIDENT-ID-AUDIT | Codex GPT-6 | Reject module-shaped binding principals and principal-shaped module IDs while accepting generic registered module IDs.
 Supersedes: None
 Contracts: r3a.resident.module-binding.v1; r3a.resident.executor@1.0.0; r3a.activity-handler.v1.
 Tests: python3 -m pytest -q tests/test_r3a_module_extensions.py
@@ -324,6 +325,18 @@ class TestResidentBinding:
         mutate(value)
         with pytest.raises(ModuleExtensionError):
             validate_resident_binding(value)
+
+    def test_binding_keeps_canonical_principal_distinct_from_generic_executor_module_id(self):
+        binding = resident_binding("resident:alpha", "executor.orbit")
+        assert validate_resident_binding(binding)["module_id"] == "executor.orbit"
+
+        wrong_principal = resident_binding("resident.alpha", "executor.orbit")
+        with pytest.raises(ModuleExtensionError, match="resident_id"):
+            validate_resident_binding(wrong_principal)
+
+        wrong_module = resident_binding("resident:alpha", "resident:alpha")
+        with pytest.raises(ModuleExtensionError, match="must not contain a resident principal"):
+            validate_resident_binding(wrong_module)
 
     def test_duplicate_effective_binding_rejected(self):
         value = resident_binding("resident:alpha", "executor.orbit")

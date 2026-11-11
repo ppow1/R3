@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_capability_integration_demo.py
 Component: R3A-CAPABILITY-INTEGRATION-REGRESSION
-File Revision: 1.0.7
+File Revision: 1.0.8
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Verify canonical CME invocation, idempotent recovery, and independently gated completion.
@@ -17,10 +17,11 @@ Changed: 2026-11-10T01:38:38Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Exercise 
 Changed: 2026-11-10T01:38:38Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify process loss after activation is durably diagnosed and blocks further discovery/invocation.
 Changed: 2026-11-10T01:38:38Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Verify handler discovery selects only the replacement module version after lifecycle transition.
 Changed: 2026-11-10T02:02:46Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Use manifest v1.1.0 when lifecycle fixtures declare resident and handler roles.
+Changed: 2026-11-11 | R3A-RESIDENT-ID-AUDIT | Codex GPT-6 | Keep canonical caller principal distinct from executable resident module ID in invocation fixtures.
 Supersedes: None.
 Contracts: r3a.capability-invocation.v1; r3a.engineering-work-order.v1; r3a.verification-result.v1; module.lifecycle v2.
 Tests: This test module.
-History/Predecessor: Existing AP2 capability integration regression; prior tracked blob 10dc99eb14a2d7365d71a8db84af131ed605c4e2; immediate predecessor recorded in Git.
+History/Predecessor: Existing AP2 capability integration regression; prior tracked blob 10dc99eb14a2d7365d71a8db84af131ed605c4e2; immediately preceding integration-tree blob recorded in Git.
 """
 from __future__ import annotations
 
@@ -629,7 +630,7 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
                 "invocation_id": ACTION, "operation_id": "engineering.workspace.apply_patch",
                 "operation_contract_version": "1.0.0",
-                "caller": {"principal_id": "resident.grace", "resident_id": "resident.grace", "service_id": None},
+                "caller": {"principal_id": "resident:grace", "resident_id": "resident.grace", "service_id": None},
                 "target": {"workspace_id": "candidate-1"},
                 "input": {"path": "artifacts/result.txt", "content": "observed"},
                 "activity_id": ACTIVITY, "attempt_id": ATTEMPT, "correlation_id": CORRELATION,
@@ -660,7 +661,7 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
                 "invocation_id": ACTION, "operation_id": "engineering.workspace.apply_patch",
                 "operation_contract_version": "1.0.0",
-                "caller": {"principal_id": "resident.grace", "resident_id": "resident.grace", "service_id": None},
+                "caller": {"principal_id": "resident:grace", "resident_id": "resident.grace", "service_id": None},
                 "target": {"workspace_id": "candidate-1"},
                 "input": {"path": "artifacts/result.txt", "content": "R3A isolated demo\n"},
                 "activity_id": ACTIVITY, "attempt_id": ATTEMPT, "correlation_id": CORRELATION,

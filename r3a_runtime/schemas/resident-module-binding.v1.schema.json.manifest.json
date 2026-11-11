@@ -1,0 +1,14 @@
+{
+  "component": "R3A-MODULE-EXTENSION-CONTRACTS",
+  "created": "2026-11-11T12:30:44Z",
+  "created_by": "Codex GPT-6",
+  "file": "r3a_runtime/schemas/resident-module-binding.v1.schema.json",
+  "file_revision": "1.0.1",
+  "content_sha256": "f386d068e43e63cfca4f5c2bb926a00f55739baafef9cf113c86f41e091111a4",
+  "purpose": "Validate that a resident binding names a canonical resident principal while retaining the generic registered module ID contract.",
+  "authority": "AD-024 resident module-binding contract; Modular Plugins #46 shared contract owner.",
+  "changed": "2026-11-11 | R3A-RESIDENT-ID-AUDIT | Codex GPT-6 | Constrain resident_id to resident principal namespace.",
+  "supersedes": "None",
+  "history": "Previous integration-tree schema blob f13b4e3a96e6b054cf512a0b29458a0da364f307.",
+  "tests": "tests/test_r3a_module_extensions.py"
+}

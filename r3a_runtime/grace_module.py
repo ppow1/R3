@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/grace_module.py
 Component: R3A-GRACE-AP1
-File Revision: 1.12.2
+File Revision: 1.12.4
 Created: 2026-11-06 UTC
 Created By: Codex GPT-6
 Purpose: Execute Grace objectives through configured inference and resident-selected capabilities in the authorized canonical runtime.
@@ -42,8 +42,10 @@ Changed: 2026-11-08 | R3A-AP1-EVIDENCE-REASONING | Coordinator integration | Req
 Changed: 2026-11-08 | R3A-CHARACTER-CONTEXT-V2 | Coordinator integration | Validate activity-bound approved context v2 and pin safe metadata across continuation.
 Changed: 2026-11-10T13:15:00Z | R3A-GRACE-CAPABILITY-AUTONOMY | Codex GPT-6 | Guide accurate capability inventory answers from authorized dynamic tools and provider limitations.
 Changed: 2026-11-10T13:35:00Z | R3A-GRACE-CAPABILITY-AUTONOMY | Codex GPT-6 | Validate the conversation activity label against its event kind in Grace execution.
+Changed: 2026-11-11 | R3A-RESIDENT-ID-AUDIT | Codex GPT-6 | Validate bound canonical principal separately from executor module identity and retain nested event kind.
+Changed: 2026-11-11 | R3A-RESIDENT-ID-AUDIT | Codex GPT-6 | Reject explicit module-shaped values in the resident principal field, including primary-module collisions.
 Contracts: R3A-019; AP1-M1 Issue #43 acceptance; r3a.resident.execution.v1; r3a.resident.approved-character-context@2.0.0; r3a.resident.execution-profile@1.0.0.
-History/Predecessor: Prior revision preserved at commit 11d4c898eea1fef6caf6a22b72bbd827217ccf15, blob 8f6e0c9bd146d95ff853d3a78ec01924fcdad68f.
+History/Predecessor: Prior revision preserved at commit 11d4c898eea1fef6caf6a22b72bbd827217ccf15, blob 8f6e0c9bd146d95ff853d3a78ec01924fcdad68f; immediately preceding integration-tree blob recorded in Git before this revision.
 """
 from __future__ import annotations
 
@@ -68,6 +70,7 @@ from .protocol import MAX_RESIDENT_EXECUTION_FRAME_BYTES, ModuleProtocolServer
 from .resident_character_context import (character_context_binding,
                                          require_character_context_pin,
                                          validate_resident_character_context)
+from .resident_identity import resident_principal_id, validate_resident_identity_pair
 
 
 RESIDENT_ACTION_SCHEMA = {
@@ -232,6 +235,10 @@ def validate_resident_profile(value: Any, *, resident_id: str,
         raise ValueError("resident execution profile contract is incompatible")
     if value["resident_id"] != resident_id or value["config_revision"] != config_revision:
         raise ValueError("resident execution profile identity or configuration revision mismatch")
+    try:
+        resident_principal_id(value["resident_id"])
+    except ValueError as exc:
+        raise ValueError("resident execution profile identity must be a canonical principal") from exc
     for key in ("resident_id", "office_id", "office_role", "model_route_id"):
         if not isinstance(value[key], str) or not value[key].strip():
             raise ValueError(f"resident execution profile {key} is required")
@@ -716,7 +723,9 @@ def context_budget_blocked_result(*, payload: dict[str, Any], route: ModelRoute,
                 "recommended_action": "Narrow the objective or configure a compatible context window."}}
     content = json.dumps(decision, separators=(",", ":"), ensure_ascii=False)
     return {"activity_id": payload["activity_id"], "attempt_id": payload["attempt_id"],
-            "objective": payload.get("objective"), "event_kind": payload.get("event_kind", "objective"),
+            "objective": payload.get("objective"),
+            "event_kind": payload.get("event_kind") or
+                          (payload.get("activity_input") or {}).get("event_kind", "objective"),
             "action": "final", "decision": decision["decision"], "capability_request": None,
             "engineering_proposal": None, "engineering_assessment": None,
             "reasoning_escalation_request": None, "resident_result": payload.get("resident_result"),
@@ -799,11 +808,32 @@ class GraceResident:
         if operation == "execute":
             if self.state != "ACTIVE":
                 raise RuntimeError("Grace resident is not active")
+            explicit_resident_id = payload.get("resident_id")
+            execution_resident_id = explicit_resident_id or self.module_id
+            if not isinstance(execution_resident_id, str) or not execution_resident_id.strip():
+                raise ContractValidationError("resident execution identity is required")
+            if explicit_resident_id is not None:
+                try:
+                    resident_principal_id(explicit_resident_id)
+                    validate_resident_identity_pair(execution_resident_id, self.module_id)
+                except ValueError as exc:
+                    raise ContractValidationError(
+                        "resident principal and executor module identities are distinct types") from exc
+            activity_input = payload.get("activity_input", {})
+            if not isinstance(activity_input, dict):
+                raise ValueError("activity_input must be an object")
+            event_kind = payload.get("event_kind", activity_input.get("event_kind", "objective"))
+            if not isinstance(event_kind, str) or not event_kind.strip():
+                raise ValueError("event_kind must be a nonempty string")
             envelope_value = payload.get("contract_envelope")
+            if (execution_resident_id != self.module_id
+                    and (payload.get("resident_profile") is None or envelope_value is None)):
+                raise ContractValidationError(
+                    "bound resident execution requires a directory profile and execution envelope")
             if envelope_value is not None:
                 envelope = ContractEnvelope.from_dict(
                     envelope_value, expected_contract="r3a.resident.execution")
-                if envelope.resident_id != self.module_id:
+                if envelope.resident_id != execution_resident_id:
                     raise ContractValidationError("resident identity mismatch")
                 if envelope.activity_id != str(payload.get("activity_id")) or \
                         envelope.attempt_id != str(payload.get("attempt_id")):
@@ -820,7 +850,7 @@ class GraceResident:
             activity_type = payload.get("activity_type")
             if activity_type not in {"grace.objective", "grace.conversation"}:
                 raise ValueError("unsupported activity type")
-            if activity_type == "grace.conversation" and payload.get("event_kind") != "conversation":
+            if activity_type == "grace.conversation" and event_kind != "conversation":
                 raise ValueError("conversation activity must carry conversation event kind")
             objective = payload.get("objective")
             evidence = payload.get("evidence", [])
@@ -831,7 +861,7 @@ class GraceResident:
             resident_profile = None
             if payload.get("resident_profile") is not None:
                 resident_profile = validate_resident_profile(
-                    payload["resident_profile"], resident_id=self.module_id,
+                    payload["resident_profile"], resident_id=execution_resident_id,
                     config_revision=str(payload.get("config_revision")))
                 role_resolver = getattr(self.settings, "model_role_for_office", None)
                 configured_role = role_resolver(resident_profile["office_role"]) if callable(role_resolver) else None
@@ -901,7 +931,8 @@ class GraceResident:
                     resident_result_value, activity_id=str(payload.get("activity_id")),
                     attempt_id=str(payload.get("attempt_id")),
                     correlation_id=str(correlation_id) if correlation_id is not None else None,
-                    resident_id=self.module_id, config_revision=str(payload.get("config_revision")))
+                    resident_id=execution_resident_id,
+                    config_revision=str(payload.get("config_revision")))
             request = {
                 "model": route.model,
                 "temperature": 0,
@@ -945,7 +976,7 @@ class GraceResident:
                         "Use blocked only when required facts remain unavailable or ambiguous; explain why in assessment. "
                         "Never imply external actions were performed. Return one compact JSON object." )},
                     *conversation,
-                    {"role": "user", "content": json.dumps({"event_kind": payload.get("event_kind", "objective"),
+                    {"role": "user", "content": json.dumps({"event_kind": event_kind,
                                                                   "objective": objective,
                                                                   "acceptance_contract": payload.get("acceptance_contract", {}),
                                                                   "reasoning_escalation": escalation,
@@ -1178,7 +1209,8 @@ class GraceResident:
                 usage_record["resident_character_context"] = resident_character_binding
                 self.last_activity = {
                     "activity_id": payload["activity_id"], "attempt_id": payload["attempt_id"],
-                    "objective": objective, "event_kind": payload.get("event_kind", "objective"),
+                    "objective": objective, "event_kind": event_kind,
+                    "resident_id": execution_resident_id,
                     "action": decision["action"], "decision": final_decision,
                     "capability_request": (decision if decision["action"] == "invoke_capability" else None),
                     "delegation_request": (decision.get("delegation")

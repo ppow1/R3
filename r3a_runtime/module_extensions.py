@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/module_extensions.py
 Component: R3A-MODULE-EXTENSION-CONTRACTS
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-10T01:09:23Z
 Created By: Codex GPT-6
 Purpose: Validate resident-executor bindings and durable activity-handler declarations.
@@ -13,6 +13,7 @@ Authority: AD-024; Modular Plugins #46. Bindings and registration grant no autho
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Add generic resident and durable handler contract validation.
 Changed: 2026-11-10T01:09:23Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Resolve resident bindings against the active registry artifact and declared execution range.
 Changed: 2026-11-10T01:26:34Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Validate configured binding targets against declared executor roles and immutable digests.
+Changed: 2026-11-11 | R3A-RESIDENT-ID-AUDIT | Codex GPT-6 | Require canonical principal for binding resident_id while keeping executor module IDs generic.
 Supersedes: None
 Contracts: r3a.resident.module-binding.v1; r3a.resident.execution-profile@1.0.0; r3a.activity-handler.v1; r3a.activity-intake.v1.
 Tests: tests/test_r3a_module_extensions.py; tests/test_r3a_module_extension_lifecycle.py
@@ -28,6 +29,7 @@ from typing import Any, Iterable
 
 from .capability_contracts import CapabilityContractError, validate_json
 from .module_contracts import semantic_version
+from .resident_identity import resident_principal_id
 
 
 class ModuleExtensionError(ValueError):
@@ -58,8 +60,14 @@ def validate_resident_binding(value: Any) -> dict[str, Any]:
         raise ModuleExtensionError("resident module binding contract is incompatible")
     if not _IDENT.fullmatch(binding["resident_id"]):
         raise ModuleExtensionError("resident_id is not a canonical contract identifier")
+    try:
+        resident_principal_id(binding["resident_id"])
+    except ValueError as exc:
+        raise ModuleExtensionError("resident_id must be a canonical resident principal") from exc
     if not _IDENT.fullmatch(binding["module_id"]):
         raise ModuleExtensionError("module_id is invalid")
+    if binding["module_id"].startswith("resident:"):
+        raise ModuleExtensionError("module_id must not contain a resident principal")
     try:
         semantic_version(binding["module_version"])
     except ValueError as exc:
