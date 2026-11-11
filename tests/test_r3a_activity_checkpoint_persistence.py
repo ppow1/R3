@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_activity_checkpoint_persistence.py
 Component: R3A-ACTIVITY-CHECKPOINT-PERSISTENCE-REGRESSION
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-10
 Created By: Codex GPT-6
 Purpose: Verify generic handler checkpoints persist through PostgreSQL progress updates and lease recovery.
@@ -13,8 +13,9 @@ Authority: Steward corrective directive, Autonomy / CME Issue #43.
 Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GPT-6 | Exercise atomic progress/checkpoint persistence and recovery against PostgreSQL.
 Supersedes: None.
 Contracts: r3a.activity-handler.v1; activity.generic v1; existing CME activity ledger.
-Tests: Set R3A_CHECKPOINT_TEST_DSN to a disposable test database and run this module.
-History/Predecessor: New permanent persistence regression.
+Tests: Isolated PostgreSQL 16; targeted digest/restart-replay checks 2 passed; focused checkpoint, Engineering, and verification suites 24 passed, 2 existing xfailed.
+Changed: 2026-11-11T21:52:57Z | R3A-STEP127-POSTGRES-REGRESSION | Codex GPT-6 | Preserve fixture settings across Store restart in the PostgreSQL regression.
+History/Predecessor: Git blob 38afccc75f5e3c10afd7897cefe5a3de568263dc at candidate commit b259a09b3e5372717f455170e9414d82af2eff6f.
 """
 from __future__ import annotations
 
@@ -65,11 +66,11 @@ class ActivityCheckpointPostgresTests(unittest.IsolatedAsyncioTestCase):
         database = str(info.get("dbname", "")).lower()
         if not database.startswith("r3a_checkpoint_test"):
             self.skipTest("R3A_CHECKPOINT_TEST_DSN must identify a dedicated test database")
-        settings = SimpleNamespace(
+        self.settings = SimpleNamespace(
             connection_info=info, worker_concurrency=1, lease_seconds=30,
             observer_interval_seconds=60,
             machine_catalog_dir=ROOT / "r3a_runtime" / "state_machines")
-        self.store = Store(settings)
+        self.store = Store(self.settings)
         async with await AsyncConnection.connect(self.store.conninfo, autocommit=True) as conn:
             await conn.execute("DROP SCHEMA IF EXISTS r3a CASCADE")
         await self.store.open()
