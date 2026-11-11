@@ -1,0 +1,17 @@
+{
+  "schema_id": "r3a.module-release-metadata.v1",
+  "schema_version": 1,
+  "module_id": "example.module-boilerplate",
+  "module_version": "1.0.0",
+  "artifact_digest": "a10b8edb16cb38ddb72252be15be99f112ff0539fc7ec55137218f0cf262467c",
+  "role": {
+    "contract_id": "r3a.resident.executor",
+    "contract_version": "1.0.0",
+    "execution_contract_range": {
+      "contract_id": "r3a.resident.execution",
+      "major": 1,
+      "min_minor": 0,
+      "max_minor": 0
+    }
+  }
+}

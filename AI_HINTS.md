@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.0.8
+File Revision: 1.0.9
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -11,6 +11,7 @@ Observability: N/A
 Dependencies: hints/README.md
 Authority: R3 engineering navigation, subordinate to approved charter
 Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-001 | ChatGPT GPT-6 | Add concise development bootstrap pointer
+Changed: 2026-11-11T21:52:37Z | R3A-MODULE-BOILERPLATES-STEP-120 | Codex GPT-6 | Index the frozen-contract offline module boilerplate
 Changed: 2026-11-06T03:39:05Z | R3A-BASELINE-001 | Codex GPT-6 | Add the R3A architecture baseline index.
 Changed: 2026-11-06T03:49:54Z | R3A-BASELINE-001 | Codex GPT-6 | Record documentation review scope accurately.
 Changed: 2026-11-06T05:02:18Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Require R3A roadmap compliance in engineering session bootstrap.
@@ -56,5 +57,6 @@ Start with [the hints index](hints/README.md). Keep this root file short; put de
 - [R3A architecture baseline, AP0 specification, roadmap, and contracts](docs/architecture/R3A_ARCHITECTURE_CHARTER.md)
 - [Deployment and command execution](hints/deployment.md) — [manifest-driven runbook](docs/runbooks/R3_MANIFEST_DEPLOYMENT.md) and [deployment scripts](scripts/deployment/Deploy-R3.ps1) (currently plan-only; no live activation)
 - [Resident avatar system](hints/resident-avatar-system.md) — replaceable website avatar runtime, browser animation API, and pending authorized backend connection
+- [R3A module boilerplates](hints/module-boilerplates.md) — offline process-module example, frozen bindings, package handoff and rollback boundaries
 
 When asked to add material to AI_HINTS, update a focused `hints/` document and add or adjust a concise pointer here only if needed.
