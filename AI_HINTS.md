@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.0.7
+File Revision: 1.0.8
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -10,6 +10,7 @@ Execution Model: N/A
 Observability: N/A
 Dependencies: hints/README.md
 Authority: R3 engineering navigation, subordinate to approved charter
+Changed: 2026-11-11 UTC | B2-STARTUP-001 | ChatGPT GPT-6 | Add two-window external bridge startup instructions
 Changed: 2026-11-11 UTC | B2-HANDOFF-001 | ChatGPT GPT-6 | Index external B-2 development control handoff
 History/Predecessor: Git blob c434f7feb31931f1ef57658ac4e55ed1bee09675
 Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-001 | ChatGPT GPT-6 | Add concise development bootstrap pointer
@@ -44,6 +45,26 @@ Start with [the hints index](hints/README.md). Keep this root file short; put de
 - Preserve authorization, audit, recovery, substantive verification, and truthful UI status without unnecessary bureaucracy.
 - Do not migrate Riverview 2 wholesale or modify production/backups without explicit authorization.
 - Favor small, testable changes and verified outcomes.
+
+## External B-2 startup for a new development session
+
+If the two Windows development-control terminals are not already running, open **two separate elevated PowerShell 7 windows** on the development workstation. **First**, in the Administrator Coordinator window run:
+
+```powershell
+$Host.UI.RawUI.WindowTitle = 'Riverview B2 Administrator Coordinator'
+Write-Output 'B-2 Administrator Coordinator ready'
+```
+
+**Second**, in the Multi-Target Bridge window run:
+
+```powershell
+Clear-Host
+$Folder = Join-Path $env:USERPROFILE 'Downloads\Riverview-B2-Administrator-Package'
+$Script = Join-Path $Folder 'Riverview-GitHub-Bridge-B2-MultiTarget.ps1'
+& $Script -DispatchIssue 61 -PollSeconds 10 -Arm
+```
+
+**Check for already-running windows before starting anything; never start a duplicate polling bridge.** Full preflight, combined launcher, limitations, and verification: [B-2 two-window startup runbook](hints/b2-development-bridge-startup.md). This controls external development terminals, **not** Riverview runtime.
 
 ## First-level references
 
