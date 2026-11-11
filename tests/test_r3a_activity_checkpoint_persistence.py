@@ -21,6 +21,7 @@ History/Predecessor: New permanent persistence regression.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import uuid
@@ -32,7 +33,7 @@ from unittest.mock import AsyncMock, Mock
 from psycopg.conninfo import conninfo_to_dict
 from psycopg import AsyncConnection
 
-from r3a_runtime.cme import CME
+from r3a_runtime.cme import CME, _capability_request_digest
 from r3a_runtime.db import Store
 from r3a_runtime.provider_runtime import ProviderProcessManager
 from tests.r3a_activity_handler_interop_provider import create_provider
@@ -46,6 +47,18 @@ TEST_DSN = os.environ.get("R3A_CHECKPOINT_TEST_DSN")
 
 class SimulatedProcessInterruption(RuntimeError):
     pass
+
+
+class CapabilityRequestDigestTests(unittest.TestCase):
+    def test_per_attempt_deadline_is_excluded_but_semantic_fields_remain_bound(self):
+        request = {"operation_id": "directory.read", "input": {"resident_id": "resident:grace"},
+                   "target": {"source_ids": ["directory"]}, "deadline": "2099-01-01T00:00:00Z"}
+        renewed = {**request, "deadline": "2099-01-01T00:01:00Z"}
+        self.assertEqual(_capability_request_digest(request), _capability_request_digest(renewed))
+        changed_input = {**request, "input": {"resident_id": "resident:vicky"}}
+        self.assertNotEqual(_capability_request_digest(request), _capability_request_digest(changed_input))
+        changed_target = {**request, "target": {"source_ids": ["secrets"]}}
+        self.assertNotEqual(_capability_request_digest(request), _capability_request_digest(changed_target))
 
 
 @unittest.skipUnless(TEST_DSN, "requires disposable PostgreSQL R3A_CHECKPOINT_TEST_DSN")
@@ -112,6 +125,69 @@ class ActivityCheckpointPostgresTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "manifest is immutable"):
             await self.store.register_module({**promoted, "owner": "changed-owner"},
                                              "ACTIVE", "healthy", diagnostic)
+    async def test_capability_retry_with_new_deadline_recovers_after_store_restart(self):
+        # Preserve the original production failure: full-envelope hashing conflicts
+        # when a stable key is retried with only its per-attempt deadline changed.
+        legacy_key = f"directory-legacy-deadline:{uuid.uuid4()}"
+        legacy_request = {
+            "idempotency_key": legacy_key,
+            "invocation_id": str(uuid.uuid4()),
+            "operation_id": "institutional.directory.discover",
+            "correlation_id": str(uuid.uuid4()),
+            "deadline": "2099-01-01T00:00:00+00:00",
+            "input": {"resident_id": "resident:grace", "limit": 250},
+        }
+
+        def full_request_digest(request):
+            return hashlib.sha256(json.dumps(request, sort_keys=True,
+                                             separators=(",", ":")).encode()).hexdigest()
+
+        await self.store.begin_capability_invocation(
+            legacy_request, full_request_digest(legacy_request), {})
+        legacy_retry = {**legacy_request, "deadline": "2099-01-01T00:01:00+00:00"}
+        with self.assertRaisesRegex(ValueError, "idempotency key already belongs to a different canonical request"):
+            await self.store.begin_capability_invocation(
+                legacy_retry, full_request_digest(legacy_retry), {})
+
+        key = f"directory-retry:{uuid.uuid4()}"
+        first_deadline = "2099-01-01T00:00:00+00:00"
+        first_request = {
+            **legacy_request,
+            "idempotency_key": key,
+            "invocation_id": str(uuid.uuid4()),
+            "correlation_id": str(uuid.uuid4()),
+            "deadline": first_deadline,
+        }
+        first_digest = _capability_request_digest(first_request)
+        created = await self.store.begin_capability_invocation(first_request, first_digest, {})
+        self.assertTrue(created["created"])
+
+        # A CME restart reconstructs Store and retries the same semantic request.
+        await self.store.close()
+        self.store = Store(self.settings)
+        await self.store.open()
+        retry_request = {**first_request, "deadline": "2099-01-01T00:01:00+00:00"}
+        retry_digest = _capability_request_digest(retry_request)
+        self.assertEqual(first_digest, retry_digest)
+        retry = await self.store.begin_capability_invocation(retry_request, retry_digest, {})
+        self.assertFalse(retry["created"])
+        self.assertEqual("STARTED", retry["state"])
+        persisted = (await self.store.rows(
+            "SELECT request FROM r3a.capability_invocations WHERE idempotency_key=%s", (key,)))[0]
+        self.assertEqual(first_deadline, persisted["request"]["deadline"])
+
+        result = {"outcome": "SUCCEEDED", "evidence": [], "output": {"residents": []}}
+        await self.store.finish_capability_invocation(key, retry["request_digest"], result)
+        replay = await self.store.begin_capability_invocation(
+            {**retry_request, "deadline": "2099-01-01T00:02:00+00:00"}, retry_digest, {})
+        self.assertFalse(replay["created"])
+        self.assertEqual("SUCCEEDED", replay["state"])
+        self.assertEqual(result, replay["result"])
+
+        changed_input = {**retry_request, "input": {"resident_id": "resident:vicky", "limit": 250}}
+        with self.assertRaisesRegex(ValueError, "idempotency key already belongs to a different canonical request"):
+            await self.store.begin_capability_invocation(
+                changed_input, _capability_request_digest(changed_input), {})
 
     async def test_handler_checkpoint_survives_progress_and_process_loss_retry(self):
         sample = fixture()

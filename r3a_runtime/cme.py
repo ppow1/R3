@@ -115,6 +115,13 @@ from .module_extensions import (ModuleExtensionError, resolve_activity_handler,
                                 validate_executor_configuration)
 
 
+def _capability_request_digest(request: dict[str, Any]) -> str:
+    """Hash semantic invocation fields; deadline is validated independently on every attempt."""
+    canonical = {key: value for key, value in request.items() if key != "deadline"}
+    return hashlib.sha256(json.dumps(canonical, sort_keys=True,
+                                    separators=(",", ":")).encode()).hexdigest()
+
+
 ACTIVITY_INTAKE_SCHEMA = json.loads(
     (Path(__file__).with_name("schemas") / "activity-intake.v1.schema.json").read_text(encoding="utf-8"))
 MAX_HANDLER_ACTION_BYTES = 512 * 1024
@@ -2549,8 +2556,7 @@ class CME:
                     "audit_event_id": authorization["audit_event_id"],
                     "policy_revision": authorization["policy_revision"],
                     "config_revision": authorization["config_revision"]}
-        canonical_digest = hashlib.sha256(json.dumps(checked, sort_keys=True,
-                                                    separators=(",", ":")).encode()).hexdigest()
+        canonical_digest = _capability_request_digest(checked)
         persistence_key = checked["idempotency_key"] or f"invocation:{checked['invocation_id']}"
         durable_request = {**checked, "idempotency_key": persistence_key}
         existing = await self.store.begin_capability_invocation(durable_request, canonical_digest, auth_ref)
