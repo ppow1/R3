@@ -4,6 +4,10 @@
 
 This is a release-gated plan, not deployment authorization. The HR source candidate is not yet independently approved at its exact SHA, the packet service is not composed into an authenticated R3A host, and migration 019 has not been applied to shared R3A. Do not deploy or migrate shared R3A until the Auditor review and Coordinator release approval are recorded.
 
+The HR branch now includes the approved active integration baseline `2cc3fe3aabad88c95a5e6489c633cb01472f7c7f` as an ancestor. Reconciliation retained its module-manifest validation and CME lifecycle changes and the HR-owned schema-reference/authority checks. The shared directory regression now tests REGISTERED denial before activation and the active-provider success path.
+
+The immutable handoff builder is `scripts/package_r3a_hr_onboarding.py`. Its deterministic archive, in-band file digest manifest, external SHA-256, and Coordinator handoff are generated under `artifacts/`. The bundle status is `SOURCE_CANDIDATE_NOT_DEPLOYABLE` until the service/API composition and external authority writers are available and the exact bundle is independently reviewed.
+
 This plan covers only the R3A onboarding packet/event store and its host integration. It does not create HR identities or appointments, directory occupants or office bindings, credentials, grants, resident modules, or Website availability.
 
 ## Authority and interface handoff
