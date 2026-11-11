@@ -85,7 +85,7 @@ Use a UTF-8 database; migration SQL contains Unicode text. The test applies the 
 
 ## Installable runtime artifact
 
-The onboarding service is distributed as an R3A runtime library component, not a new database-owning microservice. Build the runtime wheel from the exact reviewed R3A commit using the repository's pinned build environment, then retain its SHA-256 beside the source archive manifest. Verify that the wheel contains `residents/onboarding_host.py`, onboarding service/repository code, migration 019 and rollback, schema v1, and state-machine v1. Install only in the Coordinator-managed R3A environment after exact-SHA Auditor review and Coordinator release approval. Installing the wheel does not apply migration 019 or activate an API.
+The onboarding service is distributed as an R3A runtime library component, not a new database-owning microservice. Step 74 built `artifacts/r3a_ap0_runtime-0.1.0-py3-none-any.whl` from source `e247f3fba9c9affdbeac3293b77b91f904cbb27c`; SHA-256 is `0886db886f360c44bceeec5cf1760e41c3357020cf100291b81bb6fa9b5d0860`. It installed into a private target directory and imported successfully; checks confirmed the host contract, onboarding migration 019, guarded rollback 019, packet schema v1, and state machine v1 are included. The wheel manifest sidecar records this evidence. The current candidate archive is `artifacts/r3a-hr-onboarding-candidate-e247f3fba9c9.tar.gz`, SHA-256 `7402554f727298f8c3d8549ceb8a828f0b1d433c1e8190b50994362029ee8916`. Install only in the Coordinator-managed R3A environment after exact-SHA Auditor review and Coordinator release approval. Installing a wheel does not apply migration 019 or activate an API.
 
 ## Current blockers and next actions
 

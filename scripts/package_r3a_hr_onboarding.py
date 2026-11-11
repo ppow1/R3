@@ -36,7 +36,7 @@ from typing import Any
 
 COORDINATOR_BASELINE = "2cc3fe3aabad88c95a5e6489c633cb01472f7c7f"
 PACKAGE_ID = "r3a.resident-onboarding.source-bundle"
-PACKAGE_VERSION = "1.0.0"
+PACKAGE_VERSION = "1.1.0"
 PACKAGE_PREFIX = "r3a-hr-onboarding-"
 FILES = (
     "pyproject.toml",
@@ -105,7 +105,7 @@ ROLLBACK = {
 }
 TEST_EVIDENCE = {
     "source_suite": "pytest focused HR/onboarding, PostgreSQL, dossier, grants, directory, capability, and Coordinator module-contract suites",
-    "result": "143 passed, 1 DSN-gated checkpoint suite skipped in this invocation; that separate private-PostgreSQL checkpoint test then passed (1 passed)",
+    "result": "Combined source-focused suite: 145 passed, 2 DSN-gated PostgreSQL/checkpoint tests skipped, 12 subtests passed. The prior exact merged-tree checkpoint test separately passed (1 passed); migration 019 full-stack disposable PostgreSQL suite passed on the reconciled source before this host-only extension.",
     "migration_019": "full migration stack apply/repeat, guarded rollback/re-upgrade, atomicity, multi-resident, revision/idempotency, privacy, immutable audit, and populated rollback refusal passed on private UTF-8 PostgreSQL 16",
     "shared_database": "not used or changed",
 }
