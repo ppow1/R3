@@ -42,6 +42,7 @@ Changed: 2026-11-11 | R3A-AUDIT-STEP141-P0 | Codex GPT-6 | Add exact d436cc3 can
 Changed: 2026-11-11T23:45:00Z | R3A-AUDIT-DISPATCH-132-140-141 | Codex GPT-6 | Link exact owner and audit comments for Q-08/Q-09 and close queued dispatch reporting.
 Changed: 2026-11-11T23:59:00Z | R3A-AUDIT-STEP135-HR | Codex GPT-6 | Add Q-10 for the passing HR revision guard while retaining authority and live onboarding blockers.
 Changed: 2026-11-12T00:15:00Z | R3A-AUDIT-STEP142-HR-P0-READBACK | Codex GPT-6 | Add HR async-port source Q-11 and independently verify deployed CME source; retain new-chat acceptance gate.
+Changed: 2026-11-12T00:30:00Z | R3A-AUDIT-DISPATCH-132-140-STEP69 | Codex GPT-6 | Record repeated Website/CME dispatch outcomes and PR #69 failure; keep failed boilerplate candidate out of queue.
 Supersedes: None
 Contracts: R3A integration policy; AD-024; approved module, authorization, state and Website contracts.
 Tests: N/A; queue record only. Candidate tests are in the linked compliance matrix.
@@ -114,3 +115,9 @@ Current active review dispositions: **#46 historical `132b748`, `399567d`, and `
 - Next review: newly available Modular Plugins install-root correction `803cb4dc7c0439fa135c5f1b28428019dc85b91a` from #46 (request #56 comment 6807996848), then check #43/#48/#51 for newer exact pushed deliveries before continuing the queue. Grace package PR #66 head `2c8e8e3` remains FAIL until a new exact SHA is submitted.
 
 Coordinator V2 retains integration/deployment authority. Q-01 is source-review approval only. The OctoMiner module remains disabled; no activation, grant, shared migration, or host operation is approved by this queue. Recheck active issues under #56 comment `6770759266` after each review cycle.
+
+## Current review update — dispatches 132/140 and PR #69
+
+- Repeated Step 132 Website review: [#61 comment 6809166368](https://github.com/ppow1/R3/issues/61#issuecomment-6809166368). Bounded polling and package-integrity checks pass, but the candidate remains **FAIL as a complete current-source release**; rework is assigned to Website/Coordinator in #51 comment 6808398022.
+- Repeated Step 140 CME review: [#61 comment 6809166866](https://github.com/ppow1/R3/issues/61#issuecomment-6809166866). `b259a09` new-row retry behavior passed isolated PostgreSQL behavior verification, but its permanent regression has a local settings fixture failure. Corrected descendant `d436cc3` passed independent source/regression review and is eligible only for controlled testing within the approved exception. New authenticated Grace conversation/transcript acceptance remains NOT VERIFIED.
+- **PR #69 Module Boilerplates `694adce6dafb745301d06ba7024674b0e486b3a0`: FAIL; not queued.** Four fixture tests pass; corrected #46 builder 803 built/staged the exact artifact and worker lifecycle passed, but the README pins #46 commit 2641, whose known symlinked install-root defect reproduced against this package. Correction request and acceptance criteria are in #68 comment 6809249954 and PR comment 6809250312. Source is stale-base relative to active Coordinator `2cc3fe3`; Coordinator must reconcile conflicts after a corrected SHA and #46 dependency.
