@@ -1,30 +1,55 @@
 <!--
-R3A controlled handoff
+R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_NOTIFICATION_PHONE_DELIVERY_V1.md
 Component: R3A-AP1-NOTIFICATIONS
-Revision: 1.0.0
+File Revision: 1.1.0
+Created: 2026-11-08 UTC (exact time unknown)
+Created By: Unknown (legacy)
 Purpose: Record ntfy integration, phone-message payload and Website action boundaries.
-Authority: Steward Issue #48 and R3A AP1/R3A-019.
-Changed: 2026-11-08 | AP1-N2 | Inspect R2/R3 delivery, parking lots and ntfy contracts.
-Tests: tests.test_r3a_notification_ntfy; tests.test_r3a_notification_service.
+Execution Model: Documentation of separate legacy and R3 source paths.
+Observability: Source references, tests, and dated operational observations.
+Dependencies: R3A Notifications module and private ntfy transport.
+Authority: Steward Issue #48 and R3A AP1/R3A-019; no production change authorization.
+Changed: 2026-11-11 | STEP-128-FOLLOWUP | Codex GPT-6 | Reconcile current R3 source and clarify the age of R2 runtime evidence.
+Supersedes: None.
+Contracts: r3a.notification-service-manifest.v1; ntfy-publish.v1; Website view-only action boundary.
+Tests: tests/test_r3a_notification_ntfy.py; tests/test_r3a_notification_service.py.
+History/Predecessor: Git blob 3cc4d8371b9e4e546a1053c0ab013943fbe72883.
 -->
 # R3A notification phone delivery v1
 
 ## Existing R2/R3 path and preserved behavior
 
-The currently active legacy path is the Riverview notification dispatcher plus
-the private ntfy server. Read-only inspection on 2026-11-08 found both system
-services active; ntfy health at loopback port 2586 returned `healthy`, and the
-installed ntfy server reports v2.32.0. The dispatcher loads its ntfy token and
-topic using systemd credentials. This work does not change or restart either
-service or reuse its protected topic credentials.
+The latest recorded legacy-path observation is from 2026-11-08: the Riverview
+notification dispatcher and private ntfy systemd services were reported active;
+ntfy health on loopback port 2586 returned `healthy`, and the installed server
+reported v2.32.0. The dispatcher was reported to load its token and topic from
+systemd credentials. These are dated observations, not a current host check.
+The R2 dispatcher source and protected configuration are not present in this
+R3 checkout, so its present version, publisher code, topic and credentials are
+not independently revalidated here. No protected value was read or changed.
 
-The deployed publisher sends a title, priority, tags, and a fixed generic body
-selected by event type. Its single `view` action opens a V2 work/communications
-URL. It does not include the source reason, event timestamp, or correlation ID.
-The durable legacy dispatcher tracks pending/sending/failed/sent delivery,
-attempt count, retry time, lease, and ntfy message ID. Preserve that path until
+The recorded legacy publisher sends a title, priority, tags, and fixed generic
+body selected by event type. Its `view` action opens a V2 work/communications
+URL; the recorded payload omits source reason, event time and correlation ID.
+The dispatcher was documented as tracking pending/sending/failed/sent state,
+attempt count, retry time, lease and ntfy message ID. Preserve that path until
 the separately configured R3A path has a verified device test.
+
+## R3 publisher and transport source inventory — 2026-11-11
+
+The current R3 source is distinct from the legacy dispatcher described above:
+
+| Source | Evidence in this checkout | Boundary |
+|---|---|---|
+| Module version | `r3a_plugins/notification_service/manifest.json` declares `r3a.notifications@1.2.2` and pins the service publisher dependencies. | Source metadata only; no managed service activation is evidenced. |
+| Publish path | `server_v1_2_1.py` persists/routs the delivery, claims the notification phone outbox, calls `NtfyPublisher.publish()`, then records `phone_sent` or `phone_failed`. | Request handling is synchronous and retry uses the durable delivery/outbox state; no second scheduler is added. |
+| Transport/presentation | `ntfy.py` sends a JSON POST with bearer authentication, bounded message fields and a message ID; accepts HTTPS or loopback HTTP only. | Topic and token come from configured runtime inputs, not package source. |
+| Actions | The phone actions use ntfy `view` links into the Website; intent query parameters do not mutate state. | Acknowledge/resolve require the authenticated Website POST path and its CME grant; phone receipt is not acknowledgement. |
+| Configuration example | `config.example.json` sets `ntfy.enabled` to `false`; topic and token-file settings are environment/configuration names. | Example unit uses loopback port 18480 and an environment file; it is not proof of the deployed unit or present host config. |
+| Regression evidence | `tests/test_r3a_notification_ntfy.py` checks detailed message fields, safe view-only actions, no fabricated actions without a Website destination, bounded text and transport rejection. `tests/test_r3a_notification_service.py` checks outbox failure/retry, successful replay suppression and reuse of the delivery identity. | Tests use local capture/fake transports; they do not publish to a protected topic or prove phone display. |
+
+No R2 repository/source checkout or live host inspection was available in this task. The R3 implementation improves the source detail and authenticated navigation contract, but it has no real-device acceptance. The recorded legacy path remains preserved until a separately authorized phone test proves R3 delivery and links.
 
 ## Adopted R2/R3 requirements and parking-lot classification
 
@@ -52,7 +77,7 @@ the separately configured R3A path has a verified device test.
 ## Coordinator release and generic intake handoff
 
 Service manifest `r3a.notification-service-manifest.v1` pins module
-`r3a.notifications@1.2.0`, state schema 3, the inbox schema, the source
+`r3a.notifications@1.2.2`, state schema 3, the inbox schema, the source
 adapter manifest and adapter implementation, and the shared
 `r3a.activity-intake.v1` schema. The source adapter manifest is
 `r3a.capability-operation.v1` operation `notification.source.read@1.0.0`,
@@ -89,7 +114,7 @@ Coordinator activation still requires authoritative directory binding for a
 Steward recipient and its scoped grants; no identity is inferred from display
 names or a test directory.
 
-With optional `ntfy.enabled=true`, module v1.2.0 sends a JSON publish request
+With optional `ntfy.enabled=true`, module v1.2.2 sends a JSON publish request
 to the configured private ntfy origin and authenticated topic. The bearer is
 read from a credential file whose path is supplied by environment; secrets,
 topic names, and message text are not logged. HTTP is allowed only for loopback
