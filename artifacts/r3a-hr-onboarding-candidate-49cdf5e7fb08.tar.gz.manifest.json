@@ -1,0 +1,191 @@
+{
+  "configuration": {
+    "database": {
+      "migration": "019_resident_onboarding.sql",
+      "migration_runner": "r3a_runtime.db.Store.migrate",
+      "role_requirement": "Coordinator-approved least-privilege access to packet/event tables only"
+    },
+    "external_authorities": {
+      "character_canon": "separate Character Architecture approval where applicable",
+      "hr_association_operation": "associate_authority_principal_with_provenance (currently absent)",
+      "resident_binding_writer": "institutional directory authority procedure (currently unidentified)",
+      "security_credentials_and_grants": "separate Security-owned approval and provisioning"
+    },
+    "host_composition": [
+      "server-authenticated actor resolver deriving actor from the established session authority",
+      "exact-action/scope authorization provider",
+      "authoritative per-domain evidence verifiers",
+      "activation evidence verifier",
+      "Coordinator PostgreSQL pool; packet/event-only least-privilege DB grants",
+      "Coordinator-owned authenticated API route, lifecycle supervision, and health integration"
+    ],
+    "host_composition_contract": "r3a.resident.onboarding.host-composition.v1"
+  },
+  "contract_id": "r3a.hr-onboarding-package.v1",
+  "coordinator_baseline": "2cc3fe3aabad88c95a5e6489c633cb01472f7c7f",
+  "files": [
+    {
+      "path": "docs/architecture/R3A_HR_DEVELOPMENT_BACKLOG.md",
+      "sha256": "c44f5d531430ba14a07036455776e722be05b46cc4094a6e4ea61e508f16e816",
+      "size_bytes": 10677
+    },
+    {
+      "path": "docs/architecture/R3A_HR_VICKY_ACTIVATION_BACKLOG.md",
+      "sha256": "5e43c50cb566cb4b6787ed79923952d3b8cbbe0231fb3b699195c6bb45803c89",
+      "size_bytes": 14969
+    },
+    {
+      "path": "docs/architecture/R3A_HR_VICKY_TRANSFER_MATRIX_2026-11-10.md",
+      "sha256": "cc483b9166fba36a0f545495b3277d66e9a056601b6ff68bd7cc3bb24ea309f4",
+      "size_bytes": 10166
+    },
+    {
+      "path": "docs/architecture/R3A_UNIVERSAL_RESIDENT_ONBOARDING_V1.md",
+      "sha256": "249f28804366f27b0d2033e75ba35363251697bb38be9d04bcc6d8f164de96e9",
+      "size_bytes": 15119
+    },
+    {
+      "path": "docs/onboarding/packet-template.json",
+      "sha256": "d5a9a439e7f5d0ac7b3c6e8b059e27420f4b5c602672339c8a328d021c4bd55c",
+      "size_bytes": 4634
+    },
+    {
+      "path": "docs/onboarding/vicky.packet.json",
+      "sha256": "727f3db37126843670ffb96058a3890ef7a4efec5414a6b6db42f04994cf9b31",
+      "size_bytes": 6717
+    },
+    {
+      "path": "docs/runbooks/R3A_HR_ONBOARDING_DEPLOYMENT_PLAN.md",
+      "sha256": "67a2049ed8575e64e24a8e646b9c64a4d7dcbef4d9383b7fa4200f0baa5e18a2",
+      "size_bytes": 17627
+    },
+    {
+      "path": "docs/runbooks/R3A_RESIDENT_ONBOARDING.md",
+      "sha256": "aa32f6f76f01e57c11bf119c6ffca53aa4976eda15d4719b6341b3b9b88fab99",
+      "size_bytes": 6475
+    },
+    {
+      "path": "pyproject.toml",
+      "sha256": "03f9c0ee282deef1393d16844efd4ac0592940a599d76afb8dab8b07bdc36bd4",
+      "size_bytes": 1797
+    },
+    {
+      "path": "r3a_runtime/capability_contracts.py",
+      "sha256": "2d853fe4443512dad63812b98a82654ffe4c0dcad5d25ae36b17ba878e527705",
+      "size_bytes": 41151
+    },
+    {
+      "path": "r3a_runtime/migrations/019_resident_onboarding.sql",
+      "sha256": "7d8fb7f255bf1176edddcbe0f980125fe4604eeac9d4e08d7fd79aa9ee6bcd4b",
+      "size_bytes": 3910
+    },
+    {
+      "path": "r3a_runtime/residents/hr_association.py",
+      "sha256": "b4fc38d8dd8b6561d74816650975032da3e681853145193fd5bc33783dfd8852",
+      "size_bytes": 9952
+    },
+    {
+      "path": "r3a_runtime/residents/onboarding.py",
+      "sha256": "ab0a4e93f480c091bcf42fa890ef5f73164a36ead50fa378f81fe39412a377f1",
+      "size_bytes": 34735
+    },
+    {
+      "path": "r3a_runtime/residents/onboarding_host.py",
+      "sha256": "67eb722bb74059e7d90da1d2f2266efea0b99dbbceda2d2fcb39676f46f87273",
+      "size_bytes": 5648
+    },
+    {
+      "path": "r3a_runtime/residents/onboarding_repository.py",
+      "sha256": "f02f34f2dcd79bb6e1800ae8cf8cbfcaf223aac27a131309af3900dff59befad",
+      "size_bytes": 7468
+    },
+    {
+      "path": "r3a_runtime/rollback/019_resident_onboarding.down.sql",
+      "sha256": "d1c06725907f35e05f875d0a650bde3964a0b5dcba70657bcf5488e257d456c6",
+      "size_bytes": 1692
+    },
+    {
+      "path": "r3a_runtime/schemas/resident-onboarding-packet.v1.schema.json",
+      "sha256": "422d7ff254dfb6e22741816e3e4a4834371561155b97590e58aed58a0c60cf05",
+      "size_bytes": 7387
+    },
+    {
+      "path": "r3a_runtime/state_machines/resident_onboarding.v1.json",
+      "sha256": "297e6ffb7fecc7f603bc9000aa36bc2e673afe18c51b71bbd057d7f0dca788bd",
+      "size_bytes": 1295
+    },
+    {
+      "path": "scripts/package_r3a_hr_onboarding.py",
+      "sha256": "bad1686eea6c278ac37af166ae4e2db1bb850e9aa724e513a63b7d344a3e50c6",
+      "size_bytes": 15729
+    },
+    {
+      "path": "tests/fixtures/resident-onboarding-synthetic.json",
+      "sha256": "d9efff5ef6816fca6d22000dbb29d02fac0aeb8948042e5e6fe0cdfcef8f57a8",
+      "size_bytes": 4627
+    },
+    {
+      "path": "tests/test_r3a_capability_contracts.py",
+      "sha256": "9d6a96b347d8b9f2be5ad5ffaf0bdbda506b38f67895aafc8457dcafbad9b634",
+      "size_bytes": 21234
+    },
+    {
+      "path": "tests/test_r3a_hr_association.py",
+      "sha256": "9dd7934247ed05123866613a1273876fa5b88c5566cd018e4f85cb15424b0874",
+      "size_bytes": 12004
+    },
+    {
+      "path": "tests/test_r3a_hr_onboarding_package.py",
+      "sha256": "ad6b0fba187ef45a6098f532eb7499df1d26df31feb5b205556dfee789a9dfbd",
+      "size_bytes": 1378
+    },
+    {
+      "path": "tests/test_r3a_institutional_directory.py",
+      "sha256": "dc3aa3d4492d6db542d8154272c4d7163ac4539b0c930fb78d54610b84d3500a",
+      "size_bytes": 14298
+    },
+    {
+      "path": "tests/test_r3a_resident_dossiers.py",
+      "sha256": "8c71532d96740e52e78d2037c7139993c44944c9d15109e1aa0d93751c02b7a9",
+      "size_bytes": 52245
+    },
+    {
+      "path": "tests/test_r3a_resident_onboarding.py",
+      "sha256": "3450c00e5611795f7fa1f998315f76612ee94c8dd365df5fa8ef2bb370ff8629",
+      "size_bytes": 36417
+    },
+    {
+      "path": "tests/test_r3a_resident_onboarding_host.py",
+      "sha256": "01da8c727480e5ba1be30ced33e4b0f394bb539fb602d10b53e651216a49d1fd",
+      "size_bytes": 4278
+    },
+    {
+      "path": "tests/test_r3a_resident_onboarding_postgres.py",
+      "sha256": "01374c8a20559e90be829db446cc17e108ef76ec14c8da8c91dfd3bef295ac68",
+      "size_bytes": 15583
+    }
+  ],
+  "install_prerequisites": [
+    "Auditor PASS on the exact combined source/baseline SHA and package digests",
+    "Coordinator approval of migration 019, service composition, DB role grants, release window, and rollback procedure",
+    "Named HR source owner and deployed provenance-bearing association writer or verified equivalent",
+    "Named institutional-directory owner and approved occupant/office-binding procedure",
+    "No production request is enabled until separately approved personnel, credential, grant, and runtime evidence exists"
+  ],
+  "package_id": "r3a.resident-onboarding.source-bundle",
+  "package_version": "1.1.0",
+  "readiness": "SOURCE_CANDIDATE_NOT_DEPLOYABLE",
+  "rollback": {
+    "application": "Coordinator rolls back to the prior pinned application release and preserves onboarding tables/events",
+    "forbidden": "Never drop populated packet/event tables, delete audit evidence, or use the disposable-test DROP SCHEMA setup against shared R3A",
+    "schema": "019 down migration is only permitted by an approved database procedure when packet and event tables are empty; it refuses when populated"
+  },
+  "shared_deployment_authorized": false,
+  "source_revision": "49cdf5e7fb082867c512b8c4890947faf7dd9a5c",
+  "verification": {
+    "migration_019": "Full migration stack apply/repeat, guarded rollback/re-upgrade, atomicity, multi-resident, revision/idempotency, privacy, immutable audit, and populated rollback refusal passed on private UTF-8 PostgreSQL 16 on the earlier reconciled source; migration SQL is unchanged and this suite was not rerun for Step 135.",
+    "result": "Current evidence: /tmp/r3a-hr-development-venv/bin/pytest -q --tb=short tests/test_r3a_hr_association.py — 9 passed, 8 subtests passed. The combined source-focused suite was not rerun on this candidate; prior combined results apply only to the earlier reviewed revision.",
+    "shared_database": "not used or changed",
+    "source_suite": "Step 135 focused HR association regression at code commit c094f7c, included in the package source revision"
+  }
+}
