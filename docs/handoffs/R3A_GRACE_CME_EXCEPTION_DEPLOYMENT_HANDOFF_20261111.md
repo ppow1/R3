@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/handoffs/R3A_GRACE_CME_EXCEPTION_DEPLOYMENT_HANDOFF_20261111.md
 Component: R3A-GRACE-CME-EXCEPTION-DEPLOYMENT-HANDOFF
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-11T22:06:08Z
 Created By: Codex GPT-6
 Purpose: Bound implementation, review, integration, activation, rollback, and acceptance evidence for the approved frozen-CME Grace correction.
@@ -12,6 +12,7 @@ Dependencies: R3A-EXC-001; Steward approval #67 comment 6808102641; execution or
 Authority: Exact R3A-EXC-001 scope only.
 Changed: 2026-11-11T22:06:08Z | R3A-EXC-001 | Codex GPT-6 | Create approved-scope release handoff and record current gates.
 Changed: 2026-11-11T22:12:00Z | R3A-EXC-001 | Codex GPT-6 | Record frozen-baseline integration SHA and passing isolated PostgreSQL regression.
+Changed: 2026-11-11T22:16:00Z | R3A-EXC-001 | Codex GPT-6 | Align release target with Coordinator integration and same-SHA Auditor request.
 Supersedes: None.
 Contracts: Preserve historical data; only the exact deadline/idempotency digest correction may be integrated and deployed.
 Tests: Isolated PostgreSQL regression evidence recorded below; production/browser acceptance not run.
@@ -30,17 +31,18 @@ Acceptance is a **new authenticated Grace conversation** with a fresh idempotenc
 - Candidate: `b259a09b3e5372717f455170e9414d82af2eff6f`; candidate parent `29353c978ed9ea0e9991a264bc222a61fdca2f1c`.
 - Candidate change: only `r3a_runtime/cme.py` in the production delta; digest normalization omits only `deadline`; deadline validation remains per attempt and semantic fields remain bound.
 - Candidate source patch SHA-256: `a147e9c34b5aa36320c4d78d9a8e940289fbb6791229eabc019bc6280b66ef26`.
-- Frozen-baseline integration: commit `568aae85ba43e398ed925b6f649911da449e2cda`, based directly on frozen `89eda1331b96fe40918e4aa67de09c5ae3f45227`; pushed branch [`engineering/grace-cme-frozen-integration-20261111`](https://github.com/ppow1/R3/tree/engineering/grace-cme-frozen-integration-20261111). Only `r3a_runtime/cme.py` and its focused persistence regression test changed.
+- Coordinator release candidate: commit `d436cc3c8022f545d6134ba9e553b55a3aadc279`, branch [`integration/r3a-grace-chat-p0-20261111`](https://github.com/ppow1/R3/tree/integration/r3a-grace-chat-p0-20261111), directly based on frozen `89eda1331b96fe40918e4aa67de09c5ae3f45227`. Coordinator's same-SHA Auditor review request is [#56 comment 6808288267](https://github.com/ppow1/R3/issues/56#issuecomment-6808288267).
+- Supplemental independent frozen-baseline integration by this session: `568aae85ba43e398ed925b6f649911da449e2cda` on `engineering/grace-cme-frozen-integration-20261111`. Its focused result corroborates the Coordinator's 27-pass result; it is not the release target.
 - Frozen baseline: `89eda1331b96fe40918e4aa67de09c5ae3f45227`; rollback must return to this exact release.
 - Independent source review: Auditor PASS recorded in #51 comment `6805687557`; confirm review scope covers the exact integrated SHA before activation.
 - Isolated regression branch: `engineering/r3a-step127-postgres-regression-20261111`, test-only commits `4e5ca6201c3a78239e069530950a546a9f2c7273` and `2792c2d04e210c3d4501ac6d59115252fdc6b386`; CME source remained the candidate source.
 - Command: `R3A_CHECKPOINT_TEST_DSN='host=/home/admin1/.local/state/r3a-ap0-m1/run port=55492 dbname=r3a_checkpoint_test_frozen_6808077733 user=r3a_runtime' /home/admin1/R3/.venv/bin/python -m pytest -q --tb=short tests/test_r3a_activity_checkpoint_persistence.py tests/test_r3a_engineering.py tests/test_r3a_ap1.py::ResidentVerificationFeedbackIntegrationTests`.
-- Result on exact frozen-baseline integration source: **27 passed in 31.30s** on isolated PostgreSQL 16. New-row close/reopen retry and completed-result replay passed; a semantic input change under the same key remained rejected. The disposable DB was dropped and confirmed absent; isolated PG service remained healthy.
+- Result on supplemental frozen-baseline integration source: **27 passed in 31.30s** on isolated PostgreSQL 16. Coordinator separately reports exact release candidate `d436cc3` at 6 checkpoint tests passed, 27 targeted tests passed, and 512 passed / 9 skipped / 42 subtests / one existing warning / zero failures for the full suite. New-row close/reopen retry and completed-result replay passed; a semantic input change under the same key remained rejected. Both disposable databases were removed after testing.
 - Prior candidate-branch run: **25 passed, 2 xfailed in 10.72s**; it also diagnosed that a legacy frozen-format digest row conflicts under candidate retry. Step 137 explicitly excludes old rows from acceptance; historical rows remain untouched.
 
 ## Integration gate — open
 
-Candidate `b259` is descended from `2cc3fe3aabad88c95a5e6489c633cb01472f7c7f`, not frozen release `89eda`; its patch does not apply directly to the frozen tree. A minimal port is prepared at `568aae85ba43e398ed925b6f649911da449e2cda`, based directly on frozen `89eda`. Auditor must independently review this exact integrated SHA, confirm semantic-field binding and per-attempt deadline validation, and record the decision before activation.
+Candidate `b259` is descended from `2cc3fe3aabad88c95a5e6489c633cb01472f7c7f`, not frozen release `89eda`; its patch does not apply directly to the frozen tree. Coordinator's minimal port is `d436cc3c8022f545d6134ba9e553b55a3aadc279`, based directly on frozen `89eda`. Auditor must independently review this exact integrated SHA, confirm semantic-field binding and per-attempt deadline validation, and record the decision before activation.
 
 ## Controlled activation checklist — not yet executed
 
@@ -59,7 +61,7 @@ Coordinator/Deployer must attach exact evidence for each item before activation:
 
 - Approval and exception record: **APPROVED** for the exact narrow scope.
 - Isolated PostgreSQL fresh-row regression: **PASS** (25 passed, 2 existing xfailed).
-- Frozen-baseline source integration: **PASS**, commit `568aae85ba43e398ed925b6f649911da449e2cda`; independent review of that exact SHA: **OPEN**.
+- Frozen-baseline source integration: **PASS**, Coordinator commit `d436cc3c8022f545d6134ba9e553b55a3aadc279`; same-SHA independent review: **OPEN**.
 - Verified CME activation procedure, immutable release, backup/rollback evidence: **OPEN**.
 - Production activation and new authenticated browser acceptance: **NOT RUN**.
 - Read-only CME dashboard projection at 2026-11-11 22:05 local: service reported healthy, which is not release or chat acceptance evidence.
