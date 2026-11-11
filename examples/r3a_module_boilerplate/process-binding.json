@@ -1,0 +1,17 @@
+{
+  "contract_id": "r3a.module-process-binding.v1",
+  "contract_version": "1.0.0",
+  "process_kind": "jsonl",
+  "protocol_id": "r3a.module.v1",
+  "protocol_major": 1,
+  "protocol_min_minor": 0,
+  "protocol_max_minor": 0,
+  "runtime_id": "python3",
+  "entrypoint": "boilerplate_worker.worker",
+  "arguments_template": [
+    "--socket", "{socket_path}",
+    "--module-id", "{module_id}",
+    "--module-version", "{module_version}",
+    "--config", "{configuration_path}"
+  ]
+}

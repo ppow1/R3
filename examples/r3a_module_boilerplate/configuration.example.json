@@ -1,0 +1,7 @@
+{
+  "schema_id": "example.module-boilerplate.configuration.v1",
+  "schema_version": 1,
+  "settings": {
+    "display_label": "Offline module example"
+  }
+}

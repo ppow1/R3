@@ -1,0 +1,22 @@
+{
+  "contract_id": "r3a.resident.module-binding",
+  "contract_version": "1.0.0",
+  "resident_id": "resident:example",
+  "module_id": "example.module-boilerplate",
+  "module_version": "1.0.0",
+  "artifact_digest": "a10b8edb16cb38ddb72252be15be99f112ff0539fc7ec55137218f0cf262467c",
+  "execution_contract_range": {
+    "contract_id": "r3a.resident.execution",
+    "major": 1,
+    "min_minor": 0,
+    "max_minor": 0
+  },
+  "binding_revision": "fixture-only-1",
+  "configuration_ref": "example-only:configuration.example.json",
+  "configuration_revision": "8cd8b6e2e028773d9eb3232bcf097c30d414766b7ec5d590efd4aa59fcc8d229",
+  "identity_association": {
+    "authority": "fixture-only",
+    "record_id": "example-not-registered",
+    "record_revision": "fixture-only-1"
+  }
+}
