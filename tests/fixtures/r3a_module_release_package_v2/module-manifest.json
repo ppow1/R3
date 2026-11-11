@@ -1,0 +1,18 @@
+{
+  "contract_id": "r3a.module-manifest.v1",
+  "contract_version": "1.2.0",
+  "module_id": "executor.orbit",
+  "module_version": "1.0.0",
+  "owner": "fixture.owner",
+  "artifact_digest": "29e690a7e20d457d497395125b0ea19868a10e844cd1a526641ab3871353f92d",
+  "resident_executor": {
+    "contract_id": "r3a.resident.executor",
+    "contract_version": "1.0.0",
+    "execution_contract_range": {
+      "contract_id": "r3a.resident.execution",
+      "major": 1,
+      "min_minor": 0,
+      "max_minor": 2
+    }
+  }
+}
