@@ -1,0 +1,4 @@
+{
+  "dsn_env": "R3A_NOTIFICATION_DATABASE_DSN",
+  "presentation_timezone": "UTC"
+}

@@ -209,7 +209,7 @@ async def _notification_capability(request: Request, principal: dict, operation:
     invocation = {
         "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.1.0",
         "invocation_id": invocation_id, "operation_id": operation,
-        "operation_contract_version": "1.1.0",
+        "operation_contract_version": "1.0.0" if operation == "notification.delivery.read" else "1.1.0",
         "caller": {"principal_id": caller_id, "resident_id": None, "service_id": None},
         "target": {}, "input": arguments, "activity_id": None, "attempt_id": None,
         "correlation_id": invocation_id, "work_order": None, "budget_reservation": None,

@@ -2,12 +2,27 @@
 from __future__ import annotations
 
 import unittest
+import hashlib
+import json
+from pathlib import Path
 from unittest.mock import patch
 
+from r3a_runtime.capability_contracts import operation_from_manifest
 from r3a_plugins.notification_service.capability import NotificationDeliveryProvider
 
 
 class NotificationCapabilityTests(unittest.TestCase):
+    def test_inbox_manifest_uses_canonical_read_grant_and_pinned_provider(self):
+        manifest_path = (Path(__file__).resolve().parents[1] / "r3a_plugins"
+                         / "notification_service" / "manifest.read.json")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        operation = operation_from_manifest(manifest)
+        self.assertEqual(operation["operation_id"], "notification.delivery.read")
+        self.assertEqual(operation["effect_class"], "read")
+        self.assertEqual(operation["required_grants"], ["notification.delivery.read"])
+        self.assertEqual(operation["provider"]["artifact_sha256"],
+                         hashlib.sha256((manifest_path.parent / "capability.py").read_bytes()).hexdigest())
+
     def test_provider_binds_store_recipient_and_authorization_to_cme_caller(self):
         provider = object.__new__(NotificationDeliveryProvider)
         provider.presentation_timezone = "UTC"

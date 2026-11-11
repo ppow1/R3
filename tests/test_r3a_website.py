@@ -349,6 +349,7 @@ class StewardWebsiteApiTests(unittest.TestCase):
         self.assertEqual(control.await_args.args[1], "capability.invoke")
         invocation = control.await_args.args[2]["request"]
         self.assertEqual(invocation["operation_id"], "notification.delivery.read")
+        self.assertEqual(invocation["operation_contract_version"], "1.0.0")
         self.assertEqual(invocation["caller"]["principal_id"], "steward:test")
         self.assertEqual(invocation["input"], {"cursor": "page-2", "limit": 50})
 
