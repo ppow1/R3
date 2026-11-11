@@ -69,6 +69,7 @@ from .protocol import MAX_RESIDENT_EXECUTION_FRAME_BYTES, ModuleProtocolServer
 from .resident_character_context import (character_context_binding,
                                          require_character_context_pin,
                                          validate_resident_character_context)
+from .resident_identity import resident_principal_id, validate_resident_identity_pair
 
 
 RESIDENT_ACTION_SCHEMA = {
@@ -233,6 +234,10 @@ def validate_resident_profile(value: Any, *, resident_id: str,
         raise ValueError("resident execution profile contract is incompatible")
     if value["resident_id"] != resident_id or value["config_revision"] != config_revision:
         raise ValueError("resident execution profile identity or configuration revision mismatch")
+    try:
+        resident_principal_id(value["resident_id"])
+    except ValueError as exc:
+        raise ValueError("resident execution profile identity must be a canonical principal") from exc
     for key in ("resident_id", "office_id", "office_role", "model_route_id"):
         if not isinstance(value[key], str) or not value[key].strip():
             raise ValueError(f"resident execution profile {key} is required")
@@ -805,6 +810,11 @@ class GraceResident:
             execution_resident_id = payload.get("resident_id") or self.module_id
             if not isinstance(execution_resident_id, str) or not execution_resident_id.strip():
                 raise ContractValidationError("resident execution identity is required")
+            if execution_resident_id != self.module_id:
+                try:
+                    validate_resident_identity_pair(execution_resident_id, self.module_id)
+                except ValueError as exc:
+                    raise ContractValidationError("resident principal and executor module identities are distinct types") from exc
             activity_input = payload.get("activity_input", {})
             if not isinstance(activity_input, dict):
                 raise ValueError("activity_input must be an object")

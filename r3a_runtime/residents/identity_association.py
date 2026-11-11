@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ..resident_identity import resident_module_id, resident_principal_id
+
 
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")
 _SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
@@ -35,9 +37,11 @@ def validate_identity_association(value: Any) -> dict[str, Any]:
     if (hr.get("resident_id") != resident_id or type(hr.get("revision")) is not int
             or hr["revision"] < 1 or not _reference(hr.get("source_ref"))):
         raise ValueError("association requires a revisioned authoritative HR source reference")
-    if (not _reference(hr.get("principal_association_ref"))
-            or not isinstance(hr.get("authority_principal"), str)
-            or not hr["authority_principal"].startswith("resident:")):
+    try:
+        resident_principal_id(hr.get("authority_principal"))
+    except ValueError as exc:
+        raise ValueError("association requires a canonical HR resident principal") from exc
+    if not _reference(hr.get("principal_association_ref")):
         raise ValueError("association requires a governed HR principal association")
     if (dossier.get("resident_id") != resident_id
             or not _SEMVER.fullmatch(str(dossier.get("revision", "")))
@@ -47,14 +51,17 @@ def validate_identity_association(value: Any) -> dict[str, Any]:
             or directory.get("source_contract") != "riverview-authority.directory.v1"
             or not _SHA256.fullmatch(str(directory.get("snapshot_sha256", "")))
             or not _timestamp(directory.get("observed_at"))
-            or not isinstance(directory.get("principal_id"), str)
-            or not directory["principal_id"].startswith("resident:")
+            or directory.get("principal_id") is None
             or directory.get("principal_id") != hr["authority_principal"]
             or not isinstance(directory.get("office_id"), str) or not directory["office_id"]
             or not isinstance(directory.get("office_role"), str) or not directory["office_role"]
             or type(directory.get("binding_revision")) is not int
             or directory["binding_revision"] < 1):
         raise ValueError("directory snapshot, principal, and office binding evidence do not agree")
+    try:
+        resident_principal_id(directory.get("principal_id"))
+    except ValueError as exc:
+        raise ValueError("directory identity must be a canonical resident principal") from exc
     credential_ref = value.get("credential_ref")
     if not _reference(credential_ref) or any(token in credential_ref.casefold()
                                                for token in ("token=", "secret=", "bearer")):
@@ -66,6 +73,10 @@ def validate_identity_association(value: Any) -> dict[str, Any]:
     if (not all(isinstance(runtime.get(key), str) and runtime[key]
                 for key in ("profile_id", "profile_revision", "route_id"))):
         raise ValueError("runtime profile and route references are required")
+    try:
+        resident_module_id(runtime.get("profile_id"))
+    except ValueError as exc:
+        raise ValueError("runtime profile_id must be an executable resident module ID") from exc
     refs = value.get("evidence_refs")
     if not isinstance(refs, list) or len(refs) < 4 or any(not _reference(ref) for ref in refs):
         raise ValueError("association evidence references are incomplete")

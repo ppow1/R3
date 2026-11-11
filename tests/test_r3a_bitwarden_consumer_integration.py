@@ -127,7 +127,7 @@ def invocation_request(descriptor):
         "invocation_id": "11111111-1111-4111-8111-111111111111",
         "operation_id": descriptor["operation_id"],
         "operation_contract_version": descriptor["contract_version"],
-        "caller": {"principal_id": "resident.grace", "resident_id": "resident.grace",
+        "caller": {"principal_id": "resident:grace", "resident_id": "resident.grace",
                    "service_id": None},
         "target": {"role_id": "resident.primary"},
         "input": {"messages": [{"role": "user", "content": "analyze the configured evidence"}]},

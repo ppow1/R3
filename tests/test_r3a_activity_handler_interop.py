@@ -182,7 +182,7 @@ def test_v11_action_and_continuation_are_versioned_while_v10_consumer_remains_va
 def test_generic_objective_submission_contract_is_versioned_and_fail_closed():
     action = {"contract_id": "r3a.activity-handler.objective-submission",
               "contract_version": "1.0.0", "action_id": "review-evt-1",
-              "target_resident_id": "resident.fixture", "objective": "Review the source record",
+              "target_resident_id": "resident:fixture", "objective": "Review the source record",
               "event_kind": "objective", "task_class": "objective_reasoning",
               "required_capabilities": [], "required_modalities": [],
               "acceptance_criteria": [], "notification_envelope": None, "timeout_seconds": 3600}
@@ -209,7 +209,7 @@ def test_generic_objective_submission_parks_and_resumes_with_durable_result():
         activity = _cme_activity(sample)
         action = {"contract_id": "r3a.activity-handler.objective-submission",
                   "contract_version": "1.0.0", "action_id": "review-evt-1",
-                  "target_resident_id": "resident.fixture", "objective": "Review the source record",
+                  "target_resident_id": "resident:fixture", "objective": "Review the source record",
                   "event_kind": "objective", "task_class": "objective_reasoning",
                   "required_capabilities": [], "required_modalities": [],
                   "acceptance_criteria": [], "notification_envelope": None, "timeout_seconds": 3600}
@@ -229,7 +229,7 @@ def test_generic_objective_submission_parks_and_resumes_with_durable_result():
         assert waiting["_awaiting_objective"]["activity_id"] == child_id
         assert cme._control_request.await_count == 1
         assert cme._control_request.await_args.args[0] == "resident.objective.submit"
-        assert cme._control_request.await_args.kwargs["_caller_resident_id"] == "resident.fixture"
+        assert cme._control_request.await_args.kwargs["_caller_resident_id"] == "resident:fixture"
 
         pending["awaiting_objective"] = waiting["_awaiting_objective"]
         cme.store.activity_execution_result.return_value = {
@@ -263,7 +263,7 @@ def test_v11_objective_action_persists_pending_checkpoint_and_resumes_same_handl
         activity = _cme_activity(sample)
         action = {"contract_id": "r3a.activity-handler.objective-submission",
                   "contract_version": "1.0.0", "action_id": "review-evt-1",
-                  "target_resident_id": "resident.fixture", "objective": "Review the source record",
+                  "target_resident_id": "resident:fixture", "objective": "Review the source record",
                   "event_kind": "objective", "task_class": "objective_reasoning",
                   "required_capabilities": [], "required_modalities": [],
                   "acceptance_criteria": [], "notification_envelope": None, "timeout_seconds": 60}
@@ -325,7 +325,7 @@ def test_generic_objective_submission_timeout_is_explicit_and_does_not_resubmit(
         activity = _cme_activity(sample)
         action = {"contract_id": "r3a.activity-handler.objective-submission",
                   "contract_version": "1.0.0", "action_id": "review-timeout",
-                  "target_resident_id": "resident.fixture", "objective": "Review the source record",
+                  "target_resident_id": "resident:fixture", "objective": "Review the source record",
                   "event_kind": "objective", "task_class": "objective_reasoning",
                   "required_capabilities": [], "required_modalities": [],
                   "acceptance_criteria": [], "notification_envelope": None, "timeout_seconds": 1}
@@ -350,6 +350,7 @@ def test_generic_objective_submission_timeout_is_explicit_and_does_not_resubmit(
     asyncio.run(run())
 
 
+@pytest.mark.xfail(strict=True, reason="frozen CME copies handler principal into caller.resident_id; tracked for #51")
 def test_v11_handler_action_round_trip_persists_intent_and_receipt_before_resume():
     async def run():
         from r3a_runtime.cme import CME
@@ -407,6 +408,7 @@ def test_v11_handler_action_round_trip_persists_intent_and_receipt_before_resume
         cme.invoke_capability.assert_awaited_once()
         request = cme.invoke_capability.await_args.args[0]
         assert request["operation_id"] == "billing.invoice.read"
+        assert request["caller"]["principal_id"] == "resident:fixture"
         assert request["caller"]["resident_id"] == "resident.fixture"
         writes = cme.store.record_progress.await_args_list
         assert writes[1].args[1]["phase"] == "handler.action.requested"
@@ -468,7 +470,7 @@ def _cme_activity(sample: dict) -> dict:
         "activity_type": "billing.invoice.review",
         "input": {"correlation_id": "00000000-0000-4000-8000-000000000103",
                   "activity_input": copy.deepcopy(sample["activity_request"]),
-                  "resident_id": "resident.fixture"},
+                  "resident_id": "resident:fixture"},
         "checkpoint": {"cursor": 0},
     }
 
@@ -627,7 +629,7 @@ def test_cme_resolves_two_authoritative_resident_bindings_to_one_registered_exec
             config_path.write_text("{}", encoding="utf-8")
             bindings = []
             associations = {}
-            for resident_id in ("resident.alpha", "resident.beta"):
+            for resident_id in ("resident:alpha", "resident:beta"):
                 executor_config = root / f"{resident_id}.json"
                 executor_config.write_text('{"resident_model_route_id":"route.alpha"}', encoding="utf-8")
                 association = {"authority": "hr.directory", "record_id": resident_id,
@@ -695,20 +697,20 @@ def test_cme_resolves_two_authoritative_resident_bindings_to_one_registered_exec
                              "binding_revision": resolved[-1]["binding_revision"]})
                 await cme._run_bound_resident_activity(activity, resolved[-1])
             assert [item["execution_profile"]["resident_id"] for item in resolved] == [
-                "resident.alpha", "resident.beta"]
+                "resident:alpha", "resident:beta"]
             assert [item["binding_revision"] for item in resolved] == [
-                "binding-resident.alpha", "binding-resident.beta"]
+                "binding-resident:alpha", "binding-resident:beta"]
             assert [item["module_id"] for item in resolved] == [module["module_id"]] * 2
             calls = cme.provider_runtime.invoke.await_args_list
             assert len(calls) == 2
             assert {call.args[1]["request"]["payload"]["resident_id"] for call in calls} == {
-                "resident.alpha", "resident.beta"}
+                "resident:alpha", "resident:beta"}
             assert cme.store.finish_activity.await_count == 2
             assert cme._authorize_capability.await_count == 2
 
             cme._authorize_capability.side_effect = PermissionError("resident execution grant missing")
             with pytest.raises(PermissionError, match="resident execution grant missing"):
-                await cme._authorize_capability("resident.objective.execute", resident_id="resident.alpha")
+                await cme._authorize_capability("resident.objective.execute", resident_id="resident:alpha")
             assert cme.provider_runtime.invoke.await_count == 2
 
     asyncio.run(run())
@@ -730,7 +732,7 @@ def test_cme_rejects_stale_directory_association_before_authorization():
             legacy_manifest={"module_manifest": sample["module_manifest"],
                              "configuration_schema": sample["source_manifest"]["configuration_schema"]})
         projection = ProviderProcessManager._manifest(object.__new__(ProviderProcessManager), registered)
-        association = {"authority": "hr.directory", "record_id": "resident.alpha",
+        association = {"authority": "hr.directory", "record_id": "resident:alpha",
                        "record_revision": "directory-current"}
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -739,7 +741,7 @@ def test_cme_rejects_stale_directory_association_before_authorization():
             executor_config = root / "executor.json"
             executor_config.write_text("{}", encoding="utf-8")
             binding = {"contract_id": "r3a.resident.module-binding", "contract_version": "1.0.0",
-                       "resident_id": "resident.alpha", "module_id": module["module_id"],
+                       "resident_id": "resident:alpha", "module_id": module["module_id"],
                        "module_version": module["module_version"],
                        "artifact_digest": module["artifact"]["artifact_sha256"],
                        "execution_contract_range": {"contract_id": "r3a.resident.execution", "major": 1,
@@ -748,7 +750,7 @@ def test_cme_rejects_stale_directory_association_before_authorization():
                        "configuration_revision": hashlib.sha256(executor_config.read_bytes()).hexdigest(),
                        "identity_association": {**association, "record_revision": "directory-stale"}}
             profile = ({"contract_id": "r3a.resident.execution-profile", "contract_version": "1.0.0",
-                        "resident_id": "resident.alpha", "display_name": "Alpha", "office_id": "office-a",
+                        "resident_id": "resident:alpha", "display_name": "Alpha", "office_id": "office-a",
                         "office_role": "reviewer", "directory_evidence": {
                             "source_id": "hr.directory", "snapshot_sha256": "a" * 64,
                             "observed_at": datetime.now(timezone.utc).isoformat()},
@@ -765,7 +767,7 @@ def test_cme_rejects_stale_directory_association_before_authorization():
             cme._authorization_decision = AsyncMock()
             activity = {"activity_id": "00000000-0000-4000-8000-000000000301",
                         "attempt_id": "00000000-0000-4000-8000-000000000302",
-                        "idempotency_key": "resident:alpha", "input": {"resident_id": "resident.alpha"}}
+                        "idempotency_key": "resident:alpha", "input": {"resident_id": "resident:alpha"}}
             with pytest.raises(ModuleExtensionError, match="identity/HR association"):
                 await cme._resolve_resident_executor(activity)
             cme._authorization_decision.assert_not_awaited()

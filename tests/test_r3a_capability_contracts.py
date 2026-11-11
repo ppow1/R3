@@ -231,7 +231,7 @@ class CapabilityContractTests(unittest.TestCase):
         request = {"contract_id": "r3a.capability-invocation.v1", "contract_version": "1.0.0",
                    "invocation_id": "invocation-1", "operation_id": descriptor["operation_id"],
                    "operation_contract_version": "1.0.0",
-                   "caller": {"principal_id": "resident.grace", "resident_id": "resident.grace",
+                   "caller": {"principal_id": "resident:grace", "resident_id": "resident.grace",
                               "service_id": None},
                    "target": {}, "input": {},
                    "activity_id": "activity-1", "attempt_id": "attempt-1",

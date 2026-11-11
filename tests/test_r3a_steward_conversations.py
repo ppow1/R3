@@ -36,6 +36,12 @@ class ConversationControlTests(unittest.TestCase):
         cme.settings = SimpleNamespace(module_id="resident.grace", source_digest="config-sha",
                                        model_roles=[])
         cme.store = SimpleNamespace()
+        role = SimpleNamespace(role_id="role.grace", route_id="route.grace",
+                               task_classes={"objective_reasoning"})
+        cme._resolve_resident_execution_profile = AsyncMock(return_value=(
+            {"resident_id": "resident:grace", "office_role": "Director of Operations",
+             "model_route_id": "route.grace",
+             "directory_evidence": {"snapshot_sha256": "a" * 64}}, role))
         return cme
 
     def test_conversation_send_enqueues_one_durable_conversation_activity(self):
@@ -48,7 +54,7 @@ class ConversationControlTests(unittest.TestCase):
         message_id = str(uuid.uuid4())
         cme.store.accept_steward_message = AsyncMock(return_value={
             "message_id": message_id, "activity_id": None, "duplicate": False,
-            "resident_id": "resident.grace",
+            "resident_id": "resident:grace",
             "transcript": [{"role": "user", "content": "Earlier question"},
                            {"role": "assistant", "content": "Earlier answer"}],
         })
@@ -57,6 +63,7 @@ class ConversationControlTests(unittest.TestCase):
                 f"r3a.steward.conversation.turn:{conversation_id}:{message_id}")),
             "state": "QUEUED"})
         cme.store.link_steward_message_activity = AsyncMock()
+        cme._authorize_capability = AsyncMock(return_value={"allowed": True})
         real_dispatch = CME._control_request.__get__(cme, CME)
         observed = []
 
@@ -119,7 +126,7 @@ class ConversationControlTests(unittest.TestCase):
                                                     task_classes={"objective_reasoning"})]
         cme._authorize_capability = AsyncMock(side_effect=[
             {"audit_event_id": "delegate-audit"}, {"audit_event_id": "execute-audit"}])
-        profile = {"resident_id": "resident.vicky", "office_role": "engineering_manager",
+        profile = {"resident_id": "resident:vicky", "office_role": "engineering_manager",
                    "model_route_id": "route.eng", "directory_evidence": {"snapshot_sha256": "a" * 64}}
         role = SimpleNamespace(role_id="role.eng", route_id="route.eng",
                                task_classes={"objective_reasoning"})
@@ -128,11 +135,11 @@ class ConversationControlTests(unittest.TestCase):
                                                                     "state": "QUEUED"})
         result = asyncio.run(CME._control_request(cme, "resident.objective.submit", {
             "objective": "Complete an authorized resident objective", "event_kind": "objective",
-            "target_resident_id": "resident.vicky", "acceptance_criteria": [],
+            "target_resident_id": "resident:vicky", "acceptance_criteria": [],
             "task_class": "objective_reasoning"}, "vicky-turn-key"))
         self.assertEqual(result["activity_id"], "activity-vicky")
         self.assertEqual(cme.store.submit_grace_objective.await_args.kwargs["resident_id"],
-                         "resident.vicky")
+                         "resident:vicky")
         self.assertEqual(cme.store.submit_grace_objective.await_args.kwargs["resident_profile"], profile)
         self.assertEqual(cme._authorize_capability.await_args_list[0].args[0], "resident.delegate")
         self.assertEqual(cme._authorize_capability.await_args_list[1].args[0], "resident.objective.execute")
@@ -148,14 +155,15 @@ class ConversationControlTests(unittest.TestCase):
 
         result = asyncio.run(CME._control_request(cme, "resident.objective.submit", {
             "objective": "Continue an authorized objective", "event_kind": "objective",
-            "target_resident_id": "resident.grace", "task_class": "objective_reasoning",
-            "acceptance_criteria": []}, "handler-objective-key", _caller_resident_id="resident.grace"))
+            "target_resident_id": "resident:grace", "task_class": "objective_reasoning",
+            "acceptance_criteria": []}, "handler-objective-key", _caller_resident_id="resident:grace"))
 
         self.assertEqual(result["activity_id"], "objective-primary")
         self.assertEqual([call.args[0] for call in cme._authorize_capability.await_args_list],
                          ["resident.objective.execute"])
-        self.assertEqual(cme._authorize_capability.await_args.kwargs["resident_id"], "resident.grace")
-        self.assertIsNone(cme.store.submit_grace_objective.await_args.kwargs["resident_profile"])
+        self.assertEqual(cme._authorize_capability.await_args.kwargs["resident_id"], "resident:grace")
+        self.assertEqual(cme.store.submit_grace_objective.await_args.kwargs["resident_profile"]["resident_id"],
+                         "resident:grace")
 
     def test_same_principal_objective_execution_denial_fails_closed(self):
         cme = self.cme()
@@ -169,8 +177,8 @@ class ConversationControlTests(unittest.TestCase):
         with self.assertRaisesRegex(PermissionError, "objective execution denied"):
             asyncio.run(CME._control_request(cme, "resident.objective.submit", {
                 "objective": "Continue an authorized objective", "event_kind": "objective",
-                "target_resident_id": "resident.grace", "task_class": "objective_reasoning",
-                "acceptance_criteria": []}, "handler-objective-key", _caller_resident_id="resident.grace"))
+                "target_resident_id": "resident:grace", "task_class": "objective_reasoning",
+                "acceptance_criteria": []}, "handler-objective-key", _caller_resident_id="resident:grace"))
         cme.store.submit_grace_objective.assert_not_awaited()
 
     def test_direct_steward_conversation_requires_target_execution_not_resident_delegation(self):
@@ -235,15 +243,15 @@ class ConversationControlTests(unittest.TestCase):
                        "source": {"availability": "measured", "freshness": "fresh",
                                   "snapshot_sha256": "a" * 64},
                        "residents": [
-                           {"resident_id": "resident.vicky", "display_name": "Vicky",
+                           {"resident_id": "resident:vicky", "display_name": "Vicky",
                             "office_id": "office.eng", "office_role": "engineering_manager"},
-                           {"resident_id": "resident.helen", "display_name": "Helen",
+                           {"resident_id": "resident:helen", "display_name": "Helen",
                             "office_id": "office.hr", "office_role": "human_resources_manager"}]}})
         cme.store.require_capability = AsyncMock()
         result = asyncio.run(CME._control_request(cme, "steward.residents.discover",
                                                   {"principal_id": "portal:steward-7"}, "discovery-key"))
         self.assertEqual([item["resident_id"] for item in result["residents"]],
-                         ["resident.vicky", "resident.helen"])
+                         ["resident:vicky", "resident:helen"])
         self.assertTrue(result["residents"][0]["chat_available"])
         self.assertFalse(result["residents"][1]["chat_available"])
         self.assertTrue(all(item["onboarding_status"] == "unknown" for item in result["residents"]))
@@ -252,7 +260,7 @@ class ConversationControlTests(unittest.TestCase):
         self.assertEqual(result["residents"][1]["execution_status"], "unavailable")
         self.assertEqual(result["residents"][1]["chat_status"], "office_role_route_unavailable")
         self.assertEqual(cme.store.require_capability.await_args_list[0].args,
-                         ("resident.vicky", "resident.objective.execute"))
+                         ("resident:vicky", "resident.objective.execute"))
 
     def test_directory_principal_route_is_independent_of_configured_module_id(self):
         cme = self.cme()

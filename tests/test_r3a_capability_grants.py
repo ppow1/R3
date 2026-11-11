@@ -89,7 +89,7 @@ class CapabilityGrantRevocationTests(unittest.TestCase):
 
     def test_revokes_exact_grant_and_writes_audit_event(self):
         grant_id = uuid.uuid4()
-        row = {"grant_id": grant_id, "module_id": "resident:grace",
+        row = {"grant_id": grant_id, "module_id": "resident.grace",
                "capability_id": "resident.objective.execute", "scope": {},
                "revoked_at": None}
         connection = _Connection(row, {"revoked_at": "2026-11-10T00:34:18Z"})
@@ -98,7 +98,7 @@ class CapabilityGrantRevocationTests(unittest.TestCase):
         result = asyncio.run(store.revoke_capability(str(grant_id), "Steward revocation test"))
 
         self.assertEqual(result["grant_id"], str(grant_id))
-        self.assertEqual(result["module_id"], "resident:grace")
+        self.assertEqual(result["module_id"], "resident.grace")
         self.assertEqual(result["capability_id"], "resident.objective.execute")
         self.assertEqual(result["scope"], {})
         self.assertFalse(result["already_revoked"])
@@ -112,7 +112,7 @@ class CapabilityGrantRevocationTests(unittest.TestCase):
 
     def test_repeated_revocation_is_idempotent_and_does_not_duplicate_audit(self):
         grant_id = uuid.uuid4()
-        row = {"grant_id": grant_id, "module_id": "resident:grace",
+        row = {"grant_id": grant_id, "module_id": "resident.grace",
                "capability_id": "resident.objective.execute", "scope": {},
                "revoked_at": "2026-11-10T00:30:00Z"}
         connection = _Connection(row)
@@ -136,7 +136,7 @@ class CapabilityGrantRevocationTests(unittest.TestCase):
         cme = CME.__new__(CME)
         cme.store = type("RevokeStore", (), {
             "revoke_capability": AsyncMock(return_value={
-                "grant_id": grant_id, "module_id": "resident:grace",
+                "grant_id": grant_id, "module_id": "resident.grace",
                 "capability_id": "resident.objective.execute", "scope": {},
                 "revoked_at": "2026-11-10T00:34:18Z", "already_revoked": False})
         })()

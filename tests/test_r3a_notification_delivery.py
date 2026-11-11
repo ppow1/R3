@@ -35,11 +35,11 @@ def directory() -> dict:
             {"office_id": "office.retired", "office_role": "Operations", "status": "retired"},
         ],
         "residents": [
-            {"resident_id": "resident.alpha", "office_id": "office.ops",
+            {"resident_id": "resident:alpha", "office_id": "office.ops",
              "office_role": "Operations", "office_status": "active"},
-            {"resident_id": "resident.archived", "office_id": "office.ops",
+            {"resident_id": "resident:archived", "office_id": "office.ops",
              "office_role": "Operations", "office_status": "inactive"},
-            {"resident_id": "resident.other", "office_id": "office.other",
+            {"resident_id": "resident:other", "office_id": "office.other",
              "office_role": "Engineering", "office_status": "active"},
         ],
     }
@@ -59,7 +59,7 @@ class NotificationDeliveryTests(unittest.TestCase):
                                     created_at="2026-11-07T12:02:00Z")
         self.assertEqual(1, len(result))
         delivery = validate_delivery_envelope(result[0])
-        self.assertEqual("resident.alpha", delivery["recipient"]["recipient_id"])
+        self.assertEqual("resident:alpha", delivery["recipient"]["recipient_id"])
         self.assertEqual("office.ops", delivery["recipient"]["office_id"])
         self.assertEqual("queued", delivery["status"])
         self.assertEqual("critical", delivery["urgency"])
@@ -96,7 +96,7 @@ class NotificationDeliveryTests(unittest.TestCase):
 
     def test_invalid_selector_and_delivery_contract_are_rejected(self):
         invalid = policy()
-        invalid["rules"][0]["recipient"]["resident_id"] = "resident.alpha"
+        invalid["rules"][0]["recipient"]["resident_id"] = "resident:alpha"
         with self.assertRaises(ValueError):
             validate_routing_policy(invalid)
         envelope = route_notification(notification(), directory(), policy())[0]
@@ -127,14 +127,14 @@ class NotificationDeliveryTests(unittest.TestCase):
 
     def test_authorized_recipient_can_acknowledge_then_resolve(self):
         delivery = route_notification(notification(), directory(), policy())[0]
-        req, decision = self.authorization("resident.alpha", "notification.delivery.acknowledge")
-        acked = transition_delivery(delivery, "acknowledge", principal_id="resident.alpha",
+        req, decision = self.authorization("resident:alpha", "notification.delivery.acknowledge")
+        acked = transition_delivery(delivery, "acknowledge", principal_id="resident:alpha",
                                     request=req, decision=decision, directory=directory(),
                                     at="2026-11-07T12:03:00Z")
         self.assertEqual("acknowledged", acked["status"])
         self.assertEqual("2026-11-07T12:03:00Z", acked["acknowledged_at"])
-        req, decision = self.authorization("resident.alpha", "notification.delivery.resolve")
-        resolved = transition_delivery(acked, "resolve", principal_id="resident.alpha",
+        req, decision = self.authorization("resident:alpha", "notification.delivery.resolve")
+        resolved = transition_delivery(acked, "resolve", principal_id="resident:alpha",
                                        request=req, decision=decision, directory=directory(),
                                        at="2026-11-07T12:04:00Z",
                                        disposition="Restarted and service health restored",
@@ -144,23 +144,23 @@ class NotificationDeliveryTests(unittest.TestCase):
 
     def test_acknowledgment_requires_recipient_scope_and_matching_authorization(self):
         delivery = route_notification(notification(), directory(), policy())[0]
-        req, denied = self.authorization("resident.alpha", "notification.delivery.acknowledge", allowed=False)
+        req, denied = self.authorization("resident:alpha", "notification.delivery.acknowledge", allowed=False)
         with self.assertRaises(PermissionError):
-            transition_delivery(delivery, "acknowledge", principal_id="resident.alpha",
+            transition_delivery(delivery, "acknowledge", principal_id="resident:alpha",
                                 request=req, decision=denied, directory=directory())
-        req, allowed = self.authorization("resident.other", "notification.delivery.acknowledge")
+        req, allowed = self.authorization("resident:other", "notification.delivery.acknowledge")
         with self.assertRaises(PermissionError):
-            transition_delivery(delivery, "acknowledge", principal_id="resident.other",
+            transition_delivery(delivery, "acknowledge", principal_id="resident:other",
                                 request=req, decision=allowed, directory=directory())
 
     def test_office_acknowledgment_requires_active_directory_binding(self):
         delivery = route_notification(notification(), directory(), policy("office"))[0]
-        req, decision = self.authorization("resident.other", "notification.delivery.acknowledge")
+        req, decision = self.authorization("resident:other", "notification.delivery.acknowledge")
         with self.assertRaises(PermissionError):
-            transition_delivery(delivery, "acknowledge", principal_id="resident.other",
+            transition_delivery(delivery, "acknowledge", principal_id="resident:other",
                                 request=req, decision=decision, directory=directory())
-        req, decision = self.authorization("resident.alpha", "notification.delivery.acknowledge")
-        acked = transition_delivery(delivery, "acknowledge", principal_id="resident.alpha",
+        req, decision = self.authorization("resident:alpha", "notification.delivery.acknowledge")
+        acked = transition_delivery(delivery, "acknowledge", principal_id="resident:alpha",
                                     request=req, decision=decision, directory=directory())
         self.assertEqual("acknowledged", acked["status"])
 
@@ -242,9 +242,9 @@ class NotificationDeliveryPersistenceTests(unittest.IsolatedAsyncioTestCase):
 
         delivery = first[0]
         request, decision = NotificationDeliveryTests().authorization(
-            "resident.alpha", "notification.delivery.acknowledge")
+            "resident:alpha", "notification.delivery.acknowledge")
         acked = await second_store.transition_notification_delivery(
-            delivery["delivery_id"], "acknowledge", principal_id="resident.alpha",
+            delivery["delivery_id"], "acknowledge", principal_id="resident:alpha",
             request=request, decision=decision, directory=target_directory)
         self.assertEqual("acknowledged", acked["status"])
 
@@ -253,14 +253,14 @@ class NotificationDeliveryPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("acknowledged", history[0]["status"])
         self.assertEqual(2, len(events))
         request, decision = NotificationDeliveryTests().authorization(
-            "resident.alpha", "notification.delivery.read")
+            "resident:alpha", "notification.delivery.read")
         inbox = await restarted_store.notification_delivery_inbox(
-            "resident.alpha", target_directory, request, decision)
+            "resident:alpha", target_directory, request, decision)
         self.assertEqual([delivery["delivery_id"]], [item["delivery_id"] for item in inbox])
         request, decision = NotificationDeliveryTests().authorization(
-            "resident.other", "notification.delivery.read")
+            "resident:other", "notification.delivery.read")
         hidden = await restarted_store.notification_delivery_inbox(
-            "resident.other", target_directory, request, decision)
+            "resident:other", target_directory, request, decision)
         self.assertEqual([], hidden)
 
 

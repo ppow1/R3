@@ -175,7 +175,7 @@ async def _steward_principal(request: Request, action: str = "steward.r3a.read_o
 
 
 class StewardConversationCreate(BaseModel):
-    resident_id: str = Field(min_length=1, max_length=256)
+    resident_id: str = Field(pattern=r"^resident:[A-Za-z0-9][A-Za-z0-9._-]*$", max_length=256)
     client_conversation_id: str
 
 
@@ -215,7 +215,7 @@ async def steward_residents(request: Request):
 
 @app.get("/api/v1/steward/conversations")
 async def steward_conversations(request: Request, resident_id: str):
-    if not resident_id or len(resident_id) > 256:
+    if not re.fullmatch(r"resident:[A-Za-z0-9][A-Za-z0-9._-]*", resident_id):
         raise HTTPException(422, "resident_id is invalid")
     principal = await _steward_principal(request)
     return await _website_control_request(request, principal, "steward.conversation.list",
