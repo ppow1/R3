@@ -447,8 +447,6 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
     toolbarButton(toolbar, {icon: '✎', label: 'Edit message', available: false});
     toolbarButton(toolbar, {icon: '⌫', label: 'Delete message', available: false});
     toolbarButton(toolbar, {icon: '▧', label: 'Generate image', available: false});
-    toolbarButton(toolbar, {icon: '↗', label: 'Assign work to Grace', available: false});
-
     header.append(senderNode, time, statusIcon);
     toolsAnchor.append(menuButton, toolbar);
     header.appendChild(toolsAnchor);

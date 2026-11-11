@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import socket
 import subprocess
 import sys
@@ -16,6 +17,8 @@ import tempfile
 import time
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
+
+SOURCE_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 def candidate_paths(root):
     root = Path(root).resolve(strict=True)
@@ -37,12 +40,33 @@ def check_http(port):
     if status != 200 or "json" not in kind:
         raise RuntimeError("Health endpoint HTTP/content type mismatch")
     health = json.loads(data)
-    if health.get("service") != "r3" or health.get("status") != "running" or health.get("repository_present") is not True:
+    if (health.get("service") != "r3" or health.get("status") != "running" or
+            not isinstance(health.get("repository_present"), bool)):
         raise RuntimeError("Candidate health contract mismatch")
     status, kind, data = request(base + "/")
     if status != 200 or "html" not in kind or not data:
         raise RuntimeError("Candidate homepage contract mismatch")
     return {"health": health, "homepage_status": status}
+
+def source_commit_for_candidate(source):
+    """Identify git candidates from Git and extracted packages from their manifest."""
+    if (source / ".git").exists():
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=source, text=True, timeout=10).strip()
+    for manifest_path in (source / "WEBSITE_PACKAGE_MANIFEST.json",
+                          source.parent / "WEBSITE_PACKAGE_MANIFEST.json"):
+        if not manifest_path.is_file():
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Candidate package manifest is unreadable") from exc
+        commit = manifest.get("source_commit")
+        if (manifest.get("contract") != "r3a.website-release-package.v1" or
+                not isinstance(commit, str) or not SOURCE_SHA.fullmatch(commit)):
+            raise RuntimeError("Candidate package manifest contract is invalid")
+        return commit
+    raise RuntimeError("Candidate has no Git checkout or source-pinned Website package manifest")
 
 def verify(root, startup_timeout):
     root, source, python = candidate_paths(root)
@@ -74,8 +98,7 @@ def verify(root, startup_timeout):
                         raise RuntimeError("Candidate startup/HTTP verification timed out")
                     time.sleep(0.2)
             result = {
-                "source_commit": subprocess.check_output(
-                    ["git", "rev-parse", "HEAD"], cwd=source, text=True, timeout=10).strip(),
+                "source_commit": source_commit_for_candidate(source),
                 "candidate_path": str(root),
                 "loopback_port": port,
                 "health": evidence["health"],

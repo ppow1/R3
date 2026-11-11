@@ -214,6 +214,8 @@ test('resident changes and directory refreshes preserve selection and fail close
   globalThis.Option = FakeOption;
   let resolveResidentA;
   let resolveMessages;
+  let resolveVickyMessages;
+  let vickyMessageCalls = 0;
   let residentACalls = 0;
   let residentChatAvailable = true;
   let residentFreshness = 'current';
@@ -227,7 +229,7 @@ test('resident changes and directory refreshes preserve selection and fail close
       if (deferNextRoster) { deferNextRoster = false; return new Promise(resolve => { resolveDeferredRoster = resolve; }); }
       return {freshness: residentFreshness, residents: [
         {resident_id: 'resident:a', display_name: 'A', chat_available: residentChatAvailable},
-        {resident_id: 'resident:b', display_name: 'B', chat_available: true},
+        {resident_id: 'resident:b', display_name: 'Vicky', chat_available: true},
       ]};
     },
     conversations: ({residentId}) => residentId === 'resident:a'
@@ -235,7 +237,11 @@ test('resident changes and directory refreshes preserve selection and fail close
         ? new Promise(resolve => { resolveResidentA = resolve; })
         : Promise.resolve({freshness: 'A current', conversations: [{conversation_id: 'a-conversation', title: 'A conversation'}]}))
       : Promise.resolve({freshness: 'B current', conversations: [{conversation_id: 'b-conversation', title: 'B conversation'}]}),
-    messages: () => ++messageCalls <= 2
+    messages: conversationId => conversationId === 'b-conversation'
+      ? (++vickyMessageCalls === 1
+        ? new Promise(resolve => { resolveVickyMessages = resolve; })
+        : Promise.resolve({freshness: 'current', messages: [{message_id: 'vicky-message', sender: {kind: 'resident'}, delivery_state: 'completed', created_at: '2026-11-10T17:08:09Z', text: 'Vicky response.'}]}))
+      : ++messageCalls <= 2
       ? new Promise(resolve => { resolveMessages = resolve; })
       : Promise.resolve({freshness: 'current', messages: [{message_id: 'current-message', sender: {kind: 'steward'}, delivery_state: 'completed', created_at: '2026-11-10T17:08:09Z', text: 'The durable response.'}]}),
     about: async () => ({freshness: 'current', observed_at: '2026-11-10T12:00:00Z', ring0: {health: 'healthy'}, cme: {health: 'healthy'}, grace: {health: 'healthy'}}),
@@ -244,7 +250,7 @@ test('resident changes and directory refreshes preserve selection and fail close
     mountResidentChat({api, root});
     await new Promise(resolve => setImmediate(resolve));
     const select = elements['chat-resident-select'];
-    assert.deepEqual(select.options.map(option => option.textContent), ['Select a resident…', 'A', 'B']);
+    assert.deepEqual(select.options.map(option => option.textContent), ['Select a resident…', 'A', 'Vicky']);
     assert.match(elements['chat-runtime-status'].textContent, /model\/provider readiness is not reported/);
     select.value = 'resident:a'; select.dispatch('change');
     select.value = 'resident:b'; select.dispatch('change');
@@ -258,7 +264,7 @@ test('resident changes and directory refreshes preserve selection and fail close
     select.value = 'resident:a'; select.dispatch('change');
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(elements['chat-conversation-list'].childNodes[0].childNodes[0].textContent, 'A conversation');
-    resolveMessages({freshness: 'current', messages: [{message_id: 'late-message', sender: {kind: 'resident', display_name: 'B'}, created_at: '2026-11-10T12:00:00Z', text: 'Stale response'}]});
+    resolveVickyMessages({freshness: 'current', messages: [{message_id: 'late-message', sender: {kind: 'resident', display_name: 'Vicky'}, created_at: '2026-11-10T12:00:00Z', text: 'Stale response'}]});
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(elements['chat-message-list'].childNodes.length, 0);
     resolveResidentA({freshness: 'A current', conversations: [{conversation_id: 'a-conversation', title: 'A conversation'}]});
@@ -292,18 +298,27 @@ test('resident changes and directory refreshes preserve selection and fail close
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(elements['chat-resident-indicator'].className, 'resident-indicator unavailable');
     assert.equal(elements['chat-composer-input'].disabled, true, elements['chat-service-status'].textContent);
-    assert.match(elements['chat-service-status'].textContent, /chat unavailable/);
+    assert.match(elements['chat-service-status'].textContent, /chat is currently unavailable/);
     residentChatAvailable = true;
     elements['chat-refresh'].dispatch('click');
     await new Promise(resolve => setImmediate(resolve));
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(elements['chat-resident-indicator'].className, 'resident-indicator available');
     assert.equal(elements['chat-composer-input'].disabled, false);
+    select.value = 'resident:b'; select.dispatch('change');
+    await new Promise(resolve => setImmediate(resolve));
+    elements['chat-conversation-list'].childNodes[0].childNodes[0].dispatch('click');
+    await new Promise(resolve => setImmediate(resolve));
+    const vickyMessage = elements['chat-message-list'].childNodes[0];
+    assert.equal(vickyMessage.className, 'workspace-message resident');
+    assert.equal(vickyMessage.childNodes[0].childNodes[0].textContent, 'Vicky');
+    assert.doesNotMatch(vickyMessage.textContent, /Assign work to Grace/);
+    assert.doesNotMatch(elements['chat-message-list'].textContent, /Assign work to Grace/);
     failNextRoster = true;
     elements['chat-refresh'].dispatch('click');
     await new Promise(resolve => setImmediate(resolve));
     await new Promise(resolve => setImmediate(resolve));
-    assert.deepEqual(elements['chat-resident-select'].options.map(option => option.textContent), ['Select a resident…', 'A', 'B']);
+    assert.deepEqual(elements['chat-resident-select'].options.map(option => option.textContent), ['Select a resident…', 'A', 'Vicky']);
     assert.equal(elements['chat-resident-indicator'].className, 'resident-indicator unknown');
     residentFreshness = 'stale';
     elements['chat-refresh'].dispatch('click');
