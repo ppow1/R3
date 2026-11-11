@@ -21,9 +21,9 @@ Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Normalize type
 Changed: 2026-11-09 | R3A-STEWARD-CHAT-ROSTER | R3A Coordinator | Preserve directory roster rows and evaluate chat readiness through configured office routes and existing execution grants.
 Changed: 2026-11-10T00:14:15Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Separate direct Steward conversation authorization from resident-to-resident delegation while retaining target execution authorization.
 Changed: 2026-11-10T00:34:18Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Expose exact-grant revocation through the existing private CME operator control path.
+Changed: 2026-11-10 | #51 | R3A Coordinator | Exclude unavailable optional tools and apply conversation-specific completion validation.
 Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT-6 | Dispatch registered resident executors and durable activity handlers through shared module contracts while retaining legacy Grace compatibility.
 Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GPT-6 | Persist handler progress with its returned checkpoint and restore handler checkpoint state on retry.
-Changed: 2026-11-10 | #51 | R3A Coordinator | Exclude unavailable optional tools and apply conversation-specific completion validation.
 Changed: 2026-11-10T13:15:00Z | R3A-GRACE-CAPABILITY-AUTONOMY | Codex GPT-6 | Filter resident capability discovery by current grants and pass registered provider limitations to Grace.
 Changed: 2026-11-10T14:05:00Z | R3A-GRACE-CAPABILITY-AUTONOMY | Codex GPT-6 | Authorize primary resident tools against the running executor module while retaining the directory principal.
 Changed: 2026-11-10 | R3A-EXECUTOR-ROLE-P0 | Coordinator | Reuse the contracted resident.objective.execute authorization at bound-executor dispatch; remove the ungranted executor-specific capability.

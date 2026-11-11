@@ -426,12 +426,14 @@ class IsolatedCapabilityIntegrationTests(unittest.TestCase):
                 "r3a_plugins.engineering_workspace.provider:missing_factory")
             failed = operation_from_manifest(failed_manifest)
             registry.register(failed, {"workspace_root": str(root)}, legacy_manifest=failed_manifest)
-            with patch.dict("os.environ", {"R3A_TELEMETRY_DATABASE_DSN": "must-not-cross-module-boundary",
-                                            "R3A_OCTOMINER_SSH_HOST": "telemetry-host"}):
+            with patch.dict("os.environ", {"R3A_TELEMETRY_DATABASE_DSN": "approved-read-only-dsn",
+                                            "R3A_OCTOMINER_SSH_HOST": "telemetry-host",
+                                            "UNDECLARED_POSTGRES_DSN": "must-not-cross-module-boundary"}):
                 telemetry = registry.resolve("infrastructure.octominer.telemetry.read")
                 module_env = _module_environment(telemetry)
-            self.assertNotIn("R3A_TELEMETRY_DATABASE_DSN", module_env)
+            self.assertEqual("approved-read-only-dsn", module_env["R3A_TELEMETRY_DATABASE_DSN"])
             self.assertEqual("telemetry-host", module_env["R3A_OCTOMINER_SSH_HOST"])
+            self.assertNotIn("UNDECLARED_POSTGRES_DSN", module_env)
             self.assertTrue(telemetry.legacy_manifest["_pinned_artifact_paths"])
             self.assertTrue(all(len(digest) == 64 and Path(path).is_file()
                                 for path, digest in telemetry.legacy_manifest["_pinned_artifact_paths"].items()))
