@@ -2,7 +2,7 @@
 # R3 CONTROLLED SOURCE
 # File: scripts/package_r3a_hr_onboarding.py
 # Component: R3A-HR-ONBOARDING-PACKAGING
-# File Revision: 1.0.3
+# File Revision: 1.0.4
 # Created: Unknown (legacy; first committed at e618dd7)
 # Created By: Unknown (legacy)
 # Purpose: Build and verify a deterministic, digest-pinned HR onboarding source handoff.
@@ -13,6 +13,7 @@
 # Changed: 2026-11-11T18:43:21Z | HRD-STEP-74 | Codex GPT-6 | Include host-composition contract and tests in package evidence.
 # Changed: 2026-11-11T22:18:42Z | HRD-STEP-142 | Codex GPT-6 | Bind package verification metadata to the latest tested HR association source.
 # Changed: 2026-11-11T22:24:55Z | HRD-STEP-142 | Codex GPT-6 | Record async host-port integration regression results.
+# Changed: 2026-11-11T22:27:43Z | HRD-STEP-142 | Codex GPT-6 | Record private PostgreSQL migration/repository evidence for the async-port source candidate.
 # Supersedes: None; increments legacy file revision after provenance metadata was absent.
 # Contracts: r3a.hr-onboarding-package.v1; r3a.resident.onboarding.host-composition.v1
 # Tests: tests/test_r3a_hr_onboarding_package.py
@@ -108,7 +109,7 @@ ROLLBACK = {
 TEST_EVIDENCE = {
     "source_suite": "/tmp/r3a-hr-development-venv/bin/pytest -q --tb=short tests/test_r3a_hr_association.py tests/test_r3a_hr_onboarding_package.py tests/test_r3a_resident_onboarding.py tests/test_r3a_resident_onboarding_host.py tests/test_r3a_resident_onboarding_postgres.py tests/test_r3a_institutional_directory.py tests/test_r3a_capability_contracts.py",
     "result": "Current source-focused verification: 51 passed, 1 DSN-gated PostgreSQL test skipped, 17 subtests passed. The async authority-port regression is included. The separate full migration-stack PostgreSQL evidence below is from the earlier reconciled source and was not rerun in this invocation.",
-    "migration_019": "Full migration stack apply/repeat, guarded rollback/re-upgrade, atomicity, multi-resident, revision/idempotency, privacy, immutable audit, and populated rollback refusal passed on private UTF-8 PostgreSQL 16 on the earlier reconciled source; migration SQL is unchanged and this suite was not rerun for Step 135.",
+    "migration_019": "Exact code candidate b8bf813cdd56870d9979c61a6e986d53220e30a4 was tested on a private PostgreSQL 16 cluster and disposable database r3a_onboarding_test_step142: tests/test_r3a_resident_onboarding_postgres.py — 1 passed. This exercised the migration stack, repeat migration, guarded rollback/re-upgrade, transactional repository behavior, idempotency, privacy, and populated-evidence rollback refusal. No shared database was used.",
     "shared_database": "not used or changed",
 }
 
