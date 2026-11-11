@@ -1,0 +1,235 @@
+{
+  "schema_version": 1,
+  "plugin_id": "r3a.octominer-telemetry",
+  "plugin_version": "2.1.1",
+  "artifact_ref": "scope_provider_v2_1_1.py",
+  "artifact_sha256": "5209330ecf931e7698195296f952798ea09bebdb6751fb07ea26f13a76598d42",
+  "supporting_artifacts": [
+    {
+      "artifact_ref": "plugin.py",
+      "artifact_sha256": "af8aae26cad6f603f69658fea6dde2b868eadf1f4bdce6106b46f4c561587a86"
+    },
+    {
+      "artifact_ref": "http_providers.py",
+      "artifact_sha256": "0839d7dd7003fc5b9d0c8776429ea992cb5c5c59f9a0da3a6c5e5f7e6abfaea1"
+    },
+    {
+      "artifact_ref": "process_providers.py",
+      "artifact_sha256": "c5b3598aecfef13cef48432417cdcef0a1829563593e3d9d8781fb887eb06621"
+    },
+    {
+      "artifact_ref": "request_metrics.py",
+      "artifact_sha256": "2f915fae8987d6ed50e7403adcf2cffad494b598f529cdf2299ac1a0a55d7874"
+    },
+    {
+      "artifact_ref": "history.py",
+      "artifact_sha256": "726a8c264bf389ba9eab3f80981db89aa7f29f42eca7d3ad34b3eb29caa008e0"
+    },
+    {
+      "artifact_ref": "scoped_http_providers.py",
+      "artifact_sha256": "09690a1fe866dc0886497b5e297536aab00a1940c2caf7412fe53d925dd4d64f"
+    }
+  ],
+  "configuration_schema": {
+    "schema_id": "r3a.octominer-independent-telemetry.config.v3",
+    "type": "object",
+    "required": [
+      "host_id",
+      "ssh_host",
+      "ssh_port",
+      "ssh_user",
+      "identity_file",
+      "known_hosts_file",
+      "timeout_seconds",
+      "max_age_seconds",
+      "history_path_env",
+      "request_host_id"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "host_id": {
+        "type": "string",
+        "minLength": 1
+      },
+      "ssh_host": {
+        "type": "string",
+        "pattern": "(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|\\$\\{[A-Z][A-Z0-9_]*\\})"
+      },
+      "ssh_port": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 65535
+      },
+      "ssh_user": {
+        "type": "string",
+        "pattern": "(?:[A-Za-z_][A-Za-z0-9_-]{0,31}|\\$\\{[A-Z][A-Z0-9_]*\\})"
+      },
+      "identity_file": {
+        "type": "string",
+        "pattern": "(?:/.*|\\$\\{[A-Z][A-Z0-9_]*\\})"
+      },
+      "known_hosts_file": {
+        "type": "string",
+        "pattern": "(?:/.*|\\$\\{[A-Z][A-Z0-9_]*\\})"
+      },
+      "timeout_seconds": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 30
+      },
+      "max_age_seconds": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 300
+      },
+      "history_path_env": {
+        "type": "string",
+        "pattern": "[A-Z][A-Z0-9_]*"
+      },
+      "history_window_seconds": {
+        "type": "integer",
+        "minimum": 30,
+        "maximum": 3600
+      },
+      "history_capacity_per_source": {
+        "type": "integer",
+        "minimum": 8,
+        "maximum": 2048
+      },
+      "history_limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 32
+      },
+      "request_activity_limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 500
+      },
+      "request_database_dsn_env": {
+        "type": "string",
+        "pattern": "[A-Z][A-Z0-9_]*"
+      },
+      "model_servers": {
+        "type": "object"
+      },
+      "comfyui": {
+        "type": "object"
+      },
+      "model_process_names": {
+        "type": "object"
+      },
+      "request_host_id": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "provider": {
+    "provider_id": "r3a.octominer-telemetry",
+    "provider_version": "2.1.1",
+    "entrypoint": "r3a_plugins.octominer_telemetry.scope_provider_v2_1_1:create_provider",
+    "artifact_sha256": "5209330ecf931e7698195296f952798ea09bebdb6751fb07ea26f13a76598d42"
+  },
+  "operation": {
+    "contract_id": "r3a.capability-operation.v1",
+    "contract_version": "1.0.0",
+    "operation_id": "infrastructure.octominer.telemetry.read",
+    "operation_revision": "2.1.1",
+    "provider": {
+      "provider_id": "r3a.octominer-telemetry",
+      "provider_version": "2.1.1",
+      "entrypoint": "r3a_plugins.octominer_telemetry.scope_provider_v2_1_1:create_provider",
+      "artifact_sha256": "5209330ecf931e7698195296f952798ea09bebdb6751fb07ea26f13a76598d42"
+    },
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "output_schema": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source_id",
+          "content"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "content": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "effect_class": "read",
+    "caller_constraints": {
+      "allowed_principals": [],
+      "allowed_residents": [],
+      "allowed_services": []
+    },
+    "target_scope_schema": {
+      "type": "object",
+      "properties": {
+        "source_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "host_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "host_ids",
+        "source_ids"
+      ]
+    },
+    "required_grants": [
+      "infrastructure.octominer.telemetry.read"
+    ],
+    "evidence": {
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      },
+      "verification_obligations": [
+        "preserve_source_provenance_and_digest",
+        "state_source_freshness_and_timestamp_basis",
+        "do_not_infer_unavailable_measurements"
+      ]
+    },
+    "recovery": {
+      "idempotency_required": false,
+      "idempotency_scope": "invocation",
+      "replay_safe": true,
+      "reconciliation_operation_id": null
+    },
+    "execution": {
+      "timeout_seconds": 30,
+      "retry_disposition": "safe_retry"
+    },
+    "lifecycle": {
+      "desired_state": "enabled"
+    },
+    "resident_tool": {
+      "name": "OctoMiner GPU Telemetry",
+      "description": "Read GPU, filesystem, compute-process, model-server, ComfyUI, request and bounded-history telemetry from independently configured R3A sources."
+    }
+  }
+}

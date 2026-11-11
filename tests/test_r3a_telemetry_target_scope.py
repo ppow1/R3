@@ -2,7 +2,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_r3a_telemetry_target_scope.py
 # Component: TEST-R3A-TELEMETRY-TARGET-SCOPE
-# File Revision: 1.0.0
+# File Revision: 1.0.1
 # Created: 2026-11-11T18:04:26Z
 # Created By: Codex GPT-6
 # Purpose: Verify fail-closed host/source scope, selective reads, and immutable v2.0 compatibility.
@@ -10,6 +10,7 @@
 # Observability: Exact requested source IDs, transport paths, denied targets, and artifact digests.
 # Dependencies: r3a_plugins.octominer_telemetry.scope_provider; capability manifest/config contracts.
 # Authority: AD-024; Roadmap Baseline 1.0 AP0-007/008/009; Modular Plugins #46 Planned Step 51.
+# Changed: 2026-11-11T18:38:47Z | R3A-MODULAR-PLUGINS-STEP-70 | Codex GPT-6 | Cover absent and empty CME targets with zero collector calls.
 # Changed: 2026-11-11T18:04:26Z | R3A-MODULAR-PLUGINS-STEP-51 | Codex GPT-6 | Test host/source scope enforcement and v2 provider compatibility.
 # Supersedes: None.
 # Contracts: r3a.capability-operation.v1; r3a.octominer-independent-telemetry.config.v3.
@@ -27,7 +28,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from r3a_plugins.octominer_telemetry import plugin, scope_provider, scoped_http_providers
+from r3a_plugins.octominer_telemetry import (plugin, scope_provider_v2_1_1 as scope_provider,
+                                             scoped_http_providers)
+from r3a_runtime.capability_contracts import validate_json, validate_operation
 from r3a_runtime.config import _validate_plugin_config
 
 
@@ -58,7 +61,8 @@ class TelemetryTargetScopeTests(unittest.TestCase):
         with patch.object(scope_provider, "_run_ssh_query") as ssh, \
                 patch.object(scoped_http_providers, "_get_json") as http:
             with self.assertRaisesRegex(PermissionError, "host without configured provider sources"):
-                provider.invoke({}, context={"target": {"host_ids": ["host-unconfigured"]}})
+                provider.invoke({}, context={"target": {
+                    "host_ids": ["host-unconfigured"], "source_ids": ["gpu.telemetry.host-octo"]}})
         ssh.assert_not_called()
         http.assert_not_called()
 
@@ -106,19 +110,43 @@ class TelemetryTargetScopeTests(unittest.TestCase):
     def test_unconfigured_source_and_malformed_target_fail_closed(self):
         provider = scope_provider.create_provider(_config())
         for target in (
-            {"source_ids": ["gpu.telemetry.other"]},
-            {"source_ids": []},
-            {"source_ids": None},
-            {"host_ids": []},
-            {"host_ids": None},
+            {"host_ids": ["host-octo"], "source_ids": ["gpu.telemetry.other"]},
+            {"host_ids": ["host-octo"], "source_ids": []},
+            {"host_ids": ["host-octo"], "source_ids": None},
+            {"host_ids": [], "source_ids": ["gpu.telemetry.host-octo"]},
+            {"host_ids": None, "source_ids": ["gpu.telemetry.host-octo"]},
             {"host_ids": ["host-octo", " host-octo "]},
-            {"host_ids": ["host-octo"], "unexpected": True},
+            {"host_ids": ["host-octo"], "source_ids": ["gpu.telemetry.host-octo"], "unexpected": True},
         ):
             with self.subTest(target=target):
                 with patch.object(scope_provider, "_run_ssh_query") as ssh:
                     with self.assertRaises((ValueError, PermissionError)):
                         provider.invoke({}, context={"target": target})
                     ssh.assert_not_called()
+
+    def test_missing_or_empty_cme_target_fails_before_any_collector(self):
+        provider = scope_provider.create_provider(_config())
+        contexts = ({}, {"target": {}}, {"target": None})
+        for context in contexts:
+            with self.subTest(context=context), \
+                    patch.object(scope_provider, "_run_ssh_query") as ssh, \
+                    patch.object(scope_provider, "read_compute_apps") as processes, \
+                    patch.object(scoped_http_providers, "_get_json") as http:
+                with self.assertRaises(ValueError):
+                    provider.invoke({}, context=context)
+                ssh.assert_not_called()
+                processes.assert_not_called()
+                http.assert_not_called()
+
+    def test_direct_collector_call_without_target_fails_closed(self):
+        with patch.object(scope_provider, "_run_ssh_query") as ssh, \
+                patch.object(scope_provider, "read_compute_apps") as processes, \
+                patch.object(scoped_http_providers, "_get_json") as http:
+            with self.assertRaisesRegex(ValueError, "target scope is required"):
+                scope_provider.read_scoped_telemetry(_config())
+        ssh.assert_not_called()
+        processes.assert_not_called()
+        http.assert_not_called()
 
     def test_history_only_host_scope_reads_only_that_hosts_persisted_sources(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -143,15 +171,21 @@ class TelemetryTargetScopeTests(unittest.TestCase):
             self.assertEqual(["gpu.telemetry.host-octo"],
                              [item["source_id"] for item in result[0]["content"]["samples"]])
 
-    def test_v21_manifest_pins_scope_provider_and_requires_existing_grant(self):
-        manifest = json.loads((PACKAGE / "manifest.v2.1.0.json").read_text())
-        self.assertEqual("2.1.0", manifest["plugin_version"])
-        self.assertEqual("2.1.0", manifest["operation"]["operation_revision"])
+    def test_v211_manifest_pins_scope_provider_and_requires_existing_grant(self):
+        manifest = json.loads((PACKAGE / "manifest.v2.1.1.json").read_text())
+        operation = validate_operation(manifest["operation"])
+        self.assertEqual("2.1.1", manifest["plugin_version"])
+        self.assertEqual("2.1.1", manifest["operation"]["operation_revision"])
         self.assertEqual("r3a.octominer-independent-telemetry.config.v3",
                          manifest["configuration_schema"]["schema_id"])
         self.assertEqual([], manifest["operation"]["caller_constraints"]["allowed_residents"])
         self.assertEqual(["infrastructure.octominer.telemetry.read"],
                          manifest["operation"]["required_grants"])
+        with self.assertRaises(ValueError):
+            validate_json({}, operation["target_scope_schema"])
+        with self.assertRaises(ValueError):
+            validate_json({"host_ids": ["host-octo"], "source_ids": []},
+                          operation["target_scope_schema"])
         for item in [{"artifact_ref": manifest["artifact_ref"],
                       "artifact_sha256": manifest["artifact_sha256"]},
                      *manifest["supporting_artifacts"]]:
@@ -172,6 +206,16 @@ class TelemetryTargetScopeTests(unittest.TestCase):
         for supporting in manifest["supporting_artifacts"]:
             self.assertEqual(supporting["artifact_sha256"],
                              hashlib.sha256((PACKAGE / supporting["artifact_ref"]).read_bytes()).hexdigest())
+
+    def test_failed_v21_candidate_is_preserved_and_v211_has_separate_artifact(self):
+        manifest_210 = json.loads((PACKAGE / "manifest.v2.1.0.json").read_text())
+        self.assertEqual("2.1.0", manifest_210["plugin_version"])
+        self.assertEqual(manifest_210["artifact_sha256"],
+                         hashlib.sha256((PACKAGE / manifest_210["artifact_ref"]).read_bytes()).hexdigest())
+        manifest_211 = json.loads((PACKAGE / "manifest.v2.1.1.json").read_text())
+        self.assertEqual("2.1.1", manifest_211["plugin_version"])
+        self.assertNotEqual(manifest_210["artifact_sha256"], manifest_211["artifact_sha256"])
+        self.assertNotEqual(manifest_210["artifact_ref"], manifest_211["artifact_ref"])
 
     def test_v21_activation_requires_host_mapping_for_each_configured_endpoint(self):
         config = _config()
