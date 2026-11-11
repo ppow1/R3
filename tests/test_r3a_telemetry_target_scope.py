@@ -2,7 +2,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_r3a_telemetry_target_scope.py
 # Component: TEST-R3A-TELEMETRY-TARGET-SCOPE
-# File Revision: 1.0.1
+# File Revision: 1.0.2
 # Created: 2026-11-11T18:04:26Z
 # Created By: Codex GPT-6
 # Purpose: Verify fail-closed host/source scope, selective reads, and immutable v2.0 compatibility.
@@ -11,6 +11,7 @@
 # Dependencies: r3a_plugins.octominer_telemetry.scope_provider; capability manifest/config contracts.
 # Authority: AD-024; Roadmap Baseline 1.0 AP0-007/008/009; Modular Plugins #46 Planned Step 51.
 # Changed: 2026-11-11T18:38:47Z | R3A-MODULAR-PLUGINS-STEP-70 | Codex GPT-6 | Cover absent and empty CME targets with zero collector calls.
+# Changed: 2026-11-11T19:20:00Z | R3A-MODULAR-PLUGINS-STEP-98 | Codex GPT-6 | Verify pinned telemetry artifacts survive core.autocrlf=true and load_settings validation.
 # Changed: 2026-11-11T18:04:26Z | R3A-MODULAR-PLUGINS-STEP-51 | Codex GPT-6 | Test host/source scope enforcement and v2 provider compatibility.
 # Supersedes: None.
 # Contracts: r3a.capability-operation.v1; r3a.octominer-independent-telemetry.config.v3.
@@ -23,6 +24,8 @@ import hashlib
 import json
 import os
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -56,6 +59,76 @@ def _config() -> dict:
 
 
 class TelemetryTargetScopeTests(unittest.TestCase):
+    def test_autocrlf_checkout_preserves_both_v21_manifests_through_standard_loader(self):
+        expected_v210 = {
+            "scope_provider.py": "81577bb954e39c5b7dad1f559689a7eb5e11f790651ad60c820e6a8d50fa3b57",
+            "plugin.py": "af8aae26cad6f603f69658fea6dde2b868eadf1f4bdce6106b46f4c561587a86",
+            "http_providers.py": "0839d7dd7003fc5b9d0c8776429ea992cb5c5c59f9a0da3a6c5e5f7e6abfaea1",
+            "process_providers.py": "c5b3598aecfef13cef48432417cdcef0a1829563593e3d9d8781fb887eb06621",
+            "request_metrics.py": "2f915fae8987d6ed50e7403adcf2cffad494b598f529cdf2299ac1a0a55d7874",
+            "history.py": "726a8c264bf389ba9eab3f80981db89aa7f29f42eca7d3ad34b3eb29caa008e0",
+            "scoped_http_providers.py": "09690a1fe866dc0886497b5e297536aab00a1940c2caf7412fe53d925dd4d64f",
+        }
+        with tempfile.TemporaryDirectory(prefix="r3a-telemetry-autocrlf-") as temporary:
+            clone = Path(temporary) / "checkout"
+            subprocess.run(["git", "clone", "--quiet", "--no-checkout", str(ROOT), str(clone)],
+                           check=True, capture_output=True, text=True)
+            subprocess.run(["git", "-C", str(clone), "config", "core.autocrlf", "true"],
+                           check=True, capture_output=True, text=True)
+            subprocess.run(["git", "-C", str(clone), "checkout", "--quiet", "--force", "HEAD"],
+                           check=True, capture_output=True, text=True)
+
+            package = clone / "r3a_plugins/octominer_telemetry"
+            manifests = [json.loads((package / name).read_text(encoding="utf-8"))
+                         for name in ("manifest.v2.1.0.json", "manifest.v2.1.1.json")]
+            self.assertEqual("2.1.0", manifests[0]["plugin_version"])
+            self.assertEqual("2.1.1", manifests[1]["plugin_version"])
+            for name, digest in expected_v210.items():
+                self.assertEqual(digest, hashlib.sha256((package / name).read_bytes()).hexdigest(), name)
+            for manifest in manifests:
+                for item in [{"artifact_ref": manifest["artifact_ref"],
+                              "artifact_sha256": manifest["artifact_sha256"]},
+                             *manifest["supporting_artifacts"]]:
+                    payload = (package / item["artifact_ref"]).read_bytes()
+                    self.assertEqual(item["artifact_sha256"], hashlib.sha256(payload).hexdigest(),
+                                     item["artifact_ref"])
+
+            data_dir = Path(temporary) / "runtime-data"
+            source = clone / "r3a_runtime/observer_module.py"
+            bootstrap = {
+                "schema_version": 1, "instance_id": "r3a_autocrlf_fixture",
+                "paths": {"data_dir": str(data_dir), "postgres_socket_dir": str(data_dir / "pg"),
+                          "control_socket": str(data_dir / "control.sock"),
+                          "diagnostics_socket": str(data_dir / "diagnostics.sock"),
+                          "module_socket": str(data_dir / "module.sock"),
+                          "machine_catalog_dir": str(clone / "r3a_runtime/state_machines")},
+                "postgres": {"database": "r3a_autocrlf_fixture", "user": "r3a_runtime",
+                             "socket_dir": str(data_dir / "pg"), "port": 55432},
+                "module": {"module_id": "foundation.observer", "version": "1.0.0",
+                           "contract_id": "r3a.resident-module", "protocol_major": 1,
+                           "protocol_minor": 0,
+                           "capabilities": ["infrastructure.octominer.telemetry.read"],
+                           "owner": "R3A", "entrypoint": "r3a_runtime.observer_module",
+                           "source": str(source), "sha256": hashlib.sha256(source.read_bytes()).hexdigest()},
+                "timing": {"observer_interval_seconds": 1, "scheduler_interval_seconds": 1,
+                           "lease_seconds": 30, "heartbeat_interval_seconds": 5,
+                           "heartbeat_stale_after_seconds": 15, "diagnostic_stale_after_seconds": 30,
+                           "restart_initial_seconds": 1, "restart_max_seconds": 5,
+                           "worker_concurrency": 1},
+                "capability_operations": [{
+                    "manifest": str(package / "manifest.v2.1.1.json"),
+                    "configuration": str(package / "config.v3.example.json")}],
+            }
+            bootstrap_path = Path(temporary) / "bootstrap.json"
+            bootstrap_path.write_text(json.dumps(bootstrap), encoding="utf-8")
+            env = dict(os.environ)
+            env["PYTHONPATH"] = str(clone)
+            code = ("import sys; from r3a_runtime.config import load_settings; "
+                    "s=load_settings(sys.argv[1]); "
+                    "s.capability_registry.resolve('infrastructure.octominer.telemetry.read')")
+            subprocess.run([sys.executable, "-c", code, str(bootstrap_path)], cwd=clone,
+                           env=env, check=True, capture_output=True, text=True)
+
     def test_mismatched_host_denies_before_any_transport(self):
         provider = scope_provider.create_provider(_config())
         with patch.object(scope_provider, "_run_ssh_query") as ssh, \

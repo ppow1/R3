@@ -1,0 +1,8 @@
+/r3a_plugins/octominer_telemetry/scope_provider.py text eol=lf
+/r3a_plugins/octominer_telemetry/scope_provider_v2_1_1.py text eol=lf
+/r3a_plugins/octominer_telemetry/plugin.py text eol=lf
+/r3a_plugins/octominer_telemetry/http_providers.py text eol=lf
+/r3a_plugins/octominer_telemetry/process_providers.py text eol=lf
+/r3a_plugins/octominer_telemetry/request_metrics.py text eol=lf
+/r3a_plugins/octominer_telemetry/history.py text eol=lf
+/r3a_plugins/octominer_telemetry/scoped_http_providers.py text eol=lf
