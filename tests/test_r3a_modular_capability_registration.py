@@ -89,6 +89,10 @@ class ModularRegistrationConformanceTests(unittest.TestCase):
             self.assertEqual([discovered[0]["descriptor"]["operation_id"]],
                              schema["properties"]["proposal"]["properties"]["operation_id"]["enum"])
             operation = registry.resolve(OPERATION_ID)
+            self.assertEqual(["resident:grace"],
+                             operation.descriptor["caller_constraints"]["allowed_principals"])
+            self.assertEqual(["resident.grace"],
+                             operation.descriptor["caller_constraints"]["allowed_residents"])
             self.assertEqual("isolated_write", operation.descriptor["effect_class"])
             self.assertEqual("work_order", operation.descriptor["recovery"]["idempotency_scope"])
             self.assertEqual(["engineering.workspace.apply_patch"],

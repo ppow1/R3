@@ -80,7 +80,7 @@
     },
     "effect_class": "isolated_write",
     "caller_constraints": {
-      "allowed_principals": ["resident.grace"],
+      "allowed_principals": ["resident:grace"],
       "allowed_residents": ["resident.grace"],
       "allowed_services": []
     },
