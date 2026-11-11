@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_MODULE_RELEASE_PACKAGE_V2.md
 Component: R3A-MODULE-RELEASE-PACKAGE-V2
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-11T19:02:40Z
 Created By: Codex GPT-6
 Purpose: Specify a generic immutable resident executor package and process-binding contract for Autonomy integration.
@@ -13,6 +13,7 @@ Authority: AD-024; Roadmap Baseline 1.0 AP0-007/008/009; Modular Plugins #46 Ste
 Changed: 2026-11-11T19:02:40Z | R3A-MODULAR-PLUGINS-STEP-70 | Codex GPT-6 | Publish package v2 and JSON-lines process-binding interface.
 Changed: 2026-11-11T19:11:23Z | R3A-MODULAR-PLUGINS-STEP-84 | Codex GPT-6 | Document link-safe immutable staging and lifecycle-guarded cleanup.
 Changed: 2026-11-11T19:32:00Z | R3A-MODULAR-PLUGINS-STEP-84 | Codex GPT-6 | Clarify the package-only versioned metadata boundary.
+Changed: 2026-11-11T21:54:04Z | R3A-MODULAR-PLUGINS-STEP-129 | Codex GPT-6 | Specify no-follow install-root component validation.
 Supersedes: None; provider package v1 remains unchanged.
 Contracts: r3a.module-release-package.v2@2.0.0; r3a.module-release-metadata.v1@1.0.0; r3a.module-process-binding.v1@1.0.0; r3a.module.v1.
 Tests: tests/test_r3a_module_release_v2.py; tests/fixtures/r3a_module_release_package_v2.json.
@@ -26,7 +27,7 @@ Package v2 defines a generic immutable source artifact and process-launch descri
 
 This does not replace provider release-package v1 or change the capability-provider, module registry, lifecycle manager, scheduler, or authorization store. CME remains the lifecycle writer and builds the child command from the descriptor after checking the selected binding, module/artifact identity, declared protocol range, configuration, and current authority. The package tool only builds, verifies, and stages artifact bytes. It neither registers/activates a module nor changes the effective module version.
 
-Staging rejects symlink and special-file traversal and verifies every staged byte before treating an existing content-addressed target as idempotent. The cleanup helper only removes a failed/unactivated candidate when CME lifecycle state is non-effective and the caller provides the effective version and digest as a paired pin. It will not infer either value.
+Staging rejects symlink and special-file traversal in both the caller-supplied install-root path and the package contents, and verifies every staged byte before treating an existing content-addressed target as idempotent. Install and cleanup inspect each supplied root component with `lstat` before creating or removing anything; they do not resolve a symlink and then continue through its target. The cleanup helper only removes a failed/unactivated candidate when CME lifecycle state is non-effective and the caller provides the effective version and digest as a paired pin. It will not infer either value.
 
 ## Versioned contracts
 

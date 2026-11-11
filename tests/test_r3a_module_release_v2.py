@@ -3,7 +3,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_r3a_module_release_v2.py
 # Component: TEST-R3A-GENERIC-MODULE-RELEASE-V2
-# File Revision: 1.0.4
+# File Revision: 1.0.5
 # Created: 2026-11-11T18:59:02Z
 # Created By: Codex GPT-6
 # Purpose: Verify generic resident JSON-lines package integrity, installation, launch and candidate rollback.
@@ -16,6 +16,7 @@
 # Changed: 2026-11-11T19:04:46Z | R3A-MODULAR-PLUGINS-STEP-70 | Codex GPT-6 | Check staged-byte integrity and resident role validation.
 # Changed: 2026-11-11T19:11:23Z | R3A-MODULAR-PLUGINS-STEP-84 | Codex GPT-6 | Verify symlink rejection and paired effective version/digest guard.
 # Changed: 2026-11-11T19:32:00Z | R3A-MODULAR-PLUGINS-STEP-84 | Codex GPT-6 | Assert package metadata uses its own schema/version and execution range.
+# Changed: 2026-11-11T21:54:04Z | R3A-MODULAR-PLUGINS-STEP-129 | Codex GPT-6 | Reject symlinked install roots and parents for install and cleanup.
 # Supersedes: None.
 # Contracts: r3a.module-release-package.v2@2.0.0; r3a.module-release-metadata.v1@1.0.0; r3a.module-process-binding.v1@1.0.0; r3a.module.v1.
 # Tests: Self; python -m pytest -q tests/test_r3a_module_release_v2.py.
@@ -233,6 +234,56 @@ class ModuleReleaseV2Tests(unittest.TestCase):
                                           effective_artifact_digest=None,
                                           effective_module_version="1.0.0",
                                           module_lifecycle_state="FAILED")
+
+    def _symlink_directory(self, link: Path, target: Path):
+        try:
+            link.symlink_to(target, target_is_directory=True)
+        except (NotImplementedError, OSError) as exc:
+            self.skipTest(f"directory symlinks are unavailable in this environment: {exc}")
+
+    def test_install_rejects_symlinked_root_and_ancestor_without_writing_through(self):
+        package, built, _, _, _ = self._package("orbit.tar.gz")
+        real_root = self.root / "actual-install-root"
+        real_root.mkdir()
+        linked_root = self.root / "linked-install-root"
+        self._symlink_directory(linked_root, real_root)
+        with self.assertRaisesRegex(ValueError, "install root must not traverse a symlink"):
+            install_package(package, linked_root, expected_bundle_sha256=built["bundle_sha256"])
+        self.assertEqual([], list(real_root.iterdir()))
+
+        actual_parent = self.root / "actual-parent"
+        actual_parent.mkdir()
+        linked_parent = self.root / "linked-parent"
+        self._symlink_directory(linked_parent, actual_parent)
+        with self.assertRaisesRegex(ValueError, "install root must not traverse a symlink"):
+            install_package(package, linked_parent / "new-install", expected_bundle_sha256=built["bundle_sha256"])
+        self.assertEqual([], list(actual_parent.iterdir()))
+
+    def test_cleanup_rejects_symlinked_root_and_ancestor_without_removing_candidate(self):
+        package, built, metadata, _, _ = self._package("orbit.tar.gz")
+        root = self.root / "actual-install-root"
+        installed = install_package(package, root, expected_bundle_sha256=built["bundle_sha256"])
+        linked_root = self.root / "linked-install-root"
+        self._symlink_directory(linked_root, root)
+        with self.assertRaisesRegex(ValueError, "install root must not traverse a symlink"):
+            discard_unactivated_candidate(
+                linked_root, metadata["module_id"], metadata["module_version"],
+                installed["artifact_digest"], effective_artifact_digest=None,
+                effective_module_version=None, module_lifecycle_state="FAILED")
+        self.assertTrue(Path(installed["path"]).is_dir())
+
+        actual_parent = self.root / "candidate-parent"
+        actual_parent.mkdir()
+        parent_root = actual_parent / "install"
+        nested = install_package(package, parent_root, expected_bundle_sha256=built["bundle_sha256"])
+        linked_parent = self.root / "linked-candidate-parent"
+        self._symlink_directory(linked_parent, actual_parent)
+        with self.assertRaisesRegex(ValueError, "install root must not traverse a symlink"):
+            discard_unactivated_candidate(
+                linked_parent / "install", metadata["module_id"], metadata["module_version"],
+                nested["artifact_digest"], effective_artifact_digest=None,
+                effective_module_version=None, module_lifecycle_state="FAILED")
+        self.assertTrue(Path(nested["path"]).is_dir())
 
 
 if __name__ == "__main__":

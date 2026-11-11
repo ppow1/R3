@@ -3,7 +3,7 @@
 R3 CONTROLLED SOURCE
 File: scripts/r3a_module_release_package.py
 Component: R3A-GENERIC-RESIDENT-PACKAGE-TOOL
-File Revision: 1.0.4
+File Revision: 1.0.5
 Created: 2026-11-11T18:59:02Z
 Created By: Codex GPT-6
 Purpose: Implement a generic, content-addressed package boundary for versioned resident JSON-lines workers.
@@ -16,6 +16,7 @@ Changed: 2026-11-11T19:00:40Z | R3A-MODULAR-PLUGINS-STEP-70 | Codex GPT-6 | Add 
 Changed: 2026-11-11T19:04:46Z | R3A-MODULAR-PLUGINS-STEP-70 | Codex GPT-6 | Enforce resident-executor role and preserve failed staging safely.
 Changed: 2026-11-11T19:11:23Z | R3A-MODULAR-PLUGINS-STEP-84 | Codex GPT-6 | Reject link traversal and special files; pair lifecycle effective pins.
 Changed: 2026-11-11T19:32:00Z | R3A-MODULAR-PLUGINS-STEP-84 | Codex GPT-6 | Use a distinct versioned release-metadata contract rather than module-manifest v1.
+Changed: 2026-11-11T21:54:04Z | R3A-MODULAR-PLUGINS-STEP-129 | Codex GPT-6 | Validate install-root components before resolving or writing.
 Supersedes: None.
 Contracts: r3a.module-release-package.v2@2.0.0; r3a.module-release-metadata.v1@1.0.0; r3a.module-process-binding.v1@1.0.0; AP0-M1 r3a.module.v1 JSON-lines protocol.
 Tests: tests/test_r3a_module_release_v2.py.
@@ -31,6 +32,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import sys
 import tarfile
 import tempfile
@@ -247,6 +249,33 @@ def _install_parent(install_root: Path, module_id: str, module_version: str) -> 
     return install_root / ".r3a-module-artifacts" / safe_id / module_version
 
 
+def _validate_install_root(install_root: Path) -> Path:
+    """Normalize an install root without following any supplied symlink component."""
+    requested = Path(install_root).expanduser()
+    if not requested.is_absolute():
+        requested = Path.cwd() / requested
+    current = Path(requested.anchor)
+    components = requested.parts[1:]
+    for index, component in enumerate(components):
+        if component in {"", "."}:
+            continue
+        if component == "..":
+            current = current.parent
+            continue
+        current = current / component
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise ValueError(f"cannot safely inspect module install root component: {current}") from exc
+        if stat.S_ISLNK(info.st_mode):
+            raise ValueError(f"module install root must not traverse a symlink: {current}")
+        if not stat.S_ISDIR(info.st_mode):
+            raise ValueError(f"module install root component is not a directory: {current}")
+    return current
+
+
 def _reject_links_or_special_files(root: Path) -> None:
     if root.is_symlink():
         raise ValueError("module install target must not be a symlink")
@@ -280,7 +309,7 @@ def _verify_installed_target(target: Path, descriptor: dict[str, Any]) -> None:
 
 
 def install_package(package_path: Path, install_root: Path, *, expected_bundle_sha256: str) -> dict[str, Any]:
-    install_root = install_root.resolve()
+    install_root = _validate_install_root(install_root)
     descriptor, files, module_metadata = verify_package(
         package_path, expected_bundle_sha256=expected_bundle_sha256)
     parent = _install_parent(install_root, descriptor["module_id"], descriptor["module_version"])
@@ -334,7 +363,7 @@ def discard_unactivated_candidate(install_root: Path, module_id: str, module_ver
     if (effective_module_version == module_version
             and effective_artifact_digest == artifact_digest):
         raise PermissionError("cannot discard the effective module artifact")
-    install_root = install_root.resolve()
+    install_root = _validate_install_root(install_root)
     parent = _install_parent(install_root, module_id, module_version)
     for path in (install_root / ".r3a-module-artifacts", parent.parent, parent):
         if path.is_symlink():
