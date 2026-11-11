@@ -130,3 +130,43 @@ Before sending any copy/paste command, ask: **Will I need the execution result b
 **Related:** LL-001, LL-002.
 
 ---
+
+## LL-004 — 2026-11-11 — Multi-Target dispatch must match the target's executable contract
+
+**Category:** Repeat of known dispatch-format failure; confusing target selection with payload execution.
+
+### Mistake
+ChatGPT posted Step 24 to Issue #61 with `TARGET: Administrator Coordinator` and `DELIVERY: STEER`, but supplied only prose instructions. The running B-2 Multi-Target bridge found the planned step and correctly rejected it: `ERROR: Rejected malformed dispatch 6800865400 (missing fenced powershell command)`. ChatGPT had already seen this exact validation behavior in Step 18 and the subsequent fail-closed repair. The bridge was not broken; the assignment was malformed.
+
+### Known evidence ignored
+- The Multi-Target JSON maps logical target names to exact existing Windows titles; it does not convert arbitrary prose into executable PowerShell.
+- Administrator Coordinator is a PowerShell terminal. Its dispatch requires a fenced `powershell` code block containing the actual executable command.
+- HR Development and other Codex terminals can receive natural-language instructions, but that does not establish that a PowerShell target accepts prose-only instructions.
+- Step 18 repeatedly failed on missing fenced PowerShell until the bridge was corrected to reject malformed steps once and continue.
+- The bridge is polling GitHub Issue #61, and an accepted step requires the proper planned-step header, exact configured target, delivery marker, and target-appropriate payload.
+- `FOUND`, `WAKE-UP SUBMITTED`, GitHub receipt, and target task completion are distinct evidence levels; none should be conflated.
+
+### Impact
+The Steward had to report another screenshot and wait for a corrected dispatch. Step 24 performed no Windows inventory, despite the bridge working as designed.
+
+### Correct minimal approach
+Before posting any planned step, determine the **actual target execution contract**, not just its display name. For `Administrator Coordinator`, provide the expected ```powershell fenced block, including an executable, read-only command when the task is inspection. For Codex targets, use instructions suited to the Codex session and verify delivery separately. Check the installed bridge's parser/contract if uncertain; never assume all targets consume the same payload format.
+
+For the window inventory, Step 25 was posted with the required PowerShell block: https://github.com/ppow1/R3/issues/61#issuecomment-6800893787 . **Posting the correction does not prove execution; wait for a target result.**
+
+### Mandatory dispatch preflight
+1. Confirm `PLANNED STEP <number>`, `TARGET: <configured logical name>`, and `DELIVERY: STEER` exactly match the installed bridge contract.
+2. Confirm the logical target maps to the exact, currently open terminal window title in `Riverview-B2-targets.json`; adding a new window requires a config edit and any necessary reload, not a new bridge.
+3. Identify whether the target is **PowerShell command execution** or **Codex natural-language instruction**. For Administrator Coordinator, include an actual fenced `powershell` block.
+4. Check the command is safe, scoped, and minimally invasive. For read-only tasks, avoid window movement, focus changes, service changes, and clipboard overwrite.
+5. Check for duplicate/rejected prior steps; use a fresh step number rather than reusing a rejected ID. Verify bridge found/submitted/receipt and separately verify actual completion.
+6. Do not change the bridge to compensate for a malformed dispatch. Fix the assignment payload first.
+
+### Verification and status
+- Rejection screenshot: Step 24, comment `6800865400`, missing fenced PowerShell.
+- Corrected dispatch: Step 25, comment `6800893787`.
+- **Step 25 completion remains unverified in this entry.** The lesson's behavioral compliance must be checked on subsequent dispatches.
+
+**Related:** LL-001, LL-002, LL-003.
+
+---
