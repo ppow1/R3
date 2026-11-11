@@ -1,0 +1,48 @@
+{
+  "host_id": "replace-with-verified-ssh-host-id",
+  "ssh_host": "${R3A_OCTOMINER_SSH_HOST}",
+  "ssh_port": 22,
+  "ssh_user": "${R3A_OCTOMINER_SSH_USER}",
+  "identity_file": "${R3A_OCTOMINER_IDENTITY_FILE}",
+  "known_hosts_file": "${R3A_OCTOMINER_KNOWN_HOSTS}",
+  "timeout_seconds": 5,
+  "max_age_seconds": 30,
+  "history_path_env": "R3A_OCTOMINER_HISTORY_PATH",
+  "history_window_seconds": 300,
+  "history_capacity_per_source": 128,
+  "history_limit": 8,
+  "request_activity_limit": 100,
+  "request_database_dsn_env": "R3A_TELEMETRY_DATABASE_DSN",
+  "model_servers": {
+    "grace-reasoning-80b": {
+      "base_url_env": "R3A_GRACE_REASONING_ENDPOINT",
+      "token_env": "R3A_GRACE_REASONING_TOKEN",
+      "timeout_seconds": 3,
+      "max_age_seconds": 30,
+      "host_id": "replace-with-verified-model-server-host-id"
+    },
+    "grace-vision-30b": {
+      "base_url_env": "R3A_GRACE_VISION_ENDPOINT",
+      "token_env": "R3A_GRACE_VISION_TOKEN",
+      "timeout_seconds": 3,
+      "max_age_seconds": 30,
+      "host_id": "replace-with-verified-model-server-host-id"
+    },
+    "grace-autonomic-0.6b": {
+      "base_url_env": "R3A_GRACE_AUTONOMIC_ENDPOINT",
+      "token_env": "R3A_GRACE_AUTONOMIC_TOKEN",
+      "timeout_seconds": 3,
+      "max_age_seconds": 30,
+      "host_id": "replace-with-verified-model-server-host-id"
+    }
+  },
+  "comfyui": {
+    "base_url_env": "R3A_COMFYUI_ENDPOINT",
+    "token_env": "R3A_COMFYUI_TOKEN",
+    "timeout_seconds": 3,
+    "max_age_seconds": 30,
+    "host_id": "replace-with-verified-comfyui-host-id"
+  },
+  "model_process_names": {},
+  "request_host_id": "replace-with-verified-r3a-database-host-id"
+}
