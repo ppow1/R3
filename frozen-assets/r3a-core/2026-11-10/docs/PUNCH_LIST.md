@@ -1,0 +1,61 @@
+<!--
+R3 CONTROLLED DOCUMENT
+File: docs/PUNCH_LIST.md
+Component: DOCS-PUNCH-LIST-MD
+File Revision: 1.0.4
+Created: Unknown (legacy)
+Created By: Unknown (legacy)
+Purpose: R3 project governance and planning reference
+Execution Model: N/A
+Observability: N/A
+Dependencies: R3 repository
+Authority: Existing document authority unchanged; see body
+Changed: 2026-11-01 UTC | R3-COMMS-003 | ChatGPT GPT-6 | Track dashboard Comms5 saturation and temporary restart recovery
+Changed: 2026-11-10T01:31:53Z | R3-COMMS-005 | Codex GPT-6 | Track the R3A Website resident-directory provider artifact path failure.
+Supersedes: None (see body for substantive charter revisions)
+Contracts: hints/file-provenance.md
+Tests: Not run (metadata-only)
+History/Predecessor: Git blob 183a4b545824aec1b7c5138d15213336ff693d37
+-->
+# R3 — Punch List
+
+Status: initial working list; items are requirements or investigations, not verified implementations.
+
+| ID | Priority | Item | Acceptance / next action | Status |
+|---|---|---|---|---|
+| R3-P001 | P0 | Resident roster and onboarding | Reconcile full Estate roster; Evelyn (not Ellen); Vicky Engineering Manager; Chloe Chief Architect; Alyssa replaces Alfred; Jen is Jennifer | Open |
+| R3-P002 | P0 | Resident communications | Durable Steward↔resident and resident↔resident chat, messages, email-style correspondence, tracing | Open |
+| R3-P003 | P0 | CME resident participation | Every resident has identity, state, heartbeat/scheduling slot without requiring always-on inference | Open |
+| R3-P004 | P0 | Capability/resource registry | First-class searchable registry of tools, services, models, hosts, scripts, resources and access grants | Open |
+| R3-P005 | P0 | Fast responsive chat | Inspect R2 implementation; preserve verified low-latency mechanisms; evaluate Residential Gateway rather than assume reuse | Open |
+| R3-P006 | P0 | Notification triage | Audit ntfy event sources, deduplication, severity, routing, user preferences and unexplained stall notices; no change until observed | Open |
+| R3-P007 | P0 | PostgreSQL V3 design | Separate V3 database; durable messages, resident states, work orders, historian, audit | Open |
+| R3-P008 | P1 | Voice-first interaction | Win+H dictation and paste baseline; robust handling of dictated text; evaluate microphone paths | Open |
+| R3-P009 | P1 | Escalated reasoning | ChatGPT-based consultation for Chloe/Jessica and authorized residents; auditable results | Open |
+| R3-P010 | P1 | Continuous learning | Separate episodic history, durable resident memory, lessons and reviewed knowledge; assess Honcho | Open |
+| R3-P011 | P1 | Engineering Foundry management | Vicky owns work orders and rework; tools/Python execute, not replace manager | Open |
+| R3-P012 | P1 | HMI and telemetry | Live operational state, minimizable overlays, resource indicators, drilldowns, historian | Open |
+| R3-P013 | P1 | R2 reuse inventory | Verify which services and UI mechanisms are actually reusable | Open |
+| R3-P014 | P1 | Charter Revision 2 | Incorporate institution-wide onboarding, roles, CME, registry, comms, governance and HMI | Open |
+
+| R3-P015 | P0 | Jessica–Helen character/personnel workflow | Jessica owns resident character design and evolving canon; Helen HR owns authoritative personnel files; define what is shared, approvals, provenance, versioning, and access boundaries | Open |
+| R3-P016 | P1 | Progressive character onboarding | Seed each resident with a basic definition and expand character continuity over time; no requirement to complete every character at launch | Open |
+| R3-P017 | P1 | Resident communication profile settings | Define master defaults and per-resident overrides for verbosity, initiative, interests, tone and roleplay latitude; align with Jessica character canon and Helen personnel files; verify settings affect behavior without compromising professional competence | Open |
+| R3-P018 | P1 | Epistemic classification and audit prototype | Test opt-in residents; classify text spans (inline, async or hybrid), retain provenance and original labels, independently audit category correctness, show pending/pass/mismatch/indeterminate message status; measure response and audit latency | Open |
+| R3-P019 | P1 | Epistemic monitoring settings and assurance policies | Build master enable and per-resident controls, evidence-class assurance thresholds, selective substantive verification, alarm severity, acknowledgement/escalation policy; never equate confidence percentage with permission to mislabel facts | Open |
+| R3-P020 | P1 | Late-arriving chat audit alerts | Persist mismatch alarms when user has scrolled away; whole-message warning, striped disputed spans, consolidated alert count, jump-to-source and return navigation, acknowledge versus resolve, historian trail | Open |
+
+
+| R3-P019 | P0 | Riverview Comms failure capture and grant recovery | [R3-COMMS-001](comms-incidents/R3-COMMS-001.md): locate V2 grant runbook, verify grant status, run Camrui header checker, and establish repeatable incident logging | Open |
+
+| R3-P020 | P0 | Grace and engineering agents: objective-level recovery instead of premature abandonment | Implement and test `METHOD_FAILED` → `RECOVERY_IN_PROGRESS` → verified outcome or evidence-backed block; discover existing grants and alternate authorized interfaces; preserve attempt history and avoid safety bypass | Open |
+
+| R3-P021 | P0 | Comms5 dashboard request-slot saturation | Investigate 16-slot pool saturation with 15 CLOSE-WAIT connections; fix handler lifecycle and observability, test and deploy. **Temporary workaround:** authorized restart of only `riverview-status-dashboard.service` on Camrui, then verify authenticated Comms5 probe and Windows execution. See [Riverview issue #370](https://github.com/ppow1/Riverview-/issues/370). | Open — temporary recovery verified; permanent fix pending |
+
+| R3-P022 | P1 | Standardized tool onboarding and integration process | Define an extensible, documented workflow to register a new tool in R/3: tool identity and ownership, capability contract and input/output schema, supported host/service and execution transport, configuration and credential references (never embedded secrets), resident/role permissions and grants, discovery in the capability registry, availability/health checks, audit/provenance, failure handling, permanent contract/integration tests, deployment and versioning, and disable/retire procedure. Start with a representative tool end-to-end; avoid hardcoded tool allowlists and one-off integrations. **Planning item only; no implementation or deployment authorized by this entry.** | Open |
+
+| R3-P023 | P1 | R/3 configuration file inventory and ownership registry | Discover and inventory **all R/3 configuration files** across repositories, active releases, hosts, services and runtime/state directories (especially JSON, but include YAML, TOML, INI, environment files and other formats). Record canonical path, environment/host, purpose, consuming service/module, owner/maintainer, who needs read/change access, sensitivity/secrets references, source-of-truth versus generated/deployed copy, version/change history, validation and restart/reload requirements, and the authoritative location/procedure for changing each setting. Identify duplicates, obsolete configurations and drift without altering them. Design a searchable, maintainable registry with a future authenticated website configuration-management interface; **inventory and planning only for now, no configuration edits or website implementation.** | Open |
+
+| R3-P024 | P1 | Unified integration baseline, release registry, and modular deployment contracts | Establish an authoritative, machine-readable registry of each R/3 component's repository/commit, contract/API version, dependencies, tested integration baseline, immutable release artifact, active host/service, configuration reference, migration requirements, health/acceptance results, and rollback target. Allow independent feature branches but require integration compatibility gates before promotion; reconcile Grace/Chat, website, HR/native tools without discarding live uncommitted work. Consolidate effective systemd service ownership to prevent override-order regressions. Design modular release boundaries where feasible, publish a single approved deployment manifest, and document a repeatable promotion/rollback procedure. Derive requirements from the current integration incident; do not delay the Chat repair for speculative framework work. | Open |
+
+| R3-P025 | P0 | R3A Website resident discovery provider path mismatch | Keep each configured provider manifest and digest pin aligned with the exact source checkout imported by the managed CME worker. Verify the authenticated Website roster path reaches the registered authoritative directory provider after config reload; preserve CME grant enforcement and fail-closed behavior. Add and run `tests/test_r3a_deployed_provider_artifact_bindings.py` against the deployed bootstrap. Record provider activation, directory provenance, and Website acceptance evidence on Issue #51. | Provider active on config revision `ddb8de5e…`; binding, conversation (6), and Website (20) regressions pass; authenticated roster/live chat acceptance pending |

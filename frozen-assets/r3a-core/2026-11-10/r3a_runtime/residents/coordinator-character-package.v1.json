@@ -1,0 +1,43 @@
+{
+  "package_id": "r3a.resident.character-architecture",
+  "package_version": "1.0.0",
+  "integration_kind": "coordinator-inference-context-hook",
+  "artifacts": [
+    {
+      "path": "r3a_runtime/residents/coordinator_integration.py",
+      "sha256": "dc7d307fe97c1e5dbe1c970aea0f1aa70c4de69068d3c0de85790a78bb6488f8"
+    }
+  ],
+  "context_contract": {
+    "contract_id": "r3a.resident.approved-character-context",
+    "version": "2.0.0",
+    "schema": "r3a_runtime/schemas/approved-character-context.v2.schema.json"
+  },
+  "host_services": [
+    "authenticated_actor",
+    "authoritative_hr_identity_resolver",
+    "character_context_grant_checker",
+    "versioned_dossier_repository",
+    "sink_authorizer",
+    "content_free_audit_sink"
+  ],
+  "execution_boundary": {
+    "fields": ["canonical_resident_id", "execution_kind", "execution_ref", "provider_id", "authenticated_principal_ref"],
+    "source": "coordinator-server-authenticated-execution-context",
+    "pin_policy": "immutable-for-execution-boundary"
+  },
+  "sink_policy": {
+    "inference": "authorized-context-only",
+    "memory": "versioned-reference-only",
+    "communications": "versioned-reference-only",
+    "diagnostics": "content-free-metadata-only",
+    "generic_capability_output": "forbidden-for-character-text"
+  },
+  "activation_gates": [
+    "source-verified-hr-association",
+    "current-directory-office-binding",
+    "approved-active-character-revision",
+    "runtime-host-injection",
+    "sink-authorization"
+  ]
+}

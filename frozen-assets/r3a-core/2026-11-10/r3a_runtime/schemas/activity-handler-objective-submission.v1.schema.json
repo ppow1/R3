@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.activity-handler.objective-submission.v1",
+  "title": "R3A Activity Handler Objective Submission v1",
+  "type": "object",
+  "required": ["contract_id", "contract_version", "action_id", "target_resident_id", "objective", "event_kind", "task_class", "required_capabilities", "required_modalities", "acceptance_criteria", "notification_envelope", "timeout_seconds"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_id": {"const": "r3a.activity-handler.objective-submission"},
+    "contract_version": {"const": "1.0.0"},
+    "action_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$"},
+    "target_resident_id": {"type": "string", "minLength": 1, "maxLength": 200},
+    "objective": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "event_kind": {"enum": ["objective", "notification"]},
+    "task_class": {"enum": ["objective_reasoning", "vision"]},
+    "required_capabilities": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 200}},
+    "required_modalities": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 200}},
+    "acceptance_criteria": {"type": "array", "items": {"type": "object"}},
+    "notification_envelope": {"type": ["object", "null"]},
+    "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 86400}
+  }
+}

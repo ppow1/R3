@@ -1,0 +1,221 @@
+{
+  "schema_version": 1,
+  "plugin_id": "r3a.engineering-workspace",
+  "plugin_version": "1.1.0",
+  "artifact_ref": "provider.py",
+  "artifact_sha256": "8c7a8a94007bbea40e1563e78371b553a371cae7aacaaa1214d5c3a3026aeff6",
+  "configuration_schema": {
+    "schema_id": "r3a.engineering-workspace.config.v1",
+    "type": "object",
+    "required": [
+      "workspace_root"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "workspace_root": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "provider": {
+    "provider_id": "r3a.isolated_workspace",
+    "provider_version": "1.1.0",
+    "entrypoint": "r3a_plugins.engineering_workspace.provider:create_provider",
+    "artifact_sha256": "8c7a8a94007bbea40e1563e78371b553a371cae7aacaaa1214d5c3a3026aeff6"
+  },
+  "module_manifest": {
+    "contract_id": "r3a.module-manifest.v1",
+    "contract_version": "1.2.0",
+    "module_id": "r3a.isolated_workspace",
+    "module_version": "1.1.0",
+    "owner": "Engineering",
+    "binding": {
+      "contract_id": "r3a.capability-provider.v1",
+      "protocol_major": 1,
+      "protocol_min_minor": 0,
+      "protocol_max_minor": 0,
+      "entrypoint": "r3a_plugins.engineering_workspace.provider:create_provider"
+    },
+    "dependencies": [],
+    "configuration": {
+      "schema_ref": "r3a.engineering-workspace.config.v1",
+      "configuration_ref": "capability_operations[].configuration"
+    },
+    "capability_refs": [
+      "engineering.workspace.apply_patch"
+    ],
+    "resource_refs": [],
+    "state_namespace": "r3a.engineering.workspace",
+    "migration_contract": "r3a.stateless-provider.v1",
+    "recovery_policy": "operation-contract.v1",
+    "artifact": {
+      "artifact_ref": "provider.py",
+      "artifact_sha256": "8c7a8a94007bbea40e1563e78371b553a371cae7aacaaa1214d5c3a3026aeff6"
+    },
+    "activity_handler": {
+      "contract_id": "r3a.activity-handler",
+      "contract_version": "1.1.0",
+      "handler_id": "r3a.engineering.workflow",
+      "handler_version": "1.0.0",
+      "activity_types": [
+        "engineering.execute"
+      ],
+      "activity_contract_range": {
+        "contract_id": "r3a.activity-intake",
+        "major": 1,
+        "min_minor": 0,
+        "max_minor": 0
+      },
+      "handler_contract_range": {
+        "contract_id": "r3a.activity-handler",
+        "major": 1,
+        "min_minor": 1,
+        "max_minor": 1
+      },
+      "request_schema": {
+        "type": "object",
+        "required": [
+          "engineering_assignment"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "engineering_assignment": {
+            "type": "object"
+          },
+          "objective": {
+            "type": "string"
+          }
+        }
+      },
+      "result_schema": {
+        "type": "object"
+      },
+      "progress_schema": {
+        "type": "object"
+      },
+      "checkpoint_schema": {
+        "type": "object"
+      },
+      "progress_semantics": "Engineering workflow phase and durable proposal/work-order/verifier lineage.",
+      "checkpoint_semantics": "Checkpointed module-owned workflow state; CME owns activity, action, lease and recovery records.",
+      "required_capabilities": [
+        "engineering.workspace.apply_patch"
+      ],
+      "resource_constraints": {
+        "cpu_millis": 100,
+        "memory_bytes": 134217728,
+        "max_concurrency": 1
+      },
+      "state_namespace": "r3a.engineering.workflow",
+      "migration_contract": "r3a.engineering.checkpoint.v1",
+      "recovery": {
+        "mode": "checkpointed",
+        "idempotency_contract": "r3a.activity-handler.action.v1",
+        "checkpoint_contract": "r3a.activity-handler.continuation.v1"
+      }
+    }
+  },
+  "operation": {
+    "contract_id": "r3a.capability-operation.v1",
+    "contract_version": "1.0.0",
+    "operation_id": "engineering.workspace.apply_patch",
+    "operation_revision": "1.1.0",
+    "provider": {
+      "provider_id": "r3a.isolated_workspace",
+      "provider_version": "1.1.0",
+      "entrypoint": "r3a_plugins.engineering_workspace.provider:create_provider",
+      "artifact_sha256": "8c7a8a94007bbea40e1563e78371b553a371cae7aacaaa1214d5c3a3026aeff6"
+    },
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "path",
+        "content"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content": {
+          "type": "string"
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "required": [
+        "path",
+        "sha256",
+        "bytes_written",
+        "replayed"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "bytes_written": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "replayed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "effect_class": "isolated_write",
+    "caller_constraints": {
+      "allowed_principals": [],
+      "allowed_residents": [],
+      "allowed_services": []
+    },
+    "target_scope_schema": {
+      "type": "object",
+      "required": [
+        "workspace_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "workspace_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "required_grants": [
+      "engineering.workspace.apply_patch"
+    ],
+    "evidence": {
+      "schema": {
+        "type": "object"
+      },
+      "verification_obligations": [
+        "independent_digest_check"
+      ]
+    },
+    "recovery": {
+      "idempotency_required": true,
+      "idempotency_scope": "work_order",
+      "replay_safe": true,
+      "reconciliation_operation_id": null
+    },
+    "execution": {
+      "timeout_seconds": 30,
+      "retry_disposition": "safe_retry"
+    },
+    "lifecycle": {
+      "desired_state": "enabled"
+    },
+    "resident_tool": {
+      "name": "engineering_workspace_apply_patch",
+      "description": "Apply one work-order-bounded file to an isolated Engineering workspace."
+    }
+  }
+}

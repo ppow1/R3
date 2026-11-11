@@ -1,0 +1,18 @@
+{
+  "contract_id": "r3a.capability-invocation.v1",
+  "contract_version": "1.0.0",
+  "invocation_id": "fixture-invocation-01",
+  "operation_id": "infrastructure.octominer.telemetry.read",
+  "operation_contract_version": "1.0.0",
+  "caller": {"principal_id": "resident.grace", "resident_id": "resident.grace", "service_id": null},
+  "target": {"source_ids": ["gpu.telemetry.octo-fixture"]},
+  "input": {},
+  "activity_id": "fixture-activity-01",
+  "attempt_id": "fixture-attempt-01",
+  "correlation_id": "fixture-correlation-01",
+  "work_order": null,
+  "evidence_purpose": "Report current measured GPU telemetry",
+  "idempotency_key": null,
+  "deadline": "2030-11-07T12:00:00Z",
+  "config_revision": "fixture-config-sha256"
+}

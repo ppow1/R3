@@ -1,0 +1,53 @@
+<!--
+R3 CONTROLLED DOCUMENT
+File: docs/architecture/R3A_MASTER_ROADMAP_AP0_AP6.md
+Component: R3A-MASTER-ROADMAP
+File Revision: 1.0.3
+Created: 2026-11-06T03:39:05Z
+Created By: Codex GPT-6
+Purpose: Sequence R3A architecture and delivery phases AP0 through AP6.
+Execution Model: N/A; planning artifact.
+Observability: Phase status and acceptance evidence tracked in R3A punch list.
+Dependencies: Steward Directive — R3A Architecture Baseline and AP0 Specification; R3A Architecture Charter.
+Authority: Steward directive; phase details beyond stated scope are planning proposals, not authorization to implement.
+Changed: 2026-11-06T03:39:05Z | R3A-BASELINE-001 | Codex GPT-6 | Establish initial master roadmap.
+Changed: 2026-11-06T04:57:50Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Reconcile phase sequence and establish roadmap governance.
+Changed: 2026-11-06T05:03:56Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Clarify Baseline 1.0 approval status and phase requirement mapping.
+Changed: 2026-11-06 | R3A-GOV-01A | Steward-directed clarification | Permit autonomous in-scope engineering and reserve approval for material deviations.
+Changed: 2026-11-06 | R3A-BASELINE-APPROVAL | Steward authorization in conversation | Approve Roadmap Baseline 1.0 for governance and AP0 decision planning only.
+Supersedes: None.
+Contracts: R3A Architecture Charter; R3A Punch List and Parking Lot; AP0 Technical Specification.
+Tests: Not run; documentation only.
+History/Predecessor: Git blob 14c74b8af1f0e7a9ff9135a8e7954396f9e136db at baseline commit eca8b73de0fe5bd67bdb0f0b8b0a92470b07b530.
+-->
+# R3A Master Roadmap — AP0–AP6
+
+**Status:** Roadmap Baseline 1.0 APPROVED by Steward on 2026-11-06 (conversation directive “go” following explicit approval recommendation). Approval authorizes AP0 decision planning and coordination; AP0 runtime implementation and production deployment require separate authorization. The requirements below preserve the Steward's required phase ownership; they do not declare any phase implemented or operational.
+
+**Version distinction:** Roadmap baseline `1.0` is the plan presented for approval; this controlled document is revision `1.0.1`, preserving the correction history from its initial revision.
+
+| Phase | Requirement IDs | Objective and scope | Dependencies | Acceptance criteria | Status |
+|---|---|---|---|---|---|
+| **AP0 — Institutional foundation** | R3A-001–009, R3A-018 | Ring 0; CME; durable state/events/configuration/continuation; registries and versioned contracts/state machines; external configuration; actual diagnostics; interruption recovery; basic backup and restore provisions; bounded evidence-based validation. Excludes resident autonomy/product features, Engineering workflows, mobile/remote Steward access, Jessica/character development, spatial presentation and advanced security administration. | Steward approval of Roadmap Baseline 1.0; contract/state definitions; isolated development data/configuration; PostgreSQL direction from approved R3 Charter Revision 2; production isolation. | Isolated instance starts from external config; CME restarts independently under Ring 0; durable state/events/config revision and continuation reconcile; registries/contracts drive lifecycle/diagnostics; basic DB/config backup can be restored and checked; failures are visible; evidence is captured without altering production. See AP0 spec. | PLANNED |
+| **AP1 — Grace autonomy and institutional continuity** | R3A-019 | Grace autonomy; event-driven continuation; model routing; knowledge grounding/retrieval; notification intake and handling. This is resident-facing capability work on the AP0 foundation. | AP0 lifecycle, event, continuation, registry and diagnostic contracts; model/provider and knowledge-source inventory; authority and notification decisions. | Grace can repeatedly receive real events, continue authorized activity across cycles/interruption, route reasoning using configured models, ground work in identified knowledge, and expose/handle notifications with durable outcomes or explicit blockages. | PLANNED |
+| **AP2 — Engineering and escalated reasoning** | R3A-011, R3A-012 | Grace-managed Engineering execution, persistent work/dependencies, authorized capability use, artifact/evidence lineage, independent verification and auditable escalated reasoning. | AP0 contracts; AP1 event-driven Grace continuity/model/knowledge functions; work-order, verifier, provider and authority contracts. AP3 remote access may proceed alongside where its contracts and resources do not block AP2. | Grace coordinates authorized real Engineering work through recovery to independently verified deliverables or explicit evidence-backed blockage; escalated reasoning preserves identity, context, evidence, authorization and return path. | PLANNED |
+| **AP3 — Secure Steward operations and mobile access** | R3A-010, R3A-013 | Secure remote Steward operation, mobile access, authentication, and Bitwarden-based secret integration; reserve future TOTP and YubiKey support. This may develop alongside AP1/AP2 where stable interfaces and dependencies permit. | AP0 diagnostics/API and data boundaries; authentication/remote gateway decisions; Bitwarden integration and machine identity; operational host/network ownership. | Steward can securely inspect actual state and perform authorized operations remotely/mobile; invalid access is denied; secret values are protected; future factors have explicit integration/recovery points; stale/unavailable status is clear. | PLANNED |
+| **AP4 — Institutional expansion** | R3A-015, R3A-021 | Expand institutional participation, roles, onboarding and domain capabilities, including Jessica's character-development responsibilities with authoritative HR/personnel ownership and privacy. | AP0 module/identity contracts; AP1 resident continuity; AP2 capability/evidence flow; AP3 access controls as required; HR/personnel and ownership decisions. | New residents/responsibilities join through versioned contracts and authorized identity; Jessica can perform character development with provenance and correct HR/canon boundaries; existing institutional operation remains compatible. | PLANNED |
+| **AP5 — Spatial institution, avatars and Quest** | R3A-016 | Spatial estate, resident avatars and Meta Quest integration over common authoritative state. Spatial presentation cannot block functional desktop/mobile interfaces. | AP0 APIs/state semantics; AP3 remote/mobile access where applicable; actual avatar/spatial asset and hardware/runtime inventory; accessibility contracts. | Spatial/Quest interfaces expose genuine state and freshness, resident avatar status derives from authoritative records, and core activities/interfaces remain usable when spatial services are absent. | PLANNED |
+| **AP6 — Future capabilities and mature resilience** | R3A-014, R3A-023 | Future capability growth and deferred enhancements; mature backup/restore infrastructure, privacy lifecycle, emergency lockdown, cryptographic erasure, operational scaling and extended resilience. Basic AP0 recovery/backup is a prerequisite, not deferred here. | Durable AP0 data ownership/schema and basic restore evidence; AP1/AP2 operation; AP3 security; AP4/AP5 integration; explicit Steward privacy/security decisions. | Mature backup/restore and recovery are evidenced; lockdown is enforceable with approved emergency authority; privacy/erasure follows approved key/retention policy; future capabilities preserve compatibility and truthful operation. | PLANNED |
+
+## Roadmap governance — R3A-GOV-01
+
+This Steward-approved, versioned Master Roadmap is the authoritative R3A development plan. Approval of the roadmap alone does not authorize runtime implementation or production deployment. Every R3A engineering assignment must state: approved roadmap revision; AP phase and milestone; requirement IDs; authorized scope; acceptance criteria; and applicable approved exception (or `None`). An assignment missing these fields is not ready for execution.
+
+Any proposed deviation to phase ownership/order, priorities, scope or acceptance requirements must be entered in the [versioned exception register](R3A_ROADMAP_EXCEPTION_REGISTER.md), including reason, alternatives, impact and affected requirements. **Steward approval recorded against the exception is mandatory before executing the deviation.** A proposal, coordinator message, issue comment, branch, commit or Codex/resident decision is not approval. No Codex session, resident or Engineering coordinator may independently change roadmap priorities or acceptance requirements. Preserve superseded roadmap and decision versions in Git; never rewrite approved history.
+
+## Authorized engineering autonomy — R3A-GOV-01A
+
+The roadmap fixes objectives, scope boundaries, priorities and acceptance evidence, **not the individual implementation route**. After a milestone is explicitly authorized, Engineering may independently select techniques, implement supporting work, correct defects, coordinate parallel contributors and continue through recoverable obstacles without new approvals for ordinary in-scope decisions. A technical failure alone is not a stop condition. Material changes to the objective, roadmap phase/priority, protected scope or acceptance criteria require an approved exception before execution. Production deployment and destructive operations remain subject to their separate authorization. See [development governance](../../hints/development-governance.md).
+
+## Phase gates and ordering
+
+Phases are capability groupings, not calendar promises. AP0 is the required foundation and is primarily sequential. Basic recovery and backup provisions belong in AP0; mature backup infrastructure is AP6. AP1 and AP2 are the next operating priorities. Secure Steward/mobile access is assigned to AP3 but may be developed alongside AP1/AP2 when dependencies permit. AP4 and AP5 retain their named responsibilities. Privacy, lockdown and cryptographic-erasure constraints shape AP0 data/event design even when full workflows are later.
+
+No phase is complete because documentation, a mock, a one-time demonstration, a code artifact, or tests alone exist. Apply the status vocabulary and evidence bar in the [charter](R3A_ARCHITECTURE_CHARTER.md) and [acceptance policy](R3A_BOUNDED_TESTING_AND_ACCEPTANCE_POLICY.md).

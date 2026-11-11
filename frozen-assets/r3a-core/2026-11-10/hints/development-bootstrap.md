@@ -1,0 +1,90 @@
+<!--
+R3 CONTROLLED DOCUMENT
+File: hints/development-bootstrap.md
+Component: ENG-DEV-BOOTSTRAP
+File Revision: 1.0.8
+Created: 2026-11-05 UTC (date only; exact time not independently verified)
+Created By: ChatGPT GPT-6
+Purpose: Standardize the start of new R3 feature-development conversations
+Execution Model: Documentation / development conversation initialization
+Observability: Git history and bootstrap readiness summary
+Dependencies: AI_HINTS.md; hints/README.md; hints/engineering.md; hints/development-governance.md
+Authority: Steward direction, R3 charter, AI_HINTS.md
+Changed: 2026-11-05 UTC | R3-BOOTSTRAP-AUTONOMY-009 | ChatGPT GPT-6 | Establish autonomy-first agent engineering within onboarding and Steward-approved authority
+Changed: 2026-11-05 UTC | R3-BOOTSTRAP-LIMITS-008 | ChatGPT GPT-6 | Require justification/escalation or JSON configuration for imposed limits
+Changed: 2026-11-05 UTC | R3-BOOTSTRAP-ACCEPTANCE-007 | ChatGPT GPT-6 | Disallow demonstration-only, bounded one-time, and nonproduction substitutes for operational acceptance
+Changed: 2026-11-05 UTC | R3-BOOTSTRAP-ACCEPTANCE-006 | ChatGPT GPT-6 | Require operational completion rather than plan-only milestones
+Changed: 2026-11-05 UTC | R3-DEPLOY-BOOTSTRAP-005 | ChatGPT GPT-6 | Require verified real activation and protected integration/fallback
+Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-003 | ChatGPT GPT-6 | Require dated cited evidence correction
+Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-002 | ChatGPT GPT-6 | Require local-evidence-first gateway execution and PowerShell clipboard fallback
+Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-001 | ChatGPT GPT-6 | Initial bootstrap guidance
+Changed: 2026-11-06T04:57:50Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Require R3A roadmap traceability and coordination governance at startup.
+Changed: 2026-11-06T05:03:56Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Link exact roadmap gate and strengthen mandatory coordination startup checks.
+Supersedes: None
+Superseded By: None
+Contracts: hints/file-provenance.md; hints/development-governance.md
+Tests: Link and content review; no runtime deployment
+History/Predecessor: Git blob 69ec35665ad76479a6e3ddd7747b0c5627e6d027
+-->
+# R/3 Development Bootstrap
+
+**Startup phrase: `R3 Bootstrap`** (also recognize “R/3 development starting point”). This is a conversation convention, not an automatically installed ChatGPT command. A new conversation must have access to this repository or be given its URL and the phrase's meaning.
+
+## Required startup procedure
+
+1. Read repository-root [AI_HINTS.md](../AI_HINTS.md), then [hints/README.md](README.md), this document, [development governance](development-governance.md), [engineering](engineering.md), [architecture](architecture.md), [deployment](deployment.md), [file provenance](file-provenance.md), and **[Development Execution](development-execution.md)**. Follow linked authoritative documents relevant to the assignment; do not blindly read the entire repository.
+2. **Use existing local and retrieved evidence first** (repository, configs, prior outputs, runbooks, issues, punch lists, parking lots). Reuse unless verified incorrect, outdated or superseded; then correct the authoritative record with a dated update, cited source and preserved predecessor. Distinguish original observation date from correction date. Treat [AI_HINTS](../AI_HINTS.md) and its references as the current miniature knowledge base; consolidate authoritative references over time without inventing a completed knowledge-base system. Follow [Development Execution](development-execution.md) for mandatory command workflow.
+3. Inspect the actual target repository, current branch/worktree, active integration baseline, deployment state and affected service/API contracts. **Never assume a historical commit is still the current approved baseline.** Distinguish observed state from plans and past reports.
+4. Identify the owning workstream and dependencies. Preserve parallel HR onboarding, website multi-resident Chat, Grace autonomy, avatar and infrastructure work. Coordinate shared changes rather than deploying incompatible snapshots.
+5. Confirm major components have documented, validated configuration files. Prefer configuration-owned behavior over stacked systemd overrides, hidden defaults or hardcoded deployment assumptions.
+6. Before coding, state the feature objective, proposed minimal change, affected interfaces/configuration, baseline, and **proportionate Definition of Done** from [development governance](development-governance.md). Ask only for genuinely missing authorization or requirements.
+7. **Use authorized Riverview Comms 1.1 / command gateway first** when machine queries, code writing, execution, deployment or testing are needed. Discover capabilities and grants; if unavailable or blocked, use the documented PowerShell 7 clipboard fallback: `Clear-Host`, capture stdout/stderr/exit status in variables, display consolidated `$result`, and `Set-Clipboard -Value $result`. Do not repeat expensive tests when reliable evidence already exists.
+8. Implement and produce the standard delivery summary: source branch and exact commit, changed files, configuration/interface changes, targeted checks and results, backup confirmation if deploying, observed deployment status, and any unresolved issues. Do not claim completion without evidence.
+
+## R3A roadmap compliance — mandatory
+
+For any R3A engineering assignment, read the [Master Roadmap (use only a Steward-approved revision)](../docs/architecture/R3A_MASTER_ROADMAP_AP0_AP6.md), [R3A-GOV-01](../docs/architecture/R3A_MASTER_ROADMAP_AP0_AP6.md#roadmap-governance--r3a-gov-01), the [versioned exception register](../docs/architecture/R3A_ROADMAP_EXCEPTION_REGISTER.md), and [R3A development governance](development-governance.md). Record in the assignment before implementation: approved roadmap revision; AP phase and milestone; requirement IDs; authorized scope; acceptance criteria; applicable approved exception ID or `None`.
+
+If the Master Roadmap revision is not yet Steward-approved, or any required assignment field is missing, do not begin R3A implementation; report the missing approval/assignment information. Do not infer phase, scope or acceptance requirements from a branch, issue, prior session or architecture proposal. Any proposed deviation requires a versioned exception and explicit Steward approval recorded before the deviation is executed. Codex sessions, residents and engineering coordinators may not independently reprioritize or change acceptance criteria. A Steward-authorized documentation correction may update the proposed roadmap without authorizing implementation.
+
+For simultaneous workstreams, follow **R3A-GOV-02** in [development governance](development-governance.md): use one designated GitHub coordination issue per active milestone and the specified ownership, stable-contract, checkpoint and integration rules. The issue coordinates execution; it does not override the approved roadmap or Steward authority.
+
+## Production activation readiness
+
+Before attempting production activation, verify the documented runner performs a REAL activation (not a plan-only validation); inspect the live service owner, source, release path and current deployment baseline. Resolve feature-branch divergence through an isolated candidate preserving other workstreams. Do not deploy a whole outdated branch over the shared runtime, reset a dirty shared checkout, or use a legacy script whose service/port assumptions do not match live state. If the authorized Command Gateway rejects deployment-related requests despite active grants, record the blocker and use the complete PowerShell clipboard fallback for safe live preflight and activation, with observed evidence. If a safe activation procedure cannot yet be determined, report PREDEPLOY_BLOCKED, not DEPLOYED.
+
+## Autonomy-first institutional design and authority ownership
+
+**R/3 is an autonomous institutional environment.** Its residents and agents are intended to act independently and continuously **within their assigned authority**, not wait for a developer to authorize each ordinary step. **Autonomy is the default operating posture; developer-imposed conservatism is not.**
+
+**Authority is assigned through resident onboarding configuration and subsequently changed by the Steward or an explicitly authorized institutional authority.** The developer's job is to implement and faithfully enforce that authority model, provide capable tools and reliable execution, and expose observable outcomes. A developer must not independently narrow a resident's authorized scope, impose extra approval gates, reduce autonomy to a one-time demonstration, or substitute manual intervention for an authorized autonomous workflow.
+
+At design time, distinguish **authorization boundaries** from **engineering implementation limits**. Authorization, grants, scope, and escalation belong to the resident's configured institutional authority and Steward decisions. Operational tunables belong in validated, documented JSON configuration. Any proposed restriction not already justified by the resident's authority or a genuine technical/safety constraint must be escalated with its rationale rather than silently coded in. Never treat autonomy-first as permission to exceed assigned grants, bypass security enforcement, or self-expand authority.
+
+**Acceptance:** For any autonomous feature, verify that a resident can repeatedly initiate, continue, use permitted tools, and complete authorized work without ad hoc developer approval; verify that actions outside its assigned authority are refused or routed for proper approval. A single bounded demo or an operator-driven sequence does not establish autonomous operation.
+
+## Operational completion gate — no plan-only substitutions
+
+**The requested operational outcome is the acceptance criterion.** A document, manifest, implementation plan, prototype, candidate build, tests passing, or a script that only validates a plan is an intermediate deliverable, **not completion**, when the Steward requested working functionality. Labels such as `plan-only`, `phase 1`, `pending integration`, and `ready to deploy` must not be reported as deployed, operational, or done.
+
+Before beginning work, record the requested observable end-to-end behavior and how it will be verified on the intended host/service. For a deployment capability, the minimum acceptance is **one actual update installed through the intended procedure, the intended running revision verified, and essential live behavior checked**. A zero exit code from a manifest validator or an HTTP 200 alone does not satisfy that criterion.
+
+**Demonstration and scope-limit guardrail:** Descriptions such as `bounded`, `one-time use`, `demonstration only`, `proof of concept`, `mock`, `stub`, `simulation`, `dry run`, `read-only demonstration`, `temporary workaround`, `pilot`, and `manual-only` do not establish production readiness or completion of a request for an ongoing, reusable capability. A successful single demonstration is evidence of that demonstration only, not proof of durable integration, repeatable operation, ongoing autonomy, or general deployment capability. Do not silently replace a requested persistent/automated/multi-use feature with a limited demonstration, nor impose artificial use counts or narrow test permissions on its operational scope. Such limits are acceptable only if the Steward explicitly requests them or they are necessary, disclosed safety/authorization boundaries. State exactly what is demonstrated versus what remains operationally unverified.
+
+**Limit-imposition decision rule:** Before introducing any cap, quota, timeout, concurrency bound, one-time-only behavior, demo-only scope, fixed threshold, hardcoded allowlist, or other restriction, ask **why this limit is needed** and document the answer. If its necessity or policy authority is unclear, escalate the specific question to the Steward or appropriate authority rather than silently choosing a value. If the limit is a legitimate adjustable operational parameter, put it in the owning component's documented, validated **JSON configuration file**, with a named key, rationale, default, units, allowed range and effective value; do not bury it in code or scattered overrides. Do not use configuration to bypass authorization, safety constraints, hardware limits, or binding institutional policy; those boundaries require their proper authority and enforcement. Prefer no arbitrary limit when no justified requirement exists.
+
+When a stage is incomplete, explicitly report **NOT OPERATIONAL / BLOCKED**, what is implemented, what remains, and the exact blocker. Do not silently move the missing activation/integration work into an unspecified future phase or declare the original request completed. Only treat a plan-only artifact as final when the Steward **explicitly requested planning only**.
+
+Use the existing R/3 Bootstrap, deployment governance, and runbooks; do not create another manager, parallel installer, or architectural workstream to satisfy this rule. For urgent feature delivery, use an already verified safe activation path if available, and defer installer improvement without delaying the feature. Preserve live services and the dirty shared checkout.
+
+## Deployment policy during accelerated development
+
+**Confirm prior backup → Deploy → Essential smoke verification → Fix in place.** Automatic rollback, broad regression gates and elaborate disaster recovery are deferred. Do not erase backups or claim tests were run when they were not. Protect credentials and persistent state.
+
+## Ready response
+
+After reading the instructions, report the repository/ref inspected, applicable baseline, relevant constraints and readiness for the Steward's feature assignment. **Do not start coding an unspecified feature** and do not turn bootstrap into a lengthy discovery exercise.
+
+## Copy/paste starter for a fresh chat
+
+> R3 Bootstrap. Use https://github.com/ppow1/R3 and read the root AI_HINTS.md, then follow its hints/development-bootstrap.md pointer and linked governance. Confirm the current baseline and await my feature assignment.

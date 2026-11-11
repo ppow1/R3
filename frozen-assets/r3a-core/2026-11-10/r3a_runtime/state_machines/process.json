@@ -1,0 +1,16 @@
+{
+  "machine_id": "process.lifecycle",
+  "machine_version": 1,
+  "states": ["STARTING", "RUNNING", "DEGRADED", "STOPPING", "STOPPED", "FAILED", "RESTARTING"],
+  "transitions": {
+    "STARTING": ["RUNNING", "DEGRADED", "FAILED", "STOPPING"],
+    "RUNNING": ["DEGRADED", "STOPPING", "FAILED", "RESTARTING"],
+    "DEGRADED": ["RUNNING", "STOPPING", "FAILED", "RESTARTING"],
+    "STOPPING": ["STOPPED", "FAILED"],
+    "STOPPED": ["STARTING", "RESTARTING"],
+    "FAILED": ["RESTARTING", "STOPPING"],
+    "RESTARTING": ["STARTING", "RUNNING", "FAILED", "STOPPING"]
+  },
+  "terminal": ["STOPPED"],
+  "recoverable": ["STARTING", "RUNNING", "DEGRADED", "FAILED", "RESTARTING"]
+}

@@ -1,0 +1,702 @@
+<!--
+R3 CONTROLLED DOCUMENT
+File: web/index.html
+Component: R3-ESTATE-HOME
+File Revision: 1.0.30
+Created: 2026-10-31 UTC (time unverified)
+Created By: ChatGPT GPT-6
+Purpose: Present the R3 estate home with Engineering and Infrastructure observability panels
+Execution Model: Browser client consuming same-origin R3A APIs through the native AP3 opaque Steward session
+Observability: Engineering API state; CME request/correlation IDs; explicit chat, directory, and notification service availability
+Dependencies: #49 /api/v1/steward/session, /status, /capabilities, /operations/invoke; versioned Grace objective API; #48 notification API; authoritative resident conversation/directory APIs; /web/resident-avatar.js
+Authority: Steward visual placement references and approved R3 website direction
+Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Load reusable resident avatar module and pinned Three.js import map
+Changed: 2026-11-01 UTC | R3-THREE-PANE-LAUNCHER-ICON-001 | ChatGPT GPT-6 | Use layered three-pane icon for quick layout launcher
+Supersedes: R3-VISUAL-PROTOTYPE framing
+Contracts: docs/IMPLEMENTATION_HANDOFF.md; docs/architecture/ESTATE_SPATIAL_CANON.md; docs/architecture/R3A_STEWARD_WEBSITE_SESSION_CONTRACT.md; docs/architecture/R3A_STEWARD_WORKSPACE_WEB_API_V1.md; hints/chat-contract-draft.md; hints/settings-contract-draft.md
+Tests: tests.test_r3a_website; tests/test_steward_workspace_api.mjs; inline JavaScript syntax check; live identity, CME, directory, chat, notification, and avatar visual acceptance pending
+History/Predecessor: Git blob 5f681d1009aa1ad9b6a2645b149586cae5f60aea
+Changed: 2026-11-07T21:40:20Z | R3A-007/R3A-010/R3A-013/R3A-017/R3A-019 | Codex GPT-6 | Add Steward sign-in adapter and live Grace objective submission with durable activity and event history.
+Changed: 2026-11-07T21:46:12Z | R3A-019 | Codex GPT-6 | Seed the objective form with an acceptance path present in the configured process lifecycle.
+Changed: 2026-11-07T21:58:03Z | R3A-007/R3A-013 | Codex GPT-6 | Add authenticated read-only effective R3A configuration and revision activity view.
+Changed: 2026-11-07T22:00:33Z | R3A-007 | Codex GPT-6 | Add Steward panel move/minimize controls and include it in saved layout presets.
+Changed: 2026-11-07T22:02:09Z | R3A-007/R3A-013 | Codex GPT-6 | Refresh file contracts and focused validation provenance.
+Changed: 2026-11-07T23:40:00Z | R3A-007/R3A-010 | Codex GPT-6 | Add versioned persistent chat and notification inbox UI backed only by service responses.
+Changed: 2026-11-08T13:30:00Z | R3A-WEB-IDENTITY | Codex GPT-6 | Add accessible deployment identity tooltip populated by the running website metadata API.
+Changed: 2026-11-07T23:55:00Z | R3A-010/R3A-019 | Codex GPT-6 | Replace browser bearer auth with shared cookie session, generic capability discovery/invocation, and a versioned CME objective envelope.
+Changed: 2026-11-08 | #51 | Codex GPT-6 | Add issue-backed roadmap panel and include its movable geometry/visibility in saved workspace layouts.
+Changed: 2026-11-08 | #51 | Codex GPT-6 | Add browser-local opacity controls for notification and roadmap workspace panels.
+Changed: 2026-11-08 | #49/#51 | Codex GPT-6 | Emit shared session lifecycle events for resident chat refresh and revocation clearing.
+Changed: 2026-11-09T19:57:00Z | AP3/R3A-010-LIVE-LOGIN | R3A Coordinator | Remove legacy R3 portal prompts from the R3A workspace and route sign-in to native R3A auth.
+Changed: 2026-11-09T20:25:00Z | R3A-WEBSITE-WIDE-AUTH | R3A Coordinator | Gate the full Website on its native session; remove chat/panel session controls and add one global sign-out.
+Changed: 2026-11-09T21:20:00Z | R3A-LOGIN-REDIRECT-LOOP | R3A Coordinator | Only canonical session verification may redirect to login; operation 401 responses recheck session without forcing navigation.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Riverview 3</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<script>
+(() => {
+  let redirecting = false;
+  let sessionRecheck = null;
+  const showFailure = () => {
+    const reveal = () => {
+      const gate = document.getElementById('r3a-auth-gate');
+      if (!gate) return;
+      gate.hidden = false;
+      gate.querySelector('[data-session-status]').textContent = 'R3A could not verify this Website session. Try again or return to sign in.';
+      gate.querySelector('[data-session-retry]').hidden = false;
+      gate.querySelector('[data-session-login]').hidden = false;
+    };
+    if (document.getElementById('r3a-auth-gate')) reveal();
+    else document.addEventListener('DOMContentLoaded', reveal, {once:true});
+  };
+  window.r3aRequireWebsiteLogin = () => {
+    if (redirecting || location.pathname === '/login') return;
+    redirecting = true;
+    location.replace('/login');
+  };
+  // A 401 from an operation API may mean that operation denied access while
+  // the Website session remains valid. Only the canonical session endpoint
+  // is allowed to move a signed-in browser back to login.
+  window.r3aCheckWebsiteSession = () => {
+    if (location.pathname === '/login' || redirecting) return Promise.resolve(false);
+    if (sessionRecheck) return sessionRecheck;
+    sessionRecheck = fetch('/api/v1/steward/session', {credentials:'same-origin', cache:'no-store', headers:{Accept:'application/vnd.r3a.steward-session.v1+json','X-R3A-Contract':'r3a.steward-session.v1'}})
+      .then(response => {
+        if (response.status === 401) { window.r3aRequireWebsiteLogin(); return false; }
+        return response.ok;
+      })
+      .catch(() => false)
+      .finally(() => { sessionRecheck = null; });
+    return sessionRecheck;
+  };
+  fetch('/api/v1/steward/session', {credentials:'same-origin', cache:'no-store', headers:{Accept:'application/vnd.r3a.steward-session.v1+json','X-R3A-Contract':'r3a.steward-session.v1'}})
+    .then(response => {
+      if (response.status === 401) { window.r3aRequireWebsiteLogin(); return null; }
+      if (!response.ok) throw new Error('session_unavailable');
+      return response.json();
+    })
+    .then(session => {
+      if (!session) return;
+      if (session.contract !== 'r3a.steward-session.v1' || session.state !== 'authenticated') throw new Error('session_contract_invalid');
+      document.documentElement.classList.add('r3a-auth-verified');
+      document.documentElement.dataset.r3aAuthVerified = 'true';
+      const gate = document.getElementById('r3a-auth-gate');
+      if (gate) gate.hidden = true;
+      document.dispatchEvent(new CustomEvent('r3:steward-session-established', {detail:{principal_id:session.principal_id}}));
+    })
+    .catch(showFailure);
+})();
+</script>
+<style>
+:root{--panel-opacity:.45}
+html:not(.r3a-auth-verified) body>:not(#r3a-auth-gate){visibility:hidden}
+#r3a-auth-gate{position:fixed;z-index:1000;inset:0;display:grid;place-content:center;gap:12px;padding:24px;background:#091522;color:#edf4fc;font:15px system-ui,sans-serif;text-align:center}
+#r3a-auth-gate[hidden]{display:none}
+#r3a-auth-gate a,#r3a-auth-gate button{color:#eaf4ff}
+*{box-sizing:border-box}
+body{margin:0;background:#091522;color:#edf4fc;font:15px system-ui,sans-serif;overflow:hidden}
+#estate{position:fixed;inset:0;background:#152635 url('/api/v1/visual/background') center center/cover no-repeat}
+#estate:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(4,12,23,.3),transparent 70%);pointer-events:none}
+.controls{display:grid;grid-template-columns:1fr auto;gap:8px 10px;align-items:center;padding:10px;margin-top:6px;border-top:1px solid #c2d5ec33}.controls label{font-size:12px}.controls input[type=range]{grid-column:1/-1;width:100%;accent-color:#8fb9ec}.controls #snapshot-status{grid-column:1/-1;min-height:16px;font-size:11px}
+button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;border-radius:7px;padding:7px 12px}
+/* Quiet icon rail; expanded labels are opt-in. */
+#side-rail{position:fixed;z-index:30;left:14px;top:14px;bottom:14px;width:48px;display:flex;flex-direction:column;align-items:center;gap:7px;padding:8px 6px;background:rgba(8,18,30,.38);border:1px solid rgba(205,227,255,.18);border-radius:16px;backdrop-filter:blur(10px);transition:width .18s ease}
+#side-rail.expanded{width:174px;align-items:stretch}
+.rail-brand-control{position:relative;display:grid;place-items:center;margin-bottom:5px;flex:0 0 34px}
+.rail-brand{height:34px;width:34px;display:grid;place-items:center;padding:0;color:#eaf4ff;font-family:inherit;font-weight:800;font-size:17px;border-radius:11px;background:rgba(37,65,91,.44);border:1px solid rgba(205,227,255,.24);cursor:pointer}
+.rail-brand:hover,.rail-brand:focus-visible{background:rgba(62,104,143,.8);outline:2px solid #a9cefa;outline-offset:2px}
+#website-identity-tooltip{position:fixed;z-index:100;left:74px;top:14px;width:252px;padding:12px 14px;border:1px solid rgba(205,227,255,.38);border-radius:12px;background:rgba(8,18,30,.97);box-shadow:0 12px 30px #0009;backdrop-filter:blur(14px);color:#eaf4ff;font-size:12px;line-height:1.45;pointer-events:none}
+#side-rail.expanded #website-identity-tooltip{left:200px}
+#website-identity-tooltip[hidden]{display:none}
+#website-identity-tooltip strong{display:block;margin-bottom:7px;font-size:14px;color:#fff}
+#website-identity-tooltip dl{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:0}
+#website-identity-tooltip dt{color:#aebfd1}
+#website-identity-tooltip dd{margin:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.rail-spacer{flex:1}
+.rail-button{width:34px;height:34px;min-height:34px;padding:0;display:flex;align-items:center;justify-content:center;gap:11px;border:1px solid transparent;border-radius:11px;background:transparent;color:#eaf4ff;opacity:.82}
+.rail-button:hover,.rail-button:focus-visible{background:rgba(37,65,91,.56);border-color:rgba(205,227,255,.3);opacity:1}
+.rail-button svg{width:18px;height:18px;flex:0 0 18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.rail-label{display:none;white-space:nowrap;font-size:12px;text-align:left}
+#side-rail.expanded .rail-button{width:100%;justify-content:flex-start;padding:0 8px}
+#side-rail.expanded .rail-label{display:inline}
+#profile-button{position:fixed;z-index:35;left:20px;bottom:20px;width:34px;height:34px;padding:0;border-radius:50%;background:rgba(35,55,76,.62);border-color:rgba(205,227,255,.35);font-size:11px;font-weight:700}
+#profile-menu{position:fixed;z-index:36;left:14px;bottom:62px;width:min(540px,calc(100vw - 28px));max-height:78vh;overflow:auto;padding:8px;background:rgba(8,18,30,.82);border:1px solid rgba(205,227,255,.24);border-radius:13px;backdrop-filter:blur(12px);box-shadow:0 12px 32px #0006}
+#profile-menu[hidden],#infrastructure-panel[hidden],#infrastructure-anchor[hidden],#profile-settings-panel[hidden]{display:none}
+.profile-title{padding:8px 10px 10px;color:#c8d9ea;font-size:12px;border-bottom:1px solid #c2d5ec33;margin-bottom:5px}
+.profile-menu-item{width:100%;display:block;text-align:left;padding:9px 10px;margin:2px 0;background:transparent;border-color:transparent;font-size:13px}
+.profile-menu-item:hover{background:rgba(37,65,91,.56)}
+#infrastructure-panel{position:fixed;z-index:16;inset:5vh 6vw 5vh 74px;overflow:auto;padding:22px;background:rgba(8,18,30,.83);border:1px solid rgba(205,227,255,.32);border-radius:18px;backdrop-filter:blur(14px);box-shadow:0 22px 56px #0009}
+.infra-header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.infra-header h1{font-size:20px;margin:0}
+.infra-header p{font-size:12px;color:#c0d0e2;margin:4px 0 0}
+.infra-header .infra-actions{margin-left:auto;display:flex;gap:8px}.infra-header .infra-minimize-icon{margin:0 0 0 auto;width:38px;height:38px;padding:0;display:grid;place-items:center;border-radius:9px;font-size:20px;line-height:1}
+.infra-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.infra-card{padding:14px;background:rgba(30,57,80,.46);border:1px solid rgba(205,227,255,.16);border-radius:13px;min-width:0}
+.infra-card h2{font-size:14px;margin:0 0 8px}
+.infra-card p{font-size:12px;color:#c8d9ea;line-height:1.5;margin:6px 0}
+.infra-unavailable{display:inline-flex;align-items:center;gap:7px;color:#d6c79a;font-size:11px}
+.infra-unavailable:before{content:"";width:7px;height:7px;border-radius:50%;background:#b79a56;display:inline-block}
+.infra-sequence{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:10px}
+.infra-step{padding:6px 8px;border-radius:8px;background:rgba(8,18,30,.42);border:1px solid #c2d5ec22;font-size:11px;color:#d7e5f4}
+.infra-wheel{display:flex;align-items:center;justify-content:center;gap:14px;min-height:105px}
+.infra-wheel svg{width:84px;height:84px;stroke:#b8cde2;fill:none;stroke-width:2;opacity:.68}
+.infra-wheel-label{max-width:220px;font-size:12px;line-height:1.5;color:#c8d9ea}
+.infra-history{grid-column:1/-1}
+.infra-history-list{margin:8px 0 0;padding:0;list-style:none}
+.infra-history-list li{padding:8px 0;border-top:1px solid #c2d5ec22;font-size:12px;color:#c8d9ea}
+@media(max-width:760px){#infrastructure-panel{inset:8px 8px 8px 62px;padding:14px}.infra-grid{grid-template-columns:1fr}.infra-history{grid-column:auto}}
+#infrastructure-anchor{position:fixed;z-index:18;display:flex;align-items:center;gap:7px;padding:8px 12px;background:rgba(8,18,30,.52);border:1px solid rgba(205,227,255,.4);border-radius:13px;backdrop-filter:blur(7px);font-size:13px;font-weight:650;white-space:nowrap;opacity:.8;cursor:grab;touch-action:none;user-select:none}#infrastructure-anchor.dragging{cursor:grabbing;opacity:1}
+.window{position:absolute;left:8%;top:9%;width:min(1040px,86vw);height:min(760px,82vh);min-width:480px;min-height:480px;resize:both;overflow:auto;background:rgba(12,25,42,var(--panel-opacity));border:1px solid rgba(205,227,255,.55);border-radius:14px;box-shadow:0 18px 50px #0008;z-index:5}
+.window header{padding:15px 19px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #c2d5ec55;cursor:move;user-select:none;touch-action:none}
+.window header b{font-size:20px}
+.window header button{margin-left:auto}
+.content{padding:20px}
+.content h2{margin:0 0 12px;font-size:20px}
+.status-message{margin:0 0 14px;line-height:1.5;color:#cfdeef}
+.status-list{display:grid;gap:10px;margin:0 0 14px}
+.status-card{padding:11px 13px;background:rgba(30,57,80,.65);border-radius:9px}
+.status-card h3{font-size:14px;margin:0 0 6px}
+.status-card p{margin:0;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+.status-card ul{margin:6px 0 0;padding-left:18px;font-size:13px;line-height:1.55}
+.status-footnote{margin:12px 0 0;font-size:12px;line-height:1.45;color:#c0d0e2}
+.window.min{height:52px!important;min-height:52px;width:240px!important;min-width:240px;resize:none;overflow:hidden}
+.window.min .content{display:none}
+.window.min header{height:50px;padding:9px 12px}
+.window.min header b{font-size:15px;white-space:nowrap}
+@media(max-width:650px){
+ .window{left:4%;top:7%;width:92vw;height:82vh;min-width:0;min-height:400px}
+ }
+#browser-appearance[hidden]{display:none}#settings-shell{display:grid;grid-template-columns:135px minmax(0,1fr);gap:9px;padding:8px 2px}.settings-scopes{display:grid;gap:3px;align-content:start}.settings-scope{padding:7px 8px;text-align:left;font-size:12px;background:transparent;border-color:transparent}.settings-scope[aria-current=true]{background:#2b496633;border-color:#9dbce544}.settings-detail{min-width:0;padding:10px;border:1px solid #c2d5ec22;border-radius:10px;background:#10223844}.settings-detail h3{margin:0 0 5px;font-size:13px}.settings-detail p{margin:5px 0;font-size:11px;color:#c2d5ec}.settings-row{display:grid;grid-template-columns:1fr auto;gap:4px 8px;padding:7px 0;border-top:1px solid #c2d5ec22;font-size:11px}.settings-unavailable{color:#d6c79a}.settings-local{border-top:1px solid #c2d5ec33;margin-top:8px;padding-top:6px;font-size:11px}#chat-panel{position:fixed;z-index:17;inset:5vh 6vw 5vh 74px;display:grid;grid-template-columns:minmax(210px,260px) minmax(0,1fr);overflow:hidden;background:rgba(8,18,30,.86);border:1px solid rgba(205,227,255,.32);border-radius:18px;backdrop-filter:blur(14px);box-shadow:0 22px 56px #0009}#chat-panel[hidden]{display:none}.chat-sidebar,.chat-main{display:flex;flex-direction:column;min-width:0;padding:14px}.chat-sidebar{border-right:1px solid #c2d5ec22}.chat-head,.chat-toolbar{display:flex;align-items:center;gap:7px}.chat-head h1{font-size:17px;margin:0 auto 0 0}.icon-button{width:30px;height:30px;padding:0;display:grid;place-items:center;background:#23374c88;border-color:#c2d5ec33;color:#dcecff}.chat-search{width:100%;margin:10px 0;padding:8px;border-radius:9px;background:#08152288;color:#eaf4ff;border:1px solid #c2d5ec33}.chat-empty{display:grid;place-items:center;flex:1;text-align:center;padding:20px;color:#c6d6e6;font-size:13px}.chat-empty strong{display:block;margin-bottom:6px;color:#e5effb}.chat-status{font-size:11px;color:#d6c79a;margin:8px 0}.chat-toolbar{justify-content:center;gap:5px;flex-wrap:wrap;padding:9px 0;border-top:1px solid #c2d5ec22}.chat-toolbar button{width:30px;height:30px;padding:0;opacity:.46}.chat-composer{display:flex;gap:8px;align-items:end}.chat-composer textarea{flex:1;min-height:42px;max-height:120px;resize:vertical;border:1px solid #c2d5ec33;border-radius:11px;background:#091522aa;color:#eaf4ff;padding:10px}.chat-menu-template{display:none}@media(max-width:760px){#chat-panel{inset:8px;grid-template-columns:1fr}#chat-panel{grid-template-columns:minmax(115px,34%) minmax(0,1fr)}#chat-panel .chat-sidebar{display:flex;padding:8px}.chat-main{padding:8px}#settings-shell{grid-template-columns:100px minmax(0,1fr)}}
+
+/* Chat and estate panel placement controls. Presets are user-local presentation preferences. */
+#chat-panel{inset:auto;left:8vw;top:8vh;right:auto;bottom:auto;width:min(1100px,84vw);height:min(780px,84vh);min-width:460px;min-height:420px;resize:both;overflow:auto;z-index:24}
+#chat-panel .chat-main>.chat-head{cursor:move;touch-action:none;user-select:none}
+#chat-panel .chat-sidebar-toggle{flex:0 0 30px}
+#chat-panel.rail-collapsed{grid-template-columns:48px minmax(0,1fr)}
+#chat-panel.rail-collapsed .chat-sidebar{padding:8px 6px;align-items:center}
+#chat-panel.rail-collapsed .chat-sidebar .chat-head{justify-content:center}
+#chat-panel.rail-collapsed .chat-sidebar .chat-head h1,
+#chat-panel.rail-collapsed .chat-sidebar>:not(.chat-head),
+#chat-panel.rail-collapsed .chat-head #chat-new,
+#chat-panel.rail-collapsed .chat-head #chat-conference{display:none}
+#chat-panel.minimized{height:50px!important;min-height:50px;resize:none;overflow:hidden;grid-template-columns:1fr}
+#chat-panel.minimized .chat-sidebar{display:none}
+#chat-panel.minimized .chat-main{padding:7px 10px}
+#chat-panel.minimized .chat-main>:not(.chat-head){display:none}
+#chat-panel .chat-main .chat-head h1{margin-right:auto}
+#chat-panel .chat-main .chat-head #chat-close{margin-left:0}
+#infrastructure-panel{inset:auto;left:12vw;top:8vh;right:auto;bottom:auto;width:min(1040px,82vw);height:min(820px,86vh);min-width:460px;min-height:360px;resize:both;overflow:auto}
+#infrastructure-panel .infra-header{cursor:move;touch-action:none;user-select:none}
+#layout-presets{margin-top:12px;padding:10px;border:1px solid #c2d5ec33;border-radius:10px;background:#10223844}
+#layout-presets h3{margin:0 0 5px;font-size:13px}
+#layout-presets p{margin:4px 0 8px;font-size:11px;color:#c2d5ec}
+#layout-presets-controls{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}
+#layout-presets-controls select,#layout-preset-name{min-width:0;background:#091522;color:#eaf4ff;border:1px solid #c2d5ec55;border-radius:7px;padding:7px}
+#layout-preset-name{grid-column:1/-1}
+#layout-presets-controls button{padding:6px 8px;font-size:11px}
+@media(max-width:760px){#chat-panel{inset:auto;left:62px;top:8px;right:auto;bottom:auto;width:calc(100vw - 72px);height:82vh;min-width:0;min-height:380px}#infrastructure-panel{inset:auto;left:62px;top:8px;right:auto;bottom:auto;width:calc(100vw - 72px);height:82vh;min-width:0;min-height:340px}}
+
+#layout-quick-button{position:fixed;z-index:38;left:20px;bottom:62px;width:34px;height:34px;padding:6px;border-radius:10px;background:rgba(35,55,76,.62);border-color:rgba(205,227,255,.35);color:#d8eaff}
+#layout-quick-button svg{display:block;width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linejoin:round}
+#layout-quick-menu{position:fixed;z-index:39;left:14px;bottom:102px;width:220px;max-height:72vh;overflow:auto;padding:8px;background:rgba(8,18,30,.9);border:1px solid rgba(205,227,255,.3);border-radius:13px;backdrop-filter:blur(12px);box-shadow:0 12px 32px #0008}
+#layout-quick-menu[hidden]{display:none}.layout-quick-title{padding:5px 7px 8px;font-size:11px;color:#c8d9ea;border-bottom:1px solid #c2d5ec33;margin-bottom:5px}
+#layout-quick-slots{display:grid;gap:3px}.layout-quick-slot{display:flex;align-items:center;gap:8px;width:100%;padding:5px 7px;text-align:left;background:transparent;border-color:transparent;font-size:11px;opacity:.42}.layout-quick-slot.available{opacity:1}.layout-quick-slot.available:hover,.layout-quick-slot.available:focus-visible{background:rgba(62,104,143,.48);border-color:#c2d5ec44}
+.layout-quick-number{display:grid;place-items:center;width:24px;height:24px;flex:0 0 24px;border-radius:7px;border:1px solid #c2d5ec33;font-variant-numeric:tabular-nums}.layout-quick-slot.available .layout-quick-number{background:#294969;border-color:#9dc2e888;color:#fff}.layout-quick-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#layout-quick-settings{display:grid;place-items:center;width:30px;height:30px;margin:7px auto 0;padding:0;border-radius:8px;background:rgba(37,65,91,.48);font-size:15px}#layout-quick-status{display:block;min-height:14px;margin:5px 3px 0;font-size:10px;color:#c8d9ea}
+.opacity-control{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:0 0 30px}.opacity-trigger{width:30px;height:30px;padding:0;display:grid;place-items:center;border-radius:8px;background:rgba(35,55,76,.62);border-color:#c2d5ec44;color:#dcecff;font-size:16px}
+.opacity-popover{display:none;position:absolute;z-index:80;right:0;top:calc(100% + 5px);width:190px;padding:10px;background:rgba(8,18,30,.96);border:1px solid #c2d5ec66;border-radius:10px;box-shadow:0 8px 24px #0009}.opacity-control:hover .opacity-popover,.opacity-control:focus-within .opacity-popover{display:block}
+.opacity-popover label{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#eaf4ff}.opacity-popover input[type=range]{width:100%;margin:8px 0 0;accent-color:#8fb9ec}
+#infrastructure-panel{background:rgba(8,18,30,var(--infrastructure-opacity,.83))}.window.min .opacity-control{display:none}#chat-panel{background:rgba(8,18,30,var(--chat-opacity,.86))}.window{background:rgba(12,25,42,var(--engineering-opacity,.45))}
+.window header .window-actions{display:flex;align-items:center;gap:6px;margin-left:auto}.window header .window-actions>button{margin-left:0}.infra-header .infra-actions .opacity-control{margin-left:auto}.infra-header .infra-actions .infra-minimize-icon{margin-left:0}#chat-panel .chat-main>.chat-head #chat-minimize,#chat-panel .chat-main>.chat-head #chat-close{margin-left:0}
+/* Keep every floating workspace usable beside the navigation rail on phones. */
+@media(max-width:760px){
+  #side-rail.expanded{width:min(174px,calc(100vw - 24px))}
+  #side-rail.expanded #website-identity-tooltip{left:62px;top:58px}
+  #win,#chat-panel,#infrastructure-panel,#notifications-panel,#steward-panel{left:62px!important;right:auto!important;top:8px!important;bottom:auto!important;width:calc(100vw - 72px)!important;height:min(82vh,calc(100dvh - 16px))!important;min-width:0!important;min-height:0!important;max-width:calc(100vw - 72px);resize:none}
+  #chat-panel{grid-template-columns:minmax(0,34%) minmax(0,1fr)}
+  #chat-panel .chat-sidebar,#chat-panel .chat-main{padding:7px;overflow:auto}
+  #chat-panel .workspace-messages{min-height:50px}
+  #notifications-panel,#steward-panel{overflow:auto}
+}
+.steward-portal-login{display:inline-block;margin:4px 8px 7px 0;padding:8px 11px;border:1px solid #9dc2e888;border-radius:8px;color:#eff7ff;background:#294969;text-decoration:none;font-size:12px}.steward-portal-login:hover,.steward-portal-login:focus-visible{outline:2px solid #a9cefa;outline-offset:2px;background:#365d80}
+</style>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"}}
+</script>
+</head>
+<body>
+<div id="r3a-auth-gate" role="status" aria-live="polite"><strong>Verifying R3A Website session…</strong><span data-session-status>Institutional access is being checked.</span><button type="button" data-session-retry hidden onclick="location.reload()">Try again</button><a data-session-login hidden href="/login">Return to R3A sign in</a></div>
+<div id="estate" role="img" aria-label="Riverview 3 estate"></div>
+<nav id="side-rail" aria-label="R3 navigation">
+  <div class="rail-brand-control" id="rail-brand-control">
+    <button class="rail-brand" id="rail-brand" type="button" aria-label="Riverview R3 Alpha website identity" aria-describedby="website-identity-tooltip" aria-expanded="false">R</button>
+    <section id="website-identity-tooltip" role="tooltip" hidden>
+      <strong id="website-identity-application">Riverview R3 Alpha</strong>
+      <dl>
+        <dt>Website version</dt><dd id="website-identity-version">Unknown</dd>
+        <dt>Build</dt><dd id="website-identity-build">Unknown</dd>
+        <dt>Environment</dt><dd id="website-identity-environment">Unknown</dd>
+        <dt>Service port</dt><dd id="website-identity-port">Unknown</dd>
+      </dl>
+    </section>
+  </div>
+  <button class="rail-button" id="rail-toggle" type="button" aria-label="Expand navigation" title="Expand navigation" aria-controls="side-rail" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span class="rail-label">Menu</span></button>
+  <button class="rail-button" id="nav-home" type="button" aria-label="Estate home" title="Estate home"><svg viewBox="0 0 24 24"><path d="m3 10 9-7 9 7M5 9v11h14V9M9 20v-7h6v7"/></svg><span class="rail-label">Home</span></button>
+  <button class="rail-button" id="nav-chat" type="button" aria-label="Chat" title="Chat" aria-controls="chat-panel" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-5 4v-4h-.5A2.5 2.5 0 0 1 3 13.5v-8Z"/></svg><span class="rail-label">Chat</span></button>
+  <button class="rail-button" id="nav-notifications" type="button" aria-label="Notifications" title="Notifications" aria-controls="notifications-panel" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Zm-8 12h4"/></svg><span class="rail-label">Notifications</span></button>
+  <button class="rail-button" id="nav-roadmap" type="button" aria-label="Roadmap and workstream status" title="Roadmap and workstream status" aria-controls="roadmap-panel" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M4 19V5m0 14h16M7 15l4-4 3 2 5-6"/></svg><span class="rail-label">Roadmap</span></button>
+  <button class="rail-button" id="nav-steward" type="button" aria-label="Steward operations" title="Steward operations" aria-controls="steward-panel" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.5 8 8 9 4.5-1 8-4 8-9V7l-8-4Zm-4 9 2.5 2.5L16 9"/></svg><span class="rail-label">Steward</span></button>
+   <button class="rail-button" id="nav-engineering" type="button" aria-label="Engineering Foundry" title="Engineering Foundry" aria-controls="win"><svg viewBox="0 0 24 24"><path d="m14 6 4-4 4 4-4 4M3 21l9-9M7 5l12 12M5 7l12 12"/></svg><span class="rail-label">Engineering</span></button>
+  <button class="rail-button" id="nav-infrastructure" type="button" aria-label="Infrastructure" title="Infrastructure observability" aria-controls="infrastructure-panel" aria-expanded="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><path d="M12 3v7m0 4v7M3 12h7m4 0h7M5.6 5.6l4.9 4.9m3 3 4.9 4.9m0-12.8-4.9 4.9m-3 3-4.9 4.9"/></svg><span class="rail-label">Infrastructure</span></button>
+  <div class="rail-spacer"></div>
+</nav>
+<button id="layout-quick-button" type="button" aria-label="Open floating panel layouts" title="Floating panel layouts" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="1.5"/><rect x="6" y="6" width="12" height="12" rx="1.5" fill="rgba(143,185,236,.18)"/><rect x="11" y="11" width="10" height="10" rx="1.5" fill="rgba(143,185,236,.42)"/></svg></button>
+<div id="layout-quick-menu" hidden><div class="layout-quick-title">Floating panel layouts</div><div id="layout-quick-slots"></div><button id="layout-quick-settings" type="button" title="Open preset settings" aria-label="Open preset settings">⚙</button><output id="layout-quick-status" aria-live="polite"></output></div>
+<button id="profile-button" type="button" aria-label="Open profile menu" title="Steward">S</button>
+<div id="profile-menu" hidden>
+  <div class="profile-title">Steward workspace</div>
+  <button class="profile-menu-item" id="profile-settings" type="button" aria-expanded="false">Settings</button>
+  <button class="profile-menu-item" id="website-signout" type="button">Sign out of Riverview</button>
+<div id="profile-settings-panel" hidden><div id="settings-shell">
+<nav class="settings-scopes" aria-label="Settings scope"><button class="settings-scope" data-settings-scope="Institutional">Institutional</button><button class="settings-scope" data-settings-scope="Departmental">Departmental</button><button class="settings-scope" data-settings-scope="Resident">Resident</button><button class="settings-scope" data-settings-scope="Chat">Chat</button><button class="settings-scope" data-settings-scope="User">User</button><button class="settings-scope" data-settings-scope="Device">Device</button><button class="settings-scope" data-settings-scope="Infrastructure">Infrastructure</button></nav>
+<section class="settings-detail" aria-live="polite"><h3 id="settings-scope-title">Institutional</h3><p class="settings-unavailable" id="settings-registry-status">Settings registry unavailable · no operational settings loaded.</p><div class="settings-row"><span>Inherited value</span><span>Unavailable</span></div><div class="settings-row"><span>Scoped override</span><span>Unavailable</span></div><div class="settings-row"><span>Effective value</span><span>Unavailable</span></div><div class="settings-row"><span>Authorization</span><span>Capability manifest unavailable</span></div><div class="settings-row"><span>Configuration history</span><span>Unavailable</span></div><section class="settings-runtime"><h3>Effective R3A runtime configuration</h3><p>Read from the current durable config revision. This view does not imply inherited scopes or write access.</p><button id="settings-config-refresh" type="button">Load effective values</button><output id="settings-config-status" aria-live="polite">Not loaded</output><pre id="settings-config-values">No configuration values loaded.</pre><div id="settings-config-history"></div></section><div class="settings-local">Local appearance · this browser only</div><div id="browser-appearance" hidden><div class="controls"><label for="opacity">Engineering opacity</label><output id="value" for="opacity">45%</output><input id="opacity" type="range" min="45" max="95" value="45"><button id="center-window" type="button">Center window</button><button id="snapshot-button" type="button">Snapshot</button><output id="snapshot-status" aria-live="polite"></output></div><section id="layout-presets"><h3>Floating panel layouts</h3><p>Save up to 10 layouts for this browser. A layout records panel positions, sizes, and open or minimized state. Applying a preset can show Chat, Engineering, Infrastructure, Steward operations, and Notifications together.</p><div id="layout-presets-controls"><select id="layout-preset-slot" aria-label="Layout preset"></select><input id="layout-preset-name" type="text" maxlength="32" placeholder="Preset name (optional)" aria-label="Preset name"><button id="layout-preset-save" type="button">Save current</button><button id="layout-preset-apply" type="button">Apply</button><button id="layout-preset-clear" type="button">Clear</button></div><output id="layout-preset-status" aria-live="polite"></output></section></div></section></div></div>
+  <button class="profile-menu-item" id="profile-engineering" type="button">Engineering Foundry panel</button>
+  <button class="profile-menu-item" id="profile-infrastructure" type="button">Infrastructure panel</button>
+</div>
+<section class="window min" id="win" aria-label="Engineering Foundry">
+  <header id="drag">
+    <b>⚒ Engineering Foundry</b>
+    <div class="window-actions"><div class="opacity-control"><button class="opacity-trigger" type="button" title="Engineering opacity" aria-label="Engineering opacity">◐</button><div class="opacity-popover"><label for="engineering-opacity">Engineering opacity <output id="engineering-opacity-value">45%</output></label><input id="engineering-opacity" type="range" min="45" max="95" value="45"></div></div><button id="minimize" aria-label="Restore panel">□</button></div>
+  </header>
+  <div class="content">
+    <h2>Engineering status</h2>
+    <p class="status-message" id="api-status" role="status" aria-live="polite">Loading current R3 state…</p>
+    <div class="status-list">
+      <section class="status-card" aria-labelledby="repo-title">
+        <h3 id="repo-title">Repository</h3>
+        <p id="repo-status">Checking</p>
+      </section>
+      <section class="status-card" aria-labelledby="branch-title">
+        <h3 id="branch-title">Branches</h3>
+        <ul id="branch-list"><li>Loading</li></ul>
+      </section>
+      <section class="status-card" aria-labelledby="worktree-title">
+        <h3 id="worktree-title">Worktrees</h3>
+        <ul id="worktree-list"><li>Loading</li></ul>
+      </section>
+    </div>
+    <button id="refresh-status" type="button">Refresh status</button>
+    <p class="status-footnote">Branch and worktree records do not establish that a worker is currently active.</p>
+  </div>
+</section>
+<section id="infrastructure-panel" aria-label="Infrastructure observability" hidden>
+  <header class="infra-header">
+    <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true" style="fill:none;stroke:#dcecff;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><path d="M12 3v7m0 4v7M3 12h7m4 0h7M5.6 5.6l4.9 4.9m3 3 4.9 4.9m0-12.8-4.9 4.9m-3 3-4.9 4.9"/></svg>
+    <div><h1>Infrastructure</h1><p>R3 runtime observability · contract draft v0.1</p></div>
+    <div class="infra-actions"><div class="opacity-control"><button class="opacity-trigger" type="button" title="Infrastructure opacity" aria-label="Infrastructure opacity">◐</button><div class="opacity-popover"><label for="infrastructure-opacity">Infrastructure opacity <output id="infrastructure-opacity-value">83%</output></label><input id="infrastructure-opacity" type="range" min="45" max="95" value="83"></div></div><button id="infrastructure-minimize" class="infra-minimize-icon" type="button" aria-label="Minimize Infrastructure" title="Minimize">−</button></div>
+  </header>
+  <div class="infra-grid">
+    <section class="infra-card">
+      <h2>Main loop</h2>
+      <div class="infra-unavailable">Runtime state unavailable</div>
+      <p id="main-loop-state">No verified state number or transition has been received from the R3 runtime.</p>
+      <div class="infra-sequence" aria-label="Documented resident learning cycle">
+        <span class="infra-step">Retrieve knowledge</span><span class="infra-step">Ground</span><span class="infra-step">Reason / act</span><span class="infra-step">Observe</span><span class="infra-step">Verify</span><span class="infra-step">Learn / update</span>
+      </div>
+    </section>
+    <section class="infra-card">
+      <h2>Supervisory loop</h2>
+      <div class="infra-unavailable">Runtime state unavailable</div>
+      <p id="supervisory-loop-state">No verified supervisory state, watchdog reading, or recovery event has been received.</p>
+      <p>Designed responsibility: detect stalls or failures, then record recovery or escalation.</p>
+    </section>
+    <section class="infra-card">
+      <h2>Water-wheel scheduler</h2>
+      <div class="infra-wheel">
+        <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="39"/><circle cx="50" cy="50" r="8"/><path d="M50 11v31m0 16v31M11 50h31m16 0h31M22.4 22.4l21.9 21.9m11.4 11.4 21.9 21.9m0-55.2L55.7 44.3M44.3 55.7 22.4 77.6"/></svg>
+        <div class="infra-wheel-label">Scheduler model only. No active resident slot or time-slice telemetry is connected.</div>
+      </div>
+    </section>
+    <section class="infra-card">
+      <h2>Residents and resources</h2>
+      <div class="infra-unavailable">Activity not reported by runtime</div>
+      <p id="resident-resource-state">No resident assignment, resource allocation, or active time slice is available.</p>
+    </section>
+    <section class="infra-card">
+      <h2>Heartbeat, watchdog, recovery</h2>
+      <div class="infra-unavailable">No runtime source connected</div>
+      <p id="watchdog-state">Heartbeat age, watchdog status, and recovery state will be shown when supplied by verified runtime telemetry.</p>
+    </section>
+    <section class="infra-card">
+      <h2>Source freshness</h2>
+      <div class="infra-unavailable">Unavailable</div>
+      <p id="freshness-state">Last source update: not reported. Freshness cannot be determined without a runtime timestamp.</p>
+    </section>
+    <section class="infra-card infra-history">
+      <h2>Ordered transition history</h2>
+      <div class="infra-unavailable">No verified transitions received</div>
+      <ol class="infra-history-list" id="transition-history"><li>History will appear here after the R3 runtime supplies verified enum transitions and timestamps.</li></ol>
+    </section>
+  </div>
+</section>
+<section id="chat-panel" aria-label="Chat" hidden><aside class="chat-sidebar"><div class="chat-head"><h1>Conversations</h1><button class="icon-button chat-sidebar-toggle" id="chat-sidebar-toggle" type="button" title="Collapse conversation rail" aria-label="Collapse conversation rail">‹</button><button class="icon-button" id="chat-new" disabled title="New conversation · unavailable" aria-label="New conversation">＋</button><button class="icon-button" id="chat-conference" disabled title="Conference room · planned" aria-label="New conference room">♧</button></div><select id="chat-resident-select" aria-label="Select authorized resident" disabled><option value="">Resident directory unavailable</option></select><div id="chat-conversation-list" class="workspace-conversations">Conversations load from the authoritative directory.</div><div class="chat-status">Chat messages remain distinct from objectives and formal work orders.</div><div class="chat-status" id="chat-service-status" role="status" aria-live="polite">Conversation service unavailable · no live history loaded</div></aside>
+<section class="chat-main"><div class="chat-head" id="chat-drag"><h1>Resident conversation</h1><button class="icon-button" id="chat-refresh" type="button" title="Refresh conversation" aria-label="Refresh conversation">↻</button><button class="icon-button" id="chat-minimize" title="Minimize chat" aria-label="Minimize chat">−</button><div class="opacity-control"><button class="icon-button opacity-trigger" type="button" title="Chat opacity" aria-label="Chat opacity">◐</button><div class="opacity-popover"><label for="chat-opacity">Chat opacity <output id="chat-opacity-value">86%</output></label><input id="chat-opacity" type="range" min="45" max="95" value="86"></div></div><button class="icon-button" disabled title="Resident-specific actions supplied by service" aria-label="Conversation menu">⋯</button><button class="icon-button" id="chat-close" title="Close chat" aria-label="Close chat">×</button></div><div id="chat-message-list" class="workspace-messages" aria-live="polite">Select a resident and conversation to load durable history.</div><div class="chat-status">Conversation routing and action availability come from authoritative service data.</div><div class="chat-composer"><textarea id="chat-composer-input" aria-label="Message" placeholder="Select a conversation to write" disabled></textarea><button id="chat-send" disabled aria-label="Send message" title="Send message">↑</button></div></section>
+<template id="conversation-row-template"><div><button class="conversation-open"></button><button class="icon-button" title="Conversation actions">⋯</button><menu class="conversation-actions" data-capability-manifest="conversation"><button>Rename</button><button>Archive</button><button>Delete</button><button>Reopen</button></menu></div></template><template id="message-row-template"><article><button class="icon-button" title="Message actions">⋯</button><menu class="message-actions" data-capability-manifest="resident"><button>Copy</button><button>Edit</button><button>Quote</button><button>Branch</button><button>Generate image</button><button>Save reference</button><button>Work-related action</button></menu></article></template></section>
+<section id="steward-panel" aria-label="Steward operations" hidden><header class="steward-head"><div><h1>Steward operations</h1><p>Authenticated control of durable R3A activities</p></div><button id="steward-minimize" class="icon-button" aria-label="Minimize Steward operations">−</button><button id="steward-close" class="icon-button" aria-label="Close Steward operations">×</button></header><div class="steward-body"><output id="steward-auth-status" aria-live="polite">Checking institutional Website session…</output><div id="steward-workspace" hidden><div class="steward-toolbar"><b id="steward-source-state">Session not checked</b><button id="steward-refresh" type="button">Refresh activity and events</button><button id="steward-capabilities-refresh" type="button">Refresh registered capabilities</button></div><div class="steward-grid"><section class="steward-card"><h2>Submit objective to Grace</h2><label for="objective-text">Instruction or objective</label><textarea id="objective-text" maxlength="4000">Using the configured process lifecycle definition, identify the allowed transitions from RUNNING and cite the source evidence.</textarea><label for="objective-criteria">Machine-checkable acceptance criteria (JSON)</label><textarea id="objective-criteria" class="criteria" spellcheck="false">[{"criterion_id":"running-to-stopping","type":"transition_path","from_state":"RUNNING","to_state":"STOPPING"}]</textarea><button id="objective-submit" type="button">Submit durable objective</button><output id="objective-result" aria-live="polite"></output></section><section class="steward-card"><h2>Latest activities</h2><div id="steward-activities" class="steward-list">Not loaded</div></section><section class="steward-card"><h2>Institution events</h2><div id="steward-events" class="steward-list">Not loaded</div></section><section class="steward-card"><h2>Registered capabilities</h2><p>Read-only CME registry discovery. Presence does not grant invocation.</p><div id="steward-capabilities" class="steward-list">Not loaded</div></section><section class="steward-card"><h2>Invoke a registered operation</h2><p>Uses the generic versioned CME invocation path. Use the operation descriptor above; CME evaluates current grants and validates its schema.</p><label for="capability-invocation-json">Canonical invocation request JSON</label><textarea id="capability-invocation-json" class="criteria" spellcheck="false" placeholder="Paste an r3a.capability-invocation.v1 request"></textarea><button id="capability-invoke" type="button">Invoke through CME</button><output id="capability-invocation-result" aria-live="polite">No operation submitted.</output></section></div><div class="steward-integrations"><b>Unavailable integrations</b><span>Persistent resident conversations</span><span>Configuration writes and audit history</span><span>Notification acknowledgement and resolution</span><span>AP0 session-store migration and least-privilege DB binding are not configured</span></div></div></div></section>
+<section id="notifications-panel" aria-label="Notification inbox" hidden><header id="notifications-drag"><div><h1>Institution notifications</h1><p>Recipient-specific service history</p></div><div class="opacity-control"><button class="icon-button opacity-trigger" type="button" title="Notifications opacity" aria-label="Notifications opacity">◐</button><div class="opacity-popover"><label for="notifications-opacity">Notifications opacity <output id="notifications-opacity-value">92%</output></label><input id="notifications-opacity" type="range" min="45" max="98" value="92"></div></div><button id="notifications-refresh" class="icon-button" type="button" aria-label="Refresh notifications" title="Refresh">↻</button><button id="notifications-minimize" class="icon-button" type="button" aria-label="Minimize notifications" title="Minimize">−</button><button id="notifications-close" class="icon-button" type="button" aria-label="Close notifications" title="Close">×</button></header><p id="notification-service-status" role="status" aria-live="polite">Notification service unavailable · no live records loaded</p><div id="notification-list" class="notification-list">No notification data is cached in this browser.</div></section>
+<section id="roadmap-panel" aria-label="Roadmap and workstream status" hidden><header><div><h1>Roadmap and workstreams</h1><p>Live GitHub issue records and authenticated CME diagnostics</p></div><div class="opacity-control"><button class="icon-button opacity-trigger" type="button" title="Roadmap opacity" aria-label="Roadmap opacity">◐</button><div class="opacity-popover"><label for="roadmap-opacity">Roadmap opacity <output id="roadmap-opacity-value">94%</output></label><input id="roadmap-opacity" type="range" min="45" max="98" value="94"></div></div><button id="roadmap-refresh" class="icon-button" type="button" aria-label="Refresh roadmap">↻</button><button id="roadmap-minimize" class="icon-button" type="button" aria-label="Minimize roadmap status">−</button><button id="roadmap-close" class="icon-button" type="button" aria-label="Close roadmap status">×</button></header><p id="roadmap-runtime-status" role="status" aria-live="polite">CME runtime state not loaded.</p><p id="roadmap-status" role="status" aria-live="polite">Roadmap source not loaded.</p><div id="roadmap-list" class="roadmap-list">No roadmap records loaded.</div></section>
+<button id="infrastructure-anchor" type="button" aria-label="Open Infrastructure panel" title="Infrastructure entrance" hidden>◉ Infrastructure</button>
+<style>
+#chat-resident-select{width:100%;margin:7px 0;padding:8px;border:1px solid #c2d5ec33;border-radius:8px;background:#091522;color:#eaf4ff}.workspace-conversations{display:grid;gap:5px;min-height:50px;max-height:35vh;overflow:auto;font-size:11px;color:#c6d6e6}.workspace-conversation{width:100%;text-align:left;background:#10223866;border-color:#c2d5ec22;overflow-wrap:anywhere}.workspace-messages{flex:1;min-height:80px;overflow:auto;padding:8px;color:#c6d6e6;font-size:12px}.workspace-message{padding:9px;margin:5px 0;border-radius:9px;background:#10223888;overflow-wrap:anywhere}.workspace-message b{display:block}.workspace-message p{white-space:pre-wrap;margin:7px 0 0}.chat-composer{margin-top:8px}.chat-composer button{min-width:40px;height:42px}#notifications-panel{position:fixed;z-index:26;left:18vw;top:9vh;width:min(700px,72vw);height:min(700px,78vh);min-width:360px;min-height:300px;resize:both;overflow:auto;background:rgba(8,18,30,.92);border:1px solid #c2d5ec55;border-radius:15px;box-shadow:0 22px 56px #0009;backdrop-filter:blur(14px);padding:14px}#notifications-panel[hidden]{display:none}#notifications-panel.minimized{height:50px!important;min-height:50px;resize:none;overflow:hidden}#notifications-panel.minimized>:not(header){display:none}#notifications-panel header{display:flex;align-items:center;gap:8px;cursor:move;touch-action:none;user-select:none;border-bottom:1px solid #c2d5ec33;padding-bottom:8px}#notifications-panel header div{margin-right:auto}#notifications-panel h1{margin:0;font-size:17px}#notifications-panel header p,#notification-service-status{font-size:11px;color:#d6c79a;margin:4px 0}.notification-list{display:grid;gap:9px;overflow:auto;max-height:calc(100% - 82px)}.notification-item{padding:11px;border:1px solid #c2d5ec2b;border-radius:10px;background:#10223888;font-size:12px}.notification-item p{margin:7px 0;color:#c7d8e8;overflow-wrap:anywhere}.notification-heading{display:grid;grid-template-columns:1fr auto;gap:8px}.notification-heading b{font-size:13px}.notification-heading:not(b){color:#d6c79a;font-size:10px}.notification-item button{margin-right:6px}.chat-status[data-state="unavailable"],#notification-service-status[data-state="unavailable"]{color:#d6c79a}@media(max-width:760px){#notifications-panel{left:62px;top:8px;width:calc(100vw - 72px);height:82vh;min-width:0;min-height:300px}}
+#roadmap-panel{position:fixed;z-index:28;left:15vw;top:7vh;width:min(900px,80vw);height:min(850px,86vh);min-width:360px;min-height:320px;resize:both;overflow:auto;padding:14px;background:rgba(8,18,30,.94);border:1px solid #c2d5ec55;border-radius:15px;box-shadow:0 22px 56px #0009;backdrop-filter:blur(14px)}#roadmap-panel[hidden]{display:none}#roadmap-panel.minimized{height:50px!important;min-height:50px;resize:none;overflow:hidden}#roadmap-panel.minimized>:not(header){display:none}#roadmap-panel>header{display:flex;align-items:center;gap:8px;border-bottom:1px solid #c2d5ec33;padding-bottom:8px}#roadmap-panel>header div{margin-right:auto}#roadmap-panel h1{margin:0;font-size:17px}#roadmap-panel header p,#roadmap-status,#roadmap-runtime-status{font-size:11px;color:#d6c79a;margin:4px 0}#roadmap-list{display:grid;gap:9px}.roadmap-issue{padding:10px;border:1px solid #c2d5ec2b;border-radius:10px;background:#10223888}.roadmap-issue header{display:flex;align-items:center;gap:8px}.roadmap-issue header a{color:#eaf4ff;font-size:13px;font-weight:650;overflow-wrap:anywhere}.roadmap-issue p{font-size:10px;color:#bfd0e2;line-height:1.5}.roadmap-state{margin-left:auto;font-size:10px}.roadmap-issue details{font-size:11px;color:#c7d8e8}.roadmap-issue pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:230px;overflow:auto;font:11px/1.5 inherit}@media(max-width:760px){#roadmap-panel{left:62px;top:8px;width:calc(100vw - 72px);height:82vh;min-width:0;min-height:300px}}
+.roadmap-issue pre{font:inherit;font-size:11px;line-height:1.5}#roadmap-panel>header{cursor:move;touch-action:none;user-select:none}#notifications-panel{background:rgba(8,18,30,var(--notifications-opacity,.92))}#roadmap-panel{background:rgba(8,18,30,var(--roadmap-opacity,.94))}
+.notification-item details{margin:7px 0;color:#c7d8e8}.notification-item pre{max-height:320px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:8px;border-radius:7px;background:#07131e99;font:10px/1.5 ui-monospace,monospace}.notification-item>a{display:inline-block;margin:5px 9px 0 0;color:#a9cefa}
+#steward-panel{position:fixed;z-index:27;inset:auto;left:14vw;top:8vh;width:min(1120px,80vw);height:min(850px,84vh);min-width:480px;min-height:440px;resize:both;overflow:auto;background:rgba(8,18,30,.91);border:1px solid #c2d5ec55;border-radius:16px;box-shadow:0 22px 56px #0009;backdrop-filter:blur(14px)}#steward-panel[hidden]{display:none}#steward-panel.minimized{height:50px!important;min-height:50px;resize:none;overflow:hidden}#steward-panel.minimized .steward-body{display:none}.steward-head{position:sticky;top:0;z-index:2;display:flex;cursor:move;touch-action:none;user-select:none;align-items:center;padding:14px 18px;background:#0b1b2beF;border-bottom:1px solid #c2d5ec33}.steward-head h1{margin:0;font-size:18px}.steward-head p{margin:3px 0 0;color:#bfd0e2;font-size:12px}.steward-head button{margin-left:auto}.steward-body{padding:14px}.steward-card{padding:13px;margin-bottom:12px;border:1px solid #c2d5ec2b;border-radius:12px;background:#1e39504a;min-width:0}.steward-card h2{font-size:14px;margin:0 0 8px}.steward-card p{font-size:12px;color:#bfd0e2;line-height:1.5}.steward-card label{display:block;margin:9px 0 4px;font-size:12px;color:#dcecff}.steward-card input,.steward-card textarea{width:100%;padding:9px;border:1px solid #c2d5ec55;border-radius:8px;background:#081522;color:#eaf4ff}.steward-card textarea{min-height:90px;resize:vertical}.steward-card textarea.criteria{min-height:104px;font:11px ui-monospace,monospace}.steward-card button{margin-top:8px}.steward-card output{display:block;min-height:18px;margin-top:8px;color:#d6c79a;font-size:12px;overflow-wrap:anywhere}.steward-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px}.steward-toolbar b{margin-right:auto;font-size:12px}.steward-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.steward-grid .steward-card:first-child{grid-row:span 2}.steward-list{display:grid;gap:7px;max-height:280px;overflow:auto}.steward-row{padding:8px;border-radius:8px;background:#08152277;font-size:11px;line-height:1.45;overflow-wrap:anywhere}.steward-row b{display:block;font-size:12px}.steward-integrations{display:flex;gap:7px;flex-wrap:wrap;padding:8px 2px;color:#d6c79a;font-size:10px}.steward-integrations span{border:1px solid #c2d5ec2b;border-radius:20px;padding:5px 8px}@media(max-width:760px){#steward-panel{left:62px;top:8px;width:calc(100vw - 72px);height:84vh;min-width:0;min-height:400px}.steward-grid{grid-template-columns:1fr}.steward-grid .steward-card:first-child{grid-row:auto}}
+.settings-runtime{margin-top:12px;padding:9px;border-top:1px solid #c2d5ec33}.settings-runtime p,.settings-runtime output,.settings-runtime pre{font-size:10px;color:#c7d8e8;line-height:1.5}.settings-runtime pre{max-height:240px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:8px;border-radius:7px;background:#07131e99}.settings-runtime button{font-size:10px;padding:5px 8px}.settings-config-revision{font-size:10px;color:#9fc4ed;padding:5px 0}
+</style>
+<script>
+// Front-end adapter seam. It deliberately has no backend field names or inferred state values.
+// Reconcile the R3 runtime's state and scheduling contract before connecting a telemetry source.
+const infrastructureTelemetryAdapter={
+  async read(){
+    return {available:false,reason:'R3 runtime telemetry source is not connected'};
+  }
+};
+const infrastructurePanel=document.getElementById('infrastructure-panel');
+const chatPanel=document.getElementById('chat-panel');
+const roadmapPanel=document.getElementById('roadmap-panel');
+const stewardPanel=document.getElementById('steward-panel');
+const websiteIdentityButton=document.getElementById('rail-brand');
+const websiteIdentityTooltip=document.getElementById('website-identity-tooltip');
+let websiteIdentityPinned=false;
+let websiteIdentityLastPointer='mouse';
+function setWebsiteIdentityOpen(open){websiteIdentityTooltip.hidden=!open;websiteIdentityButton.setAttribute('aria-expanded',String(open));}
+websiteIdentityButton.addEventListener('pointerenter',event=>{websiteIdentityLastPointer=event.pointerType||'mouse';setWebsiteIdentityOpen(true);});
+websiteIdentityButton.addEventListener('pointerleave',()=>{if(!websiteIdentityPinned&&document.activeElement!==websiteIdentityButton)setWebsiteIdentityOpen(false);});
+websiteIdentityButton.addEventListener('focus',()=>setWebsiteIdentityOpen(true));
+websiteIdentityButton.addEventListener('blur',()=>{if(!websiteIdentityPinned)setWebsiteIdentityOpen(false);});
+websiteIdentityButton.addEventListener('pointerdown',event=>{websiteIdentityLastPointer=event.pointerType||'mouse';});
+websiteIdentityButton.addEventListener('click',()=>{websiteIdentityPinned=!websiteIdentityPinned;if(websiteIdentityLastPointer==='touch'&&!websiteIdentityPinned){setWebsiteIdentityOpen(false);websiteIdentityButton.blur();}else setWebsiteIdentityOpen(websiteIdentityPinned||document.activeElement===websiteIdentityButton);});
+websiteIdentityButton.addEventListener('keydown',event=>{if(event.key==='Escape'){websiteIdentityPinned=false;setWebsiteIdentityOpen(false);websiteIdentityButton.blur();}});
+document.addEventListener('pointerdown',event=>{if(!event.target.closest('#rail-brand-control')){websiteIdentityPinned=false;setWebsiteIdentityOpen(false);}});
+async function loadWebsiteIdentity(){
+  const fields={
+    application:document.getElementById('website-identity-application'),
+    website_version:document.getElementById('website-identity-version'),
+    build_commit:document.getElementById('website-identity-build'),
+    environment:document.getElementById('website-identity-environment'),
+    service_port:document.getElementById('website-identity-port')
+  };
+  try{
+    const response=await fetch('/api/v1/website/identity',{headers:{Accept:'application/vnd.r3a.website-identification.v1+json'},cache:'no-store'});
+    if(!response.ok)throw new Error(`identity metadata unavailable (${response.status})`);
+    const identity=await response.json();
+    if(identity.contract!=='r3a.website-identification.v1')throw new Error('identity metadata contract mismatch');
+    for(const [key,node] of Object.entries(fields))node.textContent=String(identity[key]??'unknown');
+    fields.build_commit.textContent=identity.build_commit&&identity.build_commit!=='unknown'?identity.build_commit.slice(0,8):'Unknown';
+    fields.service_port.textContent=identity.service_port&&identity.service_port!=='unknown'?String(identity.service_port):'Unknown';
+  }catch(_error){
+    for(const node of Object.values(fields))if(node!==fields.application)node.textContent='Unknown';
+  }
+}
+loadWebsiteIdentity();
+const settingsRegistryAdapter={async read(){return{available:false,reason:'R3 settings registry is not connected'};}};
+const infrastructureButton=document.getElementById('nav-infrastructure');
+const infrastructureMinimize=document.getElementById('infrastructure-minimize'),infrastructureAnchor=document.getElementById('infrastructure-anchor');
+const sideRail=document.getElementById('side-rail');
+const railToggle=document.getElementById('rail-toggle');
+const panelNavigation={chat:[chatPanel,document.getElementById('nav-chat')],notifications:[document.getElementById('notifications-panel'),document.getElementById('nav-notifications')],roadmap:[roadmapPanel,document.getElementById('nav-roadmap')],steward:[stewardPanel,document.getElementById('nav-steward')],infrastructure:[infrastructurePanel,document.getElementById('nav-infrastructure')]};
+function syncPanelNavigation(){for(const [panel,button] of Object.values(panelNavigation)){button?.setAttribute('aria-expanded',String(Boolean(panel&&!panel.hidden)));}}
+function setRailExpanded(expanded,{collapseOnMobile=false}={}){sideRail.classList.toggle('expanded',expanded);railToggle.setAttribute('aria-expanded',String(expanded));railToggle.setAttribute('aria-label',expanded?'Collapse navigation':'Expand navigation');railToggle.title=expanded?'Collapse navigation':'Expand navigation';if(collapseOnMobile&&innerWidth<=760){sideRail.classList.remove('expanded');railToggle.setAttribute('aria-expanded','false');railToggle.setAttribute('aria-label','Expand navigation');railToggle.title='Expand navigation';}}
+const profileButton=document.getElementById('profile-button');
+const layoutQuickButton=document.getElementById('layout-quick-button');
+const layoutQuickMenu=document.getElementById('layout-quick-menu');
+const layoutQuickSlots=document.getElementById('layout-quick-slots');
+const layoutQuickStatus=document.getElementById('layout-quick-status');
+const profileMenu=document.getElementById('profile-menu');
+const infrastructureHeader=document.querySelector('.infra-header');
+const chatSidebar=document.querySelector('.chat-sidebar');
+const chatDragHandle=document.getElementById('chat-drag');
+function openSteward(){stewardPanel.hidden=false;profileMenu.hidden=true;layoutQuickMenu.hidden=true;setRailExpanded(sideRail.classList.contains('expanded'),{collapseOnMobile:true});syncPanelNavigation();checkStewardSession();}
+document.getElementById('nav-steward').addEventListener('click',openSteward);document.getElementById('steward-close').addEventListener('click',()=>{stewardPanel.hidden=true;syncPanelNavigation();});document.getElementById('steward-minimize').addEventListener('click',()=>{stewardPanel.classList.toggle('minimized');const minimized=stewardPanel.classList.contains('minimized');const button=document.getElementById('steward-minimize');button.textContent=minimized?'□':'−';button.title=minimized?'Restore Steward panel':'Minimize Steward panel';button.setAttribute('aria-label',button.title);});
+document.getElementById('website-signout').addEventListener('click',async()=>{const button=document.getElementById('website-signout');button.disabled=true;try{await stewardApi('/api/v1/steward/session',{method:'DELETE'});document.dispatchEvent(new CustomEvent('r3:steward-session-revoked'));window.location.replace('/login');}catch(error){if(error.status===401){window.location.replace('/login');return;}button.disabled=false;button.textContent='Sign out unavailable · retry';}});
+document.getElementById('steward-refresh').addEventListener('click',refreshStewardState);
+document.getElementById('settings-config-refresh').addEventListener('click',async()=>{const status=document.getElementById('settings-config-status'),values=document.getElementById('settings-config-values'),history=document.getElementById('settings-config-history');status.textContent='Reading authoritative configuration…';try{const result=await stewardApi('/api/v1/steward/r3a/configuration');values.textContent=JSON.stringify(result.effective_values,null,2);history.replaceChildren();const revision=document.createElement('div');revision.className='settings-config-revision';revision.textContent='Revision '+(result.revision.revision_id||'unknown')+' · activated '+(result.revision.activated_at||'unknown')+' · actor '+(result.revision.actor||'unknown');history.appendChild(revision);const timezone=result.effective_values?.presentation_timezone;if(typeof timezone==='string'&&timezone.trim()){document.documentElement.dataset.presentationTimezone=timezone.trim();document.dispatchEvent(new Event('r3:presentation-timezone'));}for(const item of(result.activation_history||[])){const row=document.createElement('div');row.className='settings-config-revision';row.textContent=(item.occurred_at||'time unknown')+' · '+(item.config_revision||'revision unknown')+' · '+(item.actor||'actor unknown');history.appendChild(row);}status.textContent='Read from '+(result.source||'unknown')+' at '+(result.observed_at||'unknown')+' · activation history is limited to the latest '+result.history_window+' events'+(result.history_complete?'':' (not complete)')+' · writes unavailable';}catch(error){status.textContent='Configuration unavailable: '+error.message;values.textContent='No configuration values loaded.';history.replaceChildren();}});
+async function stewardApi(path,options={}){const response=await fetch(path,{credentials:'same-origin',cache:'no-store',...options,headers:{...(options.headers||{}),...(options.body?{'Content-Type':'application/json'}:{})}});const body=await response.json().catch(()=>({}));body.request_id=body.request_id||response.headers.get('X-Request-ID');if(!response.ok){const error=new Error(body.detail||('Request failed ('+response.status+')'));error.status=response.status;error.correlationId=body.correlation_id||response.headers.get('X-Correlation-ID')||response.headers.get('X-Request-ID');if(response.status===401)window.r3aCheckWebsiteSession?.();throw error;}return body;}
+function showStewardSession(session){const principal=session.principal||{},status=document.getElementById('steward-auth-status');document.getElementById('steward-workspace').hidden=false;status.textContent='Website session active · '+(principal.principal_id||session.principal_id||'principal unknown')+' · expires '+(session.expires_at||'unknown');document.getElementById('steward-source-state').textContent='Session current · '+(principal.principal_id||session.principal_id||'principal unknown');}
+async function checkStewardSession(){try{const session=await stewardApi('/api/v1/steward/session');showStewardSession(session);refreshStewardState();refreshStewardCapabilities();}catch(error){document.getElementById('steward-workspace').hidden=true;document.getElementById('steward-auth-status').textContent='Institutional Website session unavailable: '+error.message;}}
+async function refreshStewardCapabilities(){const container=document.getElementById('steward-capabilities');if(!container)return;container.textContent='Reading CME registry…';try{const result=await stewardApi('/api/v1/steward/capabilities');container.replaceChildren();for(const entry of(result.operations||[])){const descriptor=entry.descriptor||entry;const row=document.createElement('details');row.className='steward-row';const heading=document.createElement('summary');heading.textContent=(descriptor.operation_id||'Registered operation')+' · '+(descriptor.contract_version||descriptor.operation_contract_version||'contract version unknown');const detail=document.createElement('pre');detail.textContent=JSON.stringify({descriptor,health:entry.health,availability:entry.availability},null,2);row.append(heading,detail);container.appendChild(row);}if(!container.childNodes.length)container.textContent='CME returned no registered operations.';}catch(error){container.textContent='Capability registry unavailable: '+error.message;}}
+document.getElementById('capability-invoke').addEventListener('click',async()=>{const output=document.getElementById('capability-invocation-result');try{const request=JSON.parse(document.getElementById('capability-invocation-json').value);const result=await stewardApi('/api/v1/steward/operations/invoke',{method:'POST',body:JSON.stringify({request})});output.textContent=JSON.stringify({result:result.result,audit_event_id:result.audit_event_id,correlation_id:result.correlation_id,request_id:result.request_id},null,2);await refreshStewardState();}catch(error){output.textContent='Invocation failed or was denied: '+error.message+(error.correlationId?' · '+error.correlationId:'');}});
+document.getElementById('steward-capabilities-refresh').addEventListener('click',refreshStewardCapabilities);
+function appendStewardRow(container,title,details){const row=document.createElement('div');row.className='steward-row';const heading=document.createElement('b');heading.textContent=title;row.appendChild(heading);row.appendChild(document.createTextNode(details));container.appendChild(row);}
+async function refreshStewardState(){const source=document.getElementById('steward-source-state'),activities=document.getElementById('steward-activities'),events=document.getElementById('steward-events');source.textContent='Refreshing authoritative diagnostics…';try{const [status,history]=await Promise.all([stewardApi('/api/v1/steward/r3a/status'),stewardApi('/api/v1/steward/r3a/events')]);source.textContent='Source '+(status.source||'unknown')+' · observed '+(status.observed_at||'time unknown');activities.replaceChildren();for(const item of(status.activities||[]))appendStewardRow(activities,(item.activity_type||'Activity')+' · '+(item.state||'unknown'),(item.activity_id||'')+' · '+(item.updated_at||''));if(!activities.childNodes.length)activities.textContent='No activity records returned.';events.replaceChildren();for(const item of(history.events||[]))appendStewardRow(events,item.event_type||'Event',(item.persisted_at||'')+' · '+(item.event_id||''));if(!events.childNodes.length)events.textContent='No event records returned.';}catch(error){source.textContent='Unavailable: '+error.message;activities.textContent='State unavailable';events.textContent='History unavailable';}}
+let pendingObjectiveKey=null,pendingObjectivePayload=null;document.getElementById('objective-submit').addEventListener('click',async()=>{const output=document.getElementById('objective-result'),button=document.getElementById('objective-submit');button.disabled=true;try{const payload={contract:'r3a.grace-objective-submission.v1',contract_version:'1.0.0',objective:document.getElementById('objective-text').value.trim(),acceptance_criteria:JSON.parse(document.getElementById('objective-criteria').value)};const fingerprint=JSON.stringify(payload);if(fingerprint!==pendingObjectivePayload){pendingObjectivePayload=fingerprint;pendingObjectiveKey=crypto.randomUUID();}const result=await stewardApi('/api/v1/steward/r3a/objectives',{method:'POST',body:JSON.stringify({...payload,idempotency_key:pendingObjectiveKey})});output.textContent='Durably accepted · activity '+result.activity_id+' · state '+result.state+' · correlation '+result.correlation_id+' · request '+(result.request_id||'unknown');pendingObjectiveKey=null;pendingObjectivePayload=null;await refreshStewardState();}catch(error){output.textContent='Not accepted: '+error.message+' · Retry retains the same idempotency key.';}finally{button.disabled=false;}});
+function closeInfrastructure(){infrastructurePanel.hidden=true;infrastructureAnchor.hidden=true;syncPanelNavigation();}
+function closeChat(){chatPanel.hidden=true;syncPanelNavigation();}
+const notificationsPanel=document.getElementById('notifications-panel');
+function openNotifications(){notificationsPanel.hidden=false;notificationsPanel.classList.remove('minimized');profileMenu.hidden=true;layoutQuickMenu.hidden=true;setRailExpanded(sideRail.classList.contains('expanded'),{collapseOnMobile:true});syncPanelNavigation();}
+function closeNotifications(){notificationsPanel.hidden=true;syncPanelNavigation();}
+document.getElementById('nav-notifications').addEventListener('click',openNotifications);
+document.getElementById('notifications-close').addEventListener('click',closeNotifications);
+document.getElementById('notifications-minimize').addEventListener('click',()=>{notificationsPanel.classList.toggle('minimized');const minimized=notificationsPanel.classList.contains('minimized');const b=document.getElementById('notifications-minimize');b.textContent=minimized?'□':'−';b.title=minimized?'Restore notifications':'Minimize notifications';b.setAttribute('aria-label',b.title);});
+function openChat(){chatPanel.hidden=false;chatPanel.classList.remove('minimized');const button=document.getElementById('chat-minimize');button.textContent='−';button.title='Minimize chat';button.setAttribute('aria-label','Minimize chat');profileMenu.hidden=true;layoutQuickMenu.hidden=true;setRailExpanded(sideRail.classList.contains('expanded'),{collapseOnMobile:true});syncPanelNavigation();}
+document.getElementById('nav-chat').addEventListener('click',openChat);document.getElementById('chat-close').addEventListener('click',closeChat);
+document.getElementById('chat-minimize').addEventListener('click',()=>{chatPanel.classList.toggle('minimized');const minimized=chatPanel.classList.contains('minimized');document.getElementById('chat-minimize').textContent=minimized?'□':'−';document.getElementById('chat-minimize').title=minimized?'Restore chat':'Minimize chat';document.getElementById('chat-minimize').setAttribute('aria-label',minimized?'Restore chat':'Minimize chat');});
+document.getElementById('chat-sidebar-toggle').addEventListener('click',()=>{chatPanel.classList.toggle('rail-collapsed');const collapsed=chatPanel.classList.contains('rail-collapsed');document.getElementById('chat-sidebar-toggle').textContent=collapsed?'›':'‹';document.getElementById('chat-sidebar-toggle').title=collapsed?'Expand conversation rail':'Collapse conversation rail';document.getElementById('chat-sidebar-toggle').setAttribute('aria-label',collapsed?'Expand conversation rail':'Collapse conversation rail');});
+function minimizeInfrastructure(){infrastructurePanel.hidden=true;infrastructureAnchor.hidden=false;placeInfrastructureAnchor();}
+function openInfrastructure(){infrastructurePanel.hidden=false;infrastructureAnchor.hidden=true;profileMenu.hidden=true;setRailExpanded(sideRail.classList.contains('expanded'),{collapseOnMobile:true});syncPanelNavigation();}
+infrastructureButton.addEventListener('click',openInfrastructure);
+infrastructureMinimize.addEventListener('click',minimizeInfrastructure);
+railToggle.addEventListener('click',()=>setRailExpanded(!sideRail.classList.contains('expanded')));
+document.getElementById('nav-home').addEventListener('click',()=>{closeInfrastructure();closeChat();closeNotifications();stewardPanel.hidden=true;syncPanelNavigation();setRailExpanded(false);});
+document.getElementById('nav-engineering').addEventListener('click',()=>{
+  if(win.classList.contains('min'))restorePanel(false);
+});
+profileButton.addEventListener('click',()=>{layoutQuickMenu.hidden=true;profileMenu.hidden=!profileMenu.hidden;});
+layoutQuickButton.addEventListener('click',()=>{profileMenu.hidden=true;layoutQuickMenu.hidden=!layoutQuickMenu.hidden;layoutQuickButton.setAttribute('aria-expanded',String(!layoutQuickMenu.hidden));});
+document.getElementById('profile-infrastructure').addEventListener('click',openInfrastructure);
+document.getElementById('profile-engineering').addEventListener('click',()=>{
+  profileMenu.hidden=true;
+  if(win.classList.contains('min'))restorePanel(false);
+});
+document.getElementById('profile-settings').addEventListener('click',event=>{const panel=document.getElementById('profile-settings-panel');panel.hidden=!panel.hidden;event.currentTarget.setAttribute('aria-expanded',String(!panel.hidden));});
+document.querySelectorAll('[data-settings-scope]').forEach(button=>button.addEventListener('click',()=>{document.getElementById('settings-scope-title').textContent=button.dataset.settingsScope;document.querySelectorAll('[data-settings-scope]').forEach(item=>item.setAttribute('aria-current',String(item===button)));document.getElementById('browser-appearance').hidden=button.dataset.settingsScope!=='User';}));document.querySelector('[data-settings-scope="Institutional"]').setAttribute('aria-current','true');
+settingsRegistryAdapter.read().then(result=>{if(!result.available)document.getElementById('settings-registry-status').textContent=result.reason+' · no live values loaded.';});
+document.addEventListener('pointerdown',event=>{
+  if(!profileMenu.hidden&&!profileMenu.contains(event.target)&&event.target!==profileButton)profileMenu.hidden=true;
+  if(!layoutQuickMenu.hidden&&!layoutQuickMenu.contains(event.target)&&!layoutQuickButton.contains(event.target)){layoutQuickMenu.hidden=true;layoutQuickButton.setAttribute('aria-expanded','false');}
+});
+async function refreshInfrastructure(){
+  const model=await infrastructureTelemetryAdapter.read();
+  const unavailable=!model||model.available!==true;
+  if(unavailable)return;
+  // Runtime-specific enum and scheduling fields are mapped here only after architecture reconciliation.
+}
+refreshInfrastructure();
+const win=document.getElementById('win');
+const slider=document.getElementById('opacity');
+const engineeringOpacitySlider=document.getElementById('engineering-opacity');const engineeringOpacityValue=document.getElementById('engineering-opacity-value');const chatOpacitySlider=document.getElementById('chat-opacity');const chatOpacityValue=document.getElementById('chat-opacity-value');const infrastructureOpacitySlider=document.getElementById('infrastructure-opacity');const infrastructureOpacityValue=document.getElementById('infrastructure-opacity-value');
+const value=document.getElementById('value');
+const minimize=document.getElementById('minimize');
+const centerButton=document.getElementById('center-window');
+const refreshButton=document.getElementById('refresh-status');
+const snapshotButton=document.getElementById('snapshot-button');
+const snapshotStatus=document.getElementById('snapshot-status');
+const handle=document.getElementById('drag');
+let stewardDrag=null;
+const stewardDragHandle=document.querySelector('.steward-head');
+stewardDragHandle.addEventListener('pointerdown',event=>{if(event.button!==0||event.target.closest('button'))return;const rect=stewardPanel.getBoundingClientRect();stewardDrag={id:event.pointerId,x:event.clientX,y:event.clientY,left:rect.left,top:rect.top};stewardDragHandle.setPointerCapture(event.pointerId);});
+stewardDragHandle.addEventListener('pointermove',event=>{if(!stewardDrag||event.pointerId!==stewardDrag.id)return;stewardPanel.style.left=Math.max(0,Math.min(innerWidth-stewardPanel.offsetWidth,stewardDrag.left+event.clientX-stewardDrag.x))+'px';stewardPanel.style.top=Math.max(0,Math.min(innerHeight-stewardPanel.offsetHeight,stewardDrag.top+event.clientY-stewardDrag.y))+'px';});
+function endStewardDrag(event){if(stewardDrag&&event.pointerId===stewardDrag.id)stewardDrag=null;}
+stewardDragHandle.addEventListener('pointerup',endStewardDrag);stewardDragHandle.addEventListener('pointercancel',endStewardDrag);
+
+function setEngineeringOpacity(raw){const n=Math.max(45,Math.min(95,Number(raw)||45));slider.value=String(n);engineeringOpacitySlider.value=String(n);document.documentElement.style.setProperty('--engineering-opacity',n/100);value.textContent=n+'%';engineeringOpacityValue.textContent=n+'%';localStorage.setItem('r3-panel-opacity',String(n));localStorage.setItem('r3-panel-opacity-engineering',String(n));}
+function setPanelOpacity(name,range,output,raw){const n=Math.max(45,Math.min(95,Number(raw)||45));range.value=String(n);output.textContent=n+'%';document.documentElement.style.setProperty('--'+name+'-opacity',n/100);localStorage.setItem('r3-panel-opacity-'+name,String(n));}
+function installOptionalPanelOpacity(name,fallback){const range=document.getElementById(name+'-opacity'),output=document.getElementById(name+'-opacity-value');if(!range||!output)return;const saved=localStorage.getItem('r3-panel-opacity-'+name);setPanelOpacity(name,range,output,saved&&Number(saved)>=45&&Number(saved)<=98?saved:String(fallback));range.max='98';range.addEventListener('input',()=>setPanelOpacity(name,range,output,range.value));}
+installOptionalPanelOpacity('notifications',92);installOptionalPanelOpacity('roadmap',94);
+slider.addEventListener('input',()=>setEngineeringOpacity(slider.value));engineeringOpacitySlider.addEventListener('input',()=>setEngineeringOpacity(engineeringOpacitySlider.value));const savedEngineeringOpacity=localStorage.getItem('r3-panel-opacity-engineering')||localStorage.getItem('r3-panel-opacity');setEngineeringOpacity(savedEngineeringOpacity&&Number(savedEngineeringOpacity)>=45&&Number(savedEngineeringOpacity)<=95?savedEngineeringOpacity:'45');
+const savedChatOpacity=localStorage.getItem('r3-panel-opacity-chat');setPanelOpacity('chat',chatOpacitySlider,chatOpacityValue,savedChatOpacity&&Number(savedChatOpacity)>=45&&Number(savedChatOpacity)<=95?savedChatOpacity:'86');const savedInfrastructureOpacity=localStorage.getItem('r3-panel-opacity-infrastructure');setPanelOpacity('infrastructure',infrastructureOpacitySlider,infrastructureOpacityValue,savedInfrastructureOpacity&&Number(savedInfrastructureOpacity)>=45&&Number(savedInfrastructureOpacity)<=95?savedInfrastructureOpacity:'83');chatOpacitySlider.addEventListener('input',()=>setPanelOpacity('chat',chatOpacitySlider,chatOpacityValue,chatOpacitySlider.value));infrastructureOpacitySlider.addEventListener('input',()=>setPanelOpacity('infrastructure',infrastructureOpacitySlider,infrastructureOpacityValue,infrastructureOpacitySlider.value));
+function clampPosition(x,y){
+  const maxX=Math.max(0,innerWidth-win.offsetWidth);
+  const maxY=Math.max(0,innerHeight-win.offsetHeight);
+  win.style.left=Math.max(0,Math.min(maxX,x))+'px';
+  win.style.top=Math.max(0,Math.min(maxY,y))+'px';
+}
+function centerWindow(){clampPosition((innerWidth-win.offsetWidth)/2,(innerHeight-win.offsetHeight)/2);}
+// Steward's lower-left Engineering entrance target from the supplied placement reference.
+const engineeringEntrance={x:.377,y:.653};
+const infrastructureAnchorStorageKey='r3-infrastructure-anchor-image-fraction';
+let infrastructureAnchorImageFraction=null;
+try{const saved=JSON.parse(localStorage.getItem(infrastructureAnchorStorageKey)||'null');if(saved&&Number.isFinite(saved.x)&&Number.isFinite(saved.y)&&saved.x>=0&&saved.x<=1&&saved.y>=0&&saved.y<=1)infrastructureAnchorImageFraction=saved;}catch{}
+let expandedState=null;
+function imageFractionPosition(anchor){const imageWidth=background.naturalWidth||1536,imageHeight=background.naturalHeight||1024;const scale=Math.max(innerWidth/imageWidth,innerHeight/imageHeight),drawnWidth=imageWidth*scale,drawnHeight=imageHeight*scale;return{x:(innerWidth-drawnWidth)/2+anchor.x*drawnWidth,y:(innerHeight-drawnHeight)/2+anchor.y*drawnHeight};}
+function entrancePosition(){return imageFractionPosition(engineeringEntrance);}
+function imageFractionFromPoint(x,y){const iw=background.naturalWidth||1536,ih=background.naturalHeight||1024,scale=Math.max(innerWidth/iw,innerHeight/ih),dw=iw*scale,dh=ih*scale;return{x:Math.max(0,Math.min(1,(x-(innerWidth-dw)/2)/dw)),y:Math.max(0,Math.min(1,(y-(innerHeight-dh)/2)/dh))};}
+function infrastructureDefaultCenter(){const p=entrancePosition();return{x:p.x+120+infrastructureAnchor.offsetWidth/2+12,y:p.y};}
+function currentInfrastructureAnchorFraction(){if(infrastructureAnchorImageFraction)return infrastructureAnchorImageFraction;if(!infrastructureAnchor.hidden){const r=infrastructureAnchor.getBoundingClientRect();if(r.width&&r.height)return imageFractionFromPoint(r.left+r.width/2,r.top+r.height/2);}const p=infrastructureDefaultCenter();return imageFractionFromPoint(p.x,p.y);}
+function placeInfrastructureAnchor(){const p=infrastructureAnchorImageFraction?imageFractionPosition(infrastructureAnchorImageFraction):infrastructureDefaultCenter();const left=Math.max(8,Math.min(innerWidth-infrastructureAnchor.offsetWidth-8,p.x-infrastructureAnchor.offsetWidth/2));const top=Math.max(8,Math.min(innerHeight-infrastructureAnchor.offsetHeight-8,p.y-infrastructureAnchor.offsetHeight/2));infrastructureAnchor.style.left=left+'px';infrastructureAnchor.style.top=top+'px';}
+function placeMinimized(){const p=entrancePosition();clampPosition(p.x-win.offsetWidth/2,p.y-win.offsetHeight/2);}
+let infrastructureDrag=null,suppressInfrastructureClick=false;
+function clampInfrastructureAnchor(left,top){infrastructureAnchor.style.left=Math.max(8,Math.min(innerWidth-infrastructureAnchor.offsetWidth-8,left))+'px';infrastructureAnchor.style.top=Math.max(8,Math.min(innerHeight-infrastructureAnchor.offsetHeight-8,top))+'px';}
+infrastructureAnchor.addEventListener('pointerdown',e=>{if(e.button!==0)return;const r=infrastructureAnchor.getBoundingClientRect();infrastructureDrag={id:e.pointerId,startX:e.clientX,startY:e.clientY,left:r.left,top:r.top,moved:false};infrastructureAnchor.classList.add('dragging');infrastructureAnchor.setPointerCapture(e.pointerId);});
+infrastructureAnchor.addEventListener('pointermove',e=>{if(!infrastructureDrag||e.pointerId!==infrastructureDrag.id)return;const dx=e.clientX-infrastructureDrag.startX,dy=e.clientY-infrastructureDrag.startY;if(Math.hypot(dx,dy)>4)infrastructureDrag.moved=true;clampInfrastructureAnchor(infrastructureDrag.left+dx,infrastructureDrag.top+dy);});
+function finishInfrastructureDrag(e){if(!infrastructureDrag||e.pointerId!==infrastructureDrag.id)return;const moved=infrastructureDrag.moved;infrastructureDrag=null;infrastructureAnchor.classList.remove('dragging');if(moved){const r=infrastructureAnchor.getBoundingClientRect();infrastructureAnchorImageFraction=imageFractionFromPoint(r.left+r.width/2,r.top+r.height/2);try{localStorage.setItem(infrastructureAnchorStorageKey,JSON.stringify(infrastructureAnchorImageFraction));}catch{}suppressInfrastructureClick=true;}if(infrastructureAnchor.hasPointerCapture(e.pointerId))infrastructureAnchor.releasePointerCapture(e.pointerId);}
+infrastructureAnchor.addEventListener('pointerup',finishInfrastructureDrag);infrastructureAnchor.addEventListener('pointercancel',finishInfrastructureDrag);infrastructureAnchor.addEventListener('lostpointercapture',()=>{infrastructureDrag=null;infrastructureAnchor.classList.remove('dragging');});
+infrastructureAnchor.addEventListener('click',e=>{if(suppressInfrastructureClick){suppressInfrastructureClick=false;e.preventDefault();return;}openInfrastructure();});
+const presetStorageKey='r3-user-layout-presets-v1';
+const presetSelect=document.getElementById('layout-preset-slot');
+const presetStatus=document.getElementById('layout-preset-status');
+const presetName=document.getElementById('layout-preset-name');
+function readPresets(){try{const value=JSON.parse(localStorage.getItem(presetStorageKey)||'{}');return value&&typeof value==='object'?value:{}}catch{return{}}}
+function refreshPresetOptions(){const saved=readPresets(),current=presetSelect.value;presetSelect.replaceChildren();for(let i=1;i<=10;i++){const option=document.createElement('option');option.value=String(i);option.textContent=saved[i]?(i+'. '+(saved[i].name||'Saved layout')):(i+'. Empty');presetSelect.appendChild(option)}if(current)presetSelect.value=current;refreshQuickPresets();}
+function refreshQuickPresets(){const saved=readPresets();layoutQuickSlots.replaceChildren();for(let i=1;i<=10;i++){const layout=saved[i],button=document.createElement('button');button.type='button';button.className='layout-quick-slot'+(layout?' available':'');button.disabled=!layout;button.title=layout?(i+'. '+(layout.name||'Saved layout')):(i+'. Empty preset slot');button.setAttribute('aria-label',layout?('Apply layout '+i+': '+(layout.name||'Saved layout')):('Preset '+i+' is empty'));const number=document.createElement('span');number.className='layout-quick-number';number.textContent=String(i);const name=document.createElement('span');name.className='layout-quick-name';name.textContent=layout?(layout.name||'Saved layout'):'Empty';button.append(number,name);if(layout)button.addEventListener('click',()=>applyPreset(i));layoutQuickSlots.appendChild(button);}}
+function normalizedRect(element){const r=element.getBoundingClientRect();return{x:r.left/innerWidth,y:r.top/innerHeight,width:r.width/innerWidth,height:r.height/innerHeight}}
+function captureLayout(){return{version:1,saved_at:new Date().toISOString(),navigation:{rail_expanded:sideRail.classList.contains('expanded')},panels:{engineering:{rect:normalizedRect(win),minimized:win.classList.contains('min')},chat:{rect:normalizedRect(chatPanel),visible:!chatPanel.hidden,minimized:chatPanel.classList.contains('minimized'),rail_collapsed:chatPanel.classList.contains('rail-collapsed')},notifications:{rect:normalizedRect(notificationsPanel),visible:!notificationsPanel.hidden,minimized:notificationsPanel.classList.contains('minimized')},roadmap:{rect:normalizedRect(roadmapPanel),visible:!roadmapPanel.hidden,minimized:roadmapPanel.classList.contains('minimized')},infrastructure:{rect:normalizedRect(infrastructurePanel),visible:!infrastructurePanel.hidden,marker_visible:!infrastructureAnchor.hidden,marker_rect:normalizedRect(infrastructureAnchor)},steward:{rect:normalizedRect(stewardPanel),visible:!stewardPanel.hidden,minimized:stewardPanel.classList.contains('minimized')}}}}
+function applyRect(element,rect){if(!rect)return;element.style.left=Math.max(0,Math.min(1-rect.width,rect.x))*innerWidth+'px';element.style.top=Math.max(0,Math.min(1-rect.height,rect.y))*innerHeight+'px';element.style.width=Math.max(0.15,Math.min(1,rect.width))*innerWidth+'px';element.style.height=Math.max(0.15,Math.min(1,rect.height))*innerHeight+'px'}
+function applyPreset(slot){const layout=readPresets()[slot];if(!layout){layoutQuickStatus.textContent='Preset '+slot+' is empty.';presetStatus.textContent='This preset slot is empty.';return}const p=layout.panels||{};if(layout.navigation)setRailExpanded(Boolean(layout.navigation.rail_expanded));if(p.engineering){applyRect(win,p.engineering.rect);win.classList.toggle('min',Boolean(p.engineering.minimized));syncMinimizeButton();}if(p.chat){applyRect(chatPanel,p.chat.rect);chatPanel.hidden=!p.chat.visible;chatPanel.classList.toggle('minimized',Boolean(p.chat.minimized));chatPanel.classList.toggle('rail-collapsed',Boolean(p.chat.rail_collapsed));const b=document.getElementById('chat-minimize');b.textContent=p.chat.minimized?'□':'−';b.title=p.chat.minimized?'Restore chat':'Minimize chat';b.setAttribute('aria-label',b.title);const t=document.getElementById('chat-sidebar-toggle');t.textContent=p.chat.rail_collapsed?'›':'‹';t.title=p.chat.rail_collapsed?'Expand conversation rail':'Collapse conversation rail';t.setAttribute('aria-label',t.title);}if(p.notifications){applyRect(notificationsPanel,p.notifications.rect);notificationsPanel.hidden=!p.notifications.visible;notificationsPanel.classList.toggle('minimized',Boolean(p.notifications.minimized));const n=document.getElementById('notifications-minimize');n.textContent=p.notifications.minimized?'□':'−';n.title=p.notifications.minimized?'Restore notifications':'Minimize notifications';n.setAttribute('aria-label',n.title);}if(p.roadmap){applyRect(roadmapPanel,p.roadmap.rect);roadmapPanel.hidden=!p.roadmap.visible;roadmapPanel.classList.toggle('minimized',Boolean(p.roadmap.minimized));const b=document.getElementById('roadmap-minimize');b.textContent=p.roadmap.minimized?'□':'−';b.setAttribute('aria-label',p.roadmap.minimized?'Restore roadmap status':'Minimize roadmap status');}if(p.infrastructure){applyRect(infrastructurePanel,p.infrastructure.rect);infrastructurePanel.hidden=!p.infrastructure.visible;infrastructureAnchor.hidden=!p.infrastructure.marker_visible;if(p.infrastructure.marker_rect){const r=p.infrastructure.marker_rect;infrastructureAnchor.style.left=Math.max(0,Math.min(1-r.width,r.x))*innerWidth+'px';infrastructureAnchor.style.top=Math.max(0,Math.min(1-r.height,r.y))*innerHeight+'px';}}if(p.steward){applyRect(stewardPanel,p.steward.rect);stewardPanel.hidden=!p.steward.visible;stewardPanel.classList.toggle('minimized',Boolean(p.steward.minimized));}syncPanelNavigation();presetStatus.textContent='Applied '+(layout.name||'layout '+slot)+'.';layoutQuickStatus.textContent='Applied '+(layout.name||'layout '+slot)+'.';layoutQuickMenu.hidden=true;layoutQuickButton.setAttribute('aria-expanded','false');}
+layoutQuickButton.setAttribute('aria-expanded','false');
+document.getElementById('layout-preset-save').addEventListener('click',()=>{const slot=Number(presetSelect.value),presets=readPresets();presets[slot]={name:presetName.value.trim()||'Layout '+slot,...captureLayout()};localStorage.setItem(presetStorageKey,JSON.stringify(presets));refreshPresetOptions();presetSelect.value=String(slot);presetStatus.textContent='Saved locally in this browser.';});
+document.getElementById('layout-preset-apply').addEventListener('click',()=>applyPreset(Number(presetSelect.value)));
+document.getElementById('layout-preset-clear').addEventListener('click',()=>{const slot=Number(presetSelect.value),presets=readPresets();if(!presets[slot]){presetStatus.textContent='This preset slot is already empty.';return}delete presets[slot];localStorage.setItem(presetStorageKey,JSON.stringify(presets));refreshPresetOptions();presetSelect.value=String(slot);presetName.value='';presetStatus.textContent='Preset cleared from this browser.';});
+document.getElementById('layout-quick-settings').addEventListener('click',()=>{layoutQuickMenu.hidden=true;layoutQuickButton.setAttribute('aria-expanded','false');profileMenu.hidden=false;const settingsPanel=document.getElementById('profile-settings-panel');settingsPanel.hidden=false;document.getElementById('profile-settings').setAttribute('aria-expanded','true');document.querySelector('[data-settings-scope="User"]').click();requestAnimationFrame(()=>document.getElementById('layout-presets').scrollIntoView({block:'end',behavior:'smooth'}));});
+refreshPresetOptions();
+function syncMinimizeButton(){
+  const minimized=win.classList.contains('min');
+  minimize.textContent=minimized?'□':'−';
+  minimize.setAttribute('aria-label',minimized?'Restore panel':'Minimize panel');
+}
+function restorePanel(centerIfNew){
+  win.classList.remove('min');
+  slider.value=expandedState?expandedState.opacity:'82';
+  setEngineeringOpacity(slider.value);
+  if(expandedState&&!centerIfNew){clampPosition(expandedState.left,expandedState.top);}
+  else{centerWindow();}
+}
+minimize.addEventListener('click',e=>{
+  e.stopPropagation();
+  if(!win.classList.contains('min')){
+    expandedState={left:win.offsetLeft,top:win.offsetTop,opacity:slider.value};
+    win.classList.add('min');
+    slider.value='45';
+    setEngineeringOpacity(slider.value);
+    placeMinimized();
+  }else{
+    restorePanel(false);
+  }
+  syncMinimizeButton();
+});
+centerButton.addEventListener('click',()=>{
+  if(win.classList.contains('min'))restorePanel(true);
+  else centerWindow();
+});
+let drag=null;
+handle.addEventListener('pointerdown',e=>{
+  if(e.target.closest('button,.opacity-control,input')||e.button!==0)return;
+  e.preventDefault();
+  drag={id:e.pointerId,x:e.clientX,y:e.clientY,left:win.offsetLeft,top:win.offsetTop};
+  handle.setPointerCapture(e.pointerId);
+});
+handle.addEventListener('pointermove',e=>{
+  if(!drag||e.pointerId!==drag.id)return;
+  clampPosition(drag.left+e.clientX-drag.x,drag.top+e.clientY-drag.y);
+});
+function endDrag(e){
+  if(drag&&e.pointerId===drag.id){
+    drag=null;
+    if(handle.hasPointerCapture(e.pointerId))handle.releasePointerCapture(e.pointerId);
+  }
+}
+handle.addEventListener('pointerup',endDrag);
+handle.addEventListener('pointercancel',endDrag);
+handle.addEventListener('lostpointercapture',()=>{drag=null;});
+function attachPanelDrag(panel,header){let state=null;header.addEventListener('pointerdown',e=>{if(e.target.closest('button,.opacity-control,input')||e.button!==0)return;e.preventDefault();const r=panel.getBoundingClientRect();state={id:e.pointerId,x:e.clientX,y:e.clientY,left:r.left,top:r.top};header.setPointerCapture(e.pointerId);});header.addEventListener('pointermove',e=>{if(!state||state.id!==e.pointerId)return;panel.style.left=Math.max(0,Math.min(innerWidth-panel.offsetWidth,state.left+e.clientX-state.x))+'px';panel.style.top=Math.max(0,Math.min(innerHeight-panel.offsetHeight,state.top+e.clientY-state.y))+'px';});const end=e=>{if(state&&state.id===e.pointerId){state=null;if(header.hasPointerCapture(e.pointerId))header.releasePointerCapture(e.pointerId);}};header.addEventListener('pointerup',end);header.addEventListener('pointercancel',end);header.addEventListener('lostpointercapture',()=>{state=null;});}
+attachPanelDrag(chatPanel,chatDragHandle);attachPanelDrag(infrastructurePanel,infrastructureHeader);attachPanelDrag(notificationsPanel,document.getElementById('notifications-drag'));attachPanelDrag(roadmapPanel,document.querySelector('#roadmap-panel>header'));
+window.addEventListener('resize',()=>{if(innerWidth<=760&&sideRail.classList.contains('expanded'))setRailExpanded(false);win.classList.contains('min')?placeMinimized():clampPosition(win.offsetLeft,win.offsetTop);if(!infrastructureAnchor.hidden)placeInfrastructureAnchor();[chatPanel,infrastructurePanel,notificationsPanel,roadmapPanel].forEach(panel=>{if(panel.hidden)return;const r=panel.getBoundingClientRect();panel.style.left=Math.max(0,Math.min(innerWidth-panel.offsetWidth,r.left))+'px';panel.style.top=Math.max(0,Math.min(innerHeight-panel.offsetHeight,r.top))+'px';});});
+
+async function getJson(path){
+  const response=await fetch(path,{cache:'no-store'});
+  if(!response.ok)throw new Error('Request failed');
+  return response.json();
+}
+function addListItem(list,text){
+  const item=document.createElement('li');
+  item.textContent=text;
+  list.appendChild(item);
+}
+async function refreshEngineeringStatus(){
+  const apiStatus=document.getElementById('api-status');
+  const repoStatus=document.getElementById('repo-status');
+  const branchList=document.getElementById('branch-list');
+  const worktreeList=document.getElementById('worktree-list');
+  apiStatus.textContent='Loading current R3 state…';
+  repoStatus.textContent='Checking';
+  branchList.replaceChildren();
+  worktreeList.replaceChildren();
+  try{
+    const [health,branches,worktrees]=await Promise.all([
+      getJson('/api/v1/health'),
+      getJson('/api/v1/engineering/branches'),
+      getJson('/api/v1/engineering/worktrees')
+    ]);
+    apiStatus.textContent='R3 service: '+(health.status||'status not reported');
+    repoStatus.textContent='Repository '+(health.repository_present?'present':'not found')+
+      '; artwork directory '+(health.artwork_directory_present?'present':'not found');
+    if(branches.branches&&branches.branches.length){
+      branches.branches.forEach(branch=>{
+        const commit=(branch.commit||'').slice(0,8)||'commit not reported';
+        addListItem(branchList,(branch.name||'unnamed branch')+' · '+commit);
+      });
+    }else addListItem(branchList,'No branch records reported');
+    if(worktrees.worktrees&&worktrees.worktrees.length){
+      worktrees.worktrees.forEach(tree=>{
+        const commit=(tree.commit||'').slice(0,8)||'commit not reported';
+        const state=tree.locked?' · locked':'';
+        addListItem(worktreeList,(tree.branch||'detached')+' · '+commit+state);
+      });
+    }else addListItem(worktreeList,'No worktree records reported');
+  }catch(error){
+    apiStatus.textContent='R3 status unavailable';
+    repoStatus.textContent='Unknown';
+    addListItem(branchList,'Unknown');
+    addListItem(worktreeList,'Unknown');
+  }
+}
+
+
+refreshButton.addEventListener('click',refreshEngineeringStatus);
+snapshotButton.addEventListener('click',async()=>{
+  snapshotButton.disabled=true;
+  snapshotStatus.textContent='Capturing…';
+  try{
+    const rect=win.getBoundingClientRect();
+    const browser={
+      viewport_css_px:{width:innerWidth,height:innerHeight},
+      device_pixel_ratio:devicePixelRatio,
+      panel:{
+        state:win.classList.contains('min')?'minimized':'expanded',
+        rect_css_px:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},
+        opacity:Number(slider.value)/100
+      },
+      entrance_anchor_image_fraction:engineeringEntrance,
+      infrastructure_anchor_image_fraction:currentInfrastructureAnchorFraction(),
+      background_intrinsic_px:{width:background.naturalWidth||1,height:background.naturalHeight||1}
+    };
+    const response=await fetch('/api/v1/snapshot',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(browser)
+    });
+    if(!response.ok)throw new Error('Snapshot API unavailable');
+    const snapshot=await response.json();
+    const blob=new Blob([JSON.stringify(snapshot,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement('a');
+    link.href=url;
+    link.download='r3-snapshot-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json';
+    link.click();
+    URL.revokeObjectURL(url);
+    snapshotStatus.textContent='Snapshot downloaded';
+  }catch(error){
+    snapshotStatus.textContent='Snapshot unavailable';
+  }finally{
+    snapshotButton.disabled=false;
+  }
+});
+const background=new Image();
+background.onload=()=>{if(win.classList.contains('min'))placeMinimized();};
+background.onerror=()=>{};
+background.src='/api/v1/visual/background';
+setEngineeringOpacity(slider.value);
+placeMinimized();
+refreshEngineeringStatus();
+</script>
+<script type="module" src="/web/resident-avatar.js"></script>
+<script type="module" src="/web/steward-workspace-api.mjs"></script>
+<script type="module" src="/web/roadmap-status.mjs"></script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.notification-inbox.v1",
+  "title": "R3A recipient notification inbox v1",
+  "type": "object",
+  "required": ["contract", "contract_version", "freshness", "presentation_timezone", "deliveries", "next_cursor"],
+  "properties": {
+    "contract": {"const": "r3a.notification-inbox.v1"},
+    "contract_version": {"const": "1.0.0"},
+    "freshness": {"enum": ["current", "stale", "unavailable"]},
+    "presentation_timezone": {"type": "string"},
+    "next_cursor": {"type": ["string", "null"]},
+    "deliveries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["delivery_id", "source_id", "source_event_id", "event_type", "correlation_id",
+          "severity", "urgency", "requires_action", "status", "created_at", "notification",
+          "message", "phone_delivery", "evidence_refs"],
+        "properties": {
+          "delivery_id": {"type": "string", "format": "uuid"},
+          "source_id": {"type": "string"},
+          "source_event_id": {"type": "string", "format": "uuid"},
+          "event_type": {"type": "string"},
+          "correlation_id": {"type": "string", "format": "uuid"},
+          "severity": {"enum": ["info", "warning", "error"]},
+          "urgency": {"enum": ["low", "normal", "high", "critical"]},
+          "requires_action": {"type": "boolean"},
+          "status": {"enum": ["queued", "acknowledged", "resolved"]},
+          "created_at": {"type": "string", "format": "date-time"},
+          "acknowledged_at": {"type": ["string", "null"], "format": "date-time"},
+          "resolved_at": {"type": ["string", "null"], "format": "date-time"},
+          "acknowledged_by": {"type": ["string", "null"]},
+          "resolved_by": {"type": ["string", "null"]},
+          "resolution_disposition": {"type": ["string", "null"]},
+          "recipient": {"type": "object"},
+          "notification": {"type": "object"},
+          "evidence_refs": {"type": "array", "items": {"type": "string"}},
+          "phone_delivery": {
+            "type": "object",
+            "required": ["state", "attempts", "message_id", "last_error_type", "last_attempt_at", "sent_at"],
+            "properties": {
+              "state": {"enum": ["disabled", "pending", "sending", "failed", "sent"]},
+              "attempts": {"type": "integer", "minimum": 0},
+              "message_id": {"type": ["string", "null"]},
+              "last_error_type": {"type": ["string", "null"]},
+              "last_attempt_at": {"type": ["string", "null"], "format": "date-time"},
+              "sent_at": {"type": ["string", "null"], "format": "date-time"}
+            }
+          },
+          "message": {
+            "type": "object",
+            "required": ["title", "summary", "details", "source", "reason", "occurred_at",
+              "occurred_at_local", "correlation_id", "evidence_refs", "detail_url", "actions"],
+            "properties": {
+              "title": {"type": "string"},
+              "summary": {"type": "string"},
+              "details": {"type": "string"},
+              "source": {"type": "object", "required": ["source_id", "event_type", "source_event_id"]},
+              "reason": {"type": "string"},
+              "occurred_at": {"type": ["string", "null"], "format": "date-time"},
+              "occurred_at_local": {"type": ["string", "null"]},
+              "correlation_id": {"type": "string", "format": "uuid"},
+              "evidence_refs": {"type": "array", "items": {"type": "string"}},
+              "detail_url": {"type": ["string", "null"], "format": "uri"},
+              "actions": {
+                "type": "array", "maxItems": 3,
+                "items": {"type": "object", "required": ["action_id", "label", "destination", "method",
+                  "requires_authenticated_website", "mutates"], "properties": {
+                    "action_id": {"enum": ["open", "acknowledgment", "resolution"]},
+                    "label": {"type": "string"}, "destination": {"type": "string", "format": "uri"},
+                    "method": {"const": "view"}, "requires_authenticated_website": {"const": true},
+                    "mutates": {"const": false}
+                }}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

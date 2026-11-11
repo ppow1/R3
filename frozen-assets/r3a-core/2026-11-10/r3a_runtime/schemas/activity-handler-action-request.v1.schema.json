@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.activity-handler.action-request.v1",
+  "title": "R3A Activity Handler Action Request Result v1",
+  "type": "object",
+  "required": ["outcome", "action", "checkpoint"],
+  "additionalProperties": false,
+  "properties": {
+    "outcome": {"const": "action_required"},
+    "action": {"type": "object"},
+    "checkpoint": {"type": "object"},
+    "progress": {"type": "object"}
+  }
+}

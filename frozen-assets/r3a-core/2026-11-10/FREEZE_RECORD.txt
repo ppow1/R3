@@ -1,0 +1,5 @@
+R3A FROZEN SOURCE SNAPSHOT
+Date: 2026-11-10
+Repository: ppow1/R3
+Source commit: 89eda1331b96fe40918e4aa67de09c5ae3f45227
+Original files: 442

@@ -1,0 +1,634 @@
+{
+  "schema_version": 1,
+  "plugin_id": "r3a.notification-activity-intake",
+  "plugin_version": "1.3.0",
+  "artifact_ref": "intake.py",
+  "artifact_sha256": "63375cdd032ec9083208891d60833522263501eea09da611fc8413d7557b44d8",
+  "configuration_schema": {
+    "schema_id": "r3a.notification-source.config.v1",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "dsn_env",
+      "connect_timeout_seconds",
+      "statement_timeout_ms",
+      "source_id",
+      "event_types"
+    ],
+    "properties": {
+      "dsn_env": {
+        "type": "string",
+        "pattern": "[A-Z][A-Z0-9_]*"
+      },
+      "connect_timeout_seconds": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10
+      },
+      "statement_timeout_ms": {
+        "type": "integer",
+        "minimum": 100,
+        "maximum": 10000
+      },
+      "source_id": {
+        "const": "r3a.institution-events",
+        "type": "string"
+      },
+      "event_types": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "provider": {
+    "provider_id": "r3a.notification-activity-intake",
+    "provider_version": "1.3.0",
+    "entrypoint": "r3a_plugins.notification_source.intake:create_provider",
+    "artifact_sha256": "63375cdd032ec9083208891d60833522263501eea09da611fc8413d7557b44d8"
+  },
+  "capability_id": "notification.activity-intake.prepare",
+  "operation": {
+    "contract_id": "r3a.capability-operation.v1",
+    "contract_version": "1.0.0",
+    "operation_id": "notification.activity-intake.prepare",
+    "operation_revision": "1.3.0",
+    "provider": {
+      "provider_id": "r3a.notification-activity-intake",
+      "provider_version": "1.3.0",
+      "entrypoint": "r3a_plugins.notification_source.intake:create_provider",
+      "artifact_sha256": "63375cdd032ec9083208891d60833522263501eea09da611fc8413d7557b44d8"
+    },
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "source_event_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source_event_id": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36
+        }
+      }
+    },
+    "output_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "r3a.activity-intake.v1",
+      "title": "R3A Activity Intake Envelope v1",
+      "type": "object",
+      "required": [
+        "contract_id",
+        "contract_version",
+        "intake_id",
+        "source",
+        "correlation_id",
+        "activity",
+        "provenance",
+        "lifecycle_projection"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "contract_id": {
+          "type": "string",
+          "const": "r3a.activity-intake.v1"
+        },
+        "contract_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "intake_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "parent_activity_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "correlation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "source": {
+          "type": "object",
+          "required": [
+            "source_id",
+            "event_id",
+            "revision",
+            "idempotency_key",
+            "occurred_at",
+            "received_at",
+            "payload_ref",
+            "payload_sha256"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "source_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "event_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "revision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "idempotency_key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "occurred_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "received_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "payload_ref": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "payload_sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "causation_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 128
+            }
+          }
+        },
+        "activity": {
+          "type": "object",
+          "required": [
+            "activity_type",
+            "task_class",
+            "objective",
+            "input",
+            "evidence"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "activity_type": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "task_class": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9._-]{1,63}$"
+            },
+            "objective": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 20000
+            },
+            "input": {
+              "type": "object"
+            },
+            "evidence": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "type": "object",
+                "required": [
+                  "source_id",
+                  "source_ref",
+                  "sha256",
+                  "provenance"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "source_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "source_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2048
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "provenance": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  }
+                }
+              }
+            }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "required": [
+            "module_id",
+            "module_version",
+            "artifact_sha256",
+            "configuration_revision"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "module_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "module_version": {
+              "type": "string",
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+            },
+            "artifact_sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "const": "63375cdd032ec9083208891d60833522263501eea09da611fc8413d7557b44d8"
+            },
+            "configuration_revision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            }
+          }
+        },
+        "lifecycle_projection": {
+          "type": "object",
+          "required": [
+            "received",
+            "actionable",
+            "acknowledged",
+            "resolved",
+            "blocked"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "received": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9.-]*\\.[a-z][a-z0-9.-]*$"
+            },
+            "actionable": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9.-]*\\.[a-z][a-z0-9.-]*$"
+            },
+            "acknowledged": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9.-]*\\.[a-z][a-z0-9.-]*$"
+            },
+            "resolved": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9.-]*\\.[a-z][a-z0-9.-]*$"
+            },
+            "blocked": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9.-]*\\.[a-z][a-z0-9.-]*$"
+            }
+          }
+        }
+      }
+    },
+    "effect_class": "read",
+    "caller_constraints": {
+      "allowed_principals": [],
+      "allowed_residents": [],
+      "allowed_services": []
+    },
+    "target_scope_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "required_grants": [
+      "notification.source.read"
+    ],
+    "evidence": {
+      "schema": {
+        "type": "object",
+        "required": [
+          "source_id",
+          "source_event_id",
+          "payload_sha256",
+          "payload_ref",
+          "read_only",
+          "queried_at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "source_event_id": {
+            "type": "string"
+          },
+          "payload_sha256": {
+            "type": "string",
+            "pattern": "[a-f0-9]{64}"
+          },
+          "payload_ref": {
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "queried_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "verification_obligations": [
+        "preserve_source_event_and_correlation_identity",
+        "allowlist_source_event_type",
+        "retain_payload_digest_and_source_reference",
+        "do_not_mutate_or_acknowledge_upstream_event"
+      ]
+    },
+    "recovery": {
+      "idempotency_required": true,
+      "idempotency_scope": "global",
+      "replay_safe": true,
+      "reconciliation_operation_id": null
+    },
+    "execution": {
+      "timeout_seconds": 5,
+      "retry_disposition": "safe_retry"
+    },
+    "lifecycle": {
+      "desired_state": "enabled"
+    },
+    "resident_tool": {
+      "name": "Prepare Notification Activity Intake",
+      "description": "Read one configured immutable event and return a source-independent activity intake envelope for CME authorization, deduplication and persistence."
+    }
+  },
+  "supporting_artifacts": [
+    {
+      "artifact_ref": "plugin.py",
+      "artifact_sha256": "318aab4a555e4737e533b56ababe9238f9527459c685fb25ab637d1e82bfffd1"
+    }
+  ],
+  "module_manifest": {
+    "contract_id": "r3a.module-manifest.v1",
+    "contract_version": "1.2.0",
+    "module_id": "r3a.notification-activity-intake",
+    "module_version": "1.3.0",
+    "owner": "R3A Notifications",
+    "binding": {
+      "contract_id": "r3a.capability-provider.v1",
+      "protocol_major": 1,
+      "protocol_min_minor": 0,
+      "protocol_max_minor": 0,
+      "entrypoint": "r3a_plugins.notification_source.intake:create_provider"
+    },
+    "dependencies": [],
+    "configuration": {
+      "schema_ref": "r3a.notification-source.config.v1",
+      "configuration_ref": "notification-source.json"
+    },
+    "capability_refs": [
+      "notification.activity-intake.prepare",
+      "notification.source.read"
+    ],
+    "resource_refs": [],
+    "state_namespace": "r3a.notification.activity-intake",
+    "migration_contract": "r3a.notification.activity-intake-state.v1",
+    "recovery_policy": "notification.source-event-idempotency.v1",
+    "artifact": {
+      "artifact_ref": "intake.py",
+      "artifact_sha256": "63375cdd032ec9083208891d60833522263501eea09da611fc8413d7557b44d8"
+    },
+    "activity_handler": {
+      "contract_id": "r3a.activity-handler",
+      "contract_version": "1.1.0",
+      "handler_id": "r3a.notification.event-review",
+      "handler_version": "1.1.0",
+      "activity_types": [
+        "notification.event.review"
+      ],
+      "activity_contract_range": {
+        "contract_id": "r3a.activity-intake",
+        "major": 1,
+        "min_minor": 0,
+        "max_minor": 0
+      },
+      "handler_contract_range": {
+        "contract_id": "r3a.activity-handler",
+        "major": 1,
+        "min_minor": 0,
+        "max_minor": 1
+      },
+      "request_schema": {
+        "type": "object",
+        "required": [
+          "event_kind",
+          "notification"
+        ],
+        "properties": {
+          "event_kind": {
+            "type": "string",
+            "const": "notification"
+          },
+          "notification": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "type": "object",
+        "required": [
+          "outcome",
+          "reason",
+          "progress",
+          "checkpoint",
+          "evidence",
+          "lifecycle_evidence"
+        ],
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "blocked"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "progress": {
+            "type": "object"
+          },
+          "checkpoint": {
+            "type": "object"
+          },
+          "evidence": {
+            "type": "array",
+            "maxItems": 128,
+            "minItems": 1
+          },
+          "lifecycle_evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "received",
+              "actionable",
+              "blocked",
+              "acknowledged",
+              "resolved"
+            ],
+            "properties": {
+              "received": {
+                "const": "grace.notification.received",
+                "type": "string"
+              },
+              "actionable": {
+                "const": "grace.notification.actionable",
+                "type": "string"
+              },
+              "blocked": {
+                "const": "grace.notification.blocked",
+                "type": "string"
+              },
+              "resolved": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "acknowledged": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "progress_schema": {
+        "type": "object",
+        "required": [
+          "phase"
+        ],
+        "properties": {
+          "phase": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "additionalProperties": false
+      },
+      "checkpoint_schema": {
+        "type": "object",
+        "required": [
+          "source_id",
+          "source_event_id",
+          "correlation_id",
+          "idempotency_key",
+          "phase"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "source_event_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "correlation_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "phase": {
+            "enum": [
+              "awaiting_grace_disposition",
+              "grace_disposition_received",
+              "grace_disposition_unavailable"
+            ],
+            "type": "string"
+          },
+          "resident_activity_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          },
+          "resident_status": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "assessment": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "recommended_action": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "evidence_refs": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "progress_semantics": "Progress records only observed handler phases; it never implies notification acknowledgment or resolution.",
+      "checkpoint_semantics": "The checkpoint binds recovery to the immutable notification source and event identity.",
+      "required_capabilities": [
+        "notification.source.read"
+      ],
+      "resource_constraints": {
+        "cpu_millis": 250,
+        "memory_bytes": 134217728,
+        "max_concurrency": 1
+      },
+      "state_namespace": "r3a.notification.activity-intake",
+      "migration_contract": "r3a.notification.activity-intake-state.v1",
+      "recovery": {
+        "mode": "checkpointed",
+        "idempotency_contract": "notification.source-event-idempotency.v1",
+        "checkpoint_contract": "notification.source-event-checkpoint.v1"
+      }
+    }
+  }
+}

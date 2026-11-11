@@ -1,0 +1,34 @@
+{
+  "schema_id": "r3a.steward-access.config.v1",
+  "schema_version": 1,
+  "enabled": true,
+  "session_dsn_env": "R3A_STEWARD_DATABASE_DSN",
+  "secret_provider_manifest": "/etc/r3a/plugins/bitwarden_secrets/manifest.json",
+  "secret_provider_config": "/etc/r3a/bitwarden/provider.json",
+  "identity": {
+    "issuer": "r3a-steward-ingress",
+    "steward_principal_id": "<canonical-r3a-steward-principal>",
+    "assertion_secret_ref": {
+      "provider_id": "r3a.bitwarden-secrets",
+      "provider_version": "1.1.0",
+      "secret_id": "<externally-assigned-bitwarden-secret-id>"
+    },
+    "assertion_max_age_seconds": 60
+  },
+  "session": {
+    "cookie_name": "r3a_steward_session",
+    "lifetime_seconds": 28800,
+    "connect_timeout_seconds": 3,
+    "secure_cookie": true,
+    "allowed_origins": ["https://r3.example.invalid"]
+  },
+  "cme": {
+    "control_socket": "/run/r3a/cme-control.sock",
+    "request_timeout_seconds": 20,
+    "health_stale_after_seconds": 30
+  },
+  "remote_transport": {
+    "state": "unavailable",
+    "public_exposure": false
+  }
+}

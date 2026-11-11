@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.capability-operation.v1",
+  "title": "R3A Capability Operation Descriptor v1",
+  "type": "object",
+  "required": ["contract_id", "contract_version", "operation_id", "operation_revision", "provider", "input_schema", "output_schema", "effect_class", "caller_constraints", "target_scope_schema", "required_grants", "evidence", "recovery", "execution", "lifecycle"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_id": {"const": "r3a.capability-operation.v1"},
+    "contract_version": {"enum": ["1.0.0", "1.1.0"]},
+    "operation_id": {"type": "string", "pattern": "^[a-z][a-z0-9._:-]{2,127}$"},
+    "operation_revision": {"type": "string", "minLength": 1},
+    "provider": {
+      "type": "object", "required": ["provider_id", "provider_version", "entrypoint", "artifact_sha256"], "additionalProperties": false,
+      "properties": {
+        "provider_id": {"type": "string", "minLength": 1},
+        "provider_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "entrypoint": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*$"},
+        "artifact_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "input_schema": {"type": "object"},
+    "output_schema": {"type": "object"},
+    "effect_class": {"type": "string", "enum": ["read", "isolated_write", "external_write", "steward_read", "steward_write"]},
+    "caller_constraints": {
+      "type": "object", "required": ["allowed_principals", "allowed_residents", "allowed_services"], "additionalProperties": false,
+      "properties": {
+        "allowed_principals": {"type": "array", "items": {"type": "string"}},
+        "allowed_residents": {"type": "array", "items": {"type": "string"}},
+        "allowed_services": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "target_scope_schema": {"type": "object"},
+    "required_grants": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "evidence": {
+      "type": "object", "required": ["schema", "verification_obligations"], "additionalProperties": false,
+      "properties": {
+        "schema": {"type": "object"},
+        "verification_obligations": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "recovery": {
+      "type": "object", "required": ["idempotency_required", "idempotency_scope", "replay_safe", "reconciliation_operation_id"], "additionalProperties": false,
+      "properties": {
+        "idempotency_required": {"type": "boolean"},
+        "idempotency_scope": {"type": "string", "enum": ["invocation", "activity", "work_order", "global"]},
+        "replay_safe": {"type": "boolean"},
+        "reconciliation_operation_id": {"type": ["string", "null"]}
+      }
+    },
+    "execution": {
+      "type": "object", "required": ["timeout_seconds", "retry_disposition"], "additionalProperties": false,
+      "properties": {
+        "timeout_seconds": {"type": "number", "minimum": 0.1, "maximum": 3600},
+        "retry_disposition": {"type": "string", "enum": ["never", "safe_retry", "reconcile_first", "caller_decides"]}
+      }
+    },
+    "lifecycle": {
+      "type": "object", "required": ["desired_state"], "additionalProperties": false,
+      "properties": {"desired_state": {"type": "string", "enum": ["enabled", "disabled"]}}
+    },
+    "resident_tool": {
+      "type": "object", "required": ["name", "description"], "additionalProperties": false,
+      "properties": {"name": {"type": "string", "minLength": 1}, "description": {"type": "string", "minLength": 1}}
+    }
+  }
+}

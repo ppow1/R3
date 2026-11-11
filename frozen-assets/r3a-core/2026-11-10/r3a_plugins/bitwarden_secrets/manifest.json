@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "provider_id": "r3a.bitwarden-secrets",
+  "provider_version": "1.1.2",
+  "contract_id": "r3a.secrets.provider.v1",
+  "contract_version": "1.1.0",
+  "entrypoint": "r3a_plugins.bitwarden_secrets.provider:create_provider",
+  "artifact_ref": "provider.py",
+  "artifact_sha256": "85516d46a839057ddadccefb6716585f9d0da695c56142644e59431da5072378",
+  "configuration_schema": {
+    "schema_id": "r3a.bitwarden-secrets.config.v1",
+    "type": "object",
+    "required": [
+      "provider_id",
+      "provider_version",
+      "executable",
+      "access_token_env",
+      "machine_principal_id",
+      "timeout_seconds"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "provider_id": {
+        "type": "string",
+        "minLength": 1
+      },
+      "provider_version": {
+        "type": "string",
+        "minLength": 1
+      },
+      "executable": {
+        "type": "string",
+        "minLength": 1
+      },
+      "access_token_env": {
+        "type": "string",
+        "pattern": "[A-Z][A-Z0-9_]*"
+      },
+      "machine_principal_id": {
+        "type": "string",
+        "minLength": 1
+      },
+      "timeout_seconds": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 120
+      },
+      "config_file": {
+        "type": "string",
+        "minLength": 1
+      },
+      "profile": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "secret_reference_contract": {
+    "contract_id": "r3a.secrets.provider.v1",
+    "contract_version": "1.1.0",
+    "fields": [
+      "provider_id",
+      "provider_version",
+      "secret_id"
+    ]
+  },
+  "machine_principal_contract": {
+    "contract_id": "r3a.machine-principal.v1",
+    "contract_version": "1.0.0",
+    "fields": [
+      "issuer",
+      "principal_id",
+      "authenticated_at",
+      "correlation_id"
+    ]
+  }
+}

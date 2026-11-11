@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.steward-auth-health.v1",
+  "title": "R3A Steward authentication health",
+  "type": "object",
+  "properties": {
+    "contract": {"const": "r3a.steward-auth-health.v1"},
+    "state": {"enum": ["ready", "unavailable"]},
+    "identity_provider": {"enum": ["ready", "unavailable"]},
+    "session_store": {"enum": ["ready", "unavailable"]}
+  },
+  "required": ["contract", "state", "identity_provider", "session_store"],
+  "additionalProperties": false
+}

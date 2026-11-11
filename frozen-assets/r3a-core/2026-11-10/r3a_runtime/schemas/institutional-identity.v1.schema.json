@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.institutional.identity.v1",
+  "title": "Riverview institutional identity classification",
+  "type": "object",
+  "required": ["institutional_id", "display_name", "classification", "authority_ref", "revision"],
+  "properties": {
+    "institutional_id": {"type": "string", "minLength": 1},
+    "display_name": {"type": "string", "minLength": 1},
+    "classification": {"enum": ["RESIDENT", "STEWARD"]},
+    "authority_ref": {"type": "string", "minLength": 1},
+    "revision": {"type": "integer", "minimum": 1},
+    "identity_write_policy": {"enum": ["steward_governed_only", "hr_governed"]}
+  },
+  "allOf": [
+    {"if": {"properties": {"classification": {"const": "STEWARD"}}},
+     "then": {"required": ["identity_write_policy"], "properties": {"identity_write_policy": {"const": "steward_governed_only"}}}}
+  ],
+  "additionalProperties": false
+}
