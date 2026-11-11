@@ -84,3 +84,49 @@ Before creating any artifact, download, script, or deployment instruction for an
 **Related:** LL-001; https://github.com/ppow1/R3/issues/65
 
 ---
+## LL-003 — 2026-11-11 — Capture command results explicitly before asking the Steward to paste them
+
+**Category:** Operator ergonomics; missing output capture; avoidable back-and-forth.
+
+### Mistake
+During B-2 recovery, ChatGPT supplied a multi-line PowerShell repair script and asked the Steward to show the result, but the script printed its result only to the terminal. It did not collect the result in a variable and place it on the clipboard. The Steward consequently pasted the **exact command** back into ChatGPT instead of the **execution output**. ChatGPT then had to ask again whether the script had succeeded. The failure was in the handoff design, not in the Steward's response.
+
+### Evidence already available
+- The Steward works clipboard-first with copy/paste PowerShell commands and frequently returns results to this conversation.
+- Earlier B-2 inspection instructions had already demonstrated using `Set-Clipboard` to return diagnostic output.
+- The repair script ended in multiple `Write-Host` statements (`B-2 REPAIR INSTALLED`, backup path, syntax errors, etc.), but had **no explicit result variable, output capture, or final `Set-Clipboard`**.
+- The Steward posted the command itself; the actual terminal result was supplied only in a subsequent message.
+
+### Impact
+An unnecessary extra turn, confusion about whether the command ran, and additional operator work in the middle of a live bridge recovery.
+
+### Correct minimal approach
+For an **interactive one-shot PowerShell command whose output the Steward must paste back**, capture a concise, purpose-built result and explicitly copy it to the clipboard **at the end of the command**, for example:
+
+```powershell
+$Result = @(
+    'B2_REPAIR=SUCCESS'
+    "BACKUP=$Backup"
+    "PARSE_ERRORS=$($Errors.Count)"
+    'BRIDGE_RESTARTED=NO'
+) -join [Environment]::NewLine
+Write-Host $Result
+Set-Clipboard -Value $Result
+Write-Host 'Result copied to clipboard; paste into ChatGPT.'
+```
+
+For commands that may throw, design the reporting path to capture failure information too, without hiding or falsely reporting errors. Prefer a small explicit status block rather than indiscriminately copying huge source listings or sensitive data.
+
+**Crucial distinction:** This lesson applies to **one-shot operator commands requesting returned output**. It does **not** reverse the Steward's separate requirement to disable **automatic clipboard copying on every B-2 polling cycle**. Background bridge processes must not overwrite the user's clipboard.
+
+### Mandatory prevention check
+Before sending any copy/paste command, ask: **Will I need the execution result back in this conversation?** If yes, the command must produce a clear result variable and a deliberate final clipboard copy, and say explicitly what the Steward should paste. Do not make the Steward manually select terminal output or infer success from a command echo.
+
+### Verification and status
+- Observed incident: B-2 repair command reposted verbatim, followed by actual output `B-2 REPAIR INSTALLED`, `Syntax errors: 0`.
+- Recovery verified by subsequent screenshot and GitHub receipts for Steps 19 and 20: https://github.com/ppow1/R3/issues/61#issuecomment-6799995606
+- **Behavioral correction is not yet verified**; test on the next one-shot PowerShell command that requests output.
+
+**Related:** LL-001, LL-002.
+
+---
