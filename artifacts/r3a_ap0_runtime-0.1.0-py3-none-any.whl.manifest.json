@@ -1,0 +1,20 @@
+{
+  "artifact": "r3a_ap0_runtime-0.1.0-py3-none-any.whl",
+  "artifact_type": "Python wheel",
+  "composition_contract": "r3a.resident.onboarding.host-composition.v1",
+  "coordinator_baseline": "2cc3fe3aabad88c95a5e6489c633cb01472f7c7f",
+  "project": "r3a-ap0-runtime",
+  "project_version": "0.1.0",
+  "sha256": "0886db886f360c44bceeec5cf1760e41c3357020cf100291b81bb6fa9b5d0860",
+  "source_revision": "e247f3fba9c9affdbeac3293b77b91f904cbb27c",
+  "status": "INSTALLABLE_R3A_RUNTIME_LIBRARY; NOT_DEPLOYED; PRODUCTION_API_COMPOSITION_AND_AUTHORITY_GATES_PENDING",
+  "verification": {
+    "host_composition_import": true,
+    "isolated_target_install": true,
+    "migration_019_included": true,
+    "packet_schema_v1_included": true,
+    "rollback_019_included": true,
+    "shared_install_or_deployment": false,
+    "state_machine_v1_included": true
+  }
+}\n

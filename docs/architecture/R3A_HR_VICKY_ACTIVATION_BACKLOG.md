@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_HR_VICKY_ACTIVATION_BACKLOG.md
 Component: R3A-HR-VICKY-ACTIVATION-BACKLOG
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-11T18:43:21Z
 Created By: Codex GPT-6
 Purpose: Track the evidence-backed, authority-separated path from universal resident roster governance through Vicky's operational activation.
@@ -11,6 +11,7 @@ Observability: Step owner, status, evidence reference, and next action.
 Dependencies: Issue #58, R3A roadmap/contracts, current Coordinator integration baseline.
 Authority: Steward dispatch Steps 74 and 81; R3A modular architecture.
 Changed: 2026-11-11T18:43:21Z | HRD-STEP-81 | Codex GPT-6 | Recover activation path and roster policy work into a proof-linked backlog.
+Changed: 2026-11-11T18:54:31Z | HRD-STEP-74 | Codex GPT-6 | Record installable wheel verification and remaining deployment gates.
 Supersedes: None
 Contracts: Universal resident onboarding v1; HR/directory/dossier/grant/runtime/communications authority boundaries.
 Tests: Documentation review against linked authoritative R3A contracts and issue evidence.
