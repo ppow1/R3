@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: hints/README.md
 Component: README
-File Revision: 1.0.7 (provenance baseline; prior revisions untracked)
+File Revision: 1.0.8 (provenance baseline; prior revisions untracked)
 Created: Unknown (legacy; initial commit can establish earliest publication)
 Created By: Unknown (legacy)
 Purpose: R3 engineering reference and continuation guidance
@@ -10,6 +10,7 @@ Execution Model: N/A
 Observability: N/A
 Dependencies: R3 docs and hints index
 Authority: R3 engineering guidance; approved charter prevails
+Changed: 2026-11-11 UTC | B2-STARTUP-001 | ChatGPT GPT-6 | Index two-window external bridge startup commands
 Changed: 2026-11-11 UTC | B2-HANDOFF-001 | ChatGPT GPT-6 | Index external B-2 development coordination guidance
 History/Predecessor: Git blob e5259ded576a3017e8fe8a4a08870a9d75dc2087
 Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-002 | ChatGPT GPT-6 | Require local-evidence-first gateway execution and PowerShell clipboard fallback
@@ -48,6 +49,8 @@ This directory is the first-level reference index for the root [AI_HINTS.md](../
 - [Manifest-driven website deployment runbook](../docs/runbooks/R3_MANIFEST_DEPLOYMENT.md): exact operator commands, manifest examples and phase-1 plan-only status; see [deployment hint](deployment.md).
 
 ## External development coordination (not Riverview runtime)
+
+- **New session:** [B-2 two-window startup commands](b2-development-bridge-startup.md) — Administrator Coordinator title, separate Multi-Target Bridge launch, duplicate-process preflight, and GitHub verification.
 
 - [B-2 external ChatGPT development control — operational handoff](../docs/operations/development-bridge/B2_EXTERNAL_DEVELOPMENT_CONTROL_HANDOFF.md): GitHub Issue #61 dispatch contract, Administrator Coordinator PowerShell, Codex target routing, screenshot return, evidence verification, known limits, and next acceptance tests.
 - [B-2 November 11 executive summary](../docs/operations/development-bridge/B2_2026-11-11_EXECUTIVE_SUMMARY.md): work completed and independently supported results. **This bridge exists to build Riverview and must not be mistaken for an R3A institutional/runtime component.**
