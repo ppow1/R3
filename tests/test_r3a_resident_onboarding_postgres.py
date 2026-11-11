@@ -40,9 +40,9 @@ def _identity_domain(resident_id: str) -> dict:
     evidence = f"test://evidence/hr/{resident_id}"
     return {
         "applicability": "mandatory", "owner": "HR",
-        "authority_source": "test://authority/hr",
-        "required_approval": "test HR identity approval", "approval_ref": approval,
-        "status": "verified", "validation_contract": "test://contract/hr-identity-v1",
+        "authority_source": "riverview_authority.hr",
+        "required_approval": "HR identity approval and source association", "approval_ref": approval,
+        "status": "verified", "validation_contract": "r3a.resident.onboarding.identity.v1",
         "evidence_refs": [evidence], "revision_pins": {"hr_identity": "revision:1"},
         "blocker_ref": None,
         "fields": [{
