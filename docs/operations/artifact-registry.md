@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/operations/artifact-registry.md
 Component: ENG-ARTIFACT-REGISTRY
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-11T13:54:20Z
 Created By: Codex GPT-6
 Purpose: Authoritative source-controlled index of artifact locations, lifecycle state, ownership, dependencies, and verification evidence
@@ -11,10 +11,11 @@ Observability: Version-controlled records; no runtime polling
 Dependencies: Git history; linked issues and source artifacts
 Authority: Issue #62 comment 6796248868; repository file provenance convention; no deployment authorization implied
 Changed: 2026-11-11T13:54:20Z | R3-BRIDGE-V3-STEP7 | Codex GPT-6 | Create canonical artifact and deployment registry
+Changed: 2026-11-11T13:57:29Z | R3-BRIDGE-V3-STEP7 | Codex GPT-6 | Record published source commit SHA
 Supersedes: None
 Contracts: hints/file-provenance.md; docs/operations/bridge-v3-design.md
 Tests: Manual path and repository-state inspection; no runtime tests
-History/Predecessor: None; new file
+History/Predecessor: Git blob 8b45f461b223f04ecf913bd13b7aa4a9f81a29d9
 -->
 # Artifact and deployment registry
 
@@ -43,7 +44,7 @@ This is the canonical index for R3 source artifacts and deployments. Keep lifecy
 |---|---|
 | Artifact / purpose | Contract-first design for managed poll, routing, durable delivery records, and isolated coordinator provisioning |
 | Lifecycle | **CREATED in source control; NOT DEPLOYED; runtime behavior NOT VERIFIED** |
-| Repository / branch / commit | `ppow1/R3`; branch `engineering/r3a-bridge-v3-20261111`; design commit is recorded in the GitHub completion report and git history |
+| Repository / branch / commit | `ppow1/R3`; branch `engineering/r3a-bridge-v3-20261111`; design/index publication commit `4e38c16412d4ec87ba8ae99fa95c06ec713c10df` |
 | Source paths | `docs/operations/bridge-v3-design.md`; `docs/operations/artifact-registry.md` |
 | Absolute path / host | Development worktree `/home/admin1/r3a-workstreams/bridge-v3-20261111` on the current Linux host; production/runtime deployment **NOT DEPLOYED** |
 | Config / services / ports / runtime / worktree | No runtime configured or created. Service, port, and deployment locations **NOT APPLICABLE / NOT DEPLOYED**. Development worktree is the absolute path above. |
