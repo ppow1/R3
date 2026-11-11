@@ -16,7 +16,7 @@ Changed: 2026-11-11T14:35:00Z | R3-BRIDGE-V3-STEP11 | Codex GPT-6 | Record imple
 Changed: 2026-11-11 | R3-BRIDGE-V3-STEP95 | Codex GPT-6 | Record combined-baseline contract correction and Auditor finding response
 Supersedes: None
 Contracts: docs/architecture/R3A_ARCHITECTURE_CHARTER.md; hints/file-provenance.md; Issue #62 requirements
-Tests: 81 combined active-baseline tests passed; see `tests/test_r3a_development_bridge.py` and the registry entry
+Tests: 83 combined active-baseline tests passed; see `tests/test_r3a_development_bridge.py` and the registry entry
 History/Predecessor: Git blob 7a7c9ec956720fa512d02ca6ee4fcfdf1173e7c9
 -->
 # Bridge v3 design and acceptance status
