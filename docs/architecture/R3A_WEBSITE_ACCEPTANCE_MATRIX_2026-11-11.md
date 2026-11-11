@@ -59,6 +59,14 @@ python scripts/deployment/package_r3a_website.py verify \
 
 The bundle is not activated by its builder. Coordinator handoff uses the existing exact-SHA candidate builder and loopback verifier (`scripts/deployment/prepare_candidate.py`, `scripts/deployment/verify_candidate_runtime.py`), the locked requirements file, [LAN deployment runbook](../runbooks/R3A_LAN_HTTPS_DEPLOYMENT.md), and Coordinator-owned service lifecycle. Install/rollback stays Coordinator-controlled: stage a fresh release from the immutable source SHA; verify it; only the service owner may change the active working directory and restart the Website unit; rollback restores the previous exact Website source/config revision and restarts only that Website-owned unit after validation. This dispatch did not stage into the active tree, alter external config, deploy, or restart a service.
 
+### Step 65 package evidence
+
+- Source SHA `32077703603fba2a4595348d81b7d1b0ee2472e9` is committed and pushed with the package builder, tests, complete evidence matrix, and repaired 20-wheel runtime lock.
+- Archive `artifacts/releases/r3a-website-32077703603fba2a4595348d81b7d1b0ee2472e9.tar.gz` SHA-256 `a23d6c1b961ff976bccbb168e077f31096b999388e64e1510a4b5e0bfcfd18da`; 414 manifest entries; independent digest verification passed. Exact handoff is [R3A Website release handoff](../handoffs/R3A_WEBSITE_RELEASE_HANDOFF_20261111.md).
+- Fresh isolated deployment-lock install: 20 packages; Website focused Python/API + package suite **26 passed**; client/operations/roadmap Node suite **28 passed**. Repeated against the extracted archive itself: **26 + 28 passed**, `GET /api/v1/health` reported running and `/` returned HTTP 200 on ephemeral loopback; server stopped afterward. Existing candidate runtime verifier confirmed exact source SHA and clean shutdown.
+- Broader repository suite remains **not green**: the standard candidate pipeline lacks a separately pinned test-only `pytest` dependency; a run with the already provisioned R3A test environment executed 414 tests and found 3 failures, 2 errors, 5 skips in CME resident-capability adapter expectations, Notifications manifest artifact digest, and telemetry inbox fixture. Exact failing tests are enumerated in the handoff. They are assigned to those owning workstreams and are not represented as Website feature failures or silently changed here.
+- Source/package audit and Coordinator handoff are **requested, pending**. Package is built, hash-locked, independently read back, archive-tested and loopback-started; it is not activated or declared release-ready pending exact artifact review and the blocked full integration baseline.
+
 ### Remaining acceptance blockers
 
 1. Exact-SHA independent package/source audit and Coordinator integration/handoff.
