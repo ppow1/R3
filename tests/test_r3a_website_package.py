@@ -13,6 +13,11 @@ SPEC.loader.exec_module(website_package)
 
 
 class WebsitePackageTests(unittest.TestCase):
+    def test_deploy_lock_includes_database_runtime_driver_and_pool(self):
+        lock = (Path(__file__).resolve().parents[1] / "requirements-deploy.lock").read_text()
+        pinned = {line.split("==", 1)[0] for line in lock.splitlines() if "==" in line}
+        self.assertTrue({"psycopg", "psycopg-binary", "psycopg-pool"} <= pinned)
+
     def test_package_is_deterministic_pinned_and_digest_verified(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "source"
