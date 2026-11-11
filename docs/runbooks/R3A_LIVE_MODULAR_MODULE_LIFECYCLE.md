@@ -100,3 +100,36 @@ Track these separately:
 Measure installation separately from package construction and verification. From the reviewed checkout, run `python3 scripts/measure_octominer_module_install.py`; it builds and verifies the deterministic archive, installs into a fresh temporary root, and prints per-phase and total elapsed seconds. This is a repeatable local baseline. For the managed window, time the install command and record start/end timestamps separately from config reload, activation, provider health, invocation, and rollback; do not report local staging time as managed integration time.
 
 Package and staging results do not imply managed live acceptance. Do not modify shared live services from an integration worktree. The managed install/config reload/activation sequence requires Coordinator approval and an Auditor review of the evidence bundle.
+
+## Generic process-module package v2 — isolated staging only
+
+`r3a.module-release-package.v2@2.0.0` packages a process worker with a content-addressed identity, source revision, module/role metadata, fixed AP0 JSON-lines launch profile, runtime dependencies, and SHA-256 inventory. It is a package/staging contract; it does not register a module, issue a grant, or change CME lifecycle state.
+
+Build, verify, and stage the audited Grace candidate in an isolated root:
+
+```sh
+python3 scripts/package_r3a_module.py build \
+  --spec r3a_modules/resident_grace/package_spec.json \
+  --source-root . \
+  --output artifacts/r3a-resident-grace-1.2.15.tar.gz
+python3 scripts/package_r3a_module.py verify artifacts/r3a-resident-grace-1.2.15.tar.gz
+sha256sum artifacts/r3a-resident-grace-1.2.15.tar.gz
+python3 scripts/package_r3a_module.py install \
+  artifacts/r3a-resident-grace-1.2.15.tar.gz \
+  --root /path/to/isolated-module-stage
+```
+
+For a repeatable local staging-time sample, use a fresh isolated root and record host/Python version. This measures the CLI process plus local file verification/copy only; it is not managed CME installation time:
+
+```sh
+/usr/bin/time -f 'local_install_elapsed_seconds=%e' \
+  python3 scripts/package_r3a_module.py install \
+  --root /tmp/r3a-package-measurement \
+  artifacts/r3a-resident-grace-1.2.15.tar.gz
+```
+
+The installer validates every archive path and digest, rejects same-version/different-digest replacement, atomically stages the verified files under `r3a-modules/<module-id>/<version>/<bundle-sha256>`, and marks staged content read-only. The prior version remains available for rollback; installation never activates either version. A package `launch-plan` command validates the staged digest and emits a fixed argument vector/environment with `shell=false`; it does not start a process.
+
+**Current boundary:** CME does not yet consume this package-v2 launch profile. Its existing resident activation path imports the configured runtime entrypoint and has a Grace-specific `--config` argument branch; the capability-operation loader is the current role-declaration ingestion path. Do not use `launch-plan` as CME registration or live activation evidence. Coordinator and Modular Plugins must reconcile the generic role registration, installed import-root selection, external configuration reference, and rollback readback with the canonical AP0-M1 lifecycle before managed launch. No package command edits CME configuration or authorizes a grant.
+
+This package schema and `resident.grace@1.2.15` remain review candidates until #46 confirms the contract fields and the authoritative registry confirms the version is available. The current managed runtime must not install or activate this candidate based on local staging evidence.

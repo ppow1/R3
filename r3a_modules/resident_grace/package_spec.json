@@ -1,0 +1,69 @@
+{
+  "schema_id": "r3a.module-release-package.v2",
+  "schema_version": "2.0.0",
+  "source": {
+    "repository": "ppow1/R3",
+    "revision": "29353c978ed9ea0e9991a264bc222a61fdca2f1c"
+  },
+  "module": {
+    "module_id": "resident.grace",
+    "module_version": "1.2.15",
+    "owner": "Autonomy",
+    "manifest_contract": {
+      "contract_id": "r3a.module-manifest.v1",
+      "contract_version": "1.2.0"
+    },
+    "entrypoint": "r3a_runtime.grace_module",
+    "entrypoint_path": "r3a_runtime/grace_module.py",
+    "entrypoint_sha256": "1bace5130db7f866430a25a20108f4b0a624d21d891fe977d85c9947c0deb18d"
+  },
+  "role": {
+    "contract_id": "r3a.resident.executor",
+    "contract_version": "1.0.0",
+    "execution_contract_range": {
+      "contract_id": "r3a.resident.execution-profile",
+      "major": 1,
+      "min_minor": 0,
+      "max_minor": 0
+    }
+  },
+  "launch_profile": {
+    "binding": "process",
+    "protocol_id": "r3a.module-jsonl-worker.v1",
+    "protocol_major": 1,
+    "protocol_min_minor": 0,
+    "protocol_max_minor": 0,
+    "import_root": "runtime",
+    "entrypoint": "r3a_runtime.grace_module",
+    "argv_template": [
+      "-m",
+      "r3a_runtime.grace_module",
+      "--socket",
+      "{socket_path}",
+      "--module-id",
+      "{module_id}",
+      "--module-version",
+      "{module_version}",
+      "--config",
+      "{configuration_path}"
+    ]
+  },
+  "runtime_dependencies": [
+    "Python >=3.12",
+    "psycopg[binary,pool] >=3.2,<4"
+  ],
+  "source_files": [
+    {"source": "r3a_runtime/__init__.py", "path": "runtime/r3a_runtime/__init__.py", "sha256": "41399a48e9907648ece60a4810439f33fa6eed5e04bbb09fde3a709eeea6ce11"},
+    {"source": "r3a_runtime/acceptance.py", "path": "runtime/r3a_runtime/acceptance.py", "sha256": "b3c0669bc1ad9e6e563a74d2405e89f62666671a1746151de7c8ea230d365d76"},
+    {"source": "r3a_runtime/capability_contracts.py", "path": "runtime/r3a_runtime/capability_contracts.py", "sha256": "8f6584602d6b6a9c2e8e3f01694c75da721b40a0f1b8f64b91ec9bf587da5480"},
+    {"source": "r3a_runtime/config.py", "path": "runtime/r3a_runtime/config.py", "sha256": "8b7817c42553aeeb03a06564294a30a5435eb3bf0ba8939c4ae25c8d9f0d6b3a"},
+    {"source": "r3a_runtime/contracts.py", "path": "runtime/r3a_runtime/contracts.py", "sha256": "52a560c2a099270e081299163703c27a7bb56953d1252c09a870bbb2bfd102bc"},
+    {"source": "r3a_runtime/grace_module.py", "path": "runtime/r3a_runtime/grace_module.py", "sha256": "1bace5130db7f866430a25a20108f4b0a624d21d891fe977d85c9947c0deb18d"},
+    {"source": "r3a_runtime/module_contracts.py", "path": "runtime/r3a_runtime/module_contracts.py", "sha256": "e052147121dc336a3fec6fc5c58ad61f5513a5059145289303ebe84f9dd4de58"},
+    {"source": "r3a_runtime/module_extensions.py", "path": "runtime/r3a_runtime/module_extensions.py", "sha256": "142333ab3071ca27913eb7c56f63a1e21954f9d6c827447e92e6e0c10d0b9502"},
+    {"source": "r3a_runtime/protocol.py", "path": "runtime/r3a_runtime/protocol.py", "sha256": "c9e02de5a02915f06f928f4f13303a86af3bd94c6644d77805300a15c7695acb"},
+    {"source": "r3a_runtime/resident_character_context.py", "path": "runtime/r3a_runtime/resident_character_context.py", "sha256": "8837c2f684780454b5d2e7a5de75feda8099a4552190d93e2ea02b8fdf87bb7c"},
+    {"source": "r3a_runtime/resident_identity.py", "path": "runtime/r3a_runtime/resident_identity.py", "sha256": "9bdd33b5fd17eec48335003f03f691ed466c6aae876ede05a9655f90c211bcfa"},
+    {"source": "r3a_runtime/timestamp_presentation.py", "path": "runtime/r3a_runtime/timestamp_presentation.py", "sha256": "cc31a525058f316fa5608fc3f621812fb3e44e84e804e0db7a3d654065d1b228"}
+  ]
+}
