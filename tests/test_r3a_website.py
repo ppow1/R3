@@ -46,6 +46,7 @@ class StewardWebsiteApiTests(unittest.TestCase):
         self.settings = SimpleNamespace(
             diagnostics_socket="/run/r3a/diagnostics.sock",
             control_socket="/run/r3a/control.sock",
+            source_digest="test-config-revision",
         )
 
     def tearDown(self):
@@ -207,13 +208,14 @@ class StewardWebsiteApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
 
     def test_shared_ap3_configuration_supplies_cme_socket_without_secondary_runtime_config(self):
-        self.access.config = {"cme": {"control_socket": "/run/r3a/control.sock"}}
+        socket_path = os.path.abspath("r3a-control.sock")
+        self.access.config = {"cme": {"control_socket": socket_path}}
         with patch.dict(os.environ, {}, clear=True), \
                 patch("r3a_runtime.control.control_request", new_callable=AsyncMock,
                       return_value={"observed_at": "2026-11-09T12:00:00Z"}) as control:
             response = self.client.get("/api/v1/steward/r3a/status")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(control.await_args.args[:2], ("/run/r3a/control.sock", "diagnostics.status"))
+        self.assertEqual(control.await_args.args[:2], (socket_path, "diagnostics.status"))
 
     def test_temporary_bearer_does_not_replace_shared_session(self):
         app.state.steward_access = None
@@ -331,6 +333,67 @@ class StewardWebsiteApiTests(unittest.TestCase):
         self.access.authenticated_principal.side_effect = HTTPException(401, "session required")
         response = self.client.get("/api/v1/steward/residents")
         self.assertEqual(response.status_code, 401)
+
+    def test_notification_inbox_uses_ap3_principal_and_registered_cme_capability(self):
+        inbox = {"contract": "r3a.notification-inbox.v1", "contract_version": "1.0.0",
+                 "freshness": "current", "deliveries": [], "next_cursor": None,
+                 "presentation_timezone": "UTC"}
+        result = {"outcome": "SUCCEEDED", "authorization": {"allowed": True}, "output": inbox}
+        with patch.dict(os.environ, {"R3A_CONFIG": "/tmp/r3a.json"}), \
+                patch("r3a_runtime.config.load_settings", return_value=self.settings), \
+                patch("r3a_runtime.control.control_request", new_callable=AsyncMock,
+                      return_value=result) as control:
+            response = self.client.get("/api/v1/notifications?cursor=page-2")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), inbox)
+        self.assertEqual(control.await_args.args[1], "capability.invoke")
+        invocation = control.await_args.args[2]["request"]
+        self.assertEqual(invocation["operation_id"], "notification.delivery.read")
+        self.assertEqual(invocation["caller"]["principal_id"], "steward:test")
+        self.assertEqual(invocation["input"], {"cursor": "page-2", "limit": 50})
+
+    def test_notification_lifecycle_uses_cme_grants_and_replay_key(self):
+        delivery_id = "9d4e4325-27b3-43aa-9197-08d6bab5a1c0"
+        ack = {"contract_id": "r3a.notification-delivery", "status": "acknowledged"}
+        resolution = {"contract_id": "r3a.notification-delivery", "status": "resolved"}
+        results = [{"outcome": "SUCCEEDED", "authorization": {"allowed": True}, "output": ack},
+                   {"outcome": "SUCCEEDED", "authorization": {"allowed": True}, "output": resolution}]
+        with patch.dict(os.environ, {"R3A_CONFIG": "/tmp/r3a.json"}), \
+                patch("r3a_runtime.config.load_settings", return_value=self.settings), \
+                patch("r3a_runtime.control.control_request", new_callable=AsyncMock,
+                      side_effect=results) as control:
+            acknowledged = self.client.post(
+                f"/api/v1/notifications/{delivery_id}/acknowledgment",
+                json={"idempotency_key": "website-ack-0001", "note": "Seen"},
+                headers={"Origin": "http://testserver"})
+            resolved = self.client.post(
+                f"/api/v1/notifications/{delivery_id}/resolution",
+                json={"idempotency_key": "website-resolve-01", "disposition": "Handled",
+                      "evidence_refs": ["notification:e1"]}, headers={"Origin": "http://testserver"})
+        self.assertEqual(acknowledged.status_code, 200)
+        self.assertEqual(resolved.status_code, 200)
+        ack_invocation, resolve_invocation = [call.args[2]["request"] for call in control.await_args_list]
+        self.assertEqual(ack_invocation["operation_id"], "notification.delivery.acknowledge")
+        self.assertEqual(ack_invocation["caller"]["principal_id"], "steward:test")
+        self.assertEqual(ack_invocation["idempotency_key"], "website-ack-0001")
+        self.assertEqual(resolve_invocation["operation_id"], "notification.delivery.resolve")
+        self.assertEqual(resolve_invocation["input"]["evidence_refs"], ["notification:e1"])
+
+    def test_notification_inbox_requires_ap3_session_before_cme_dispatch(self):
+        self.access.authenticated_principal.side_effect = HTTPException(401, "session required")
+        with patch("r3a_runtime.control.control_request", new_callable=AsyncMock) as control:
+            response = self.client.get("/api/v1/notifications")
+        self.assertEqual(response.status_code, 401)
+        control.assert_not_awaited()
+
+    def test_notification_cme_denial_is_not_converted_to_success(self):
+        result = {"outcome": "DENIED", "authorization": {"allowed": False}, "output": None}
+        with patch.dict(os.environ, {"R3A_CONFIG": "/tmp/r3a.json"}), \
+                patch("r3a_runtime.config.load_settings", return_value=self.settings), \
+                patch("r3a_runtime.control.control_request", new_callable=AsyncMock,
+                      return_value=result):
+            response = self.client.get("/api/v1/notifications")
+        self.assertEqual(response.status_code, 403)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.21
+# File Revision: 1.0.22
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Serve visual estate UI and authenticated, canonical R3A Steward API adapters
@@ -20,6 +20,7 @@
 # Changed: 2026-11-07T21:58:03Z | R3A-007/R3A-013 | Codex GPT-6 | Expose read-only effective sanitized configuration and bounded activation history from authoritative diagnostics.
 # Changed: 2026-11-07T22:02:09Z | R3A-007/R3A-013 | Codex GPT-6 | Record focused API test coverage and current verification limits in provenance.
 # Changed: 2026-11-07T22:04:07Z | R3A-007/R3A-010 | Codex GPT-6 | Add structured request correlation and preserve CME's actual objective correlation ID.
+# Changed: 2026-11-10 | R3A-WEBSITE-NOTIFICATIONS | Codex GPT-6 | Add AP3-session-bound notification capability routes and CME invocation adapter.
 # Changed: 2026-11-07T23:40:00Z | R3A-007/R3A-010 | Codex GPT-6 | Serve versioned Steward workspace browser client module.
 # Changed: 2026-11-07T23:55:00Z | R3A-010 | Codex GPT-6 | Replace temporary bearer checks with the shared AP3 opaque session and version the objective result.
 # Changed: 2026-11-08T13:30:00Z | R3A-WEB-IDENTITY | Codex GPT-6 | Expose startup-captured build/version/environment identity for the Steward website.
@@ -182,6 +183,96 @@ class StewardConversationCreate(BaseModel):
 class StewardConversationMessage(BaseModel):
     client_message_id: str
     text: str = Field(min_length=1, max_length=2000)
+
+
+class NotificationAcknowledgment(BaseModel):
+    idempotency_key: str = Field(min_length=8, max_length=512)
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class NotificationResolution(BaseModel):
+    idempotency_key: str = Field(min_length=8, max_length=512)
+    disposition: str = Field(min_length=1, max_length=2000)
+    evidence_refs: list[str] = Field(min_length=1, max_length=50)
+
+
+async def _notification_capability(request: Request, principal: dict, operation: str,
+                                   arguments: dict, idempotency_key: str | None = None):
+    """Invoke the registered notification operation; CME owns grants and audit."""
+    settings = await _steward_settings(request)
+    from r3a_runtime.control import control_request
+    invocation_id = str(uuid.uuid4())
+    caller_id = principal.get("principal_id")
+    if not isinstance(caller_id, str) or not caller_id:
+        raise HTTPException(401, "Authenticated Steward principal is unavailable")
+    idem = idempotency_key or f"website-notification-read:{caller_id}:{invocation_id}"
+    invocation = {
+        "contract_id": "r3a.capability-invocation.v1", "contract_version": "1.1.0",
+        "invocation_id": invocation_id, "operation_id": operation,
+        "operation_contract_version": "1.1.0",
+        "caller": {"principal_id": caller_id, "resident_id": None, "service_id": None},
+        "target": {}, "input": arguments, "activity_id": None, "attempt_id": None,
+        "correlation_id": invocation_id, "work_order": None, "budget_reservation": None,
+        "evidence_purpose": "Authenticated AP3 notification inbox or lifecycle operation",
+        "idempotency_key": idem, "deadline": None,
+        "config_revision": settings.source_digest,
+    }
+    try:
+        result = await control_request(settings.control_socket, "capability.invoke",
+                                       {"request": invocation}, idempotency_key=idem, timeout=15.0)
+    except RuntimeError as exc:
+        if str(exc).startswith("PermissionError:"):
+            raise HTTPException(403, "Notification operation denied by CME") from exc
+        if str(exc).startswith(("ValueError:", "LookupError:")):
+            raise HTTPException(503, "Notification capability is not registered or unavailable") from exc
+        raise HTTPException(503, "Managed notification operation is unavailable") from exc
+    except Exception as exc:
+        raise HTTPException(503, f"Managed notification operation unavailable: {type(exc).__name__}") from exc
+    if result.get("outcome") != "SUCCEEDED" or result.get("authorization", {}).get("allowed") is not True:
+        raise HTTPException(403 if result.get("outcome") == "DENIED" else 503,
+                            "Notification operation was not authorized or did not complete")
+    return result.get("output")
+
+
+@app.get("/api/v1/notifications")
+async def steward_notifications(request: Request, cursor: str | None = None):
+    principal = await _steward_principal(request, "steward.r3a.read_or_submit")
+    output = await _notification_capability(
+        request, principal, "notification.delivery.read", {"cursor": cursor, "limit": 50})
+    if not isinstance(output, dict) or output.get("contract") != "r3a.notification-inbox.v1":
+        raise HTTPException(503, "Notification provider returned an invalid inbox contract")
+    return output
+
+
+@app.post("/api/v1/notifications/{delivery_id}/acknowledgment")
+async def steward_acknowledge_notification(delivery_id: str, body: NotificationAcknowledgment,
+                                            request: Request):
+    try:
+        uuid.UUID(delivery_id)
+    except ValueError as exc:
+        raise HTTPException(422, "delivery_id must be a UUID") from exc
+    principal = await _steward_principal(request, "steward.r3a.read_or_submit")
+    output = await _notification_capability(
+        request, principal, "notification.delivery.acknowledge",
+        {"delivery_id": delivery_id, "idempotency_key": body.idempotency_key, "note": body.note},
+        body.idempotency_key)
+    return output
+
+
+@app.post("/api/v1/notifications/{delivery_id}/resolution")
+async def steward_resolve_notification(delivery_id: str, body: NotificationResolution,
+                                       request: Request):
+    try:
+        uuid.UUID(delivery_id)
+    except ValueError as exc:
+        raise HTTPException(422, "delivery_id must be a UUID") from exc
+    principal = await _steward_principal(request, "steward.r3a.read_or_submit")
+    output = await _notification_capability(
+        request, principal, "notification.delivery.resolve",
+        {"delivery_id": delivery_id, "idempotency_key": body.idempotency_key,
+         "disposition": body.disposition, "evidence_refs": body.evidence_refs},
+        body.idempotency_key)
+    return output
 
 
 async def _website_control_request(request: Request, principal: dict, operation: str,
