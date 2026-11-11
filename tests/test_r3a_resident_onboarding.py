@@ -23,6 +23,7 @@ from r3a_runtime.residents.onboarding import (
     transition_packet,
     validate_json_schema_and_machine,
     validate_packet,
+    _canonical_domain_metadata,
 )
 from r3a_runtime.residents.onboarding_repository import PostgresResidentOnboardingRepository
 
@@ -47,16 +48,16 @@ def _new(packet_id: str, resident_id: str | None, label: str, role: str):
 def _verified_domain(name: str, owner: str, fields: set[str], *, expires: bool = False):
     approval = f"test://approval/{name}"
     evidence = f"test://evidence/{name}"
+    canonical = _canonical_domain_metadata(name, "conditional" if name == "character" else "mandatory")
     return {
-        "applicability": "mandatory", "owner": owner,
-        "authority_source": f"test://authority/{name}",
-        "required_approval": f"approved {name}", "approval_ref": approval,
-        "status": "verified", "validation_contract": f"test://contract/{name}",
+        **canonical, "approval_ref": approval,
+        "status": "verified",
         "evidence_refs": [evidence], "revision_pins": {name: "revision:1"},
         "blocker_ref": None,
         "fields": [{
             "field_id": field_id, "value_ref": f"test://value/{name}/{field_id}",
-            "classification": "institutional", "owner": owner,
+            "classification": "institutional",
+            "owner": "Independent Auditor" if name == "acceptance" and field_id == "independent_review" else owner,
             "source_ref": f"test://source/{name}/{field_id}",
             "approval_required": True, "approval_ref": approval,
             "validation_contract": f"test://validate/{name}/{field_id}",
@@ -89,9 +90,10 @@ def _activation_packet():
     auditor_field["owner"] = "Independent Auditor"
     packet["domains"]["character"] = {
         "applicability": "conditional", "owner": "Character Architecture",
-        "authority_source": "test://authority/character",
-        "required_approval": "approved not applicable", "approval_ref": "test://approval/character-na",
-        "status": "not_applicable", "validation_contract": "test://contract/character",
+        "authority_source": "r3a.character-architecture",
+        "required_approval": "Character Architecture approval when applicable",
+        "approval_ref": "test://approval/character-na",
+        "status": "not_applicable", "validation_contract": "r3a.resident.onboarding.character.v1",
         "evidence_refs": ["test://evidence/character-na"], "revision_pins": {},
         "fields": [], "blocker_ref": None,
     }
@@ -294,6 +296,53 @@ class ResidentOnboardingTests(unittest.TestCase):
                          {packet["resident_id"] for packet in results})
         self.assertEqual({"Research Analyst", "Product Designer"},
                          {packet["request_context"]["requested_role"] for packet in results})
+
+    def test_create_rejects_caller_reassignment_of_security_authority_metadata(self):
+        async def run():
+            store = MemoryOnboardingStore()
+            service = _service(store)
+            hr = OnboardingActor("principal:hr", "HR", "session:hr")
+            steward = OnboardingActor("principal:steward", "Steward", "session:steward")
+            for actor in (hr, steward):
+                packet = _new(str(uuid.uuid4()), None, "Candidate", "Requested role")
+                packet["domains"]["grants"].update({
+                    "owner": actor.role,
+                    "authority_source": "caller://invented-security-authority",
+                    "required_approval": "caller-selected approval",
+                    "validation_contract": "caller.selected.grants.v99",
+                })
+                with self.assertRaisesRegex(OnboardingError, "authority metadata"):
+                    await service.create(packet, actor=actor, correlation_id=str(uuid.uuid4()),
+                        reason_ref="test://reason/request", evidence_refs=["test://request/evidence"])
+            self.assertEqual({}, store.packets)
+        asyncio.run(run())
+
+    def test_hr_cannot_reassign_or_record_security_owned_grant_evidence(self):
+        async def run():
+            store = MemoryOnboardingStore()
+            service = _service(store)
+            hr = OnboardingActor("principal:hr", "HR", "session:hr")
+            packet = _new(str(uuid.uuid4()), None, "Candidate", "Requested role")
+            created = await service.create(packet, actor=hr, correlation_id=str(uuid.uuid4()),
+                reason_ref="test://reason/request", evidence_refs=["test://request/evidence"])
+
+            reassigned = deepcopy(created["domains"]["grants"])
+            reassigned.update({"owner": "HR", "authority_source": "caller://security",
+                               "required_approval": "HR approved", "validation_contract": "hr.grants.v1"})
+            with self.assertRaisesRegex(OnboardingError, "authority metadata"):
+                await service.record_domain(packet["packet_id"], "grants", domain=reassigned, actor=hr,
+                    expected_revision=1, idempotency_key="spoof-grants-owner-0001",
+                    correlation_id=str(uuid.uuid4()), reason_ref="test://reason/spoof",
+                    event_id=str(uuid.uuid4()))
+
+            forged_field = _verified_domain("grants", "HR", REQUIRED_FIELDS["grants"], expires=True)
+            with self.assertRaisesRegex(PermissionError, "authoritative owner"):
+                await service.record_domain(packet["packet_id"], "grants", domain=forged_field, actor=hr,
+                    expected_revision=1, idempotency_key="spoof-grants-fields-0001",
+                    correlation_id=str(uuid.uuid4()), reason_ref="test://reason/spoof-fields",
+                    event_id=str(uuid.uuid4()))
+            self.assertEqual("pending", (await store.get_packet(packet["packet_id"]))["domains"]["grants"]["status"])
+        asyncio.run(run())
 
     def test_unauthorized_request_and_transition_actor_are_denied(self):
         async def run():

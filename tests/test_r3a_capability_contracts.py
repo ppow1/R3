@@ -12,7 +12,7 @@ from unittest.mock import patch
 from r3a_runtime.capability_contracts import (
     CapabilityContractError, CapabilityProviderResult, CapabilityRegistry, validate_invocation_request,
     validate_invocation_result, validate_operation, operation_from_manifest, validate_json,
-    normalize_provider_result,
+    normalize_provider_result, validate_schema_definition,
 )
 from r3a_runtime.config import load_settings
 
@@ -42,6 +42,32 @@ class CapabilityContractTests(unittest.TestCase):
                                             self.descriptor)
         self.assertEqual(self.descriptor["operation_id"], request["operation_id"])
         self.assertEqual("SUCCEEDED", result["outcome"])
+
+    def test_schema_definition_rejects_recursive_refs_and_accepts_resolvable_refs(self):
+        recursive = {
+            "type": "object", "properties": {"node": {"$ref": "#/$defs/node"}},
+            "$defs": {"node": {"type": "object", "properties": {
+                "next": {"$ref": "#/$defs/node"}}}},
+        }
+        with self.assertRaisesRegex(CapabilityContractError, "recursive schema references"):
+            validate_schema_definition(recursive)
+        with self.assertRaisesRegex(CapabilityContractError, "recursive schema references"):
+            validate_json({"node": {"next": {}}}, recursive)
+
+        resolvable = {
+            "type": "object", "required": ["name"],
+            "properties": {"name": {"$ref": "#/$defs/name"}},
+            "$defs": {"name": {"type": "string", "minLength": 1}},
+        }
+        validate_schema_definition(resolvable)
+
+    def test_schema_definition_reports_unresolved_and_external_refs(self):
+        with self.assertRaisesRegex(CapabilityContractError, "unresolved schema reference"):
+            validate_schema_definition({"type": "object", "properties": {
+                "value": {"$ref": "#/$defs/missing"}}})
+        with self.assertRaisesRegex(CapabilityContractError, "only local reference-only"):
+            validate_schema_definition({"type": "object", "properties": {
+                "value": {"$ref": "https://schemas.invalid/value.json"}}})
 
     def test_direct_principal_read_uses_grant_checked_lineage_without_fake_activity(self):
         directory_manifest = json.loads(

@@ -68,7 +68,8 @@ def _type_matches(value: Any, expected: str) -> bool:
 
 
 def validate_json(value: Any, schema: dict[str, Any], *, path: str = "$",
-                  root_schema: dict[str, Any] | None = None) -> None:
+                  root_schema: dict[str, Any] | None = None,
+                  _ref_stack: frozenset[str] = frozenset()) -> None:
     """Validate the portable JSON Schema subset and fail with a stable path."""
     if not isinstance(schema, dict):
         raise CapabilityContractError(f"{path}: schema must be an object")
@@ -77,13 +78,15 @@ def validate_json(value: Any, schema: dict[str, Any], *, path: str = "$",
         ref = schema["$ref"]
         if not isinstance(ref, str) or not ref.startswith("#/"):
             raise CapabilityContractError(f"{path}: external schema references are unsupported")
+        if ref in _ref_stack:
+            raise CapabilityContractError(f"{path}: recursive schema references are unsupported")
         target: Any = root
         try:
             for key in ref[2:].split("/"):
                 target = target[key.replace("~1", "/").replace("~0", "~")]
         except (KeyError, TypeError):
             raise CapabilityContractError(f"{path}: unresolved schema reference") from None
-        validate_json(value, target, path=path, root_schema=root)
+        validate_json(value, target, path=path, root_schema=root, _ref_stack=_ref_stack | {ref})
         return
     expected = schema.get("type")
     if isinstance(expected, list):
@@ -110,7 +113,8 @@ def validate_json(value: Any, schema: dict[str, Any], *, path: str = "$",
             if child_schema is None and isinstance(additional, dict):
                 child_schema = additional
             if child_schema is not None:
-                validate_json(item, child_schema, path=f"{path}.{key}", root_schema=root)
+                validate_json(item, child_schema, path=f"{path}.{key}", root_schema=root,
+                              _ref_stack=_ref_stack)
     if isinstance(value, list):
         if len(value) < schema.get("minItems", 0) or len(value) > schema.get("maxItems", float("inf")):
             raise CapabilityContractError(f"{path}: array size is outside bounds")
@@ -118,7 +122,8 @@ def validate_json(value: Any, schema: dict[str, Any], *, path: str = "$",
             raise CapabilityContractError(f"{path}: array values must be unique")
         if isinstance(schema.get("items"), dict):
             for i, item in enumerate(value):
-                validate_json(item, schema["items"], path=f"{path}[{i}]", root_schema=root)
+                validate_json(item, schema["items"], path=f"{path}[{i}]", root_schema=root,
+                              _ref_stack=_ref_stack)
     if isinstance(value, str):
         if len(value) < schema.get("minLength", 0) or len(value) > schema.get("maxLength", float("inf")):
             raise CapabilityContractError(f"{path}: string length is outside bounds")
@@ -144,7 +149,8 @@ def _timestamp(value: str, field: str) -> datetime:
 
 
 def validate_schema_definition(schema: Any, *, path: str = "schema",
-                              root_schema: dict[str, Any] | None = None) -> None:
+                              root_schema: dict[str, Any] | None = None,
+                              _ref_stack: frozenset[str] = frozenset()) -> None:
     """Validate R3A's supported self-contained JSON Schema subset."""
     if not isinstance(schema, dict):
         raise CapabilityContractError(f"{path}: schema must be an object")
@@ -153,13 +159,16 @@ def validate_schema_definition(schema: Any, *, path: str = "schema",
         ref = schema["$ref"]
         if not isinstance(ref, str) or not ref.startswith("#/") or set(schema) != {"$ref"}:
             raise CapabilityContractError(f"{path}: only local reference-only schema nodes are supported")
+        if ref in _ref_stack:
+            raise CapabilityContractError(f"{path}: recursive schema references are unsupported")
         target: Any = root
         try:
             for key in ref[2:].split("/"):
                 target = target[key.replace("~1", "/").replace("~0", "~")]
         except (KeyError, TypeError):
             raise CapabilityContractError(f"{path}: unresolved schema reference") from None
-        validate_schema_definition(target, path=path + "->$ref", root_schema=root)
+        validate_schema_definition(target, path=path + "->$ref", root_schema=root,
+                                   _ref_stack=_ref_stack | {ref})
         return
     allowed = {"$schema", "$id", "$defs", "title", "description", "type", "required", "properties",
                "additionalProperties", "items", "enum", "const", "pattern", "format",
@@ -184,19 +193,23 @@ def validate_schema_definition(schema: Any, *, path: str = "schema",
         if not isinstance(additional, (bool, dict)):
             raise CapabilityContractError(f"{path}.additionalProperties must be boolean or a schema")
         if isinstance(additional, dict):
-            validate_schema_definition(additional, path=f"{path}.additionalProperties", root_schema=root)
+            validate_schema_definition(additional, path=f"{path}.additionalProperties", root_schema=root,
+                                       _ref_stack=_ref_stack)
         for key, child in properties.items():
-            validate_schema_definition(child, path=f"{path}.{key}", root_schema=root)
+            validate_schema_definition(child, path=f"{path}.{key}", root_schema=root,
+                                       _ref_stack=_ref_stack)
     if "$defs" in schema:
         definitions = schema["$defs"]
         if not isinstance(definitions, dict) or any(not isinstance(k, str) for k in definitions):
             raise CapabilityContractError(f"{path}.$defs must be an object")
         for key, child in definitions.items():
-            validate_schema_definition(child, path=f"{path}.$defs.{key}", root_schema=root)
+            validate_schema_definition(child, path=f"{path}.$defs.{key}", root_schema=root,
+                                       _ref_stack=_ref_stack)
     if "array" in type_set:
         if "items" not in schema:
             raise CapabilityContractError(f"{path}.items is required for array schemas")
-        validate_schema_definition(schema["items"], path=f"{path}.items", root_schema=root)
+        validate_schema_definition(schema["items"], path=f"{path}.items", root_schema=root,
+                                   _ref_stack=_ref_stack)
         if schema.get("uniqueItems", False) not in (True, False):
             raise CapabilityContractError(f"{path}.uniqueItems must be boolean")
     if "string" in type_set:

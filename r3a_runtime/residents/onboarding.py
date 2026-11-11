@@ -47,6 +47,47 @@ REQUIRED_FIELDS = {
                    "credential_rotation", "grant_revocation", "offboarding", "rollback_recovery"},
 }
 
+# Authority metadata is a server-owned contract. Packet requesters may provide
+# evidence only after creation; they cannot redefine who owns a domain or which
+# authority/approval contract governs it.
+DOMAIN_AUTHORITY = {
+    "identity": ("HR", "riverview_authority.hr", "HR identity approval and source association"),
+    "appointment": ("HR", "riverview_authority.hr", "HR appointment authority approval"),
+    "character": ("Character Architecture", "r3a.character-architecture",
+                  "Character Architecture approval when applicable"),
+    "credentials": ("Security", "institutional.security.credentials",
+                    "Security credential issuance approval"),
+    "grants": ("Security", "r3a.authority.capability-grants", "Security capability grant approval"),
+    "runtime": ("Coordinator", "r3a.cme.module-registry", "Coordinator registration and deployment approval"),
+    "communications": ("Website", "r3a.website.resident-roster-and-chat",
+                        "Coordinator Website integration approval"),
+    "acceptance": ("Steward", "r3a.acceptance.evidence",
+                   "Independent Auditor review and Steward acceptance"),
+    "lifecycle": ("HR", "r3a.resident.lifecycle",
+                  "HR, Security, and Coordinator lifecycle procedure approvals"),
+}
+DOMAIN_FIELD_OWNERS = {("acceptance", "independent_review"): "Independent Auditor"}
+
+
+def _canonical_domain_metadata(domain_id: str, applicability: str) -> dict[str, str]:
+    owner, authority_source, required_approval = DOMAIN_AUTHORITY[domain_id]
+    if domain_id != "character":
+        applicability = "mandatory"
+    if applicability not in {"mandatory", "conditional"}:
+        raise OnboardingError(f"domains.{domain_id}.applicability is not a supported policy")
+    return {"owner": owner, "authority_source": authority_source,
+            "required_approval": required_approval,
+            "validation_contract": f"r3a.resident.onboarding.{domain_id}.v1",
+            "applicability": applicability}
+
+
+def _assert_canonical_domain_metadata(domain_id: str, domain: dict[str, Any], *,
+                                      expected_applicability: str | None = None) -> None:
+    expected_applicability = expected_applicability or domain.get("applicability")
+    expected = _canonical_domain_metadata(domain_id, expected_applicability)
+    if any(domain.get(key) != value for key, value in expected.items()):
+        raise OnboardingError(f"domains.{domain_id} authority metadata does not match the institutional contract")
+
 _ADVANCE_ROLE = {
     ("REQUESTED", "IDENTITY_PENDING"): "HR",
     ("IDENTITY_PENDING", "APPOINTMENT_PENDING"): "HR",
@@ -107,6 +148,7 @@ def validate_packet(packet: Any) -> dict[str, Any]:
     for domain_id, domain in domains.items():
         if not isinstance(domain["owner"], str) or domain["owner"] not in ROLES:
             raise OnboardingError(f"domains.{domain_id}.owner is not an institutional authority")
+        _assert_canonical_domain_metadata(domain_id, domain)
         if domain["status"] == "verified":
             if not domain["evidence_refs"] or not domain["fields"]:
                 raise OnboardingError(f"verified domain {domain_id} requires field and stage evidence")
@@ -116,6 +158,10 @@ def validate_packet(packet: Any) -> dict[str, Any]:
             raise OnboardingError(f"blocked domain {domain_id} requires a source or issue reference")
         field_ids: set[str] = set()
         for field in domain["fields"]:
+            expected_field_owner = DOMAIN_FIELD_OWNERS.get((domain_id, field["field_id"]), domain["owner"])
+            if field["owner"] != expected_field_owner:
+                raise OnboardingError(
+                    f"domains.{domain_id}.{field['field_id']} owner does not match the institutional contract")
             if field["field_id"] in field_ids:
                 raise OnboardingError(f"duplicate evidence field in {domain_id}: {field['field_id']}")
             field_ids.add(field["field_id"])
@@ -308,36 +354,12 @@ def new_onboarding_packet(*, packet_id: str, create_idempotency_key: str,
                          requested_role: str | None, request_source_ref: str,
                          created_at: str, character_applicability: str = "conditional") -> dict[str, Any]:
     """Create a data-only packet skeleton; it grants no identity or appointment."""
-    owner_and_source = {
-        "identity": ("HR", "riverview_authority.hr"),
-        "appointment": ("HR", "riverview_authority.hr"),
-        "character": ("Character Architecture", "r3a.character-architecture"),
-        "credentials": ("Security", "institutional.security.credentials"),
-        "grants": ("Security", "r3a.authority.capability-grants"),
-        "runtime": ("Coordinator", "r3a.cme.module-registry"),
-        "communications": ("Website", "r3a.website.resident-roster-and-chat"),
-        "acceptance": ("Steward", "r3a.acceptance.evidence"),
-        "lifecycle": ("HR", "r3a.resident.lifecycle"),
-    }
     domains = {}
-    for domain_id, (owner, authority_source) in owner_and_source.items():
+    for domain_id in DOMAIN_AUTHORITY:
         applicability = character_applicability if domain_id == "character" else "mandatory"
         domains[domain_id] = {
-            "applicability": applicability, "owner": owner,
-            "authority_source": authority_source,
-            "required_approval": {
-                "identity": "HR identity approval and source association",
-                "appointment": "HR appointment authority approval",
-                "character": "Character Architecture approval when applicable",
-                "credentials": "Security credential issuance approval",
-                "grants": "Security capability grant approval",
-                "runtime": "Coordinator registration and deployment approval",
-                "communications": "Coordinator Website integration approval",
-                "acceptance": "Independent Auditor review and Steward acceptance",
-                "lifecycle": "HR, Security, and Coordinator lifecycle procedure approvals",
-            }[domain_id],
+            **_canonical_domain_metadata(domain_id, applicability),
             "approval_ref": None, "status": "pending",
-            "validation_contract": f"r3a.resident.onboarding.{domain_id}.v1",
             "evidence_refs": [], "revision_pins": {}, "fields": [], "blocker_ref": None,
         }
     packet = {
@@ -385,6 +407,7 @@ class ResidentOnboardingService:
         if packet["audit"]:
             raise OnboardingError("new packet cannot carry caller-supplied audit history")
         for domain_id, domain in packet["domains"].items():
+            _assert_canonical_domain_metadata(domain_id, domain)
             if (domain["status"] != "pending" or domain["fields"] or domain["evidence_refs"]
                     or domain["approval_ref"] is not None or domain["blocker_ref"] is not None):
                 raise OnboardingError(f"new request cannot pre-populate authority evidence for {domain_id}")
@@ -467,6 +490,10 @@ class ResidentOnboardingService:
         if packet["state"] == "REVOKED" and domain_id not in {"appointment", "runtime", "communications", "lifecycle"}:
             raise OnboardingError("revoked packets accept only remaining offboarding evidence")
         current_domain = packet["domains"][domain_id]
+        _assert_canonical_domain_metadata(
+            domain_id, current_domain, expected_applicability=current_domain["applicability"])
+        _assert_canonical_domain_metadata(
+            domain_id, domain, expected_applicability=current_domain["applicability"])
         current_fields = {f["field_id"]: f for f in current_domain["fields"]}
         next_fields = {f["field_id"]: f for f in domain.get("fields", [])}
         if set(current_fields) - set(next_fields):
@@ -480,8 +507,10 @@ class ResidentOnboardingService:
                 raise OnboardingError("changed field evidence requires a new source revision pin")
         metadata_changed = {key: value for key, value in current_domain.items() if key != "fields"} != {
             key: value for key, value in domain.items() if key != "fields"}
-        if any(field["owner"] != actor.role for field in changed_fields):
-            raise PermissionError("only each field's authoritative owner may change its evidence")
+        for field in changed_fields:
+            required_owner = DOMAIN_FIELD_OWNERS.get((domain_id, field["field_id"]), current_domain["owner"])
+            if field["owner"] != required_owner or actor.role != required_owner:
+                raise PermissionError("only each field's authoritative owner may change its evidence")
         if actor.role != current_domain["owner"] and (metadata_changed or not changed_fields):
             raise PermissionError("only the domain owner may change domain status, approval, or metadata")
         if self._authorize(actor, "resident.onboarding.domain.record", packet) is not True:
