@@ -212,5 +212,51 @@
       "name": "OctoMiner GPU Telemetry",
       "description": "Read GPU, filesystem, compute-process, model-server, ComfyUI, request and bounded-history telemetry from independently configured R3A sources."
     }
+  },
+  "module_manifest": {
+    "contract_id": "r3a.module-manifest.v1",
+    "contract_version": "1.1.0",
+    "module_id": "r3a.octominer-telemetry",
+    "module_version": "2.0.0",
+    "owner": "R3A Infrastructure Telemetry",
+    "binding": {
+      "contract_id": "r3a.capability-provider.v1",
+      "protocol_major": 1,
+      "protocol_min_minor": 0,
+      "protocol_max_minor": 0,
+      "entrypoint": "r3a_plugins.octominer_telemetry.plugin:create_provider"
+    },
+    "dependencies": [],
+    "configuration": {
+      "schema_ref": "r3a.octominer-independent-telemetry.config.v2",
+      "configuration_ref": "capability_operations[].configuration"
+    },
+    "capability_refs": ["infrastructure.octominer.telemetry.read"],
+    "resource_refs": [],
+    "state_namespace": "r3a.octominer-telemetry",
+    "migration_contract": "r3a.stateless-provider.v1",
+    "recovery_policy": "operation-contract.v1",
+    "artifact": {
+      "artifact_ref": "plugin.py",
+      "artifact_sha256": "af8aae26cad6f603f69658fea6dde2b868eadf1f4bdce6106b46f4c561587a86"
+    },
+    "environment": {
+      "allowlist": [
+        "R3A_OCTOMINER_SSH_HOST",
+        "R3A_OCTOMINER_SSH_USER",
+        "R3A_OCTOMINER_IDENTITY_FILE",
+        "R3A_OCTOMINER_KNOWN_HOSTS",
+        "R3A_OCTOMINER_HISTORY_PATH",
+        "R3A_TELEMETRY_DATABASE_DSN",
+        "R3A_GRACE_REASONING_ENDPOINT",
+        "R3A_GRACE_REASONING_TOKEN",
+        "R3A_GRACE_VISION_ENDPOINT",
+        "R3A_GRACE_VISION_TOKEN",
+        "R3A_GRACE_AUTONOMIC_ENDPOINT",
+        "R3A_GRACE_AUTONOMIC_TOKEN",
+        "R3A_COMFYUI_ENDPOINT",
+        "R3A_COMFYUI_TOKEN"
+      ]
+    }
   }
 }

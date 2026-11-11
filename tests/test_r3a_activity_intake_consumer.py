@@ -1,4 +1,21 @@
-"""CME generic activity-intake authorization and durable persistence tests."""
+"""
+R3 CONTROLLED SOURCE
+File: tests/test_r3a_activity_intake_consumer.py
+Component: R3A-GENERIC-ACTIVITY-INTAKE-REGRESSION
+File Revision: 1.0.1
+Created: 2026-11-09
+Created By: Codex GPT-6
+Purpose: Verify authorized generic activity intake remains durable and idempotent.
+Execution Model: Python unittest using in-memory database and provider fakes.
+Observability: Assertions cover authorization, durable identity, event lineage, and replay behavior.
+Dependencies: r3a_runtime.cme; r3a_runtime.db; shared activity-intake contracts.
+Authority: AD-024; Autonomy / CME Issue #43.
+Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT-6 | Cover non-Grace activity intake persistence and idempotency.
+Supersedes: None.
+Contracts: r3a.activity-intake.v1; r3a.activity-handler.v1.
+Tests: This test module.
+History/Predecessor: New regression module on the Coordinator integration baseline.
+"""
 from __future__ import annotations
 
 import copy
@@ -211,8 +228,8 @@ class FakeConnection:
             return Cursor({"revision_id": "c" * 64})
         if "INSERT INTO r3a.activities" in query:
             self.activity = {"activity_id": params[0], "state": "QUEUED",
-                             "activity_type": "grace.objective", "idempotency_key": params[1],
-                             "input": json.loads(params[3]), "attempt_count": 0}
+                             "activity_type": params[1], "idempotency_key": params[2],
+                             "input": json.loads(params[4]), "attempt_count": 0}
         return Cursor()
 
 
@@ -249,6 +266,36 @@ class ActivityIntakePersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(intake, persisted["activity_intake"])
         self.assertEqual("activity_intake", persisted["event_kind"])
         store._transition_on_conn.assert_awaited_once()
+
+        conflicting = copy.deepcopy(intake)
+        conflicting["activity"]["input"] = {"different": "source payload"}
+        with self.assertRaisesRegex(ValueError, "already bound to different source data"):
+            await store.submit_activity_intake(conflicting, result)
+
+    async def test_persists_non_grace_activity_type_and_handler_input(self):
+        provider = {"provider_id": "source.module", "provider_version": "1.0.0",
+                    "artifact_sha256": "a" * 64}
+        intake = valid_notification_intake()
+        intake["activity"].update(activity_type="billing.invoice.review", task_class="operations.review",
+                                   input={"invoice_id": "invoice-001"})
+        intake["provenance"].update(module_id=provider["provider_id"],
+                                    module_version=provider["provider_version"],
+                                    artifact_sha256=provider["artifact_sha256"])
+        result = invocation_result(intake, provider)
+        store = Store.__new__(Store)
+        store.settings = SimpleNamespace(model_roles=[], default_model_route="grace.80b",
+                                         module_id="resident.grace", source_digest="c" * 64)
+        store.pool = FakePool()
+        store._event = AsyncMock(return_value=uuid.uuid4())
+        store._transition_on_conn = AsyncMock(return_value=True)
+
+        accepted = await store.submit_activity_intake(intake, result)
+        persisted = store.pool.connection_value.activity
+        self.assertEqual("billing.invoice.review", accepted["activity_type"])
+        self.assertEqual("billing.invoice.review", persisted["activity_type"])
+        self.assertEqual({"invoice_id": "invoice-001"}, persisted["input"]["activity_input"])
+        self.assertEqual(intake, persisted["input"]["activity_intake"])
+        self.assertEqual("activity_intake", persisted["input"]["event_kind"])
 
     async def test_rejects_unauthorized_invocation_result(self):
         intake = valid_notification_intake()

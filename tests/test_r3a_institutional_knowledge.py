@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_institutional_knowledge.py
 Component: R3A-KNOWLEDGE-RETRIEVAL-TESTS
-File Revision: 1.3.0
+File Revision: 1.3.1
 Created: Unknown (legacy)
 Created By: Unknown (legacy)
 Purpose: Verify registered institutional knowledge retrieval, authorization, freshness, and provenance.
@@ -11,6 +11,7 @@ Observability: Test names and assertion failures.
 Dependencies: R3A capability contracts, CME, knowledge provider, configured source files.
 Authority: AP1 / R3A-019; read-only capability regression tests.
 Changed: 2026-11-07T23:45:06Z | AP1-K2 | Codex GPT-6 | Verify 1.1.0 compatibility, citation and digest integrity, and external configuration reload behavior.
+Changed: 2026-11-10T13:35:00Z | R3A-GRACE-CAPABILITY-AUTONOMY | Codex GPT-6 | Mark registered knowledge test providers active before exercising CME selection and denial.
 Supersedes: None.
 Contracts: institution.knowledge.read@1.1.0; R3A capability-operation v1.
 Tests: This module; tests.test_r3a_capability_contracts; tests.test_r3a_ap1.
@@ -132,6 +133,8 @@ class InstitutionalKnowledgeProviderTests(unittest.TestCase):
             registry = CapabilityRegistry()
             registered = registry.register(operation_from_manifest(manifest), config,
                                            legacy_manifest=manifest)
+            registry.set_provider_state(registered.descriptor["provider"]["provider_id"],
+                                        registered.descriptor["provider"]["provider_version"], "ACTIVE")
             self.assertEqual("institution.knowledge.read", registered.descriptor["operation_id"])
             self.assertEqual("1.1.0", registered.descriptor["operation_revision"])
             tool = registered.resident_tool_projection()
@@ -199,6 +202,8 @@ class InstitutionalKnowledgeProviderTests(unittest.TestCase):
             registry = CapabilityRegistry()
             registered = registry.register(operation_from_manifest(manifest),
                                            self._configuration(source), legacy_manifest=manifest)
+            registry.set_provider_state(registered.descriptor["provider"]["provider_id"],
+                                        registered.descriptor["provider"]["provider_version"], "ACTIVE")
             tool = registered.resident_tool_projection()
             cme = CME.__new__(CME)
             cme.module_id = "resident.grace"

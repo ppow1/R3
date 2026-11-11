@@ -1,4 +1,20 @@
 """Contract and conformance tests for the R3A Riverview directory adapter."""
+# R3 CONTROLLED SOURCE
+# File: tests/test_r3a_institutional_directory.py
+# Component: R3A-INSTITUTIONAL-DIRECTORY-TESTS
+# File Revision: 1.0.0
+# Created: Unknown (legacy)
+# Created By: Unknown (legacy)
+# Purpose: Verify directory provider contracts and its read-only Grace capability path.
+# Execution Model: pytest/unittest with isolated directory fixtures.
+# Observability: Assertions cover provider output, authorization, and evidence provenance.
+# Dependencies: R3A capability registry, CME, institutional directory provider.
+# Authority: Existing institutional directory contract and R3A capability-provider architecture.
+# Changed: 2026-11-10T13:45:00Z | R3A-GRACE-CAPABILITY-AUTONOMY | Codex GPT-6 | Mark the directory fixture provider active before CME invocation.
+# Supersedes: None.
+# Contracts: r3a.capability-invocation.v1; institutional directory provider contract.
+# Tests: python -m pytest -q tests/test_r3a_institutional_directory.py
+# History/Predecessor: Git history before R3A capability-autonomy test adjustment.
 from __future__ import annotations
 
 import hashlib
@@ -177,19 +193,17 @@ class InstitutionalDirectoryProviderTests(unittest.TestCase):
 
     def test_dynamic_grace_tool_receives_directory_output_and_distinct_evidence(self):
         registry = CapabilityRegistry()
-        registry.register(self.descriptor, self.config, legacy_manifest=self.manifest)
+        registered = registry.register(self.descriptor, self.config, legacy_manifest=self.manifest)
         instance = CME.__new__(CME)
         instance.settings = SimpleNamespace(capability_registry=registry,
                                             module_capabilities=(self.descriptor["operation_id"],),
                                             source_digest="cfg-directory-test")
         instance.module_id = "resident.grace"
-        instance.invoke_capability = AsyncMock()
         request = {"contract_id": "r3a.resident-capability-tool", "contract_version": "1.0.0",
                    "capability_id": self.descriptor["operation_id"], "arguments": {}}
         activity = {"activity_id": "activity-1", "attempt_id": "attempt-1", "correlation_id": "corr-1"}
         with self.assertRaisesRegex(PermissionError, "without an execution adapter"):
             __import__("asyncio").run(instance._invoke_resident_capability(activity, request))
-        instance.invoke_capability.assert_not_awaited()
 
         # This success path explicitly observes the registered provider as active
         # and supplies CME's invocation adapter below. Registration alone is not

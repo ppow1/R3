@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/config.py
 Component: R3A-BOOTSTRAP-CONFIG
-File Revision: 1.8.1
+File Revision: 1.9.1
 Created: 2026-11-06T15:04:00Z
 Created By: Codex GPT-6
 Purpose: Strictly validate external R3A AP0-M1 bootstrap and operating settings.
@@ -25,13 +25,16 @@ Changed: 2026-11-07 | R3A-AP1-N1 | Codex GPT-6 | Add externally configured versi
 Changed: 2026-11-07 | R3A-MODULAR-FOUNDATION-001 | Codex GPT-6 | Preserve immutable provider-version registrations and pass resolved pinned artifact paths to the generic CME binding.
 Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | R3A Coordinator | Resolve module dependency ranges and reject missing providers or cycles.
 Changed: 2026-11-08 | R3A-CONTEXT-RECOVERY | R3A Coordinator | Configure route context windows while preserving legacy configuration digests.
+Changed: 2026-11-10T01:26:34Z | R3A-MODULAR-PLUGINS-46 | Codex GPT-6 | Load and validate external resident-to-module bindings against declared executor roles and preserve them in durable configuration projections.
+Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT-6 | Accept stable module identifiers and arbitrary dotted executor entrypoints without resident-specific allowlists.
 Supersedes: None.
 Contracts: AP0-001/008/009; R3A-019; Issue #46; AP0-M1 D7; r3a_runtime.contracts; hints/file-provenance.md.
 Tests: tests/test_r3a_ap1.py; tests/test_r3a_modular_autonomy.py; tests/test_r3a_context_recovery.py; tests/test_r3a_octominer_plugin.py.
-History/Predecessor: Git blob 189c6ef7ef3821f9140bddbeac8d04c177ca32ac at commit ad16700f1e94dd36c81cac5383f9f2e2771a98a1.
+History/Predecessor: Prior revision at integration commit 9a41d7e9647d37c2b7dc6f2aca3be3f5f82ccfe9, blob 5fbebd029263678252d366dd172a04ab8ef758bc.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import ipaddress
 import json
@@ -46,6 +49,8 @@ from .timestamp_presentation import (DEFAULT_PRESENTATION_TIMEZONE,
                                     TimestampPresentationError, resolve_timezone)
 
 from .module_contracts import validate_dependency_graph
+from .module_extensions import (ModuleExtensionError, validate_resident_bindings,
+                                validate_resident_binding_targets)
 
 
 class ConfigurationError(ValueError):
@@ -286,6 +291,7 @@ class Settings:
     capability_registry: Any
     notification_sources: tuple[NotificationSourceSettings, ...]
     resident_office_routes: tuple[ResidentOfficeRoute, ...]
+    resident_module_bindings: tuple[dict[str, Any], ...]
     presentation_timezone: str = DEFAULT_PRESENTATION_TIMEZONE
 
     def model_route(self, route_id: str | None = None) -> ModelRoute:
@@ -337,10 +343,15 @@ def load_settings(path: str | Path) -> Settings:
     expected_root = {"schema_version", "instance_id", "paths", "postgres", "module", "timing"}
     extra = value.keys() - expected_root - {
         "grace", "authorization", "capability_plugins", "capability_operations", "notification_intake",
-        "resident_execution", "presentation_timezone"}
+        "resident_execution", "resident_module_bindings", "presentation_timezone"}
     missing = expected_root - value.keys()
     if missing or extra:
         raise ConfigurationError(f"root keys invalid; missing={sorted(missing)}, unknown={sorted(extra)}")
+    try:
+        resident_module_bindings = validate_resident_bindings(
+            value.get("resident_module_bindings", []))
+    except ModuleExtensionError as exc:
+        raise ConfigurationError(f"resident_module_bindings is invalid: {exc}") from exc
     notification_sources = ()
     if "notification_intake" in value:
         intake = value["notification_intake"]
@@ -427,6 +438,8 @@ def load_settings(path: str | Path) -> Settings:
         raise ConfigurationError("module must be an object")
     _keys(module, {"module_id", "version", "contract_id", "protocol_major", "protocol_minor", "capabilities", "owner", "entrypoint", "source", "sha256"}, "module")
     module_id = _text(module["module_id"], "module.module_id")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}", module_id):
+        raise ConfigurationError("module.module_id is not a stable module identifier")
     module_version = _text(module["version"], "module.version")
     if not all(part.isdigit() for part in module_version.split(".")) or len(module_version.split(".")) != 3:
         raise ConfigurationError("module.version must be semantic major.minor.patch numbers")
@@ -445,10 +458,8 @@ def load_settings(path: str | Path) -> Settings:
         raise ConfigurationError("module.capabilities contains an invalid capability identifier")
     module_owner = _text(module["owner"], "module.owner")
     entrypoint = _text(module["entrypoint"], "module.entrypoint")
-    if entrypoint not in {"r3a_runtime.observer_module", "r3a_runtime.grace_module"}:
-        raise ConfigurationError("module.entrypoint is not supported by this R3A installation")
-    if (entrypoint == "r3a_runtime.observer_module") != (module_id == "foundation.observer"):
-        raise ConfigurationError("module_id must match its supported module entrypoint")
+    if not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+", entrypoint):
+        raise ConfigurationError("module.entrypoint must be a dotted Python module path")
     module_source = _absolute_path(module["source"], "module.source")
     module_digest = _text(module["sha256"], "module.sha256").lower()
     if len(module_digest) != 64 or any(c not in "0123456789abcdef" for c in module_digest):
@@ -766,6 +777,7 @@ def load_settings(path: str | Path) -> Settings:
     plugin_ids: set[tuple[str, str, str]] = set()
     configured_provider_versions: dict[str, set[str]] = {}
     declared_module_dependencies: list[tuple[str, dict[str, Any]]] = []
+    declared_role_modules: dict[tuple[str, str], dict[str, Any]] = {}
     if "capability_plugins" in value and "capability_operations" in value:
         raise ConfigurationError("use one capability_operations registry input; capability_plugins is a compatibility alias")
     raw_plugins = value.get("capability_operations", value.get("capability_plugins", []))
@@ -852,6 +864,16 @@ def load_settings(path: str | Path) -> Settings:
                     raise CapabilityContractError(
                         "module manifest declares a capability outside module.capabilities")
                 declared_module_dependencies.append((where, module_manifest))
+                if "resident_executor" in module_manifest:
+                    module_key = (module_manifest["module_id"], module_manifest["module_version"])
+                    role_record = {"module_id": module_manifest["module_id"],
+                                   "module_version": module_manifest["module_version"],
+                                   "artifact_digest": module_manifest["artifact"]["artifact_sha256"],
+                                   "resident_executor": module_manifest["resident_executor"]}
+                    if module_key in declared_role_modules and declared_role_modules[module_key] != role_record:
+                        raise CapabilityContractError(
+                            "module version has conflicting resident-executor role declarations")
+                    declared_role_modules[module_key] = role_record
             plugin_identity = (capability_id, provider["provider_id"], provider["provider_version"])
             if plugin_identity in plugin_ids or capability_id not in capabilities:
                 raise CapabilityContractError("operation provider version must be unique and operation_id declared in module.capabilities")
@@ -877,6 +899,11 @@ def load_settings(path: str | Path) -> Settings:
             [manifest for _where, manifest in declared_module_dependencies])
     except ValueError as exc:
         raise ConfigurationError(f"Module dependency contract is invalid: {exc}") from exc
+    try:
+        resident_module_bindings = validate_resident_binding_targets(
+            resident_module_bindings, declared_role_modules.values())
+    except ModuleExtensionError as exc:
+        raise ConfigurationError(f"resident_module_bindings is incompatible: {exc}") from exc
 
     timing = value["timing"]
     if not isinstance(timing, dict):
@@ -942,6 +969,7 @@ def load_settings(path: str | Path) -> Settings:
         capability_registry=capability_registry,
         notification_sources=notification_sources,
         resident_office_routes=resident_office_routes,
+        resident_module_bindings=resident_module_bindings,
         presentation_timezone=presentation_timezone,
     )
 
@@ -984,6 +1012,8 @@ def sanitized_config(settings: Settings) -> dict[str, Any]:
                                "office_role_routes": [{"office_role": route.office_role,
                                                        "model_role_id": route.model_role_id}
                                                       for route in settings.resident_office_routes]},
+        "resident_module_bindings": [copy.deepcopy(binding)
+                                      for binding in settings.resident_module_bindings],
         "grace": ({"default_route": settings.default_model_route,
                    "routes": [{"route_id": route.route_id, "provider": route.provider,
                                "endpoint": route.endpoint, "model": route.model,
