@@ -2,10 +2,10 @@
 R3 CONTROLLED DOCUMENT
 File: web/index.html
 Component: R3-ESTATE-HOME
-File Revision: 1.0.32
+File Revision: 1.0.33
 Created: 2026-10-31 UTC (time unverified)
 Created By: ChatGPT GPT-6
-Purpose: Present the R3 estate home with Engineering and Infrastructure observability panels
+Purpose: Present Riverview's institutional Steward workspace with authenticated R3A service panels
 Execution Model: Browser client consuming same-origin R3A APIs through the native AP3 opaque Steward session
 Observability: Engineering API state; CME request/correlation IDs; explicit chat, directory, and notification service availability
 Dependencies: #49 /api/v1/steward/session, /status, /capabilities, /operations/invoke; versioned Grace objective API; #48 notification API; authoritative resident conversation/directory APIs; /web/resident-avatar.js
@@ -16,6 +16,7 @@ Changed: 2026-11-01 UTC | R3-THREE-PANE-LAUNCHER-ICON-001 | ChatGPT GPT-6 | Use 
 Supersedes: R3-VISUAL-PROTOTYPE framing
 Contracts: docs/IMPLEMENTATION_HANDOFF.md; docs/architecture/ESTATE_SPATIAL_CANON.md; docs/architecture/R3A_STEWARD_WEBSITE_SESSION_CONTRACT.md; docs/architecture/R3A_STEWARD_WORKSPACE_WEB_API_V1.md; hints/chat-contract-draft.md; hints/settings-contract-draft.md
 Tests: tests.test_r3a_website; tests/test_steward_workspace_api.mjs; inline JavaScript syntax check; live identity, CME, directory, chat, notification, and avatar visual acceptance pending
+Changed: 2026-11-11 | #51 | Replace legacy Engineering inventory and placeholder settings scopes with authenticated R3A registry/configuration views; connect snapshot to bounded CME diagnostics.
 History/Predecessor: Git blob 5f681d1009aa1ad9b6a2645b149586cae5f60aea
 Changed: 2026-11-07T21:40:20Z | R3A-007/R3A-010/R3A-013/R3A-017/R3A-019 | Codex GPT-6 | Add Steward sign-in adapter and live Grace objective submission with durable activity and event history.
 Changed: 2026-11-07T21:46:12Z | R3A-019 | Codex GPT-6 | Seed the objective form with an acceptance path present in the configured process lifecycle.
@@ -38,7 +39,7 @@ Changed: 2026-11-10 | #51 | Load authorized effective configuration with the ver
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Riverview 3</title>
+<title>Riverview · Steward workspace</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <script>
 (() => {
@@ -173,7 +174,7 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 @media(max-width:650px){
  .window{left:4%;top:7%;width:92vw;height:82vh;min-width:0;min-height:400px}
  }
-#browser-appearance[hidden]{display:none}#settings-shell{display:grid;grid-template-columns:135px minmax(0,1fr);gap:9px;padding:8px 2px}.settings-scopes{display:grid;gap:3px;align-content:start}.settings-scope{padding:7px 8px;text-align:left;font-size:12px;background:transparent;border-color:transparent}.settings-scope[aria-current=true]{background:#2b496633;border-color:#9dbce544}.settings-detail{min-width:0;padding:10px;border:1px solid #c2d5ec22;border-radius:10px;background:#10223844}.settings-detail h3{margin:0 0 5px;font-size:13px}.settings-detail p{margin:5px 0;font-size:11px;color:#c2d5ec}.settings-row{display:grid;grid-template-columns:1fr auto;gap:4px 8px;padding:7px 0;border-top:1px solid #c2d5ec22;font-size:11px}.settings-unavailable{color:#d6c79a}.settings-local{border-top:1px solid #c2d5ec33;margin-top:8px;padding-top:6px;font-size:11px}#chat-panel{position:fixed;z-index:17;inset:5vh 6vw 5vh 74px;display:grid;grid-template-columns:minmax(210px,260px) minmax(0,1fr);overflow:hidden;background:rgba(8,18,30,.86);border:1px solid rgba(205,227,255,.32);border-radius:18px;backdrop-filter:blur(14px);box-shadow:0 22px 56px #0009}#chat-panel[hidden]{display:none}.chat-sidebar,.chat-main{display:flex;flex-direction:column;min-width:0;padding:14px}.chat-sidebar{border-right:1px solid #c2d5ec22}.chat-head,.chat-toolbar{display:flex;align-items:center;gap:7px}.chat-head h1{font-size:17px;margin:0 auto 0 0}.icon-button{width:30px;height:30px;padding:0;display:grid;place-items:center;background:#23374c88;border-color:#c2d5ec33;color:#dcecff}.chat-search{width:100%;margin:10px 0;padding:8px;border-radius:9px;background:#08152288;color:#eaf4ff;border:1px solid #c2d5ec33}.chat-empty{display:grid;place-items:center;flex:1;text-align:center;padding:20px;color:#c6d6e6;font-size:13px}.chat-empty strong{display:block;margin-bottom:6px;color:#e5effb}.chat-status{font-size:11px;color:#d6c79a;margin:8px 0}.chat-toolbar{justify-content:center;gap:5px;flex-wrap:wrap;padding:9px 0;border-top:1px solid #c2d5ec22}.chat-toolbar button{width:30px;height:30px;padding:0;opacity:.46}.chat-composer{display:flex;gap:8px;align-items:end}.chat-composer textarea{flex:1;min-height:42px;max-height:120px;resize:vertical;border:1px solid #c2d5ec33;border-radius:11px;background:#091522aa;color:#eaf4ff;padding:10px}.chat-menu-template{display:none}@media(max-width:760px){#chat-panel{inset:8px;grid-template-columns:1fr}#chat-panel{grid-template-columns:minmax(115px,34%) minmax(0,1fr)}#chat-panel .chat-sidebar{display:flex;padding:8px}.chat-main{padding:8px}#settings-shell{grid-template-columns:100px minmax(0,1fr)}}
+#browser-appearance[hidden]{display:none}#settings-shell{display:block;padding:8px 2px}.settings-detail{min-width:0;padding:10px;border:1px solid #c2d5ec22;border-radius:10px;background:#10223844}.settings-detail h3{margin:0 0 5px;font-size:13px}.settings-detail p{margin:5px 0;font-size:11px;color:#c2d5ec}.settings-local{border-top:1px solid #c2d5ec33;margin-top:8px;padding-top:6px;font-size:11px}#chat-panel{position:fixed;z-index:17;inset:5vh 6vw 5vh 74px;display:grid;grid-template-columns:minmax(210px,260px) minmax(0,1fr);overflow:hidden;background:rgba(8,18,30,.86);border:1px solid rgba(205,227,255,.32);border-radius:18px;backdrop-filter:blur(14px);box-shadow:0 22px 56px #0009}#chat-panel[hidden]{display:none}.chat-sidebar,.chat-main{display:flex;flex-direction:column;min-width:0;padding:14px}.chat-sidebar{border-right:1px solid #c2d5ec22}.chat-head,.chat-toolbar{display:flex;align-items:center;gap:7px}.chat-head h1{font-size:17px;margin:0 auto 0 0}.icon-button{width:30px;height:30px;padding:0;display:grid;place-items:center;background:#23374c88;border-color:#c2d5ec33;color:#dcecff}.chat-search{width:100%;margin:10px 0;padding:8px;border-radius:9px;background:#08152288;color:#eaf4ff;border:1px solid #c2d5ec33}.chat-empty{display:grid;place-items:center;flex:1;text-align:center;padding:20px;color:#c6d6e6;font-size:13px}.chat-empty strong{display:block;margin-bottom:6px;color:#e5effb}.chat-status{font-size:11px;color:#d6c79a;margin:8px 0}.chat-toolbar{justify-content:center;gap:5px;flex-wrap:wrap;padding:9px 0;border-top:1px solid #c2d5ec22}.chat-toolbar button{width:30px;height:30px;padding:0;opacity:.46}.chat-composer{display:flex;gap:8px;align-items:end}.chat-composer textarea{flex:1;min-height:42px;max-height:120px;resize:vertical;border:1px solid #c2d5ec33;border-radius:11px;background:#091522aa;color:#eaf4ff;padding:10px}.chat-menu-template{display:none}@media(max-width:760px){#chat-panel{inset:8px;grid-template-columns:1fr}#chat-panel{grid-template-columns:minmax(115px,34%) minmax(0,1fr)}#chat-panel .chat-sidebar{display:flex;padding:8px}.chat-main{padding:8px}}
 
 /* Chat and estate panel placement controls. Presets are user-local presentation preferences. */
 #chat-panel{inset:auto;left:8vw;top:8vh;right:auto;bottom:auto;width:min(1100px,84vw);height:min(780px,84vh);min-width:460px;min-height:420px;resize:both;overflow:auto;z-index:24}
@@ -265,8 +266,7 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
   <button class="profile-menu-item" id="profile-settings" type="button" aria-expanded="false">Settings</button>
   <button class="profile-menu-item" id="website-signout" type="button">Sign out of Riverview</button>
 <div id="profile-settings-panel" hidden><div id="settings-shell">
-<nav class="settings-scopes" aria-label="Settings scope"><button class="settings-scope" data-settings-scope="Institutional">Institutional</button><button class="settings-scope" data-settings-scope="Departmental">Departmental</button><button class="settings-scope" data-settings-scope="Resident">Resident</button><button class="settings-scope" data-settings-scope="Chat">Chat</button><button class="settings-scope" data-settings-scope="User">User</button><button class="settings-scope" data-settings-scope="Device">Device</button><button class="settings-scope" data-settings-scope="Infrastructure">Infrastructure</button></nav>
-<section class="settings-detail" aria-live="polite"><h3 id="settings-scope-title">Institutional</h3><p class="settings-unavailable" id="settings-registry-status">Settings registry unavailable · no operational settings loaded.</p><div class="settings-row"><span>Inherited value</span><span>Unavailable</span></div><div class="settings-row"><span>Scoped override</span><span>Unavailable</span></div><div class="settings-row"><span>Effective value</span><span>Unavailable</span></div><div class="settings-row"><span>Authorization</span><span>Capability manifest unavailable</span></div><div class="settings-row"><span>Configuration history</span><span>Unavailable</span></div><section class="settings-runtime"><h3>Effective R3A runtime configuration</h3><p>Read from the current durable config revision. This view does not imply inherited scopes or write access.</p><button id="settings-config-refresh" type="button">Load effective values</button><output id="settings-config-status" aria-live="polite">Not loaded</output><pre id="settings-config-values">No configuration values loaded.</pre><div id="settings-config-history"></div></section><div class="settings-local">Local appearance · this browser only</div><div id="browser-appearance" hidden><div class="controls"><label for="opacity">Engineering opacity</label><output id="value" for="opacity">45%</output><input id="opacity" type="range" min="45" max="95" value="45"><button id="center-window" type="button">Center window</button><button id="snapshot-button" type="button">Snapshot</button><output id="snapshot-status" aria-live="polite"></output></div><section id="layout-presets"><h3>Floating panel layouts</h3><p>Save up to 10 layouts for this browser. A layout records panel positions, sizes, and open or minimized state. Applying a preset can show Chat, Engineering, Infrastructure, Steward operations, and Notifications together.</p><div id="layout-presets-controls"><select id="layout-preset-slot" aria-label="Layout preset"></select><input id="layout-preset-name" type="text" maxlength="32" placeholder="Preset name (optional)" aria-label="Preset name"><button id="layout-preset-save" type="button">Save current</button><button id="layout-preset-apply" type="button">Apply</button><button id="layout-preset-clear" type="button">Clear</button></div><output id="layout-preset-status" aria-live="polite"></output></section></div></section></div></div>
+<section class="settings-detail" aria-live="polite"><h3>R3A runtime configuration</h3><p>Effective values and durable activation history from authenticated CME diagnostics. This interface is read-only; scope-level inheritance, overrides, and configuration writes are not exposed by an approved Website contract.</p><button id="settings-config-refresh" type="button">Refresh effective values</button><output id="settings-config-status" aria-live="polite">Waiting for an authenticated Website session.</output><pre id="settings-config-values">No configuration values loaded.</pre><div id="settings-config-history"></div><div class="settings-local">Browser appearance and workspace layout · stored in this browser</div><div id="browser-appearance"><div class="controls"><label for="opacity">Engineering opacity</label><output id="value" for="opacity">45%</output><input id="opacity" type="range" min="45" max="95" value="45"><button id="center-window" type="button">Center window</button><button id="snapshot-button" type="button">Snapshot</button><output id="snapshot-status" aria-live="polite"></output></div><section id="layout-presets"><h3>Floating panel layouts</h3><p>Save up to 10 layouts for this browser. A layout records panel positions, sizes, and open or minimized state. Applying a preset can show Chat, Engineering, Infrastructure, Steward operations, and Notifications together.</p><div id="layout-presets-controls"><select id="layout-preset-slot" aria-label="Layout preset"></select><input id="layout-preset-name" type="text" maxlength="32" placeholder="Preset name (optional)" aria-label="Preset name"><button id="layout-preset-save" type="button">Save current</button><button id="layout-preset-apply" type="button">Apply</button><button id="layout-preset-clear" type="button">Clear</button></div><output id="layout-preset-status" aria-live="polite"></output></section></div></section></div></div>
   <button class="profile-menu-item" id="profile-engineering" type="button">Engineering Foundry panel</button>
   <button class="profile-menu-item" id="profile-infrastructure" type="button">Infrastructure panel</button>
 </div>
@@ -277,72 +277,49 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
   </header>
   <div class="content">
     <h2>Engineering status</h2>
-    <p class="status-message" id="api-status" role="status" aria-live="polite">Loading current R3 state…</p>
+    <p class="status-message" id="api-status" role="status" aria-live="polite">Loading authenticated R3A Engineering registry…</p>
     <div class="status-list">
       <section class="status-card" aria-labelledby="repo-title">
-        <h3 id="repo-title">Repository</h3>
-        <p id="repo-status">Checking</p>
+        <h3 id="repo-title">Repository interface</h3>
+        <p id="repo-status">Checking approved R3A repository source</p>
       </section>
       <section class="status-card" aria-labelledby="branch-title">
-        <h3 id="branch-title">Branches</h3>
+        <h3 id="branch-title">Engineering modules</h3>
         <ul id="branch-list"><li>Loading</li></ul>
       </section>
       <section class="status-card" aria-labelledby="worktree-title">
-        <h3 id="worktree-title">Worktrees</h3>
+        <h3 id="worktree-title">Registered operations</h3>
         <ul id="worktree-list"><li>Loading</li></ul>
       </section>
     </div>
     <button id="refresh-status" type="button">Refresh status</button>
-    <p class="status-footnote">Branch and worktree records do not establish that a worker is currently active.</p>
+    <p class="status-footnote">Lifecycle and operation records come from authenticated R3A registries. A registered operation does not establish an active worker.</p>
   </div>
 </section>
 <section id="infrastructure-panel" aria-label="Infrastructure observability" hidden>
   <header class="infra-header">
     <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true" style="fill:none;stroke:#dcecff;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><path d="M12 3v7m0 4v7M3 12h7m4 0h7M5.6 5.6l4.9 4.9m3 3 4.9 4.9m0-12.8-4.9 4.9m-3 3-4.9 4.9"/></svg>
-    <div><h1>Infrastructure</h1><p>R3 runtime observability · contract draft v0.1</p></div>
-    <div class="infra-actions"><div class="opacity-control"><button class="opacity-trigger" type="button" title="Infrastructure opacity" aria-label="Infrastructure opacity">◐</button><div class="opacity-popover"><label for="infrastructure-opacity">Infrastructure opacity <output id="infrastructure-opacity-value">83%</output></label><input id="infrastructure-opacity" type="range" min="45" max="95" value="83"></div></div><button id="infrastructure-minimize" class="infra-minimize-icon" type="button" aria-label="Minimize Infrastructure" title="Minimize">−</button></div>
+    <div><h1>Infrastructure</h1><p>Live CME diagnostics · read-only</p><output id="infra-source-status" role="status" aria-live="polite">Loading authenticated CME diagnostics…</output><small id="infra-revision-status"></small></div>
+    <div class="infra-actions"><button id="infrastructure-refresh" type="button">Refresh live status</button><div class="opacity-control"><button class="opacity-trigger" type="button" title="Infrastructure opacity" aria-label="Infrastructure opacity">◐</button><div class="opacity-popover"><label for="infrastructure-opacity">Infrastructure opacity <output id="infrastructure-opacity-value">83%</output></label><input id="infrastructure-opacity" type="range" min="45" max="95" value="83"></div></div><button id="infrastructure-minimize" class="infra-minimize-icon" type="button" aria-label="Minimize Infrastructure" title="Minimize">−</button></div>
   </header>
   <div class="infra-grid">
     <section class="infra-card">
-      <h2>Main loop</h2>
-      <div class="infra-unavailable">Runtime state unavailable</div>
-      <p id="main-loop-state">No verified state number or transition has been received from the R3 runtime.</p>
-      <div class="infra-sequence" aria-label="Documented resident learning cycle">
-        <span class="infra-step">Retrieve knowledge</span><span class="infra-step">Ground</span><span class="infra-step">Reason / act</span><span class="infra-step">Observe</span><span class="infra-step">Verify</span><span class="infra-step">Learn / update</span>
-      </div>
+      <h2>Ring0 and CME</h2><ul id="infra-processes" class="infra-data-list"><li>Waiting for live process diagnostics.</li></ul>
     </section>
     <section class="infra-card">
-      <h2>Supervisory loop</h2>
-      <div class="infra-unavailable">Runtime state unavailable</div>
-      <p id="supervisory-loop-state">No verified supervisory state, watchdog reading, or recovery event has been received.</p>
-      <p>Designed responsibility: detect stalls or failures, then record recovery or escalation.</p>
+      <h2>Activity queue</h2><ul id="infra-activity-counts" class="infra-data-list"><li>Waiting for live activity counts.</li></ul>
     </section>
     <section class="infra-card">
-      <h2>Water-wheel scheduler</h2>
-      <div class="infra-wheel">
-        <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="39"/><circle cx="50" cy="50" r="8"/><path d="M50 11v31m0 16v31M11 50h31m16 0h31M22.4 22.4l21.9 21.9m11.4 11.4 21.9 21.9m0-55.2L55.7 44.3M44.3 55.7 22.4 77.6"/></svg>
-        <div class="infra-wheel-label">Scheduler model only. No active resident slot or time-slice telemetry is connected.</div>
-      </div>
+      <h2>Resident modules</h2><ul id="infra-modules" class="infra-data-list"><li>Waiting for live module registry diagnostics.</li></ul>
     </section>
     <section class="infra-card">
-      <h2>Residents and resources</h2>
-      <div class="infra-unavailable">Activity not reported by runtime</div>
-      <p id="resident-resource-state">No resident assignment, resource allocation, or active time slice is available.</p>
+      <h2>Registered resources</h2><ul id="infra-resources" class="infra-data-list"><li>Waiting for live resource readiness.</li></ul>
     </section>
     <section class="infra-card">
-      <h2>Heartbeat, watchdog, recovery</h2>
-      <div class="infra-unavailable">No runtime source connected</div>
-      <p id="watchdog-state">Heartbeat age, watchdog status, and recovery state will be shown when supplied by verified runtime telemetry.</p>
-    </section>
-    <section class="infra-card">
-      <h2>Source freshness</h2>
-      <div class="infra-unavailable">Unavailable</div>
-      <p id="freshness-state">Last source update: not reported. Freshness cannot be determined without a runtime timestamp.</p>
+      <h2>Recent activities</h2><ul id="infra-activities" class="infra-data-list"><li>Waiting for live activity records.</li></ul>
     </section>
     <section class="infra-card infra-history">
-      <h2>Ordered transition history</h2>
-      <div class="infra-unavailable">No verified transitions received</div>
-      <ol class="infra-history-list" id="transition-history"><li>History will appear here after the R3 runtime supplies verified enum transitions and timestamps.</li></ol>
+      <h2>Recent durable events</h2><ol class="infra-history-list infra-data-list" id="infra-event-history"><li>Waiting for live event history.</li></ol>
     </section>
   </div>
 </section>
@@ -399,13 +376,6 @@ button{cursor:pointer;border:1px solid #7794b1;color:#eaf4ff;background:#223b54;
 @media(max-width:760px){.workspace-message{width:94%}.workspace-message.resident{margin-left:8px}.workspace-message-head{gap:5px}.workspace-message-time{font-size:9px}.message-toolbar{max-width:calc(100vw - 120px);overflow-x:auto}}
 </style>
 <script>
-// Front-end adapter seam. It deliberately has no backend field names or inferred state values.
-// Reconcile the R3 runtime's state and scheduling contract before connecting a telemetry source.
-const infrastructureTelemetryAdapter={
-  async read(){
-    return {available:false,reason:'R3 runtime telemetry source is not connected'};
-  }
-};
 const infrastructurePanel=document.getElementById('infrastructure-panel');
 const chatPanel=document.getElementById('chat-panel');
 const roadmapPanel=document.getElementById('roadmap-panel');
@@ -444,7 +414,6 @@ async function loadWebsiteIdentity(){
   }
 }
 loadWebsiteIdentity();
-const settingsRegistryAdapter={async read(){return{available:false,reason:'R3 settings registry is not connected'};}};
 const infrastructureButton=document.getElementById('nav-infrastructure');
 const infrastructureMinimize=document.getElementById('infrastructure-minimize'),infrastructureAnchor=document.getElementById('infrastructure-anchor');
 const sideRail=document.getElementById('side-rail');
@@ -532,19 +501,11 @@ document.getElementById('profile-engineering').addEventListener('click',()=>{
   if(win.classList.contains('min'))restorePanel(false);
 });
 document.getElementById('profile-settings').addEventListener('click',event=>{const panel=document.getElementById('profile-settings-panel');panel.hidden=!panel.hidden;event.currentTarget.setAttribute('aria-expanded',String(!panel.hidden));});
-document.querySelectorAll('[data-settings-scope]').forEach(button=>button.addEventListener('click',()=>{document.getElementById('settings-scope-title').textContent=button.dataset.settingsScope;document.querySelectorAll('[data-settings-scope]').forEach(item=>item.setAttribute('aria-current',String(item===button)));document.getElementById('browser-appearance').hidden=button.dataset.settingsScope!=='User';}));document.querySelector('[data-settings-scope="Institutional"]').setAttribute('aria-current','true');
-settingsRegistryAdapter.read().then(result=>{if(!result.available)document.getElementById('settings-registry-status').textContent=result.reason+' · no live values loaded.';});
+document.getElementById('browser-appearance').hidden=false;
 document.addEventListener('pointerdown',event=>{
   if(!profileMenu.hidden&&!profileMenu.contains(event.target)&&event.target!==profileButton)profileMenu.hidden=true;
   if(!layoutQuickMenu.hidden&&!layoutQuickMenu.contains(event.target)&&!layoutQuickButton.contains(event.target)){layoutQuickMenu.hidden=true;layoutQuickButton.setAttribute('aria-expanded','false');}
 });
-async function refreshInfrastructure(){
-  const model=await infrastructureTelemetryAdapter.read();
-  const unavailable=!model||model.available!==true;
-  if(unavailable)return;
-  // Runtime-specific enum and scheduling fields are mapped here only after architecture reconciliation.
-}
-refreshInfrastructure();
 const win=document.getElementById('win');
 const slider=document.getElementById('opacity');
 const engineeringOpacitySlider=document.getElementById('engineering-opacity');const engineeringOpacityValue=document.getElementById('engineering-opacity-value');const chatOpacitySlider=document.getElementById('chat-opacity');const chatOpacityValue=document.getElementById('chat-opacity-value');const infrastructureOpacitySlider=document.getElementById('infrastructure-opacity');const infrastructureOpacityValue=document.getElementById('infrastructure-opacity-value');
@@ -610,7 +571,7 @@ layoutQuickButton.setAttribute('aria-expanded','false');
 document.getElementById('layout-preset-save').addEventListener('click',()=>{const slot=Number(presetSelect.value),presets=readPresets();presets[slot]={name:presetName.value.trim()||'Layout '+slot,...captureLayout()};localStorage.setItem(presetStorageKey,JSON.stringify(presets));refreshPresetOptions();presetSelect.value=String(slot);presetStatus.textContent='Saved locally in this browser.';});
 document.getElementById('layout-preset-apply').addEventListener('click',()=>applyPreset(Number(presetSelect.value)));
 document.getElementById('layout-preset-clear').addEventListener('click',()=>{const slot=Number(presetSelect.value),presets=readPresets();if(!presets[slot]){presetStatus.textContent='This preset slot is already empty.';return}delete presets[slot];localStorage.setItem(presetStorageKey,JSON.stringify(presets));refreshPresetOptions();presetSelect.value=String(slot);presetName.value='';presetStatus.textContent='Preset cleared from this browser.';});
-document.getElementById('layout-quick-settings').addEventListener('click',()=>{layoutQuickMenu.hidden=true;layoutQuickButton.setAttribute('aria-expanded','false');profileMenu.hidden=false;const settingsPanel=document.getElementById('profile-settings-panel');settingsPanel.hidden=false;document.getElementById('profile-settings').setAttribute('aria-expanded','true');document.querySelector('[data-settings-scope="User"]').click();requestAnimationFrame(()=>document.getElementById('layout-presets').scrollIntoView({block:'end',behavior:'smooth'}));});
+document.getElementById('layout-quick-settings').addEventListener('click',()=>{layoutQuickMenu.hidden=true;layoutQuickButton.setAttribute('aria-expanded','false');profileMenu.hidden=false;const settingsPanel=document.getElementById('profile-settings-panel');settingsPanel.hidden=false;document.getElementById('profile-settings').setAttribute('aria-expanded','true');requestAnimationFrame(()=>document.getElementById('layout-presets').scrollIntoView({block:'end',behavior:'smooth'}));});
 refreshPresetOptions();
 function syncMinimizeButton(){
   const minimized=win.classList.contains('min');
@@ -665,57 +626,6 @@ function attachPanelDrag(panel,header){let state=null;header.addEventListener('p
 attachPanelDrag(chatPanel,chatDragHandle);attachPanelDrag(infrastructurePanel,infrastructureHeader);attachPanelDrag(notificationsPanel,document.getElementById('notifications-drag'));attachPanelDrag(roadmapPanel,document.querySelector('#roadmap-panel>header'));
 window.addEventListener('resize',()=>{if(innerWidth<=760&&sideRail.classList.contains('expanded'))setRailExpanded(false);win.classList.contains('min')?placeMinimized():clampPosition(win.offsetLeft,win.offsetTop);if(!infrastructureAnchor.hidden)placeInfrastructureAnchor();[chatPanel,infrastructurePanel,notificationsPanel,roadmapPanel].forEach(panel=>{if(panel.hidden)return;const r=panel.getBoundingClientRect();panel.style.left=Math.max(0,Math.min(innerWidth-panel.offsetWidth,r.left))+'px';panel.style.top=Math.max(0,Math.min(innerHeight-panel.offsetHeight,r.top))+'px';});});
 
-async function getJson(path){
-  const response=await fetch(path,{cache:'no-store'});
-  if(!response.ok)throw new Error('Request failed');
-  return response.json();
-}
-function addListItem(list,text){
-  const item=document.createElement('li');
-  item.textContent=text;
-  list.appendChild(item);
-}
-async function refreshEngineeringStatus(){
-  const apiStatus=document.getElementById('api-status');
-  const repoStatus=document.getElementById('repo-status');
-  const branchList=document.getElementById('branch-list');
-  const worktreeList=document.getElementById('worktree-list');
-  apiStatus.textContent='Loading current R3 state…';
-  repoStatus.textContent='Checking';
-  branchList.replaceChildren();
-  worktreeList.replaceChildren();
-  try{
-    const [health,branches,worktrees]=await Promise.all([
-      getJson('/api/v1/health'),
-      getJson('/api/v1/engineering/branches'),
-      getJson('/api/v1/engineering/worktrees')
-    ]);
-    apiStatus.textContent='R3 service: '+(health.status||'status not reported');
-    repoStatus.textContent='Repository '+(health.repository_present?'present':'not found')+
-      '; artwork directory '+(health.artwork_directory_present?'present':'not found');
-    if(branches.branches&&branches.branches.length){
-      branches.branches.forEach(branch=>{
-        const commit=(branch.commit||'').slice(0,8)||'commit not reported';
-        addListItem(branchList,(branch.name||'unnamed branch')+' · '+commit);
-      });
-    }else addListItem(branchList,'No branch records reported');
-    if(worktrees.worktrees&&worktrees.worktrees.length){
-      worktrees.worktrees.forEach(tree=>{
-        const commit=(tree.commit||'').slice(0,8)||'commit not reported';
-        const state=tree.locked?' · locked':'';
-        addListItem(worktreeList,(tree.branch||'detached')+' · '+commit+state);
-      });
-    }else addListItem(worktreeList,'No worktree records reported');
-  }catch(error){
-    apiStatus.textContent='R3 status unavailable';
-    repoStatus.textContent='Unknown';
-    addListItem(branchList,'Unknown');
-    addListItem(worktreeList,'Unknown');
-  }
-}
-
-
-refreshButton.addEventListener('click',refreshEngineeringStatus);
 snapshotButton.addEventListener('click',async()=>{
   snapshotButton.disabled=true;
   snapshotStatus.textContent='Capturing…';
@@ -760,10 +670,10 @@ background.onerror=()=>{};
 background.src='/api/v1/visual/background';
 setEngineeringOpacity(slider.value);
 placeMinimized();
-refreshEngineeringStatus();
 </script>
 <script type="module" src="/web/resident-avatar.js"></script>
 <script type="module" src="/web/steward-workspace-api.mjs"></script>
 <script type="module" src="/web/roadmap-status.mjs"></script>
+<script type="module" src="/web/r3a-operations.mjs"></script>
 </body>
 </html>

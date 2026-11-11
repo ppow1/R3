@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_website.py
 Component: R3A-WEBSITE-API-TESTS
-File Revision: 1.0.9
+File Revision: 1.1.0
 Created: 2026-11-07T21:59:13Z
 Created By: Codex GPT-6
 Purpose: Verify shared-session gating, versioned objective forwarding, and website client assets.
@@ -20,6 +20,7 @@ Changed: 2026-11-09T18:10:00Z | AP3/R3A-010 | Verify native R3A login page, HTTP
 Changed: 2026-11-09T19:57:00Z | AP3/R3A-010-LIVE-LOGIN | Verify native-mode base routing, no R3 portal UI, and workspace return after login.
 Changed: 2026-11-09T21:20:00Z | R3A-LOGIN-REDIRECT-LOOP | Verify only canonical session 401 redirects and operation 401s trigger a session recheck.
 Changed: 2026-11-10 | #51 | Verify the authenticated workspace loads effective configuration for institution-timezone presentation.
+Changed: 2026-11-11 | #51 | Verify R3A engineering registry projection, truthful settings scope, and live CME snapshot projection.
 Supersedes: None.
 Contracts: r3a.steward-session.v1; r3a.grace-objective-submission.v1; R3A AP0 diagnostic socket.
 Tests: python -m unittest tests.test_r3a_website.
@@ -28,6 +29,7 @@ History/Predecessor: New file; initial publication recorded in Git.
 from __future__ import annotations
 
 import os
+import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -35,7 +37,7 @@ from fastapi import HTTPException
 
 from fastapi.testclient import TestClient
 
-from r3_app import app
+from r3_app import app, _snapshot_r3a_runtime
 
 
 class StewardWebsiteApiTests(unittest.TestCase):
@@ -91,6 +93,44 @@ class StewardWebsiteApiTests(unittest.TestCase):
         self.assertIn("r3:steward-session-revoked", workspace.text)
         self.assertIn("new CustomEvent('r3:steward-session-established'", page.text)
         self.assertIn("issue reports are not proof of CME execution", module.text)
+
+    def test_engineering_panel_uses_r3a_registry_and_drops_legacy_r3_inventories(self):
+        with patch.dict(os.environ, {"R3_WEBSITE_AUTH_MODE": "r3a-native"}):
+            page = self.client.get("/steward")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("/web/r3a-operations.mjs", page.text)
+        self.assertNotIn("/api/v1/engineering/branches", page.text)
+        self.assertNotIn("Loading current R3 state", page.text)
+        module = self.client.get("/web/r3a-operations.mjs")
+        self.assertEqual(module.status_code, 200)
+        self.assertIn("/api/v1/steward/about", module.text)
+        self.assertIn("/api/v1/steward/capabilities", module.text)
+
+    def test_settings_no_longer_claims_unimplemented_scope_or_registry_rows(self):
+        with patch.dict(os.environ, {"R3_WEBSITE_AUTH_MODE": "r3a-native"}):
+            page = self.client.get("/steward")
+        self.assertIn("scope-level inheritance, overrides, and configuration writes are not exposed", page.text)
+        self.assertNotIn("data-settings-scope", page.text)
+        self.assertNotIn("Inherited value", page.text)
+        self.assertIn("Refresh effective values", page.text)
+
+    def test_snapshot_runtime_projection_uses_diagnostics_contract_and_excludes_private_payloads(self):
+        runtime = {"source": "postgresql", "observed_at": "2026-11-11T01:00:00Z",
+                   "source_freshness": "fresh", "implementation_revision": "core-rev",
+                   "configuration": {"revision_id": "config-rev"},
+                   "processes": [{"component_id": "cme", "state": "RUNNING", "health": "healthy",
+                                  "private": "must not appear"}],
+                   "modules": [], "resources": [], "activity_state_counts": {"BLOCKED": 1},
+                   "activities": [{"input": {"secret": "must not appear"}}]}
+        with patch("r3_app._steward_settings", new=AsyncMock(return_value=self.settings)), \
+             patch("r3a_runtime.control.control_request", new=AsyncMock(return_value=runtime)) as control:
+            result = asyncio.run(_snapshot_r3a_runtime(None))
+        control.assert_awaited_once_with(self.settings.diagnostics_socket, "diagnostics.status", timeout=4.0)
+        self.assertEqual(result["availability"], "available")
+        self.assertEqual(result["implementation_revision"], "core-rev")
+        self.assertEqual(result["processes"][0]["component_id"], "cme")
+        self.assertNotIn("private", str(result))
+        self.assertNotIn("secret", str(result))
 
     def test_website_identity_reports_running_build_version_environment_and_port(self):
         client = TestClient(app, base_url="http://testserver:8311")
