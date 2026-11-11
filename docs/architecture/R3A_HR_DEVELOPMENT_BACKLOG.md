@@ -1,6 +1,25 @@
+<!--
+R3 CONTROLLED DOCUMENT
+File: docs/architecture/R3A_HR_DEVELOPMENT_BACKLOG.md
+Component: R3A-HR-DEVELOPMENT-BACKLOG
+File Revision: 1.0.1
+Created: Unknown (legacy; predecessor committed before 2026-11-10)
+Created By: Unknown (legacy)
+Purpose: Track reusable HR onboarding deliverables, authority dependencies, and operational blockers.
+Execution Model: Durable workstream backlog; no authority writes or activation.
+Observability: Owner, state, next action, test result, and commit evidence.
+Dependencies: R3A HR contracts, Issue #58, Coordinator baseline and authority interfaces.
+Authority: Steward Steps 66/74/81; R3A architecture and roadmap governance.
+Changed: 2026-11-11T18:43:21Z | HRD-STEP-74/81 | Codex GPT-6 | Track host composition, installable package, roster policy, and end-to-end activation register.
+Supersedes: None; increments legacy document revision after provenance metadata was absent.
+Contracts: Universal Resident Onboarding v1; host-composition v1.
+Tests: Documentation cross-checked against R3A contracts and issue evidence.
+History/Predecessor: Existing register predecessor in branch history; legacy file provenance not recorded.
+-->
+
 # R3A HR Development Backlog and Dependency Register
 
-Updated 2026-11-11 from Issue #58 and Step 61 dispatch #61 comment `6803213372`.
+Updated 2026-11-11 from Issue #58 and Steps 61/74/81 dispatches #61 comments `6803213372`, `6804154755`, and `6804261392`.
 
 | ID | Work / required evidence | Owner | Status | Next action |
 |---|---|---|---|---|
@@ -14,9 +33,11 @@ Updated 2026-11-11 from Issue #58 and Step 61 dispatch #61 comment `6803213372`.
 | HRD-08 | Runtime module, model route, dependencies, CME registration/config | Coordinator #51 with Autonomy #43 | BLOCKED for Vicky: no Vicky execution profile/route or deployed registration evidence | Coordinator/Autonomy agree canonical module, route, capability interface and live execution acceptance tests |
 | HRD-09 | Authenticated Website resident directory and chat/persistence | Coordinator / Website #51 | PARTIAL platform path exists; Vicky not present in latest authenticated roster; chat not verified. Directory-provider test's inactive-provider fixture is corrected; registration alone remains fail-closed | After approved binding/runtime, authenticate through `/api/v1/steward/residents`, then prove resident chat turn and persistence |
 | HRD-10 | Independent acceptance review and institutional activation | Independent Auditor #56; Steward | BLOCKED until HRD-02..09 evidence exists | Auditor reviews packet/trace; Steward provides explicit activation approval after all checks pass |
-| HRD-11 | Migration, DB role grants, service composition and production deployment | Coordinator #51 | Active baseline `2cc3fe3aabad88c95a5e6489c633cb01472f7c7f` is now an ancestor. Combined migration stack through 019, rollback/re-upgrade and transaction/privacy checks pass in private disposable PostgreSQL 16; shared migration remains unapplied. No authenticated onboarding service composition/API or least-privilege DB grants are present. | Auditor review of combined SHA; Coordinator identifies service integration owner, approves DB grants/route/release procedure and maintenance window before shared migration |
-| HRD-12 | Immutable onboarding handoff package and exact digest manifest | HR Development; Coordinator consumes after review | Deterministic package builder and archive/digest regressions implemented. It will label the bundle `SOURCE_CANDIDATE_NOT_DEPLOYABLE` until host composition, authority writers, and review gates exist. | Build from the clean merged source SHA; verify in-band hashes and archive digest; commit sidecars and handoff; obtain exact-SHA Auditor review |
-| HRD-13 | Universal process backlog/maintenance | HR Development and each domain owner | OPEN | Keep this register updated; implement source-independent improvements without waiting for Vicky's external approvals |
+| HRD-11 | Migration, DB role grants, service composition and production deployment | Coordinator #51 | Active baseline `2cc3fe3aabad88c95a5e6489c633cb01472f7c7f` is an ancestor. Combined migration stack through 019, rollback/re-upgrade and transaction/privacy checks passed in private disposable PostgreSQL 16; shared migration remains unapplied. Step 74 implements the `r3a.resident.onboarding.host-composition.v1` façade; authenticated production API route and least-privilege DB grants remain absent. | Auditor reviews exact new SHA; Coordinator names host/service owner and authorizes DB role, route/release procedure and maintenance window before shared migration |
+| HRD-12 | Immutable installable onboarding runtime package and exact digest manifest | HR Development; Coordinator installs after approval | Prior Step 66 package was a source archive and explicitly `SOURCE_CANDIDATE_NOT_DEPLOYABLE`. Step 74 builds/verifies an R3A runtime wheel plus source archive and records digests; no managed installation/deployment authorized. | Verify wheel has host/service/schema/migration/rollback resources; install to isolated target; publish checksums and exact-SHA Auditor request |
+| HRD-13 | Universal HR roster, privacy, crosswalk and resident lifecycle policy | HR authority / Steward; HR Development supplies adapter/schema after policy approval | **BLOCKED.** Current R3A dossier contract requires HR-sensitive fields to stay governed and authorized projections only; no approved universal roster policy/source owner/projection contract is evidenced. | HR authority names owner and approves source-of-truth, lifecycle, data classification, disclosure, retention, correction, provenance and revision rules; then HRD implements generic adapter/tests |
+| HRD-14 | Universal Vicky activation and all-resident operational dependency register | HR Development plus each authoritative owner | Step 81 register created at `docs/architecture/R3A_HR_VICKY_ACTIVATION_BACKLOG.md`; records 19 ordered gates, current proof, owner, and next action. Vicky activation remains blocked. | Keep status evidence-linked; execute next source-owned work and do not infer missing decisions |
+| HRD-15 | Universal process backlog/maintenance | HR Development and each domain owner | OPEN | Keep this register and activation matrix current; continue source-independent work while external authority gates are unresolved |
 
 ## Completed source artifacts in the current candidate
 
@@ -24,6 +45,7 @@ Updated 2026-11-11 from Issue #58 and Step 61 dispatch #61 comment `6803213372`.
 - `r3a_runtime/state_machines/resident_onboarding.v1.json`
 - `r3a_runtime/residents/onboarding.py`
 - `r3a_runtime/residents/onboarding_repository.py`
+- `r3a_runtime/residents/onboarding_host.py` — Step 74 versioned authenticated host composition boundary
 - `r3a_runtime/migrations/019_resident_onboarding.sql`
 - `r3a_runtime/rollback/019_resident_onboarding.down.sql` (data-preserving refusal if records exist)
 - `docs/architecture/R3A_UNIVERSAL_RESIDENT_ONBOARDING_V1.md`
@@ -33,8 +55,10 @@ Updated 2026-11-11 from Issue #58 and Step 61 dispatch #61 comment `6803213372`.
 - `docs/onboarding/vicky.packet.json`
 - `tests/fixtures/resident-onboarding-synthetic.json`
 - `tests/test_r3a_resident_onboarding.py`
+- `tests/test_r3a_resident_onboarding_host.py`
 - `tests/test_r3a_resident_onboarding_postgres.py` (explicit disposable database only)
 - `scripts/package_r3a_hr_onboarding.py` and `tests/test_r3a_hr_onboarding_package.py` (deterministic immutable handoff bundle)
 - `tests/test_r3a_institutional_directory.py` fail-closed inactive-provider fixture regression
+- `docs/architecture/R3A_HR_VICKY_ACTIVATION_BACKLOG.md` — proof-linked all-resident policy dependencies and Vicky activation path
 
 Source implementation and operational activation have distinct status. No external record, appointment, identity, binding, credential, grant, module or chat configuration is modified by the source candidate.

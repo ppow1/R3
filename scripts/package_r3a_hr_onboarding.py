@@ -1,4 +1,20 @@
 #!/usr/bin/env python3
+# R3 CONTROLLED SOURCE
+# File: scripts/package_r3a_hr_onboarding.py
+# Component: R3A-HR-ONBOARDING-PACKAGING
+# File Revision: 1.0.1
+# Created: Unknown (legacy; first committed at e618dd7)
+# Created By: Unknown (legacy)
+# Purpose: Build and verify a deterministic, digest-pinned HR onboarding source handoff.
+# Execution Model: Command-line Python script using tracked repository inputs.
+# Observability: Archive manifest, external digest, verification result, and handoff document.
+# Dependencies: Python standard library; clean committed R3A worktree with approved Coordinator baseline ancestry.
+# Authority: Steward Steps 66/74; no shared deployment or migration authority.
+# Changed: 2026-11-11T18:43:21Z | HRD-STEP-74 | Codex GPT-6 | Include host-composition contract and tests in package evidence.
+# Supersedes: None; increments legacy file revision after provenance metadata was absent.
+# Contracts: r3a.hr-onboarding-package.v1; r3a.resident.onboarding.host-composition.v1
+# Tests: tests/test_r3a_hr_onboarding_package.py
+# History/Predecessor: Git commit e618dd7; legacy source provenance was not recorded.
 """Build a deterministic, checksummed HR onboarding source handoff bundle.
 
 This does not install the workflow or migrate a shared database. The manifest
@@ -27,6 +43,7 @@ FILES = (
     "docs/architecture/R3A_HR_VICKY_TRANSFER_MATRIX_2026-11-10.md",
     "docs/architecture/R3A_UNIVERSAL_RESIDENT_ONBOARDING_V1.md",
     "docs/architecture/R3A_HR_DEVELOPMENT_BACKLOG.md",
+    "docs/architecture/R3A_HR_VICKY_ACTIVATION_BACKLOG.md",
     "docs/onboarding/packet-template.json",
     "docs/onboarding/vicky.packet.json",
     "docs/runbooks/R3A_RESIDENT_ONBOARDING.md",
@@ -36,6 +53,7 @@ FILES = (
     "r3a_runtime/rollback/019_resident_onboarding.down.sql",
     "r3a_runtime/residents/hr_association.py",
     "r3a_runtime/residents/onboarding.py",
+    "r3a_runtime/residents/onboarding_host.py",
     "r3a_runtime/residents/onboarding_repository.py",
     "r3a_runtime/schemas/resident-onboarding-packet.v1.schema.json",
     "r3a_runtime/state_machines/resident_onboarding.v1.json",
@@ -46,17 +64,20 @@ FILES = (
     "tests/test_r3a_institutional_directory.py",
     "tests/test_r3a_resident_dossiers.py",
     "tests/test_r3a_resident_onboarding.py",
+    "tests/test_r3a_resident_onboarding_host.py",
     "tests/test_r3a_resident_onboarding_postgres.py",
     "tests/test_r3a_hr_onboarding_package.py",
 )
 
 CONFIGURATION = {
+    "host_composition_contract": "r3a.resident.onboarding.host-composition.v1",
     "host_composition": [
-        "server-authenticated actor resolver",
+        "server-authenticated actor resolver deriving actor from the established session authority",
         "exact-action/scope authorization provider",
         "authoritative per-domain evidence verifiers",
         "activation evidence verifier",
-        "Coordinator PostgreSQL pool and onboarding repository",
+        "Coordinator PostgreSQL pool; packet/event-only least-privilege DB grants",
+        "Coordinator-owned authenticated API route, lifecycle supervision, and health integration",
     ],
     "database": {
         "migration_runner": "r3a_runtime.db.Store.migrate",
@@ -229,7 +250,7 @@ def create_release(root: Path, output_dir: Path) -> dict[str, Any]:
 
 See the package manifest for the complete file-level digest list and configuration contract. Before installation, Auditor must PASS this exact source and package. Coordinator must approve service composition, the migration/DB role grants, the controlled release window, and its application rollback procedure. Host composition requires authenticated actor and authorization providers, authoritative domain/activation verifiers, and the Coordinator packet repository. Security, HR, character, runtime, and communications remain separate authorities.
 
-The verified HR host lacks `associate_authority_principal_with_provenance`; the accountable HR writer owner is not identified. The directory capability is read-only and no authorized resident/office-binding writer or named owner is identified. No production service API is composed in this source candidate. Consequently this bundle is an immutable integration handoff, not an installable/activated service.
+The verified HR host lacks `associate_authority_principal_with_provenance`; the accountable HR writer owner is not identified. The directory capability is read-only and no authorized resident/office-binding writer or named owner is identified. The bundle contains an installable R3A runtime library and versioned `r3a.resident.onboarding.host-composition.v1` façade, but no production route is registered or deployed. Consequently this bundle remains a source/integration handoff, not an activated production service.
 
 ## Install/rollback contract
 

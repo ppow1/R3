@@ -1,12 +1,31 @@
+<!--
+R3 CONTROLLED DOCUMENT
+File: docs/runbooks/R3A_HR_ONBOARDING_DEPLOYMENT_PLAN.md
+Component: R3A-HR-ONBOARDING-RELEASE
+File Revision: 1.0.1
+Created: Unknown (legacy; predecessor documented in commit 82261c8)
+Created By: Unknown (legacy)
+Purpose: Define gated Coordinator installation, migration, validation, rollback, and ownership dependencies for resident onboarding.
+Execution Model: Operator runbook; does not itself deploy or authorize changes.
+Observability: Exact commits, checksums, migration ledger, audit evidence, and service health observations.
+Dependencies: Auditor review; Coordinator release/DB authority; HR, directory, Security, Character Architecture, Autonomy, Website owners.
+Authority: Steward Steps 66/74; R3A modular architecture and universal onboarding contracts.
+Changed: 2026-11-11T18:43:21Z | HRD-STEP-74 | Codex GPT-6 | Document host-composition seam and precise authority-owner requests.
+Supersedes: None; increments legacy document revision after provenance metadata was absent.
+Contracts: r3a.resident.onboarding.host-composition.v1; migration 019; universal onboarding packet v1.
+Tests: Reviewed against tests/test_r3a_resident_onboarding_postgres.py and package regression; no shared DB used.
+History/Predecessor: Git commit 82261c8; legacy document provenance was not recorded.
+-->
+
 # R3A HR Onboarding Deployment and Recovery Plan
 
 ## Current disposition
 
-This is a release-gated plan, not deployment authorization. The HR source candidate is not yet independently approved at its exact SHA, the packet service is not composed into an authenticated R3A host, and migration 019 has not been applied to shared R3A. Do not deploy or migrate shared R3A until the Auditor review and Coordinator release approval are recorded.
+This is a release-gated plan, not deployment authorization. The HR source candidate is not yet independently approved at its exact SHA, the host-composition façade is not registered as an authenticated R3A API, and migration 019 has not been applied to shared R3A. Do not deploy or migrate shared R3A until the Auditor review and Coordinator release approval are recorded.
 
 The HR branch now includes the approved active integration baseline `2cc3fe3aabad88c95a5e6489c633cb01472f7c7f` as an ancestor. Reconciliation retained its module-manifest validation and CME lifecycle changes and the HR-owned schema-reference/authority checks. The shared directory regression now tests REGISTERED denial before activation and the active-provider success path.
 
-The immutable handoff builder is `scripts/package_r3a_hr_onboarding.py`. Its deterministic archive, in-band file digest manifest, external SHA-256, and Coordinator handoff are generated under `artifacts/`. The bundle status is `SOURCE_CANDIDATE_NOT_DEPLOYABLE` until the service/API composition and external authority writers are available and the exact bundle is independently reviewed.
+The immutable handoff builder is `scripts/package_r3a_hr_onboarding.py`. Its deterministic archive, in-band file digest manifest, external SHA-256, and Coordinator handoff are generated under `artifacts/`. `r3a_runtime.residents.onboarding_host` defines the versioned `r3a.resident.onboarding.host-composition.v1` application boundary. It requires a Coordinator PostgreSQL pool, authenticated-context actor resolver, exact-action/scope authorizer, authority-owned evidence verifier, and activation verifier. Resolver output supplies the actor for every request; actor facts in request data are not accepted. Missing ports fail composition. This component is packaged in the installable R3A runtime wheel, but the façade is not itself a registered production API or deployment authorization.
 
 This plan covers only the R3A onboarding packet/event store and its host integration. It does not create HR identities or appointments, directory occupants or office bindings, credentials, grants, resident modules, or Website availability.
 
@@ -25,6 +44,17 @@ This plan covers only the R3A onboarding packet/event store and its host integra
 ### HR association request/response contract
 
 The adapter's operation name and payload are defined in `hr_association.py`. The host call receives the authenticated/authorized HR principal, existing `r3:` HR record ID, expected HR revision, server-resolved canonical `resident:` principal and active office/binding evidence, opaque requested evidence reference, idempotency key, and correlation ID. The host returns the same HR record and associated principal, a newer revision, the exact persisted provenance, idempotency/correlation values, an association reference, and an audit-event reference. The adapter rejects absent operation, stale/inactive HR record, stale/mismatched evidence, caller-selected principal, and incomplete persistence evidence. The host remains responsible for its own authoritative transaction and audit. R3A must not implement a substitute HR or directory writer.
+
+### Host-composition contract and ownership requests
+
+The R3A module is a library boundary: it does not start a server, register a route, apply migrations, or impersonate an authority. Coordinator composes it into the approved authenticated API host. The composition must pass the server-authenticated request context to `actor_resolver`; that resolver must return an `OnboardingActor` derived from the established session authority. The authorizer must use the current R3A grant/policy path for the request, domain-record, and transition actions with exact scope. The domain verifier routes each domain to its authoritative system and confirms current source revision, provenance, approval, and privacy-safe references. The activation verifier rechecks current evidence rather than trusting packet status. The pool uses the Coordinator-approved least-privilege role. No production defaults or local allow-all verifiers are supplied.
+
+The following owner requests remain unresolved and are intentionally contracts rather than fabricated integrations:
+
+1. **HR authority/source maintainer (principal and owner to be named by HR Steward):** name the accountable maintainer and approver; expose or identify the authenticated read/write API for current appointment evidence and `associate_authority_principal_with_provenance`; document exact action/scope, request/response schema, server-side principal/evidence resolution, expected revision/CAS behavior, stable idempotency/correlation, conflict/duplicate behavior, provenance persistence, and immutable audit reference. Confirm which HR approval principal/policy represents Helen's personnel decision. Until supplied, identity association and appointment verification remain blocked.
+2. **Institutional directory authority (owner/principal to be named by Coordinator/Steward):** identify the owner of `resident_occupants` and `office_bindings`; specify the authorized onboarding operation for an HR-approved appointment, canonical resident principal and office resolution, expected revision/idempotency, and durable provenance/audit response. Confirm discovery stays read-only. Until supplied, no binding writer exists in this component.
+3. **Coordinator runtime owner:** identify authenticated API host and route-registration/release owner; provide session principal resolver, authorization provider binding, migration/release path, packet/event-only DB grants, and health/rollback interface. The new host façade is the versioned integration point but cannot self-register or deploy.
+4. **Security, Character Architecture, Autonomy, and Website owners:** publish the existing verification adapters or contracts for credential/grant state, character/canon approval, execution/model registration, and authenticated directory/chat readiness. Each authority retains its own approval and durable source evidence.
 
 ## Staged release procedure
 
@@ -53,10 +83,14 @@ R3A_TEST_ONBOARDING_DSN='host=/tmp/<private-test-socket> port=<private-port> dbn
 
 Use a UTF-8 database; migration SQL contains Unicode text. The test applies the full migration stack, checks repeat migration is a no-op, exercises rollback/re-upgrade for empty 019 tables, runs multi-resident packet/event repository and concurrency/privacy checks, and proves rollback refuses populated evidence. Stop and remove only the private cluster created for the test after capturing its test log.
 
+## Installable runtime artifact
+
+The onboarding service is distributed as an R3A runtime library component, not a new database-owning microservice. Build the runtime wheel from the exact reviewed R3A commit using the repository's pinned build environment, then retain its SHA-256 beside the source archive manifest. Verify that the wheel contains `residents/onboarding_host.py`, onboarding service/repository code, migration 019 and rollback, schema v1, and state-machine v1. Install only in the Coordinator-managed R3A environment after exact-SHA Auditor review and Coordinator release approval. Installing the wheel does not apply migration 019 or activate an API.
+
 ## Current blockers and next actions
 
-1. Auditor posts PASS/FAIL/BLOCKED for exact SHA `62d6aae84f2bf7d824078f5559fd77a010349bd0`.
-2. Coordinator identifies the authenticated service-composition/API owner and reviews schema, DB role grants, and release procedure before shared migration.
-3. HR authority names its accountable source owner/approver and provides current appointment/read evidence plus the governed association writer or exact equivalent.
+1. Auditor publishes exact-SHA disposition for the reconciled candidate, including host-composition boundary, package, and tests.
+2. Coordinator identifies authenticated service-composition/API owner and reviews schema, DB role grants, route registration, installation, health, and release/rollback procedure before shared migration.
+3. HR authority names its accountable source owner/approver and provides appointment/read plus governed provenance-association interfaces above.
 4. Directory authority names its write owner and authorized `resident_occupants`/`office_bindings` onboarding procedure.
-5. Security and Character Architecture provide their separately owned procedures/evidence; Coordinator and Autonomy provide runtime/model/Website readiness evidence.
+5. Security and Character Architecture provide their separately owned procedures/evidence; Coordinator and Autonomy provide runtime/model/Website readiness evidence. Vicky remains inactive until those approvals and operational acceptance are independently verified.
