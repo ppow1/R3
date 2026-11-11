@@ -33,7 +33,7 @@
   },
   "module_manifest": {
     "contract_id": "r3a.module-manifest.v1",
-    "contract_version": "1.2.0",
+    "contract_version": "1.1.0",
     "module_id": "r3a.development-bridge",
     "module_version": "0.1.0",
     "owner": "Engineering",
@@ -67,7 +67,7 @@
     },
     "activity_handler": {
       "contract_id": "r3a.activity-handler",
-      "contract_version": "1.1.0",
+      "contract_version": "1.0.0",
       "handler_id": "r3a.development-bridge.dispatch-planner",
       "handler_version": "0.1.0",
       "activity_types": [
@@ -82,8 +82,8 @@
       "handler_contract_range": {
         "contract_id": "r3a.activity-handler",
         "major": 1,
-        "min_minor": 1,
-        "max_minor": 1
+        "min_minor": 0,
+        "max_minor": 0
       },
       "request_schema": {
         "type": "object",

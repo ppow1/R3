@@ -72,10 +72,10 @@ class MockTransport:
 
 def test_manifest_discovers_disabled_provider_and_reuses_cme_module_activity_contracts(monkeypatch):
     manifest = _manifest()
-    assert manifest["module_manifest"]["contract_version"] == "1.2.0"
+    assert manifest["module_manifest"]["contract_version"] == "1.1.0"
     assert manifest["operation"]["lifecycle"]["desired_state"] == "disabled"
     assert manifest["module_manifest"]["binding"]["contract_id"] == "r3a.capability-provider.v1"
-    assert manifest["module_manifest"]["activity_handler"]["contract_version"] == "1.1.0"
+    assert manifest["module_manifest"]["activity_handler"]["contract_version"] == "1.0.0"
     descriptor = operation_from_manifest(manifest)
     config = json.loads((PACKAGE / "config.example.json").read_text(encoding="utf-8"))
 
@@ -92,7 +92,7 @@ def test_manifest_discovers_disabled_provider_and_reuses_cme_module_activity_con
 
         provider_manifest = ProviderProcessManager._manifest(
             object.__new__(ProviderProcessManager), registered)
-        assert provider_manifest["manifest_contract"] == "r3a.module-manifest.v1@1.2.0"
+        assert provider_manifest["manifest_contract"] == "r3a.module-manifest.v1@1.1.0"
         handler = resolve_activity_handler([{
             "module_id": provider_manifest["module_id"],
             "module_version": provider_manifest["module_version"],
