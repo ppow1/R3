@@ -10,3 +10,4 @@ r3a_runtime/timestamp_presentation.py text eol=lf
 r3a_runtime/notifications.py text eol=lf
 r3a_runtime/notification_delivery.py text eol=lf
 r3a_runtime/capability_contracts.py text eol=lf
+r3a_plugins/notification_service/capability.py text eol=lf

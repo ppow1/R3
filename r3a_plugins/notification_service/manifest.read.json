@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "plugin_id": "r3a.notification-delivery",
+  "plugin_version": "1.2.2",
+  "configuration_schema": {
+    "schema_id": "r3a.notification-delivery.config.v1",
+    "type": "object",
+    "required": [
+      "dsn_env",
+      "presentation_timezone"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "dsn_env": {
+        "type": "string",
+        "const": "R3A_NOTIFICATION_DATABASE_DSN"
+      },
+      "presentation_timezone": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "artifact_ref": "capability.py",
+  "artifact_sha256": "f7409526fe286738cb21c6e3be061f8841b51c7e1d013aa977731f2ed76c492f",
+  "supporting_artifacts": [
+    {
+      "artifact_ref": "store.py",
+      "artifact_sha256": "059a1ef19c4f48e430b19a599062e5f91718fc27471af19680beeba9295c6992"
+    }
+  ],
+  "capability_id": "notification.delivery.read",
+  "provider": {
+    "provider_id": "r3a.notification-delivery",
+    "provider_version": "1.2.2",
+    "entrypoint": "r3a_plugins.notification_service.capability:create_provider",
+    "artifact_sha256": "f7409526fe286738cb21c6e3be061f8841b51c7e1d013aa977731f2ed76c492f"
+  },
+  "operation": {
+    "contract_id": "r3a.capability-operation.v1",
+    "contract_version": "1.0.0",
+    "operation_id": "notification.delivery.read",
+    "operation_revision": "1.0.0",
+    "provider": {
+      "provider_id": "r3a.notification-delivery",
+      "provider_version": "1.2.2",
+      "entrypoint": "r3a_plugins.notification_service.capability:create_provider",
+      "artifact_sha256": "f7409526fe286738cb21c6e3be061f8841b51c7e1d013aa977731f2ed76c492f"
+    },
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "cursor",
+        "limit"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "effect_class": "read",
+    "caller_constraints": {
+      "allowed_principals": [],
+      "allowed_residents": [],
+      "allowed_services": []
+    },
+    "target_scope_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "required_grants": [
+      "notification.delivery.read"
+    ],
+    "evidence": {
+      "schema": {
+        "type": "object"
+      },
+      "verification_obligations": [
+        "preserve_cme_authorization_reference",
+        "bind_recipient_to_authenticated_caller",
+        "preserve_notification_store_ownership"
+      ]
+    },
+    "recovery": {
+      "idempotency_required": false,
+      "idempotency_scope": "invocation",
+      "replay_safe": true,
+      "reconciliation_operation_id": null
+    },
+    "execution": {
+      "timeout_seconds": 20,
+      "retry_disposition": "safe_retry"
+    },
+    "lifecycle": {
+      "desired_state": "enabled"
+    }
+  },
+  "module_manifest": {
+    "contract_id": "r3a.module-manifest.v1",
+    "contract_version": "1.0.0",
+    "module_id": "r3a.notification-delivery",
+    "module_version": "1.2.2",
+    "owner": "R3A Notifications",
+    "binding": {
+      "contract_id": "r3a.capability-provider.v1",
+      "protocol_major": 1,
+      "protocol_min_minor": 0,
+      "protocol_max_minor": 0,
+      "entrypoint": "r3a_plugins.notification_service.capability:create_provider"
+    },
+    "dependencies": [],
+    "configuration": {
+      "schema_ref": "r3a.notification-delivery.config.v1",
+      "configuration_ref": "capability_operations[].configuration"
+    },
+    "capability_refs": [
+      "notification.delivery.read"
+    ],
+    "resource_refs": [],
+    "state_namespace": "r3a.notification-delivery",
+    "migration_contract": "r3a.stateless-provider.v1",
+    "recovery_policy": "operation-contract.v1",
+    "artifact": {
+      "artifact_ref": "capability.py",
+      "artifact_sha256": "f7409526fe286738cb21c6e3be061f8841b51c7e1d013aa977731f2ed76c492f"
+    },
+    "environment": {
+      "allowlist": [
+        "R3A_NOTIFICATION_DATABASE_DSN"
+      ]
+    }
+  }
+}
