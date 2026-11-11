@@ -60,7 +60,7 @@ The changed test fixtures include two separately bound resident principals, `res
 
 ## Confirmed integration-only mismatch
 
-At baseline `2cc3fe3`, `r3a_plugins/engineering_workspace/manifest.json:83` set `caller_constraints.allowed_principals` to `resident.grace`, while line 84 correctly set `allowed_residents` to `resident.grace`. The principal has been corrected to `resident:grace`; the module remains dotted. Because the current integration manifest is newer than the one on the older `a9da804` tree, this was corrected on its own branch based directly on `2cc3fe3`, preserving the integrated Engineering handler and lifecycle declarations. Commit `afa220c0c6e37292b8ba1c36484abebff36b68b7` is pushed. Its focused manifest-registration regression passes (**2 passed**); it is a candidate branch and has not been merged into the Coordinator baseline.
+At baseline `2cc3fe3`, `r3a_plugins/engineering_workspace/manifest.json:83` set `caller_constraints.allowed_principals` to `resident.grace`, while line 84 correctly set `allowed_residents` to `resident.grace`. The principal has been corrected to `resident:grace`; the module remains dotted. Because the current integration manifest is newer than the one on the older `a9da804` tree, this was corrected on its own branch based directly on `2cc3fe3`, preserving the integrated Engineering handler and lifecycle declarations. The original correction was pushed as `afa220c0c6e37292b8ba1c36484abebff36b68b7`; this reconciled candidate carries the equivalent tree change in commit `6ab0d9103ff1f58f6bd057aff94c993a56e441d2`. Its focused manifest-registration regression passes (**2 passed**); it has not been merged into the Coordinator baseline.
 
 ## CME boundary disposition; frozen source not changed
 
