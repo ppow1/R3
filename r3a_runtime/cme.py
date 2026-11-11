@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.22.1
+File Revision: 1.22.2
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -63,6 +63,7 @@ Changed: 2026-11-08 | R3A-MODULAR-PLUGINS-INTEGRATION | R3A Coordinator | Reload
 Changed: 2026-11-08 | R3A-CONTEXT-RECOVERY | R3A Coordinator | Apply the larger bounded frame to generic resident execution while preserving provider IPC bounds.
 Changed: 2026-11-08 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Reconcile absent processes from superseded primary-resident versions through durable module lifecycle transitions.
 Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Consume versioned read-provider activity-intake envelopes through CME authorization and durable idempotent activity persistence.
+Changed: 2026-11-10 | R3A-GRACE-DIRECTORY-IDEMPOTENCY | Codex GPT-6 | Exclude per-attempt deadline metadata from canonical idempotency identity while preserving all semantic request fields.
 Supersedes: None.
 Contracts: AP0-002–010; AP0-M1 D2–D8; R3A-019; MOD-001–MOD-010; STM-001–STM-007; module.lifecycle v2; r3a.resident.execution.v1; r3a.model-role.v1; r3a.authorization-decision.v1; r3a.capability-invocation.v1; r3a.model-readiness-provider.v1; r3a.model-readiness.v2.
 Tests: tests/test_r3a_engineering_handler.py; tests/test_r3a_activity_handler_interop.py; affected CME integration regressions.
@@ -113,6 +114,13 @@ from .module_extensions import (ModuleExtensionError, resolve_activity_handler,
                                 validate_activity_handler_objective_submission,
                                 validate_activity_handler_payload,
                                 validate_executor_configuration)
+
+
+def _capability_request_digest(request: dict[str, Any]) -> str:
+    """Hash semantic invocation fields; deadline is validated independently on every attempt."""
+    canonical = {key: value for key, value in request.items() if key != "deadline"}
+    return hashlib.sha256(json.dumps(canonical, sort_keys=True,
+                                    separators=(",", ":")).encode()).hexdigest()
 
 
 ACTIVITY_INTAKE_SCHEMA = json.loads(
@@ -2549,8 +2557,7 @@ class CME:
                     "audit_event_id": authorization["audit_event_id"],
                     "policy_revision": authorization["policy_revision"],
                     "config_revision": authorization["config_revision"]}
-        canonical_digest = hashlib.sha256(json.dumps(checked, sort_keys=True,
-                                                    separators=(",", ":")).encode()).hexdigest()
+        canonical_digest = _capability_request_digest(checked)
         persistence_key = checked["idempotency_key"] or f"invocation:{checked['invocation_id']}"
         durable_request = {**checked, "idempotency_key": persistence_key}
         existing = await self.store.begin_capability_invocation(durable_request, canonical_digest, auth_ref)

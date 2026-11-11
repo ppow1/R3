@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_activity_checkpoint_persistence.py
 Component: R3A-ACTIVITY-CHECKPOINT-PERSISTENCE-REGRESSION
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-10
 Created By: Codex GPT-6
 Purpose: Verify generic handler checkpoints persist through PostgreSQL progress updates and lease recovery.
@@ -14,6 +14,7 @@ Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GP
 Changed: 2026-11-10 | R3A-EXECUTOR-ROLE-P0 | Coordinator | Verify durable v1.1 role promotion preserves primary-module registration and lifecycle state.
 Changed: 2026-11-10T20:10:03Z | R3A-GENERIC-OBJECTIVE-CONTINUATION | R3A Coordinator | Verify PostgreSQL parks and resumes objective-waiting handler activities after child completion.
 Changed: 2026-11-10 | R3A-FS01-NOTIFICATION-ACK | R3A Coordinator | Verify notification acknowledgment requires a cited final disposition and shares the PostgreSQL completion transaction.
+Changed: 2026-11-10 | R3A-GRACE-DIRECTORY-IDEMPOTENCY | Codex GPT-6 | Regress changing invocation deadlines across PostgreSQL process restart while retaining semantic conflict rejection.
 Supersedes: None.
 Contracts: r3a.activity-handler.v1; r3a.activity-handler.objective-submission@1.0.0; activity.generic v1; existing CME activity/module ledgers.
 Tests: Set R3A_CHECKPOINT_TEST_DSN to a disposable test database and run this module.
@@ -21,6 +22,7 @@ History/Predecessor: New permanent persistence regression.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import uuid
@@ -32,7 +34,7 @@ from unittest.mock import AsyncMock, Mock
 from psycopg.conninfo import conninfo_to_dict
 from psycopg import AsyncConnection
 
-from r3a_runtime.cme import CME
+from r3a_runtime.cme import CME, _capability_request_digest
 from r3a_runtime.db import Store
 from r3a_runtime.provider_runtime import ProviderProcessManager
 from tests.r3a_activity_handler_interop_provider import create_provider
@@ -59,6 +61,7 @@ class ActivityCheckpointPostgresTests(unittest.IsolatedAsyncioTestCase):
             connection_info=info, worker_concurrency=1, lease_seconds=30,
             observer_interval_seconds=60,
             machine_catalog_dir=ROOT / "r3a_runtime" / "state_machines")
+        self.settings = settings
         self.store = Store(settings)
         async with await AsyncConnection.connect(self.store.conninfo, autocommit=True) as conn:
             await conn.execute("DROP SCHEMA IF EXISTS r3a CASCADE")
@@ -69,6 +72,69 @@ class ActivityCheckpointPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         if hasattr(self, "store"):
             await self.store.close()
+
+    async def test_capability_retry_with_new_deadline_recovers_after_store_restart(self):
+        # Preserve the original production failure as an assertion: hashing the full
+        # attempt envelope makes the same stable key conflict when only deadline moves.
+        legacy_key = f"directory-legacy-deadline:{uuid.uuid4()}"
+        legacy_request = {
+            "idempotency_key": legacy_key,
+            "invocation_id": str(uuid.uuid4()),
+            "operation_id": "institutional.directory.discover",
+            "correlation_id": str(uuid.uuid4()),
+            "deadline": "2099-01-01T00:00:00+00:00",
+            "input": {"resident_id": "resident.grace", "limit": 250},
+        }
+        def full_request_digest(request):
+            return hashlib.sha256(json.dumps(request, sort_keys=True,
+                                             separators=(",", ":")).encode()).hexdigest()
+        await self.store.begin_capability_invocation(legacy_request,
+                                                     full_request_digest(legacy_request), {})
+        legacy_retry = {**legacy_request, "deadline": "2099-01-01T00:01:00+00:00"}
+        with self.assertRaisesRegex(ValueError, "idempotency key already belongs to a different canonical request"):
+            await self.store.begin_capability_invocation(legacy_retry,
+                                                         full_request_digest(legacy_retry), {})
+
+        key = f"directory-retry:{uuid.uuid4()}"
+        first_deadline = "2099-01-01T00:00:00+00:00"
+        first_request = {
+            "idempotency_key": key,
+            "invocation_id": str(uuid.uuid4()),
+            "operation_id": "institutional.directory.discover",
+            "correlation_id": str(uuid.uuid4()),
+            "deadline": first_deadline,
+            "input": {"resident_id": "resident.grace", "limit": 250},
+        }
+        first_digest = _capability_request_digest(first_request)
+        created = await self.store.begin_capability_invocation(first_request, first_digest, {})
+        self.assertTrue(created["created"])
+
+        # A CME process restart reconstructs Store and retries the same semantic request.
+        await self.store.close()
+        self.store = Store(self.settings)
+        await self.store.open()
+        retry_request = {**first_request, "deadline": "2099-01-01T00:01:00+00:00"}
+        retry_digest = _capability_request_digest(retry_request)
+        self.assertEqual(first_digest, retry_digest)
+        retry = await self.store.begin_capability_invocation(retry_request, retry_digest, {})
+        self.assertFalse(retry["created"])
+        self.assertEqual("STARTED", retry["state"])
+        persisted = (await self.store.rows(
+            "SELECT request FROM r3a.capability_invocations WHERE idempotency_key=%s", (key,)))[0]
+        self.assertEqual(first_deadline, persisted["request"]["deadline"])
+
+        result = {"outcome": "SUCCEEDED", "evidence": [], "output": {"residents": []}}
+        await self.store.finish_capability_invocation(key, retry["request_digest"], result)
+        replay = await self.store.begin_capability_invocation(
+            {**retry_request, "deadline": "2099-01-01T00:02:00+00:00"}, retry_digest, {})
+        self.assertFalse(replay["created"])
+        self.assertEqual("SUCCEEDED", replay["state"])
+        self.assertEqual(result, replay["result"])
+
+        changed_input = {**retry_request, "input": {"resident_id": "resident.vicky", "limit": 250}}
+        with self.assertRaisesRegex(ValueError, "idempotency key already belongs to a different canonical request"):
+            await self.store.begin_capability_invocation(
+                changed_input, _capability_request_digest(changed_input), {})
 
     async def test_primary_executor_role_promotion_is_durable_and_preserves_module_state(self):
         module_id = f"executor.fixture.{uuid.uuid4().hex}"
