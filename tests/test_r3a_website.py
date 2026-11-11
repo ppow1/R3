@@ -41,7 +41,7 @@ from fastapi import HTTPException
 
 from fastapi.testclient import TestClient
 
-from r3_app import app, _snapshot_r3a_runtime
+from r3_app import app, _base_snapshot, _snapshot_r3a_runtime
 
 
 class StewardWebsiteApiTests(unittest.TestCase):
@@ -101,6 +101,19 @@ class StewardWebsiteApiTests(unittest.TestCase):
                 response = self.client.get("/api/v1/visual/background")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, png)
+
+    def test_snapshot_background_metadata_uses_projected_asset_without_archive(self):
+        png = (bytes([137, 80, 78, 71, 13, 10, 26, 10]) + bytes(8) +
+               bytes([0, 0, 2, 88, 0, 0, 1, 44]) + b"snapshot image")
+        with tempfile.TemporaryDirectory() as temporary:
+            projected = Path(temporary) / "background.png"
+            projected.write_bytes(png)
+            with (
+                patch("r3_app.VISUAL_BACKGROUND_PATH", projected),
+                patch("r3_app.ZIP_PATH", Path(temporary) / "omitted-concept-library.zip"),
+            ):
+                result = _base_snapshot()
+        self.assertEqual((result["artwork"]["width_px"], result["artwork"]["height_px"]), (600, 300))
 
     def test_native_login_is_same_origin_nostore_and_never_discovers_r3_portal_in_native_mode(self):
         page = self.client.get("/login")
