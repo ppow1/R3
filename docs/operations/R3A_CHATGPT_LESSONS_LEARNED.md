@@ -55,3 +55,32 @@ Extend the existing B-2 target selection and preserve the GitHub polling/SendKey
 **Behavioral correction:** Not automatically verified by documenting this entry. Recheck on future R3A assignments. If repeated, cite LL-001 and record the recurrence.
 
 ---
+
+## LL-002 — 2026-11-11 — Do not repackage software to make a configuration-only change
+
+**Category:** Immediate recurrence of LL-001; failure to apply a lesson still present in the active conversation; unnecessary user work.
+
+### Mistake
+Less than 40 minutes after documenting LL-001, ChatGPT proposed that the Steward download and extract a new ZIP package to add HR Development as a second B-2 Multi-Target destination. It had just established that the existing bridge reads its target mapping from `Riverview-B2-targets.json`. The proposed package replaced files unnecessarily, requiring download, extraction, and extra user steps for what should have been a configuration-only edit.
+
+### Known evidence ignored
+- B-2 Multi-Target already ran successfully with the Administrator Coordinator target.
+- The target list was externalized in `Riverview-B2-targets.json` specifically to support multiple window targets.
+- The next requested behavior was simply to add `HR Development` → `HR - Vicky | hr-development`.
+- LL-001's mandatory preflight and minimal-change rule had just been written and were still in the active conversation.
+
+### Impact
+The Steward had to stop the work again. This immediately undermined the purpose of the lessons log and created avoidable installation and replacement risks. The failure was not missing memory or an expired context window; the relevant lesson was readily available and was not applied.
+
+### Correct approach
+Inspect the existing target configuration and bridge contract, modify only the target mapping, restart only the affected Multi-Target bridge if configuration is loaded at startup, and run a harmless GitHub dispatch to verify routing. Preserve the original Live Modular instance. Do not ship a new ZIP or script unless an actual code defect is demonstrated. The specific JSON shape must be checked against the installed file before editing, not assumed from an example.
+
+### Mandatory prevention check
+Before creating any artifact, download, script, or deployment instruction for an existing system, explicitly check: **Is the requested behavior already supported by the installed code, and can it be accomplished by editing existing configuration?** If yes, use that path and do not manufacture a replacement package. For recurring failures, read the previous lesson and name how the proposed action avoids repeating it **before** proceeding.
+
+### Verification and status
+**Documentation:** This entry records the repeat failure and correction. **Runtime configuration and HR target delivery:** Not yet verified by this entry. Do not report the HR routing test as complete until a real GitHub result confirms it.
+
+**Related:** LL-001; https://github.com/ppow1/R3/issues/65
+
+---
