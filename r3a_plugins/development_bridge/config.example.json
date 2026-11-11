@@ -1,0 +1,4 @@
+{
+  "transport": "unavailable",
+  "transport_state_path_env": "R3A_BRIDGE_TRANSPORT_STATE_PATH"
+}

@@ -1,0 +1,385 @@
+{
+  "schema_version": 1,
+  "plugin_id": "r3a.development-bridge",
+  "plugin_version": "0.1.0",
+  "artifact_ref": "provider.py",
+  "artifact_sha256": "b208529353b2abf053ce051dab3644be46ebf5f54f5c3ef0ec6317678ed645e0",
+  "configuration_schema": {
+    "schema_id": "r3a.development-bridge.config.v1",
+    "type": "object",
+    "required": [
+      "transport",
+      "transport_state_path_env"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "transport": {
+        "type": "string",
+        "enum": [
+          "unavailable"
+        ]
+      },
+      "transport_state_path_env": {
+        "type": "string",
+        "pattern": "^[A-Z][A-Z0-9_]*$"
+      }
+    }
+  },
+  "provider": {
+    "provider_id": "r3a.development-bridge",
+    "provider_version": "0.1.0",
+    "entrypoint": "r3a_plugins.development_bridge.provider:create_provider",
+    "artifact_sha256": "b208529353b2abf053ce051dab3644be46ebf5f54f5c3ef0ec6317678ed645e0"
+  },
+  "module_manifest": {
+    "contract_id": "r3a.module-manifest.v1",
+    "contract_version": "1.1.0",
+    "module_id": "r3a.development-bridge",
+    "module_version": "0.1.0",
+    "owner": "Engineering",
+    "binding": {
+      "contract_id": "r3a.capability-provider.v1",
+      "protocol_major": 1,
+      "protocol_min_minor": 0,
+      "protocol_max_minor": 0,
+      "entrypoint": "r3a_plugins.development_bridge.provider:create_provider"
+    },
+    "dependencies": [],
+    "configuration": {
+      "schema_ref": "r3a.development-bridge.config.v1",
+      "configuration_ref": "capability_operations[].configuration"
+    },
+    "capability_refs": [
+      "development.bridge.dispatch.plan"
+    ],
+    "resource_refs": [],
+    "state_namespace": "r3a.development-bridge.transport-attempt-cache",
+    "migration_contract": "subordinate.transport-attempt-cache.v1",
+    "recovery_policy": "cme-activity-and-transport-reconciliation.v1",
+    "artifact": {
+      "artifact_ref": "provider.py",
+      "artifact_sha256": "b208529353b2abf053ce051dab3644be46ebf5f54f5c3ef0ec6317678ed645e0"
+    },
+    "environment": {
+      "allowlist": [
+        "R3A_BRIDGE_TRANSPORT_STATE_PATH"
+      ]
+    },
+    "activity_handler": {
+      "contract_id": "r3a.activity-handler",
+      "contract_version": "1.0.0",
+      "handler_id": "r3a.development-bridge.dispatch-planner",
+      "handler_version": "0.1.0",
+      "activity_types": [
+        "bridge.dispatch.plan"
+      ],
+      "activity_contract_range": {
+        "contract_id": "r3a.activity-intake",
+        "major": 1,
+        "min_minor": 0,
+        "max_minor": 0
+      },
+      "handler_contract_range": {
+        "contract_id": "r3a.activity-handler",
+        "major": 1,
+        "min_minor": 0,
+        "max_minor": 0
+      },
+      "request_schema": {
+        "type": "object",
+        "required": [
+          "dispatches",
+          "sessions"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "dispatches": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "sessions": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "result_schema": {
+        "type": "object",
+        "required": [
+          "outcome",
+          "decisions"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "blocked"
+            ]
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "progress": {
+            "type": "object"
+          },
+          "checkpoint": {
+            "type": "object"
+          }
+        }
+      },
+      "progress_schema": {
+        "type": "object",
+        "required": [
+          "phase",
+          "decision_count"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "phase": {
+            "type": "string",
+            "const": "dispatch_batch_planned"
+          },
+          "decision_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "checkpoint_schema": {
+        "type": "object",
+        "required": [
+          "source_keys"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "source_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "progress_semantics": "CME-observed count of route decisions for one source-identified dispatch batch.",
+      "checkpoint_semantics": "CME-persisted source comment identities for planning replay; no session registry or delivery state.",
+      "required_capabilities": [],
+      "resource_constraints": {
+        "cpu_millis": 25,
+        "memory_bytes": 16777216,
+        "max_concurrency": 4
+      },
+      "state_namespace": "r3a.development-bridge.dispatch-plan",
+      "migration_contract": "r3a.activity-handler.checkpoint.v1",
+      "recovery": {
+        "mode": "checkpointed",
+        "idempotency_contract": "r3a.capability-invocation.idempotency.v1",
+        "checkpoint_contract": "r3a.activity-handler.checkpoint.v1"
+      }
+    }
+  },
+  "operation": {
+    "contract_id": "r3a.capability-operation.v1",
+    "contract_version": "1.0.0",
+    "operation_id": "development.bridge.dispatch.plan",
+    "operation_revision": "0.1.0",
+    "provider": {
+      "provider_id": "r3a.development-bridge",
+      "provider_version": "0.1.0",
+      "entrypoint": "r3a_plugins.development_bridge.provider:create_provider",
+      "artifact_sha256": "b208529353b2abf053ce051dab3644be46ebf5f54f5c3ef0ec6317678ed645e0"
+    },
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "dispatches",
+        "sessions"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "dispatches": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "repository",
+              "issue_number",
+              "comment_id",
+              "target",
+              "mode",
+              "summary"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "repository": {
+                "type": "string",
+                "minLength": 1
+              },
+              "issue_number": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "comment_id": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "target": {
+                "type": "string",
+                "minLength": 1
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "QUEUE",
+                  "STEER",
+                  "PRIORITY"
+                ]
+              },
+              "summary": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            }
+          }
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "target",
+              "state"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "target": {
+                "type": "string",
+                "minLength": 1
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "AVAILABLE",
+                  "BUSY",
+                  "UNKNOWN"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "required": [
+        "decisions"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "repository",
+              "issue_number",
+              "comment_id",
+              "target",
+              "mode",
+              "state",
+              "reason",
+              "idempotency_key"
+            ],
+            "properties": {
+              "repository": {
+                "type": "string"
+              },
+              "issue_number": {
+                "type": "integer"
+              },
+              "comment_id": {
+                "type": "integer"
+              },
+              "target": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "idempotency_key": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "effect_class": "read",
+    "caller_constraints": {
+      "allowed_principals": [],
+      "allowed_residents": [],
+      "allowed_services": []
+    },
+    "target_scope_schema": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "required_grants": [
+      "development.bridge.dispatch.plan"
+    ],
+    "evidence": {
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      },
+      "verification_obligations": [
+        "preserve_source_comment_identity",
+        "report_unknown_targets_fail_closed",
+        "do_not_infer_session_activity"
+      ]
+    },
+    "recovery": {
+      "idempotency_required": true,
+      "idempotency_scope": "invocation",
+      "replay_safe": true,
+      "reconciliation_operation_id": null
+    },
+    "execution": {
+      "timeout_seconds": 5,
+      "retry_disposition": "safe_retry"
+    },
+    "lifecycle": {
+      "desired_state": "disabled"
+    },
+    "resident_tool": {
+      "name": "Plan Bridge Dispatch",
+      "description": "Plan routing for an explicit batch of GitHub dispatch references and observed target states. Planning does not deliver work."
+    }
+  }
+}
