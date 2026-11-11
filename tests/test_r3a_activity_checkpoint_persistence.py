@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_activity_checkpoint_persistence.py
 Component: R3A-ACTIVITY-CHECKPOINT-PERSISTENCE-REGRESSION
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-10
 Created By: Codex GPT-6
 Purpose: Verify generic handler checkpoints persist through PostgreSQL progress updates and lease recovery.
@@ -14,6 +14,7 @@ Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GP
 Changed: 2026-11-10 | R3A-EXECUTOR-ROLE-P0 | Coordinator | Verify durable v1.1 role promotion preserves primary-module registration and lifecycle state.
 Changed: 2026-11-10T20:10:03Z | R3A-GENERIC-OBJECTIVE-CONTINUATION | R3A Coordinator | Verify PostgreSQL parks and resumes objective-waiting handler activities after child completion.
 Changed: 2026-11-10 | R3A-FS01-NOTIFICATION-ACK | R3A Coordinator | Verify notification acknowledgment requires a cited final disposition and shares the PostgreSQL completion transaction.
+Changed: 2026-11-11T22:16:00Z | R3A-EXC-001-PG-REGRESSION | R3A Coordinator | Retain PostgreSQL fixture settings for fresh-row Store restart verification.
 Supersedes: None.
 Contracts: r3a.activity-handler.v1; r3a.activity-handler.objective-submission@1.0.0; activity.generic v1; existing CME activity/module ledgers.
 Tests: Set R3A_CHECKPOINT_TEST_DSN to a disposable test database and run this module.
@@ -72,6 +73,7 @@ class ActivityCheckpointPostgresTests(unittest.IsolatedAsyncioTestCase):
             connection_info=info, worker_concurrency=1, lease_seconds=30,
             observer_interval_seconds=60,
             machine_catalog_dir=ROOT / "r3a_runtime" / "state_machines")
+        self.settings = settings
         self.store = Store(settings)
         async with await AsyncConnection.connect(self.store.conninfo, autocommit=True) as conn:
             await conn.execute("DROP SCHEMA IF EXISTS r3a CASCADE")
