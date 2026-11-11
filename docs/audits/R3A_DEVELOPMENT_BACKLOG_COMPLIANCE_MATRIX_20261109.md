@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/audits/R3A_DEVELOPMENT_BACKLOG_COMPLIANCE_MATRIX_20261109.md
 Component: R3A-AUDIT-DEVELOPMENT-BACKLOG
-File Revision: 1.3.0
+File Revision: 1.4.0
 Created: 2026-11-10T01:26:06Z
 Created By: Codex GPT-6, Independent Auditor V2
 Purpose: Inventory R3A development deliveries and record evidence-based integration and operational dispositions.
@@ -34,6 +34,7 @@ Changed: 2026-11-11 | R3A-AUDIT-STEP51-OCTOMINER | Codex GPT-6 | Review Modular 
 Changed: 2026-11-11 | R3A-AUDIT-BASELINE-CLARIFICATION | Codex GPT-6 | Distinguish frozen/deployed 89eda from active integration candidate 2cc3 and recommend the latter for source integration review.
 Changed: 2026-11-11 | R3A-AUDIT-STEP76-79 | Codex GPT-6 | Independently review HR f3ead73 and Website 3207770/source archive digests; reproduce focused, private-PostgreSQL, package-install and source-suite evidence; record owner dispositions and artifact/operational boundaries.
 Changed: 2026-11-11 | R3A-AUDIT-STEP87-91 | Codex GPT-6 | Re-review Notifications 61b167b and Modular Plugins 399567d; reproduce autoCRLF manifest-pin defects, package evidence, and CME target interoperability; update exact dispositions/owners.
+Changed: 2026-11-11 | R3A-AUDIT-STEP94 | Codex GPT-6 | Review HR ac163ef source bundle and runtime wheel; independently verify hashes/install/import and run isolated PostgreSQL regressions; distinguish artifact pass from activation blocker.
 Supersedes: None
 Contracts: R3A-001–024; AD-024; MOD-001–014; activity, module, resident, authorization, state, Website and acceptance contracts.
 Tests: Focused source candidate tests recorded per row; isolated PostgreSQL 16 databases used for onboarding migration/repository verification and earlier checkpoint recovery; no production or managed service tests run by Auditor.
@@ -42,6 +43,14 @@ History/Predecessor: Prior revision 1.1.3 at commit 11d038e2c50deef16c9df5f3ad26
 # R3A Development Backlog Compliance Matrix — 2026-11-09
 
 **Status:** Initial rolling audit inventory. This matrix records source deliveries separately from integration, deployment, and live acceptance. It is not a deployment authorization.
+
+## Step 94 bounded HR artifact review — 2026-11-11
+
+| Priority | Workstream / owner issue | Exact source / package | Review readiness and disposition | Independent evidence | Next owner/action |
+|---|---|---|---|---|---|
+| P0 follow-up | HR onboarding / #58 | Source branch `engineering/r3a-hr-vicky-20261110`, exact candidate `ac163ef3306522c9d2f0711a1d103ca6b514702f`; source archive SHA-256 `418190d96090eb8c5b71084145fda6f5b62c47875ef6e2b98b1792e96d41a6ed`, embedded source `0d973cbea920ff0518f696b7de0baf4e41867359`; wheel SHA-256 `0886db886f360c44bceeec5cf1760e41c3357020cf100291b81bb6fa9b5d0860`, wheel source `e247f3fba9c9affdbeac3293b77b91f904cbb27c` | **BLOCKED — bounded source/archive/wheel checks PASS; integration and activation remain blocked.** This is not a Vicky activation or live HR acceptance. | Active baseline `2cc3fe3aabad88c95a5e6489c633cb01472f7c7` is an ancestor; exact source candidate is not on frozen/deployed `89eda133`. Archive SHA matches sidecar; all 28 manifest entries and the complete 29-member archive (including in-band manifest) verify. Wheel SHA matches manifest; wheel RECORD hashes/sizes verify, 108 packaged runtime files match wheel source revision `e247f3f`, and a disposable target install/import exposes `r3a.resident.onboarding.host-composition.v1` plus migration 019, rollback, packet schema, and state machine. Focused suites: 114 passed, 1 DSN-gated skip, 12 subtests; PostgreSQL onboarding migration/repository test rerun against private PostgreSQL 16: 1 passed; checkpoint persistence/process-loss test against separate disposable PostgreSQL DB: 1 passed. Combined candidate tree retains no R3 runtime diff after the wheel's source revision. The source manifest explicitly marks `SOURCE_CANDIDATE_NOT_DEPLOYABLE`. `onboarding_host.py` requires injected actor resolver, exact-scope authorizer, authority verifiers, activation verifier and Coordinator pool, fails closed if absent, and does not write authoritative HR/directory/security records. | HR/Coordinator must identify and authorize the provenance-bearing HR association writer and directory occupant/binding procedure; Coordinator must provide reviewed authenticated API/host composition and least-privilege packet/event DB role, migration/release and rollback approval. Existing Issue #58 comment 6804702380 names these dependencies; no code bypass requested. Do not infer appointment, binding, grants, route registration, Vicky onboarding or live acceptance. Full disposition: [#58 auditor comment 6804957229](https://github.com/ppow1/R3/issues/58#issuecomment-6804957229). |
+
+Candidate count for the Step 87/91/94 rolling review set: **5 reviewed — 3 FAIL, 2 BLOCKED, 0 PASS/ready, 0 superseded.** The first two are the Notifications #48 and Modular Plugins #46 corrections; HR `ac163ef` is the third current exact candidate and adds a second blocked disposition. No candidate from this set is currently ready for integration.
 
 ## Step 76/79 active delivery review — 2026-11-11
 
