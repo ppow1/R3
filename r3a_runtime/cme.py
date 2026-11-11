@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: r3a_runtime/cme.py
 Component: R3A-CME-AP0
-File Revision: 1.22.1
+File Revision: 1.22.2
 Created: 2026-11-06T15:22:00Z
 Created By: Codex GPT-6
 Purpose: Run CME scheduling, resource leases, module lifecycle, durable recovery, registries and diagnostics.
@@ -21,6 +21,7 @@ Changed: 2026-11-09 | R3A-UNIFIED-INTEGRATION | R3A Coordinator | Normalize type
 Changed: 2026-11-09 | R3A-STEWARD-CHAT-ROSTER | R3A Coordinator | Preserve directory roster rows and evaluate chat readiness through configured office routes and existing execution grants.
 Changed: 2026-11-10T00:14:15Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Separate direct Steward conversation authorization from resident-to-resident delegation while retaining target execution authorization.
 Changed: 2026-11-10T00:34:18Z | R3A-GRACE-CHAT-AUTH | R3A Coordinator | Expose exact-grant revocation through the existing private CME operator control path.
+Changed: 2026-11-11T22:06:08Z | R3A-EXC-001 | Codex GPT-6 | Exclude per-attempt deadline from invocation digest while validating it independently.
 Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT-6 | Dispatch registered resident executors and durable activity handlers through shared module contracts while retaining legacy Grace compatibility.
 Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GPT-6 | Persist handler progress with its returned checkpoint and restore handler checkpoint state on retry.
 Changed: 2026-11-10 | #51 | R3A Coordinator | Exclude unavailable optional tools and apply conversation-specific completion validation.
@@ -113,6 +114,13 @@ from .module_extensions import (ModuleExtensionError, resolve_activity_handler,
                                 validate_activity_handler_objective_submission,
                                 validate_activity_handler_payload,
                                 validate_executor_configuration)
+
+
+def _capability_request_digest(request: dict[str, Any]) -> str:
+    """Hash semantic invocation fields; deadline is validated independently on every attempt."""
+    canonical = {key: value for key, value in request.items() if key != "deadline"}
+    return hashlib.sha256(json.dumps(canonical, sort_keys=True,
+                                    separators=(",", ":")).encode()).hexdigest()
 
 
 ACTIVITY_INTAKE_SCHEMA = json.loads(
@@ -2549,8 +2557,7 @@ class CME:
                     "audit_event_id": authorization["audit_event_id"],
                     "policy_revision": authorization["policy_revision"],
                     "config_revision": authorization["config_revision"]}
-        canonical_digest = hashlib.sha256(json.dumps(checked, sort_keys=True,
-                                                    separators=(",", ":")).encode()).hexdigest()
+        canonical_digest = _capability_request_digest(checked)
         persistence_key = checked["idempotency_key"] or f"invocation:{checked['invocation_id']}"
         durable_request = {**checked, "idempotency_key": persistence_key}
         existing = await self.store.begin_capability_invocation(durable_request, canonical_digest, auth_ref)

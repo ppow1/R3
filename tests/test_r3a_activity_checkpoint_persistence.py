@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_activity_checkpoint_persistence.py
 Component: R3A-ACTIVITY-CHECKPOINT-PERSISTENCE-REGRESSION
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-10
 Created By: Codex GPT-6
 Purpose: Verify generic handler checkpoints persist through PostgreSQL progress updates and lease recovery.
@@ -14,6 +14,7 @@ Changed: 2026-11-10T04:00:00Z | R3A-CHECKPOINT-PERSISTENCE-CORRECTION | Codex GP
 Changed: 2026-11-10 | R3A-EXECUTOR-ROLE-P0 | Coordinator | Verify durable v1.1 role promotion preserves primary-module registration and lifecycle state.
 Changed: 2026-11-10T20:10:03Z | R3A-GENERIC-OBJECTIVE-CONTINUATION | R3A Coordinator | Verify PostgreSQL parks and resumes objective-waiting handler activities after child completion.
 Changed: 2026-11-10 | R3A-FS01-NOTIFICATION-ACK | R3A Coordinator | Verify notification acknowledgment requires a cited final disposition and shares the PostgreSQL completion transaction.
+Changed: 2026-11-11T22:06:08Z | R3A-EXC-001 | Codex GPT-6 | Prove deadline-only retries survive Store restart while semantic changes remain bound.
 Supersedes: None.
 Contracts: r3a.activity-handler.v1; r3a.activity-handler.objective-submission@1.0.0; activity.generic v1; existing CME activity/module ledgers.
 Tests: Set R3A_CHECKPOINT_TEST_DSN to a disposable test database and run this module.
@@ -32,7 +33,7 @@ from unittest.mock import AsyncMock, Mock
 from psycopg.conninfo import conninfo_to_dict
 from psycopg import AsyncConnection
 
-from r3a_runtime.cme import CME
+from r3a_runtime.cme import CME, _capability_request_digest
 from r3a_runtime.db import Store
 from r3a_runtime.provider_runtime import ProviderProcessManager
 from tests.r3a_activity_handler_interop_provider import create_provider
@@ -48,6 +49,18 @@ class SimulatedProcessInterruption(RuntimeError):
     pass
 
 
+class CapabilityRequestDigestTests(unittest.TestCase):
+    def test_per_attempt_deadline_is_excluded_but_semantic_fields_remain_bound(self):
+        request = {"operation_id": "directory.read", "input": {"resident_id": "resident:grace"},
+                   "target": {"source_ids": ["directory"]}, "deadline": "2099-01-01T00:00:00Z"}
+        renewed = {**request, "deadline": "2099-01-01T00:01:00Z"}
+        self.assertEqual(_capability_request_digest(request), _capability_request_digest(renewed))
+        changed_input = {**request, "input": {"resident_id": "resident:vicky"}}
+        self.assertNotEqual(_capability_request_digest(request), _capability_request_digest(changed_input))
+        changed_target = {**request, "target": {"source_ids": ["secrets"]}}
+        self.assertNotEqual(_capability_request_digest(request), _capability_request_digest(changed_target))
+
+
 @unittest.skipUnless(TEST_DSN, "requires disposable PostgreSQL R3A_CHECKPOINT_TEST_DSN")
 class ActivityCheckpointPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -59,6 +72,7 @@ class ActivityCheckpointPostgresTests(unittest.IsolatedAsyncioTestCase):
             connection_info=info, worker_concurrency=1, lease_seconds=30,
             observer_interval_seconds=60,
             machine_catalog_dir=ROOT / "r3a_runtime" / "state_machines")
+        self.settings = settings
         self.store = Store(settings)
         async with await AsyncConnection.connect(self.store.conninfo, autocommit=True) as conn:
             await conn.execute("DROP SCHEMA IF EXISTS r3a CASCADE")
@@ -69,6 +83,47 @@ class ActivityCheckpointPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         if hasattr(self, "store"):
             await self.store.close()
+
+    async def test_new_capability_retry_recovers_after_store_restart(self):
+        key = f"directory-retry:{uuid.uuid4()}"
+        first_deadline = "2099-01-01T00:00:00+00:00"
+        first_request = {
+            "idempotency_key": key,
+            "invocation_id": str(uuid.uuid4()),
+            "operation_id": "institutional.directory.discover",
+            "correlation_id": str(uuid.uuid4()),
+            "deadline": first_deadline,
+            "input": {"resident_id": "resident:grace", "limit": 250},
+        }
+        created = await self.store.begin_capability_invocation(
+            first_request, _capability_request_digest(first_request), {})
+        self.assertTrue(created["created"])
+
+        await self.store.close()
+        self.store = Store(self.settings)
+        await self.store.open()
+        retry_request = {**first_request, "deadline": "2099-01-01T00:01:00+00:00"}
+        retry_digest = _capability_request_digest(retry_request)
+        retry = await self.store.begin_capability_invocation(retry_request, retry_digest, {})
+        self.assertFalse(retry["created"])
+        self.assertEqual("STARTED", retry["state"])
+        persisted = (await self.store.rows(
+            "SELECT request FROM r3a.capability_invocations WHERE idempotency_key=%s", (key,)))[0]
+        self.assertEqual(first_deadline, persisted["request"]["deadline"])
+
+        result = {"outcome": "SUCCEEDED", "evidence": [], "output": {"residents": []}}
+        await self.store.finish_capability_invocation(key, retry_digest, result)
+        replay = await self.store.begin_capability_invocation(
+            {**retry_request, "deadline": "2099-01-01T00:02:00+00:00"}, retry_digest, {})
+        self.assertFalse(replay["created"])
+        self.assertEqual("SUCCEEDED", replay["state"])
+        self.assertEqual(result, replay["result"])
+
+        changed_input = {**retry_request, "input": {"resident_id": "resident:vicky", "limit": 250}}
+        with self.assertRaisesRegex(ValueError,
+                                    "idempotency key already belongs to a different canonical request"):
+            await self.store.begin_capability_invocation(
+                changed_input, _capability_request_digest(changed_input), {})
 
     async def test_primary_executor_role_promotion_is_durable_and_preserves_module_state(self):
         module_id = f"executor.fixture.{uuid.uuid4().hex}"
