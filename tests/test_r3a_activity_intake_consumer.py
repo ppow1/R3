@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_activity_intake_consumer.py
 Component: R3A-GENERIC-ACTIVITY-INTAKE-REGRESSION
-File Revision: 1.0.1
+File Revision: 1.0.2
 Created: 2026-11-09
 Created By: Codex GPT-6
 Purpose: Verify authorized generic activity intake remains durable and idempotent.
@@ -11,6 +11,7 @@ Observability: Assertions cover authorization, durable identity, event lineage, 
 Dependencies: r3a_runtime.cme; r3a_runtime.db; shared activity-intake contracts.
 Authority: AD-024; Autonomy / CME Issue #43.
 Changed: 2026-11-10T03:20:00Z | R3A-AUTONOMY-BASELINE-RECONCILIATION | Codex GPT-6 | Cover non-Grace activity intake persistence and idempotency.
+Changed: 2026-11-11 | R3A-RESIDENT-ID-AUDIT | Codex GPT-6 | Identify CME as its own module in the source-intake fixture rather than mislabeling it as Grace.
 Supersedes: None.
 Contracts: r3a.activity-intake.v1; r3a.activity-handler.v1.
 Tests: This test module.
@@ -139,7 +140,7 @@ class ActivityIntakeControlTests(unittest.IsolatedAsyncioTestCase):
             "provider": self.provider, "execution": {"timeout_seconds": 5},
         }
         self.cme = CME.__new__(CME)
-        self.cme.settings = SimpleNamespace(source_digest=self.digest, module_id="resident.grace",
+        self.cme.settings = SimpleNamespace(source_digest=self.digest, module_id="r3a.cme",
                                             capability_registry=Registry(descriptor))
         self.cme.invoke_capability = AsyncMock(return_value=invocation_result(self.intake, self.provider))
         self.cme.store = SimpleNamespace(submit_activity_intake=AsyncMock(
@@ -150,7 +151,8 @@ class ActivityIntakeControlTests(unittest.IsolatedAsyncioTestCase):
             "activity.intake.accept", {"operation_id": "source.read", "input": {"event_id": "event-123"}},
             self.key)
         request = self.cme.invoke_capability.await_args.args[0]
-        self.assertEqual("resident.grace", request["caller"]["principal_id"])
+        self.assertEqual("r3a.cme", request["caller"]["principal_id"])
+        self.assertEqual("r3a.cme", request["caller"]["resident_id"])
         self.assertEqual(self.key, request["idempotency_key"])
         self.cme.store.submit_activity_intake.assert_awaited_once()
         self.assertEqual("durable-activity-1", result["activity_id"])

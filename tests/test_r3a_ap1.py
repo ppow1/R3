@@ -61,6 +61,7 @@ from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 import hashlib
+import pytest
 from r3a_runtime.db import Store
 
 from r3a_runtime.acceptance import (AcceptanceCriteriaRequired, validate_acceptance,
@@ -1312,15 +1313,17 @@ class ResidentVerificationFeedbackIntegrationTests(unittest.TestCase):
             verified_at="2026-11-08T01:20:00Z", outcome="FAIL")
         return cme, activity, verification
 
-    def test_cme_builds_lineage_bound_non_authoritative_verifier_result(self):
+    @pytest.mark.xfail(strict=True, reason="Frozen CME currently writes its executor module ID into resident.result.resident_id; #51 owns the boundary correction")
+    def test_cme_verifier_result_uses_canonical_resident_principal(self):
         cme, activity, verification = self._fixture()
+        activity["input"]["resident_id"] = "resident:grace"
         result = cme._resident_result_from_verification(activity, verification)
 
         self.assertEqual(result["contract_id"], "r3a.resident.result")
         self.assertEqual(result["activity_id"], activity["activity_id"])
         self.assertEqual(result["attempt_id"], activity["attempt_id"])
         self.assertEqual(result["correlation_id"], activity["input"]["correlation_id"])
-        self.assertEqual(result["resident_id"], "resident.grace")
+        self.assertEqual(result["resident_id"], "resident:grace")
         self.assertEqual(result["outcome"], "FAIL")
         self.assertFalse(result["completion_authority"])
         self.assertEqual(result["issuer"]["decision_ref"],

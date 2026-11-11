@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: tests/test_r3a_engineering.py
 Component: R3A-AP2-ENGINEERING-CONTRACT-TESTS
-File Revision: 1.0.2
+File Revision: 1.0.3
 Created: 2026-11-07T05:28:24Z
 Created By: Codex GPT-6
 Purpose: Verify AP2 work-order lineage, effect references, criterion coverage, and fail-closed completion.
@@ -15,6 +15,7 @@ Changed: 2026-11-07T05:45:10Z | AP2-IMPLEMENTATION | Codex GPT-6 | Cover verifie
 Changed: 2026-11-07T05:47:16Z | AP2-IMPLEMENTATION | Codex GPT-6 | Assert exact approved unified capability contract identities.
 Changed: 2026-11-07T05:52:05Z | AP2-IMPLEMENTATION | Codex GPT-6 | Verify durable proposal revision round-trip and idempotent checkpoint persistence.
 Changed: 2026-11-07T05:59:32Z | AP2-IMPLEMENTATION | Codex GPT-6 | Cover canonical request mapping and distinct authorization decision/audit provenance.
+Changed: 2026-11-11 | R3A-RESIDENT-ID-AUDIT | Codex GPT-6 | Add strict expected-failure regression for EngineeringAction principal/module identity conflation pending frozen-owner review.
 Supersedes: None.
 Contracts: r3a.engineering-proposal.v1; r3a.engineering-work-order.v1; r3a.engineering-action.v1; r3a.verification-result.v1.
 Tests: This test module.
@@ -24,6 +25,7 @@ from __future__ import annotations
 
 import json
 import unittest
+import pytest
 import asyncio
 import copy
 from contextlib import asynccontextmanager
@@ -326,6 +328,18 @@ class EngineeringContractTests(unittest.TestCase):
                                         "operation_contract_version", "caller", "target", "input", "activity_id",
                                         "attempt_id", "correlation_id", "work_order", "evidence_purpose",
                                         "idempotency_key", "deadline", "config_revision"})
+
+    @pytest.mark.xfail(strict=True, reason="EngineeringAction currently has one caller_id and duplicates it into principal_id/resident_id; #51 owns the reviewed contract correction")
+    def test_engineering_action_separates_resident_principal_from_executor_module_id(self):
+        action = EngineeringAction(
+            action_id=ACTION, idempotency_key=f"{ORDER}:1:1", work_order_id=ORDER,
+            work_order_version=1, activity_id=ACTIVITY, attempt_id=ATTEMPT,
+            correlation_id=CORRELATION, operation=operation(), caller_id="resident:grace",
+            requested_at="2026-11-07T05:30:00Z", config_revision="cfg-17",
+            evidence_purpose="Apply the authorized isolated patch.")
+        caller = action.to_invocation_request()["caller"]
+        self.assertEqual(caller["principal_id"], "resident:grace")
+        self.assertEqual(caller["resident_id"], "resident.grace")
 
     def test_verification_request_is_bound_to_candidate_and_criteria(self):
         request = VerificationRequest(
