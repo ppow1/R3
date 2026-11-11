@@ -2,7 +2,7 @@
 R3 CONTROLLED SOURCE
 File: web/steward-workspace-api.js
 Component: R3A-STEWARD-WORKSPACE-CLIENT
-File Revision: 1.0.15
+File Revision: 1.0.16
 Created: 2026-11-07 UTC
 Created By: Codex GPT-6
 Purpose: Same-origin client for versioned resident conversation and notification contracts
@@ -19,7 +19,7 @@ Changed: 2026-11-09 | R3A-WEBSITE-WIDE-AUTH | R3A Coordinator | Inherit global W
 Changed: 2026-11-09 | R3A-LOGIN-REDIRECT-LOOP | R3A Coordinator | Recheck only the canonical session after operation 401; preserve authenticated Website navigation on scoped denials.
 Changed: 2026-11-09 | R3A-STEWARD-CHAT-ROSTER | R3A Coordinator | Render all dynamic roster rows and disable chat when the current response does not establish availability.
 Changed: 2026-11-09 | R3A-STEWARD-CHAT-READINESS | R3A Coordinator | Show the evidence-backed route or authorization reason for disabled roster entries.
-Changed: 2026-11-10 | #51 | Keep loaded history visible during polling and pause refresh after a bounded wait.
+Changed: 2026-11-11 | #51 | Keep selected durable transcripts refreshing throughout long-running resident turns.
 Changed: 2026-11-10 | #51 | Ignore stale resident/conversation responses after selection changes.
 Changed: 2026-11-10 | #51 | Report and disable an empty authoritative resident roster accurately.
 Changed: 2026-11-10 | #51 | Render compact resident chat, accessible message actions, and Eastern timestamps.
@@ -103,13 +103,16 @@ export function conversationHistoryLoadingLabel(isInitialLoad) {
   return isInitialLoad ? 'Loading durable conversation history…' : null;
 }
 
-export function conversationPollState(polls, maxPolls = 80) {
-  const continuePolling = Number.isInteger(polls) && polls <= maxPolls;
+export function conversationPollState(polls) {
+  // Durable turns can outlive a browser tab's ordinary request window while a
+  // host/model starts. Keep the selected conversation live indefinitely; the
+  // delay is separately capped, and selection/session changes cancel polling.
+  const continuePolling = Number.isInteger(polls) && polls >= 0;
   return {
     continuePolling,
     message: continuePolling
       ? 'Resident is working on this turn through managed CME…'
-      : 'This turn is still processing. Automatic refresh is paused; reload the conversation to check again.',
+      : 'Conversation status is unavailable; refresh the conversation to check again.',
   };
 }
 
@@ -175,6 +178,7 @@ export function residentAvailabilityPresentation(resident, verified, checkedAt =
 
 export function messageStatusPresentation(state) {
   const values = {
+    pending: ['◷', 'Queued; waiting for the resident service'],
     accepted: ['◷', 'Accepted; waiting for the resident service'],
     processing: ['◌', 'Resident is working on this turn'],
     completed: ['✓', 'Completed'],
@@ -315,7 +319,6 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
   let pendingMessage = null;
   const newConversationButton = root.getElementById('chat-new');
   const processingPolls = new Map();
-  const maxProcessingPolls = 80;
   let conversationLoadRevision = 0;
   let messageLoadRevision = 0;
   let runtimePollTimer = null;
@@ -470,7 +473,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
       if (!messageList.childNodes.length) setText(messageList, 'This conversation has no messages yet.');
       loadedConversationIds.add(conversationId);
       const messages = result.messages || [];
-      const processing = messages.some(message => message.sender?.kind === 'steward' && ['accepted', 'processing'].includes(message.delivery_state));
+      const processing = messages.some(message => message.sender?.kind === 'steward' && ['pending', 'accepted', 'processing'].includes(message.delivery_state));
       const lastMessage = messages.at(-1);
       const failedMessage = lastMessage && ['blocked', 'failed', 'rejected'].includes(lastMessage.delivery_state) ? lastMessage : null;
       const residentCanChat = residentRosterVerified && chatAvailableResidentIds.has(requestedResident);
@@ -480,7 +483,7 @@ export function mountResidentChat({api = new StewardWorkspaceApi(), root = docum
         const pollAttempt = processingPolls.get(conversationId) || 0;
         const nextAttempt = pollAttempt + 1;
         processingPolls.set(conversationId, nextAttempt);
-        const pollState = conversationPollState(nextAttempt, maxProcessingPolls);
+        const pollState = conversationPollState(nextAttempt);
         if (pollState.continuePolling) {
           const runtime = runtimeStatus.dataset.modelReadiness === 'starting' ? ' The model service is still starting; the conversation will update here.' : '';
           setText(status, `${residentProgressLabel(residentNames.get(requestedResident))}${runtime} · checked ${formatConversationTimestamp(new Date().toISOString())}`);

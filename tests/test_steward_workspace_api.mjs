@@ -126,13 +126,14 @@ test('blocked turn status names the resident selected for that conversation', ()
   assert.match(residentBlockedLabel(''), /^Resident could not complete this turn/);
 });
 
-test('history polling keeps loaded messages visible and stops with an explicit timeout state', () => {
+test('history polling keeps refreshing long-running turns with a capped delay', () => {
   assert.equal(conversationHistoryLoadingLabel(true), 'Loading durable conversation history…');
   assert.equal(conversationHistoryLoadingLabel(false), null);
   assert.equal(conversationPollState(80).continuePolling, true);
-  const timeout = conversationPollState(81);
-  assert.equal(timeout.continuePolling, false);
-  assert.match(timeout.message, /Automatic refresh is paused/);
+  assert.equal(conversationPollState(81).continuePolling, true);
+  assert.equal(conversationPollState(8000).continuePolling, true);
+  assert.equal(conversationPollState(-1).continuePolling, false);
+  assert.equal(conversationPollDelay(8000), 8000);
 });
 
 test('conversation UI helpers present readable names, meaningful titles, Eastern seconds, and explicit states', async () => {
@@ -145,6 +146,7 @@ test('conversation UI helpers present readable names, meaningful titles, Eastern
   assert.equal(conversationDisplayTitle({title: 'Conversation', resident_display_name: 'Vicky', created_at: '2026-11-10T17:08:09Z'}), 'Vicky · Nov 10, 12:08 PM EST');
   assert.equal(conversationDisplayTitle({title: 'Medication follow-up'}, 'Grace'), 'Medication follow-up');
   assert.equal(messageStatusPresentation('processing').label, 'Resident is working on this turn');
+  assert.equal(messageStatusPresentation('pending').label, 'Queued; waiting for the resident service');
   assert.ok(conversationPollDelay(1) < conversationPollDelay(2));
   assert.equal(conversationPollDelay(20), 8000);
   assert.equal(residentRosterRefreshDelay(true), 15000);
