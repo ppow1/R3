@@ -20,7 +20,7 @@ Authority: Issue #48 Planned Step 69; no managed activation authorized.
 - Store source digest: `059a1ef19c4f48e430b19a599062e5f91718fc27471af19680beeba9295c6992`
 - Test command for deterministic package build and archive hash validation: `python scripts/package_notification_module.py --output artifacts/r3a-notification-delivery-1.0.0.tar.gz`
 
-Build normalizes source line endings and fixes tar ownership, modes, timestamps, and gzip timestamp so identical source yields identical package bytes. The per-file inventory is inside `RELEASE_MANIFEST.json`. The package contains no DSN value, grant, or write-operation registration.
+Build normalizes source line endings and fixes tar ownership, modes, timestamps, and gzip timestamp so identical source yields identical package bytes. Both raw-byte-pinned source files, `capability.py` and `store.py`, are pinned to LF in `.gitattributes`. A regression clones the package with `core.autocrlf=true` and verifies both raw hashes plus standard loader registration. The per-file inventory is inside `RELEASE_MANIFEST.json`. The package contains no DSN value, grant, or write-operation registration.
 
 ## Install and rollback boundary
 
