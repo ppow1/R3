@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/audits/R3A_DEVELOPMENT_BACKLOG_COMPLIANCE_MATRIX_20261109.md
 Component: R3A-AUDIT-DEVELOPMENT-BACKLOG
-File Revision: 1.1.4
+File Revision: 1.1.5
 Created: 2026-11-10T01:26:06Z
 Created By: Codex GPT-6, Independent Auditor V2
 Purpose: Inventory R3A development deliveries and record evidence-based integration and operational dispositions.
@@ -26,6 +26,8 @@ Changed: 2026-11-10T15:55:38Z | R3A-AUDIT-BACKLOG-CONTINUATION | Codex GPT-6 | R
 Changed: 2026-11-10T15:55:38Z | R3A-AUDIT-BACKLOG-CONTINUATION | Codex GPT-6 | Independently review PR #54 character package against HR/directory/context contracts; verify current-base source equivalence and migration reconciliation.
 Changed: 2026-11-10T16:20:20Z | R3A-AUDIT-PR59-REVIEW | Codex GPT-6 | Re-review exact PR #59 head against current #43/#46 role contracts, authorization scope and package integrity; block integration readiness pending scope disposition and #48 digest correction.
 Changed: 2026-11-10T16:30:13Z | R3A-AUDIT-PR52-53-BACKLOG | Codex GPT-6 | Verify PR #52/#53 ancestry and current Coordinator module/activity implementation; record integrated state and outstanding notification-core modularity correction.
+Changed: 2026-11-11 | R3A-AUDIT-STEP47 | Codex GPT-6 | Re-review HR #58 same-SHA correction, Autonomy principal/module audit, frozen CME retry correction and Notifications AP3 delivery; record exact tests and owner actions.
+Changed: 2026-11-11 | R3A-AUDIT-STEP47 | Codex GPT-6 | Expand Autonomy exact-SHA focused regression evidence to 228 passed / 2 strict xfailed.
 Supersedes: None
 Contracts: R3A-001–024; AD-024; MOD-001–014; activity, module, resident, authorization, state, Website and acceptance contracts.
 Tests: Focused source candidate tests recorded per row; isolated PostgreSQL 16 databases used for onboarding migration/repository verification and earlier checkpoint recovery; no production or managed service tests run by Auditor.
@@ -35,7 +37,18 @@ History/Predecessor: Prior revision 1.1.3 at commit 11d038e2c50deef16c9df5f3ad26
 
 **Status:** Initial rolling audit inventory. This matrix records source deliveries separately from integration, deployment, and live acceptance. It is not a deployment authorization.
 
-## Current active-development priority snapshot — 2026-11-10
+## Current active-development priority snapshot — 2026-11-11
+
+This update follows Step 47 and dispatch comments #61/6802783003 and #61/6803214087. It supersedes older status for the exact candidates below. Source review, integration readiness, and live acceptance remain distinct.
+
+| Priority | Workstream / issue | Candidate branch and exact SHA | Review readiness / disposition | Independently verified evidence | Next owner/action |
+|---|---|---|---|---|---|
+| P0 | HR universal onboarding #58 | `engineering/r3a-hr-vicky-20261110` — `62d6aae84f2bf7d824078f5559fd77a010349bd0` | **FAIL — rework required** | Prior source defects fixed: canonical domain authority checks reject Security grant owner/authority reassignment and HR-authored grant evidence; recursive local refs fail as `CapabilityContractError`. Exact focused run: 30 passed. Disposable PostgreSQL 16 test applies migrations, exercises guarded 019 rollback/re-upgrade, then fails at `tests/test_r3a_resident_onboarding_postgres.py:153` because `_identity_domain()` retains noncanonical `test://` authority metadata. It stops before transaction/privacy assertions. | HR owner updates only the stale PostgreSQL fixture to canonical authority metadata, keeps service validation strict, reruns PostgreSQL and focused suites, and posts new SHA in #58. Vicky remains not onboarded. Auditor disposition: #58 comment 6803302276. |
+| P0 | Autonomy principal/module audit #43 | `engineering/r3a-resident-id-audit-integration-20261111` — `29353c978ed9ea0e9991a264bc222a61fdca2f1c`, based on current live-modular baseline `2cc3fe3aabad88c95a5e6489c633cb01472f7c7` | **PASS — source corrections ready for integration** | Expanded independent focused run across 17 identity/provider/Grace/Website/HR/activity-intake/Engineering suites: 228 passed, 2 strict xfailed. Verified separate principal/module/HR-record types across identity helpers, Grace, HR/directory association, module binding, Website API, manifests, and fixtures. Xfails isolate two existing, unmodified CME/Engineering identity defects; they do not falsify this candidate's corrected paths. No live inference, grants, or Website session tested. | Coordinator #51 can integrate exact candidate. Separately correct CME verifier result identity (`cme.py:2455`) and Engineering caller identity (`engineering.py:434`, CME construction 2597/2634/2665) before whole-system identity acceptance; owner path #51. Auditor review: #43 comments 6803426692 and 6803509730. |
+| P0 | Frozen CME deadline/idempotency correction #51 | `core-fix/grace-directory-invocation-idempotency-20261111` — `11a140b5a7de24752ab7639ba0e0cd3fc456c586`, direct child of `89eda1331b96fe40918e4aa67de09c5ae3f45227` | **PASS — source and isolated PostgreSQL regression; controlled integration pending** | Reviewed digest excludes only per-attempt deadline after request validation/authorization; all semantic fields stay hashed and original request is retained. Isolated PostgreSQL 16 test suite: 5 passed, including Store restart, changed-deadline retry, replay, and changed-input rejection. No managed CME/Grace run. | Coordinator rebase/reconcile against active `2cc3fe3` integration tree, run combined focused/full regressions, obtain explicit controlled-deployment authorization, then verify managed Grace continuation. Do not call this deployed or a freeze exception. Auditor review: #51 comment 6803427151. |
+| P0 | Notifications AP3 #48 | `engineering/r3a-notification-handler-freeze-20261110` — `e2782c732395b886bc144af06ca8fcd7af3e3c54` | **FAIL — rework required** | Exact focused suite: 55 passed, 5 skipped, 1 failed. Standard registry loader rejects `manifest.read.json` supporting `store.py` pin (`65033d85…`) because actual SHA-256 is `059a1ef1…`. | Notifications owner updates the correct artifact and all dependent provenance pins, then reruns registry and focused suites. CME session-principal contract for write endpoints remains a separate #46/#51 dependency; no wildcard. No deployment/grant/live inbox acceptance. Auditor review: #48 comment 6803428149. |
+
+## Prior active-development inventory snapshot — 2026-11-10
 
 This snapshot supersedes older queue/status summaries below where candidates or baselines have since advanced. Review priority follows Steward comments [#56/6769145175](https://github.com/ppow1/R3/issues/56#issuecomment-6769145175) and [#56/6770759266](https://github.com/ppow1/R3/issues/56#issuecomment-6770759266): review active deliveries first, do not repeat the e0 review, and recheck issue heads after each review. Source PASS is distinct from deployment/live acceptance.
 
