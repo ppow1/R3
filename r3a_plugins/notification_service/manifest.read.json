@@ -8,7 +8,7 @@
     "required": ["dsn_env", "presentation_timezone"],
     "additionalProperties": false,
     "properties": {
-      "dsn_env": {"const": "R3A_NOTIFICATION_DATABASE_DSN"},
+      "dsn_env": {"type": "string", "const": "R3A_NOTIFICATION_DATABASE_DSN"},
       "presentation_timezone": {"type": "string", "minLength": 1}
     }
   },
