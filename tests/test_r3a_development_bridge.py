@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import sqlite3
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import asyncio
@@ -233,6 +234,75 @@ def test_replay_with_changed_target_mode_or_payload_fails_closed_without_receipt
         assert replay.receipt_ref is None
         assert len(transport.deliveries) == 1
         assert transport.deliveries[0][0] == "Live Modular"
+
+
+def test_legacy_cache_rows_without_fingerprint_fail_closed_after_schema_upgrade():
+    with TemporaryDirectory() as temporary:
+        cache_path = Path(temporary) / "attempts.sqlite3"
+        decision = route_batch([_dispatch(131)], [
+            {"target": "Live Modular", "state": "AVAILABLE"}
+        ])[0]
+        connection = sqlite3.connect(cache_path)
+        connection.execute("""CREATE TABLE transport_attempts (
+            idempotency_key TEXT PRIMARY KEY,
+            target TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            state TEXT NOT NULL CHECK (state IN ('ATTEMPTING','DELIVERED','UNCERTAIN','FAILED')),
+            receipt_ref TEXT,
+            reason TEXT,
+            updated_at TEXT NOT NULL
+        )""")
+        connection.execute("PRAGMA user_version=1")
+        connection.execute(
+            "INSERT INTO transport_attempts VALUES (?,?,?,?,?,?,?)",
+            (decision.idempotency_key, "Live Modular", "QUEUE", "DELIVERED",
+             "legacy:receipt-for-unknown-payload", "legacy fixture", "2026-11-11T00:00:00+00:00"))
+        connection.commit()
+        connection.close()
+
+        cache = TransportAttemptCache(cache_path)
+        transport = MockTransport()
+        replay = deliver_ready([decision], transport, cache)[0]
+
+        assert replay.state == "IDEMPOTENCY_CONFLICT"
+        assert replay.receipt_ref is None
+        assert not transport.deliveries
+        connection = sqlite3.connect(cache_path)
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute(
+            "SELECT dispatch_fingerprint FROM transport_attempts WHERE idempotency_key=?",
+            (decision.idempotency_key,)).fetchone()[0] is None
+        connection.close()
+
+
+def test_cache_stores_dispatch_fingerprint_not_payload_text():
+    with TemporaryDirectory() as temporary:
+        cache_path = Path(temporary) / "attempts.sqlite3"
+        dispatch = _dispatch(132)
+        decision = route_batch([dispatch], [
+            {"target": "Live Modular", "state": "AVAILABLE"}
+        ])[0]
+        delivered = deliver_ready([decision], MockTransport(), TransportAttemptCache(cache_path))[0]
+        assert delivered.state == "DELIVERED"
+
+        connection = sqlite3.connect(cache_path)
+        fingerprint, target, mode = connection.execute(
+            "SELECT dispatch_fingerprint,target,mode FROM transport_attempts WHERE idempotency_key=?",
+            (decision.idempotency_key,)).fetchone()
+        connection.close()
+
+        canonical = json.dumps({
+            "repository": dispatch["repository"],
+            "issue_number": dispatch["issue_number"],
+            "comment_id": dispatch["comment_id"],
+            "target": dispatch["target"],
+            "mode": dispatch["mode"],
+            "summary": dispatch["summary"],
+        }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        assert fingerprint == hashlib.sha256(canonical).hexdigest()
+        assert target == dispatch["target"]
+        assert mode == dispatch["mode"]
+        assert dispatch["summary"] not in fingerprint
 
 
 def test_crash_during_attempt_becomes_uncertain_and_requires_explicit_reconciliation():
