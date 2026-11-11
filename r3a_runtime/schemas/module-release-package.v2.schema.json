@@ -3,7 +3,7 @@
   "$id": "r3a.module-release-package.v2@2.0.0",
   "title": "R3A Module Release Package v2",
   "type": "object",
-  "required": ["schema_id", "schema_version", "module_id", "module_version", "module_kind", "manifest_ref", "manifest_sha256", "artifact_digest", "files", "process_binding"],
+  "required": ["schema_id", "schema_version", "module_id", "module_version", "module_kind", "metadata_ref", "metadata_sha256", "artifact_digest", "files", "process_binding"],
   "additionalProperties": false,
   "properties": {
     "schema_id": {"const": "r3a.module-release-package.v2"},
@@ -11,8 +11,8 @@
     "module_id": {"type": "string", "minLength": 2, "maxLength": 160, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]+$"},
     "module_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
     "module_kind": {"const": "resident_executor"},
-    "manifest_ref": {"const": "module-manifest.json"},
-    "manifest_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "metadata_ref": {"const": "MODULE_METADATA.json"},
+    "metadata_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "artifact_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "files": {
       "type": "array",

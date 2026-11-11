@@ -3,7 +3,7 @@
 R3 CONTROLLED SOURCE
 File: scripts/r3a_module_release_package.py
 Component: R3A-GENERIC-RESIDENT-PACKAGE-TOOL
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-11T18:59:02Z
 Created By: Codex GPT-6
 Purpose: Implement a generic, content-addressed package boundary for versioned resident JSON-lines workers.
@@ -15,8 +15,9 @@ Changed: 2026-11-11T18:59:02Z | R3A-MODULAR-PLUGINS-STEP-70 | Codex GPT-6 | Add 
 Changed: 2026-11-11T19:00:40Z | R3A-MODULAR-PLUGINS-STEP-70 | Codex GPT-6 | Add a generic build CLI and verify staged bytes during idempotent installs.
 Changed: 2026-11-11T19:04:46Z | R3A-MODULAR-PLUGINS-STEP-70 | Codex GPT-6 | Enforce resident-executor role and preserve failed staging safely.
 Changed: 2026-11-11T19:11:23Z | R3A-MODULAR-PLUGINS-STEP-84 | Codex GPT-6 | Reject link traversal and special files; pair lifecycle effective pins.
+Changed: 2026-11-11T19:32:00Z | R3A-MODULAR-PLUGINS-STEP-84 | Codex GPT-6 | Use a distinct versioned release-metadata contract rather than module-manifest v1.
 Supersedes: None.
-Contracts: r3a.module-release-package.v2@2.0.0; r3a.module-process-binding.v1@1.0.0; r3a.module-manifest.v1; AP0-M1 r3a.module.v1 JSON-lines protocol.
+Contracts: r3a.module-release-package.v2@2.0.0; r3a.module-release-metadata.v1@1.0.0; r3a.module-process-binding.v1@1.0.0; AP0-M1 r3a.module.v1 JSON-lines protocol.
 Tests: tests/test_r3a_module_release_v2.py.
 History/Predecessor: New file; reuses module identity, JSON Schema, protocol, and lifecycle contracts.
 """
@@ -45,9 +46,10 @@ from r3a_runtime.capability_contracts import validate_json
 from r3a_runtime.module_contracts import semantic_version
 
 RELEASE_SCHEMA = ROOT / "r3a_runtime/schemas/module-release-package.v2.schema.json"
+METADATA_SCHEMA = ROOT / "r3a_runtime/schemas/module-release-metadata.v1.schema.json"
 PROCESS_BINDING_SCHEMA = ROOT / "r3a_runtime/schemas/module-process-binding.v1.schema.json"
 RELEASE_PATH = "RELEASE_MANIFEST.json"
-MODULE_MANIFEST_PATH = "module-manifest.json"
+MODULE_METADATA_PATH = "MODULE_METADATA.json"
 ARTIFACT_ROOT = "artifact"
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")
 _MODULE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{1,159}$")
@@ -93,49 +95,51 @@ def _validate_process_binding(binding: Any) -> dict[str, Any]:
     return dict(binding)
 
 
-def _validate_module_manifest(manifest: Any, *, expected_module_id: str | None = None,
+def _validate_module_metadata(metadata: Any, *, expected_module_id: str | None = None,
                               expected_version: str | None = None,
                               expected_artifact_digest: str | None = None) -> dict[str, Any]:
-    if not isinstance(manifest, dict):
-        raise ValueError("module manifest must be an object")
-    module_id = manifest.get("module_id")
-    version = manifest.get("module_version")
-    digest = manifest.get("artifact_digest")
+    schema = json.loads(METADATA_SCHEMA.read_text(encoding="utf-8"))
+    validate_json(metadata, schema, path="$.module_metadata")
+    module_id = metadata.get("module_id")
+    version = metadata.get("module_version")
+    digest = metadata.get("artifact_digest")
     if not isinstance(module_id, str) or not _MODULE_ID.fullmatch(module_id):
-        raise ValueError("module manifest has an invalid module_id")
+        raise ValueError("module metadata has an invalid module_id")
     semantic_version(version)
     if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
-        raise ValueError("module manifest has an invalid artifact_digest")
+        raise ValueError("module metadata has an invalid artifact_digest")
     if expected_module_id is not None and module_id != expected_module_id:
-        raise ValueError("module manifest ID differs from release descriptor")
+        raise ValueError("module metadata ID differs from release descriptor")
     if expected_version is not None and version != expected_version:
-        raise ValueError("module manifest version differs from release descriptor")
+        raise ValueError("module metadata version differs from release descriptor")
     if expected_artifact_digest is not None and digest != expected_artifact_digest:
-        raise ValueError("module manifest artifact digest differs from release descriptor")
-    role = manifest.get("resident_executor")
-    if (not isinstance(role, dict) or role.get("contract_id") != "r3a.resident.executor"
-            or role.get("contract_version") != "1.0.0"):
-        raise ValueError("module manifest must declare the generic resident executor role")
-    return dict(manifest)
+        raise ValueError("module metadata artifact digest differs from release descriptor")
+    role = metadata["role"]
+    if role["contract_id"] != "r3a.resident.executor" or role["contract_version"] != "1.0.0":
+        raise ValueError("module metadata must declare the generic resident executor role")
+    contract_range = role["execution_contract_range"]
+    if contract_range["min_minor"] > contract_range["max_minor"]:
+        raise ValueError("resident execution contract minor range is reversed")
+    return dict(metadata)
 
 
-def _release_descriptor(module_manifest: dict[str, Any], process_binding: dict[str, Any],
+def _release_descriptor(module_metadata: dict[str, Any], process_binding: dict[str, Any],
                         files: dict[str, bytes]) -> dict[str, Any]:
-    manifest = _validate_module_manifest(module_manifest)
+    metadata = _validate_module_metadata(module_metadata)
     binding = _validate_process_binding(process_binding)
     artifact_digest = _tree_digest(files)
-    if manifest["artifact_digest"] != artifact_digest:
-        raise ValueError("module manifest artifact_digest does not match the packaged file tree")
+    if metadata["artifact_digest"] != artifact_digest:
+        raise ValueError("module metadata artifact_digest does not match the packaged file tree")
     entries = [{"path": name, "sha256": _sha(payload), "size_bytes": len(payload)}
                for name, payload in sorted(files.items())]
     descriptor = {
         "schema_id": "r3a.module-release-package.v2",
         "schema_version": 2,
-        "module_id": manifest["module_id"],
-        "module_version": manifest["module_version"],
+        "module_id": metadata["module_id"],
+        "module_version": metadata["module_version"],
         "module_kind": "resident_executor",
-        "manifest_ref": MODULE_MANIFEST_PATH,
-        "manifest_sha256": _sha(_json_bytes(manifest)),
+        "metadata_ref": MODULE_METADATA_PATH,
+        "metadata_sha256": _sha(_json_bytes(metadata)),
         "artifact_digest": artifact_digest,
         "files": entries,
         "process_binding": binding,
@@ -145,7 +149,7 @@ def _release_descriptor(module_manifest: dict[str, Any], process_binding: dict[s
     return descriptor
 
 
-def build_package(module_manifest: dict[str, Any], process_binding: dict[str, Any],
+def build_package(module_metadata: dict[str, Any], process_binding: dict[str, Any],
                   files: dict[str, bytes], output: Path) -> dict[str, Any]:
     """Build a deterministic package from caller-supplied generic module inputs."""
     if not isinstance(files, dict) or not files:
@@ -153,18 +157,18 @@ def build_package(module_manifest: dict[str, Any], process_binding: dict[str, An
     clean_files: dict[str, bytes] = {}
     for name, payload in files.items():
         rel = _safe_relative(name)
-        if rel.as_posix() in {RELEASE_PATH, MODULE_MANIFEST_PATH} or rel.parts[0] == ARTIFACT_ROOT:
+        if rel.as_posix() in {RELEASE_PATH, MODULE_METADATA_PATH} or rel.parts[0] == ARTIFACT_ROOT:
             raise ValueError("package source paths collide with reserved package entries")
         if not isinstance(payload, bytes):
             raise ValueError(f"package payload must be bytes: {name}")
         clean_files[rel.as_posix()] = payload
     if len(clean_files) != len(files):
         raise ValueError("package contains duplicate normalized paths")
-    manifest = _validate_module_manifest(module_manifest)
-    descriptor = _release_descriptor(manifest, process_binding, clean_files)
+    metadata = _validate_module_metadata(module_metadata)
+    descriptor = _release_descriptor(metadata, process_binding, clean_files)
     entries = {
         RELEASE_PATH: _json_bytes(descriptor),
-        MODULE_MANIFEST_PATH: _json_bytes(manifest),
+        MODULE_METADATA_PATH: _json_bytes(metadata),
         **{f"{ARTIFACT_ROOT}/{name}": payload for name, payload in clean_files.items()},
     }
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -182,8 +186,8 @@ def build_package(module_manifest: dict[str, Any], process_binding: dict[str, An
     packed = buffer.getvalue()
     output.write_bytes(packed)
     return {"path": str(output), "bundle_sha256": _sha(packed), "size_bytes": len(packed),
-            "module_id": manifest["module_id"], "module_version": manifest["module_version"],
-            "artifact_digest": manifest["artifact_digest"]}
+            "module_id": metadata["module_id"], "module_version": metadata["module_version"],
+            "artifact_digest": metadata["artifact_digest"]}
 
 
 def verify_package(package_path: Path, *, expected_bundle_sha256: str) -> tuple[dict[str, Any], dict[str, bytes], dict[str, Any]]:
@@ -202,14 +206,14 @@ def verify_package(package_path: Path, *, expected_bundle_sha256: str) -> tuple[
             if handle is None:
                 raise ValueError(f"package entry is unreadable: {member.name}")
             entries[rel.as_posix()] = handle.read()
-    if RELEASE_PATH not in entries or MODULE_MANIFEST_PATH not in entries:
-        raise ValueError("package is missing its release or module manifest")
+    if RELEASE_PATH not in entries or MODULE_METADATA_PATH not in entries:
+        raise ValueError("package is missing its release or module metadata")
     descriptor = json.loads(entries[RELEASE_PATH])
     schema = json.loads(RELEASE_SCHEMA.read_text(encoding="utf-8"))
     validate_json(descriptor, schema, path="$.release")
     if descriptor["module_kind"] != "resident_executor":
         raise ValueError("release package v2 currently supports the resident-executor module role")
-    declared_paths = {RELEASE_PATH, MODULE_MANIFEST_PATH,
+    declared_paths = {RELEASE_PATH, MODULE_METADATA_PATH,
                       *(f"{ARTIFACT_ROOT}/{item['path']}" for item in descriptor["files"])}
     if set(entries) != declared_paths:
         raise ValueError("package archive has undeclared entries")
@@ -227,15 +231,15 @@ def verify_package(package_path: Path, *, expected_bundle_sha256: str) -> tuple[
             raise ValueError(f"module package file digest/size mismatch: {name}")
     if _tree_digest(actual_artifacts) != descriptor["artifact_digest"]:
         raise ValueError("module package artifact tree digest mismatch")
-    manifest_raw = entries[MODULE_MANIFEST_PATH]
-    if _sha(manifest_raw) != descriptor["manifest_sha256"]:
-        raise ValueError("module manifest digest mismatch")
-    module_manifest = _validate_module_manifest(
-        json.loads(manifest_raw), expected_module_id=descriptor["module_id"],
+    metadata_raw = entries[MODULE_METADATA_PATH]
+    if _sha(metadata_raw) != descriptor["metadata_sha256"]:
+        raise ValueError("module metadata digest mismatch")
+    module_metadata = _validate_module_metadata(
+        json.loads(metadata_raw), expected_module_id=descriptor["module_id"],
         expected_version=descriptor["module_version"],
         expected_artifact_digest=descriptor["artifact_digest"])
     _validate_process_binding(descriptor["process_binding"])
-    return descriptor, actual_artifacts, module_manifest
+    return descriptor, actual_artifacts, module_metadata
 
 
 def _install_parent(install_root: Path, module_id: str, module_version: str) -> Path:
@@ -253,13 +257,13 @@ def _reject_links_or_special_files(root: Path) -> None:
 
 def _verify_installed_target(target: Path, descriptor: dict[str, Any]) -> None:
     _reject_links_or_special_files(target)
-    manifest_path = target / MODULE_MANIFEST_PATH
+    metadata_path = target / MODULE_METADATA_PATH
     release_path = target / RELEASE_PATH
-    if not manifest_path.is_file() or not release_path.is_file():
+    if not metadata_path.is_file() or not release_path.is_file():
         raise ValueError("existing immutable module install is incomplete")
     installed_descriptor = json.loads(release_path.read_text(encoding="utf-8"))
-    manifest_raw = manifest_path.read_bytes()
-    if installed_descriptor != descriptor or _sha(manifest_raw) != descriptor["manifest_sha256"]:
+    metadata_raw = metadata_path.read_bytes()
+    if installed_descriptor != descriptor or _sha(metadata_raw) != descriptor["metadata_sha256"]:
         raise ValueError("existing immutable module install metadata differs from package")
     installed_files: dict[str, bytes] = {}
     for item in descriptor["files"]:
@@ -277,7 +281,7 @@ def _verify_installed_target(target: Path, descriptor: dict[str, Any]) -> None:
 
 def install_package(package_path: Path, install_root: Path, *, expected_bundle_sha256: str) -> dict[str, Any]:
     install_root = install_root.resolve()
-    descriptor, files, module_manifest = verify_package(
+    descriptor, files, module_metadata = verify_package(
         package_path, expected_bundle_sha256=expected_bundle_sha256)
     parent = _install_parent(install_root, descriptor["module_id"], descriptor["module_version"])
     for path in (install_root / ".r3a-module-artifacts", parent.parent, parent):
@@ -293,7 +297,7 @@ def install_package(package_path: Path, install_root: Path, *, expected_bundle_s
     parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".candidate-", dir=parent))
     try:
-        (staging / MODULE_MANIFEST_PATH).write_bytes(_json_bytes(module_manifest))
+        (staging / MODULE_METADATA_PATH).write_bytes(_json_bytes(module_metadata))
         (staging / RELEASE_PATH).write_bytes(_json_bytes(descriptor))
         for name, payload in files.items():
             destination = staging / ARTIFACT_ROOT / _safe_relative(name)
@@ -357,7 +361,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     build_parser = subparsers.add_parser("build", help="build a deterministic immutable module package")
-    build_parser.add_argument("--module-manifest", type=Path, required=True)
+    build_parser.add_argument("--module-metadata", type=Path, required=True)
     build_parser.add_argument("--process-binding", type=Path, required=True)
     build_parser.add_argument("--source-root", type=Path, required=True)
     build_parser.add_argument("--file", action="append", required=True,
@@ -381,10 +385,10 @@ def main(argv: list[str] | None = None) -> int:
             if not candidate.is_file():
                 raise FileNotFoundError(f"declared module source file is missing: {name}")
             files[rel.as_posix()] = candidate.read_bytes()
-        manifest = json.loads(args.module_manifest.read_text(encoding="utf-8"))
+        metadata = json.loads(args.module_metadata.read_text(encoding="utf-8"))
         binding = json.loads(args.process_binding.read_text(encoding="utf-8"))
-        manifest["artifact_digest"] = _tree_digest(files)
-        result = build_package(manifest, binding, files, args.output)
+        metadata["artifact_digest"] = _tree_digest(files)
+        result = build_package(metadata, binding, files, args.output)
     else:
         result = install_package(args.package, args.install_root,
                                  expected_bundle_sha256=args.expected_sha256)

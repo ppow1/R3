@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "r3a.module-release-metadata.v1@1.0.0",
+  "title": "R3A Versioned Module Release Metadata v1",
+  "type": "object",
+  "required": ["schema_id", "schema_version", "module_id", "module_version", "artifact_digest", "role"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_id": {"const": "r3a.module-release-metadata.v1"},
+    "schema_version": {"const": 1},
+    "module_id": {"type": "string", "minLength": 2, "maxLength": 160, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]+$"},
+    "module_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "artifact_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "role": {
+      "type": "object",
+      "required": ["contract_id", "contract_version", "execution_contract_range"],
+      "additionalProperties": false,
+      "properties": {
+        "contract_id": {"const": "r3a.resident.executor"},
+        "contract_version": {"const": "1.0.0"},
+        "execution_contract_range": {
+          "type": "object",
+          "required": ["contract_id", "major", "min_minor", "max_minor"],
+          "additionalProperties": false,
+          "properties": {
+            "contract_id": {"const": "r3a.resident.execution"},
+            "major": {"type": "integer", "minimum": 1},
+            "min_minor": {"type": "integer", "minimum": 0},
+            "max_minor": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    }
+  }
+}

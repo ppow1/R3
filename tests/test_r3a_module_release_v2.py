@@ -3,7 +3,7 @@
 # R3 CONTROLLED SOURCE
 # File: tests/test_r3a_module_release_v2.py
 # Component: TEST-R3A-GENERIC-MODULE-RELEASE-V2
-# File Revision: 1.0.3
+# File Revision: 1.0.4
 # Created: 2026-11-11T18:59:02Z
 # Created By: Codex GPT-6
 # Purpose: Verify generic resident JSON-lines package integrity, installation, launch and candidate rollback.
@@ -15,8 +15,9 @@
 # Changed: 2026-11-11T19:00:40Z | R3A-MODULAR-PLUGINS-STEP-70 | Codex GPT-6 | Exercise generic launch CLI inputs and CME lifecycle-guarded candidate cleanup.
 # Changed: 2026-11-11T19:04:46Z | R3A-MODULAR-PLUGINS-STEP-70 | Codex GPT-6 | Check staged-byte integrity and resident role validation.
 # Changed: 2026-11-11T19:11:23Z | R3A-MODULAR-PLUGINS-STEP-84 | Codex GPT-6 | Verify symlink rejection and paired effective version/digest guard.
+# Changed: 2026-11-11T19:32:00Z | R3A-MODULAR-PLUGINS-STEP-84 | Codex GPT-6 | Assert package metadata uses its own schema/version and execution range.
 # Supersedes: None.
-# Contracts: r3a.module-release-package.v2@2.0.0; r3a.module-process-binding.v1@1.0.0; r3a.module.v1.
+# Contracts: r3a.module-release-package.v2@2.0.0; r3a.module-release-metadata.v1@1.0.0; r3a.module-process-binding.v1@1.0.0; r3a.module.v1.
 # Tests: Self; python -m pytest -q tests/test_r3a_module_release_v2.py.
 # History/Predecessor: New test file; interop payload fixture is in tests/fixtures/r3a_module_release_package_v2/.
 """
@@ -53,7 +54,7 @@ def _inputs(module_version: str = "1.0.0", *, worker_suffix: bytes = b""):
         "orbit_worker/__init__.py": (FIXTURE / "orbit_worker/__init__.py").read_bytes(),
         "orbit_worker/worker.py": (FIXTURE / "orbit_worker/worker.py").read_bytes() + worker_suffix,
     }
-    manifest = json.loads((FIXTURE / "module-manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads((FIXTURE / "MODULE_METADATA.json").read_text(encoding="utf-8"))
     manifest["module_version"] = module_version
     manifest["artifact_digest"] = _tree_digest(files)
     binding = json.loads((FIXTURE / "process-binding.json").read_text(encoding="utf-8"))
@@ -179,6 +180,22 @@ class ModuleReleaseV2Tests(unittest.TestCase):
         for unsafe in ("../escape.py", "/absolute.py", "orbit//worker.py", "orbit/../worker.py"):
             with self.subTest(path=unsafe), self.assertRaises(ValueError):
                 build_package(manifest, binding, {unsafe: b"fixture"}, self.root / "bad.tar.gz")
+
+    def test_package_role_metadata_has_its_own_versioned_schema(self):
+        metadata, binding, files = _inputs()
+        self.assertEqual("r3a.module-release-metadata.v1", metadata["schema_id"])
+        invalid = dict(metadata)
+        invalid.pop("schema_id")
+        invalid["contract_id"] = "r3a.module-manifest.v1"
+        invalid["contract_version"] = "1.2.0"
+        with self.assertRaises(ValueError):
+            build_package(invalid, binding, files, self.root / "unsupported-manifest.json.tar.gz")
+        invalid = dict(metadata)
+        invalid["role"] = dict(metadata["role"])
+        invalid["role"]["execution_contract_range"] = dict(metadata["role"]["execution_contract_range"])
+        invalid["role"]["execution_contract_range"]["min_minor"] = 3
+        with self.assertRaisesRegex(ValueError, "range is reversed"):
+            build_package(invalid, binding, files, self.root / "reversed-range.tar.gz")
 
     def test_release_manifest_digest_pins_and_binding_schema_validate(self):
         package, built, _, _, _ = self._package("orbit.tar.gz")
