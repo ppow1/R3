@@ -11,6 +11,7 @@ Observability: Profile lineage and route identity are included in resident infer
 Dependencies: r3a_plugins/institutional_directory/manifest.json; r3a_runtime/grace_module.py; future CME resident dispatch integration.
 Authority: R3A Multi-Resident Autonomy Steward directives. The profile grants no execution authority.
 Changed: 2026-11-08T01:04:33Z | R3A-MULTI-RESIDENT | Codex GPT-6 | Document generic resident execution-profile payload and current directory limitations.
+Changed: 2026-11-11 | R3A-GRACE-CHAT-RECOVERY | Codex GPT-6 | Clarify that the canonical directory principal and registered executor module identity are separate contract identities.
 Supersedes: None
 Contracts: Proposed r3a.resident.execution-profile@1.0.0; existing r3a.resident.execution.v1 remains unchanged.
 Tests: Fixture-based validation in tests/test_r3a_ap1.py; no live resident invocation.
@@ -44,7 +45,7 @@ The profile is descriptive routing context. It is not a grant, capability list, 
 }
 ```
 
-The profile must match the executing module's resident identity and configuration revision. If an explicit activity route conflicts with the profile route, the resident rejects the request. The configured route must exist in the resident's loaded model settings. Durable conversation remains activity-scoped and supplied by CME; this profile creates no private session store.
+The profile resident ID must match the canonical target resident ID in the `r3a.resident.execution` envelope and the configuration revision used by CME. The registered executor's module ID/version are separate registry identities and are verified by the module protocol/registry binding; they need not equal the directory principal string. The resident rejects disagreement between the envelope, explicit target identity, and profile. If an explicit activity route conflicts with the profile route, the resident rejects the request. The configured route must exist in the resident's loaded model settings. Durable conversation remains activity-scoped and supplied by CME; this profile creates no private session store.
 
 No candidate names, resident IDs, office assignments, responsibilities, operation IDs, or grants are embedded in code. The current directory operation contract exposes `resident_id`, nullable `display_name`, `office_id`, `office_role`, binding revision, and availability. It does **not** expose a separate office-responsibilities field; that remains an authoritative-directory contract gap. No responsibility text should be inferred beyond returned `office_role` until its owner provides an authoritative field.
 
