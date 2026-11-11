@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_MASTER_ROADMAP_AP0_AP6.md
 Component: R3A-MASTER-ROADMAP
-File Revision: 1.0.3
+File Revision: 1.0.4
 Created: 2026-11-06T03:39:05Z
 Created By: Codex GPT-6
 Purpose: Sequence R3A architecture and delivery phases AP0 through AP6.
@@ -15,12 +15,15 @@ Changed: 2026-11-06T04:57:50Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Reco
 Changed: 2026-11-06T05:03:56Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Clarify Baseline 1.0 approval status and phase requirement mapping.
 Changed: 2026-11-06 | R3A-GOV-01A | Steward-directed clarification | Permit autonomous in-scope engineering and reserve approval for material deviations.
 Changed: 2026-11-06 | R3A-BASELINE-APPROVAL | Steward authorization in conversation | Approve Roadmap Baseline 1.0 for governance and AP0 decision planning only.
+Changed: 2026-11-11T19:00:29Z | STEP-77/86/92 | Codex GPT-6 | Add pointer to the evidence-only cross-window backlog and serial deployment index.
 Supersedes: None.
 Contracts: R3A Architecture Charter; R3A Punch List and Parking Lot; AP0 Technical Specification.
 Tests: Not run; documentation only.
-History/Predecessor: Git blob 14c74b8af1f0e7a9ff9135a8e7954396f9e136db at baseline commit eca8b73de0fe5bd67bdb0f0b8b0a92470b07b530.
+History/Predecessor: Git blob 708edbda5c70d65e720e3808a8067a14eccf27d5 at source baseline 2cc3fe3aabad88c95a5e6489c633cb01472f7c7f; earlier baseline history retained in Git.
 -->
 # R3A Master Roadmap — AP0–AP6
+
+**Current evidence index:** [R3A cross-window backlog and release index](../integration/R3A_CROSS_WINDOW_BACKLOG_INDEX.md). It reports status and evidence only; this Master Roadmap remains normative.
 
 **Status:** Roadmap Baseline 1.0 APPROVED by Steward on 2026-11-06 (conversation directive “go” following explicit approval recommendation). Approval authorizes AP0 decision planning and coordination; AP0 runtime implementation and production deployment require separate authorization. The requirements below preserve the Steward's required phase ownership; they do not declare any phase implemented or operational.
 

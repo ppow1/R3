@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.0.9
+File Revision: 1.0.10
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -19,10 +19,11 @@ Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-001 | ChatGPT GPT-6 | Index manifes
 Changed: 2026-11-04 UTC | R3-GRANT-RUNBOOK-MIGRATION | ChatGPT GPT-6 | Direct all new grant/delegation runbooks to R3
 Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Index resident avatar implementation notes
 Changed: 2026-10-31 UTC | R3-COMMS-001 | ChatGPT GPT-6 | Index mandatory Comms incident capture
+Changed: 2026-11-11T19:00:29Z | STEP-77/86/92 | Codex GPT-6 | Link the cross-window R3A status and serial release queue.
 Supersedes: None
 Contracts: hints/file-provenance.md
 Tests: Manual source/index review; no automated tests run.
-History/Predecessor: Git blob 7747ef612528c990621bfb9e907473ac68da925a
+History/Predecessor: Git blob e1d48e0b8b9bce0be5279a7f39283005240fa1c6 at source baseline 2cc3fe3aabad88c95a5e6489c633cb01472f7c7f.
 -->
 # AI_HINTS.md — Riverview 3
 
@@ -59,5 +60,6 @@ Start with [the hints index](hints/README.md). Keep this root file short; put de
 - [Resident avatar system](hints/resident-avatar-system.md) — replaceable website avatar runtime, browser animation API, and pending authorized backend connection
 - [Resident character architecture](docs/architecture/R3A_RESIDENT_CHARACTER_ARCHITECTURE.md) — versioned dossiers, modular prompts, and [Coordinator/Autonomy integration handoff](docs/architecture/R3A_RESIDENT_CHARACTER_INTEGRATION_HANDOFF.md)
 - [Resident source inventory](docs/architecture/resident-source-inventory.md) — identity and HR database authority findings, roster discrepancy, source confidence, and protected-source limits
+- [R3A cross-window backlog and release index](docs/integration/R3A_CROSS_WINDOW_BACKLOG_INDEX.md) — current evidence-linked owner/status ledger, exact candidate review outcomes, dispatch receipts, runtime identity, and serial deployment queue. Normative requirements remain in the linked R3A architecture/roadmap/contracts.
 
 When asked to add material to AI_HINTS, update a focused `hints/` document and add or adjust a concise pointer here only if needed.

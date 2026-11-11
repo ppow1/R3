@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_PUNCH_LIST_AND_PARKING_LOT.md
 Component: R3A-PUNCH-LIST
-File Revision: 1.0.6
+File Revision: 1.0.7
 Created: 2026-11-06T03:39:05Z
 Created By: Codex GPT-6
 Purpose: Track R3A requirements, dependencies, acceptance and intentionally unresolved decisions.
@@ -19,12 +19,15 @@ Changed: 2026-11-09T17:04:07Z | R3A-AUTH-INDEPENDENCE-APPROVED | Codex GPT-6 | R
 Changed: 2026-11-09T17:06:17Z | R3A-AUTH-INDEPENDENCE-SECURE-LAN | Codex GPT-6 | Require trusted HTTPS for private-LAN authentication and sessions.
 Changed: 2026-11-09T17:54:09Z | R3A-AUTH-COOKIE-ISOLATION | Codex GPT-6 | Require a dedicated R3A hostname to prevent cross-port cookie transmission to R3.
 Changed: 2026-11-09T19:23:00Z | AP3-R3A-010-LAN-IP | Codex GPT-6 | Accept the approved LAN IP origin with an IP-SAN certificate and a narrow Steward API cookie path.
+Changed: 2026-11-11T19:00:29Z | STEP-77/86/92 | Codex GPT-6 | Link current cross-window evidence and clarify that deployment-lane assignment does not amend L014 authority.
 Supersedes: None; supplements rather than closes docs/PUNCH_LIST.md and docs/PARKING_LOT.md.
 Contracts: R3A Architecture Charter; State Machine and Diagnostic Contract; Bounded Testing and Acceptance Policy.
 Tests: Not run; documentation only.
-History/Predecessor: Git blob 287cb3cd599a4f746adf3a30365a78cc13d3d8e5 at baseline commit f629a570d904719d1f13d2ceaddff7a2af2ce00d.
+History/Predecessor: Git blob 76bb7fe474987bd97fc90106ea972b440fd45d76 at source baseline 2cc3fe3aabad88c95a5e6489c633cb01472f7c7f; earlier baseline history retained in Git.
 -->
 # R3A Punch List and Parking Lot
+
+**Current evidence index:** [R3A cross-window backlog and release index](../integration/R3A_CROSS_WINDOW_BACKLOG_INDEX.md). This index does not replace requirements or authority entries below.
 
 **Status:** Requirements are PLANNED unless noted. This R3A tracker supplements the existing R3 [punch list](../PUNCH_LIST.md) and [parking lot](../PARKING_LOT.md); it does not claim those items are complete or superseded.
 
@@ -75,5 +78,7 @@ History/Predecessor: Git blob 287cb3cd599a4f746adf3a30365a78cc13d3d8e5 at baseli
 | R3A-L013 | Future TOTP/YubiKey factors and account recovery policy. | AP3/AP6 implementation. | Steward. | OPEN |
 | R3A-L014 | Coordination issue and integration authority for active AP0-M1 planning. | For this milestone. | Steward. | RESOLVED — Issue #42; Steward is integration authority until explicitly reassigned there |
 | R3A-L015 | Initial canonical Steward-to-R3A-principal association and fresh credential enrollment/recovery procedure; credential-hash migration is excluded. | Before real account activation: verified authoritative identity, governed association, Steward-controlled enrollment, and live acceptance. | HR authority, Remote Access #49, Website #51, Coordinator #56, Steward. | APPROVED FOR IMPLEMENTATION — Steward approved the identity-provenance and fresh-enrollment policy on 2026-11-09. No account or credential is active until verified and the Steward completes enrollment. |
+
+**L014 authority clarification pending:** Step 86 assigns the Coordinator the serial deployment lane; it does not by itself amend L014's existing Steward/#42 integration-authority record or grant release authority. Steward retains release authorization. Update this row only through the established governance owner/decision path.
 
 The AP0-M1 selections and dependency-ordered running milestone are in [First Living Water Wheel Technical Plan](R3A_AP0_M1_FIRST_LIVING_WATER_WHEEL_PLAN.md). “Selected” means planning choice, not implemented or operational. Environmental facts and deferred policy decisions remain open with the owners and gates above.
