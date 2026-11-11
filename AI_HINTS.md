@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: AI_HINTS.md
 Component: ENG-AGENT-INDEX
-File Revision: 1.0.8
+File Revision: 1.0.9
 Created: Unknown (legacy; inspect initial Git commit for earliest published version)
 Created By: Unknown (legacy)
 Purpose: Lightweight agent startup and knowledge index
@@ -10,6 +10,7 @@ Execution Model: N/A
 Observability: N/A
 Dependencies: hints/README.md
 Authority: R3 engineering navigation, subordinate to approved charter
+Changed: 2026-11-11 UTC | B2-UNDERSTANDING-001 | ChatGPT GPT-6 | Index fundamental B-2 regrounding doctrine
 Changed: 2026-11-11 UTC | B2-STARTUP-001 | ChatGPT GPT-6 | Add two-window external bridge startup instructions
 Changed: 2026-11-11 UTC | B2-HANDOFF-001 | ChatGPT GPT-6 | Index external B-2 development control handoff
 History/Predecessor: Git blob c434f7feb31931f1ef57658ac4e55ed1bee09675
@@ -70,6 +71,7 @@ $Script = Join-Path $Folder 'Riverview-GitHub-Bridge-B2-MultiTarget.ps1'
 
 - **New R3 feature development:** Start with [Development Bootstrap](hints/development-bootstrap.md) (startup phrase `R3 Bootstrap`), then follow [Development Governance and Definition of Done](hints/development-governance.md).
 
+- **B-2 fundamental understanding / regrounding:** [B-2 Multi-Target Bridge V2 — ChatGPT Fundamental Understanding](docs/operations/development-bridge/B2_CHATGPT_FUNDAMENTAL_UNDERSTANDING.md). When the Steward asks to reground on B-2, read this statement and the operational handoff before acting. It defines ChatGPT's responsibility to dispatch, verify, and continue engineering work without confusing acknowledgment with completion.
 - **External ChatGPT-to-Windows/Codex development bridge (B-2):** [operational handoff](docs/operations/development-bridge/B2_EXTERNAL_DEVELOPMENT_CONTROL_HANDOFF.md) and [November 11 executive summary](docs/operations/development-bridge/B2_2026-11-11_EXECUTIVE_SUMMARY.md). Use private GitHub Issue #61 to dispatch to verified Windows PowerShell/Codex targets, check execution receipts, and retrieve screenshot evidence. **This is development tooling outside Riverview, not an R3A runtime component.** See also [hints index](hints/README.md).
 - [Engineering and current handoff](hints/engineering.md)
 - [Institutional architecture and durable state](hints/architecture.md)
