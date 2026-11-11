@@ -7,6 +7,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 import threading
 import unittest
 import uuid
@@ -272,14 +275,15 @@ class NotificationServicePresentationTests(unittest.TestCase):
     def test_versioned_service_manifest_pins_runtime_artifacts_and_categories(self):
         manifest=json.loads((ROOT/"r3a_plugins/notification_service/manifest.json").read_text())
         self.assertEqual("r3a.notifications",manifest["module_id"])
-        self.assertEqual("1.2.1",manifest["module_version"])
+        self.assertEqual("1.2.2",manifest["module_version"])
         references={item["artifact_ref"] for item in manifest["supporting_artifacts"]}
         self.assertTrue({"../notification_source/manifest.json","../notification_source/plugin.py",
             "../../r3a_runtime/schemas/activity-intake.v1.schema.json"} <= references)
         for item in [{"artifact_ref":manifest["artifact_ref"],"artifact_sha256":manifest["artifact_sha256"]},
                      *manifest["supporting_artifacts"]]:
             artifact=(ROOT/"r3a_plugins/notification_service"/item["artifact_ref"]).resolve()
-            self.assertEqual(item["artifact_sha256"],hashlib.sha256(artifact.read_bytes()).hexdigest())
+            canonical=artifact.read_bytes().replace(b"\r\n",b"\n")
+            self.assertEqual(item["artifact_sha256"],hashlib.sha256(canonical).hexdigest())
         config=load_config(ROOT/"r3a_plugins/notification_service/config.example.json")
         categories={item["category"] for item in config["subscriptions"]}
         self.assertTrue({"resident_objective_completed","resident_objective_blocked",
@@ -287,6 +291,47 @@ class NotificationServicePresentationTests(unittest.TestCase):
             "service_or_capability_unavailable","resident_delegation_completed"} <= categories)
         historical=json.loads((ROOT/"r3a_plugins/notification_service/manifest.v1.2.0.json").read_text())
         self.assertEqual("1.2.0",historical["module_version"])
+    def test_service_manifest_pins_survive_autocrlf_true_and_false_checkouts(self):
+        manifest_path=ROOT/"r3a_plugins/notification_service/manifest.json"
+        manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
+        artifacts=[{"artifact_ref":manifest["artifact_ref"],
+                    "artifact_sha256":manifest["artifact_sha256"]},*manifest["supporting_artifacts"]]
+        with tempfile.TemporaryDirectory() as temporary:
+            temp_root=Path(temporary)
+            seed=temp_root/"seed"
+            seed.mkdir()
+            paths={manifest_path.relative_to(ROOT)}
+            for item in artifacts:
+                artifact=(manifest_path.parent/item["artifact_ref"]).resolve()
+                paths.add(artifact.relative_to(ROOT))
+            for relative in paths:
+                source=ROOT/relative
+                target=seed/relative
+                target.parent.mkdir(parents=True,exist_ok=True)
+                target.write_bytes(source.read_bytes().replace(b"\r\n",b"\n"))
+            shutil.copy2(ROOT/".gitattributes",seed/".gitattributes")
+
+            def git(*args,cwd):
+                subprocess.run(["git",*args],cwd=cwd,check=True,capture_output=True,text=True)
+
+            git("init","--quiet",cwd=seed)
+            git("config","user.name","Notification Manifest Test",cwd=seed)
+            git("config","user.email","notification-manifest-test@example.invalid",cwd=seed)
+            git("add","--all",cwd=seed)
+            git("commit","--quiet","-m","fixture",cwd=seed)
+            for checkout_name,autocrlf in (("windows","true"),("linux","false")):
+                checkout=temp_root/checkout_name
+                subprocess.run(["git","clone","--quiet","-c",f"core.autocrlf={autocrlf}",
+                                str(seed),str(checkout)],check=True,capture_output=True,text=True)
+                clone_manifest_path=checkout/manifest_path.relative_to(ROOT)
+                clone_manifest=json.loads(clone_manifest_path.read_text(encoding="utf-8"))
+                for item in [{"artifact_ref":clone_manifest["artifact_ref"],
+                              "artifact_sha256":clone_manifest["artifact_sha256"]},
+                             *clone_manifest["supporting_artifacts"]]:
+                    artifact=(clone_manifest_path.parent/item["artifact_ref"]).resolve()
+                    self.assertEqual(item["artifact_sha256"],
+                                     hashlib.sha256(artifact.read_bytes()).hexdigest(),
+                                     f"{checkout_name}:{item['artifact_ref']}")
 
 
 if __name__=="__main__": unittest.main()

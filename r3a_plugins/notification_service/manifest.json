@@ -2,7 +2,7 @@
   "contract_id": "r3a.notification-service-manifest.v1",
   "contract_version": "1.0.0",
   "module_id": "r3a.notifications",
-  "module_version": "1.2.1",
+  "module_version": "1.2.2",
   "module_type": "http_service",
   "entrypoint": "r3a_plugins.notification_service.server_v1_2_1:main",
   "health_path": "/healthz",
@@ -63,7 +63,7 @@
     },
     {
       "artifact_ref": "../../r3a_runtime/capability_contracts.py",
-      "artifact_sha256": "107ea3b45871477ab24038114d4f00b1bf92d4b78b2ca4882c859635800780c3"
+      "artifact_sha256": "8f6584602d6b6a9c2e8e3f01694c75da721b40a0f1b8f64b91ec9bf587da5480"
     }
   ]
 }

@@ -1,0 +1,12 @@
+r3a_plugins/notification_service/server_v1_2_1.py text eol=lf
+r3a_plugins/notification_service/store.py text eol=lf
+r3a_plugins/notification_service/ntfy.py text eol=lf
+r3a_plugins/notification_service/notification-inbox.v1.schema.json text eol=lf
+r3a_plugins/notification_service/config.schema.json text eol=lf
+r3a_plugins/notification_source/manifest.json text eol=lf
+r3a_plugins/notification_source/plugin.py text eol=lf
+r3a_runtime/schemas/activity-intake.v1.schema.json text eol=lf
+r3a_runtime/timestamp_presentation.py text eol=lf
+r3a_runtime/notifications.py text eol=lf
+r3a_runtime/notification_delivery.py text eol=lf
+r3a_runtime/capability_contracts.py text eol=lf
