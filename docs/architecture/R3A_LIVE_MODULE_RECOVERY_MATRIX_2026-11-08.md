@@ -2,14 +2,20 @@
 R3 CONTROLLED DOCUMENT
 File: docs/architecture/R3A_LIVE_MODULE_RECOVERY_MATRIX_2026-11-08.md
 Component: R3A-LIVE-MODULAR-ACCEPTANCE
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-08
+Created By: Unknown (legacy document; original author not recorded)
 Purpose: Record isolated real-process recovery acceptance against fetched Modular Plugins and Coordinator candidates.
 Execution Model: Independent PostgreSQL, Ring 0/CME, and provider child processes; Unix-domain control interfaces.
+Observability: Exact candidate revisions, activity records, process identities, and regression evidence.
+Dependencies: R3A lifecycle and recovery contracts; isolated PostgreSQL and module provider interfaces.
 Authority: Steward directive R3A Live Module Recovery Acceptance, 2026-11-08.
 Changed: 2026-11-08 | R3A-LIVE-MODULAR | Record live candidate matrix and exact residual defects.
+Changed: 2026-11-11T18:04:20Z | R3A-WEBSITE-INTEGRATION-STEP46 | Codex GPT-6 | Reconcile the deployed Website recovery-matrix edit into the Coordinator candidate.
 Tests: Live acceptance plus focused fixture tests; full candidate unit-suite result below.
 Supersedes: Extends R3A_LIVE_MODULAR_INTEGRATION_ACCEPTANCE_2026-11-08.md.
+Contracts: R3A module lifecycle and recovery contracts; hints/file-provenance.md.
+History/Predecessor: Immediate predecessor blob db65c13ea43db2a6ad117ec331cafeaf105fa13d at frozen baseline 89eda1331b96fe40918e4aa67de09c5ae3f45227.
 -->
 # R3A live module recovery acceptance matrix — 2026-11-08
 
@@ -101,4 +107,3 @@ This acceptance report does not designate a production module release. Workspace
 3. **Engineering invocation workflow:** a provider replacement and restart are verified, but post-restart effectful capability execution depends on the configured durable Engineering authorization/work-order workflow. This acceptance run did not create such a work order and did not bypass the gate. To close this evidence item, run the canonical Engineering operation through the normal AP2 adapter.
 4. **Candidate compatibility:** d58e004 and c1818d5 are not directly mergeable. Modular Plugins and Coordinator need to publish a compatible integrated revision, after which this isolated matrix can be rerun.
 5. **Suite environment:** provide both `pytest` and declared `psycopg_pool` in the isolated test environment and rerun the candidate suite.
-

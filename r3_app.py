@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.21
+# File Revision: 1.0.23
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Serve visual estate UI and authenticated, canonical R3A Steward API adapters
@@ -10,12 +10,13 @@
 # Dependencies: FastAPI, Git checkout, local artwork folder; optional r3a_runtime Steward access module
 # Authority: R3 engineering guidance; AP3-M1 Issue #49; approved charter prevails
 # Changed: 2026-11-07T21:48:11Z | AP3-M1 | Codex GPT-6 | Apply no-store headers and keep the authenticated status response freshness-aware.
+# Changed: 2026-11-11T18:04:20Z | R3A-WEBSITE-INTEGRATION-STEP46 | Codex GPT-6 | Integrate authenticated website operations, diagnostics, and snapshot routes from the deployed Website candidate.
 # Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Serve the fixed resident avatar frontend module
 # Changed: 2026-11-01 UTC | R3-PANEL-INTERACTION-002 | ChatGPT GPT-6 | Align snapshot anchors and report dragged Infrastructure marker
 # Supersedes: None
 # Contracts: hints/file-provenance.md
 # Tests: tests.test_r3a_website; API responses mocked at Unix socket boundary; live/browser verification pending
-# History/Predecessor: Git blob b3195f5a0ea8bacc030b642bc3dbb76258a4e747
+# History/Predecessor: Git blob b3195f5a0ea8bacc030b642bc3dbb76258a4e747; immediate integration predecessor blob 75608e30eb3c9784541e5d057a91e1d11c48fbce at baseline 89eda1331b96fe40918e4aa67de09c5ae3f45227.
 # Changed: 2026-11-07T21:40:20Z | R3A-007/R3A-010/R3A-013/R3A-017/R3A-019 | Codex GPT-6 | Add configurable Steward-authenticated AP1 diagnostics and durable Grace objective gateway.
 # Changed: 2026-11-07T21:58:03Z | R3A-007/R3A-013 | Codex GPT-6 | Expose read-only effective sanitized configuration and bounded activation history from authoritative diagnostics.
 # Changed: 2026-11-07T22:02:09Z | R3A-007/R3A-013 | Codex GPT-6 | Record focused API test coverage and current verification limits in provenance.
@@ -545,6 +546,15 @@ def roadmap_status_module():
                        "X-Content-Type-Options": "nosniff"})
 
 
+@app.get("/web/r3a-operations.mjs")
+def r3a_operations_module():
+    module = ROOT / "web" / "r3a-operations.mjs"
+    if not module.is_file():
+        raise HTTPException(404, "R3A operations interface unavailable")
+    return FileResponse(module, media_type="text/javascript", headers={"Cache-Control": "no-cache",
+                       "X-Content-Type-Options": "nosniff"})
+
+
 
 def _base_snapshot():
     try:
@@ -568,9 +578,8 @@ def _base_snapshot():
     return {
         "schema_version": "r3.website.diagnostic-snapshot.v1",
         "captured_at": datetime.now(timezone.utc).isoformat(),
-        "service": {"name": "r3", "status": "running", "api_version": app.version},
-        "source": {
-            "repository": "R3",
+        "service": {"name": "r3a-website", "status": "running", "api_version": app.version},
+        "website_source": {
             "branch": source_branch,
             "commit": source_commit,
             "working_tree_clean": working_tree_clean,
@@ -588,10 +597,6 @@ def _base_snapshot():
             "engineering_entrance_image_fraction": {"x": 0.377, "y": 0.653},
             "minimized_opacity": 0.45,
             "background_rendering": "cover",
-        },
-        "engineering": {
-            "branches": _branch_inventory()["branches"],
-            "worktrees": _worktree_inventory()["worktrees"],
         },
         "privacy": {
             "credentials": "excluded",
@@ -648,6 +653,7 @@ async def snapshot(request: Request):
     """Return a bounded read-only snapshot, including the latest browser capture if available."""
     await _steward_principal(request)
     result = _base_snapshot()
+    result["r3a_runtime"] = await _snapshot_r3a_runtime(request)
     result["browser"] = LATEST_BROWSER_CAPTURE or {"status": "not captured"}
     return result
 
@@ -659,8 +665,40 @@ async def capture_snapshot(request: Request, browser: dict = Body(...)):
     await _steward_principal(request, "steward.website.snapshot.write")
     LATEST_BROWSER_CAPTURE = _validate_browser_capture(browser)
     result = _base_snapshot()
+    result["r3a_runtime"] = await _snapshot_r3a_runtime(request)
     result["browser"] = LATEST_BROWSER_CAPTURE
     return result
+
+
+async def _snapshot_r3a_runtime(request: Request):
+    """Add bounded live CME evidence to the Website snapshot via the diagnostics contract."""
+    try:
+        settings = await _steward_settings(request)
+        from r3a_runtime.control import control_request
+        runtime = await control_request(settings.diagnostics_socket, "diagnostics.status", timeout=4.0)
+        if runtime.get("source") != "postgresql":
+            raise RuntimeError("diagnostics source is not authoritative")
+        return {
+            "contract": "r3a.cme-diagnostics.status.v1",
+            "availability": "available",
+            "observed_at": runtime.get("observed_at"),
+            "freshness": runtime.get("source_freshness", "unknown"),
+            "implementation_revision": runtime.get("implementation_revision"),
+            "configuration_revision": (runtime.get("configuration") or {}).get("revision_id"),
+            "processes": [{key: item.get(key) for key in
+                           ("component_id", "state", "health", "freshness", "heartbeat_at", "heartbeat_age_seconds")}
+                          for item in runtime.get("processes", []) if isinstance(item, dict)],
+            "modules": [{key: item.get(key) for key in
+                         ("module_id", "module_version", "lifecycle_state", "health", "freshness", "observed_at")}
+                        for item in runtime.get("modules", []) if isinstance(item, dict)],
+            "resources": [{key: item.get(key) for key in
+                           ("resource_id", "health", "observed_at")}
+                          for item in runtime.get("resources", []) if isinstance(item, dict)],
+            "activity_state_counts": runtime.get("activity_state_counts", {}),
+        }
+    except Exception as exc:
+        return {"contract": "r3a.cme-diagnostics.status.v1", "availability": "unavailable",
+                "reason": type(exc).__name__, "observed_at": datetime.now(timezone.utc).isoformat()}
 
 
 @app.get("/api/v1/visual/background")
