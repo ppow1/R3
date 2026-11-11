@@ -1,7 +1,7 @@
 # R3 CONTROLLED SOURCE
 # File: r3_app.py
 # Component: R3-APP
-# File Revision: 1.0.22
+# File Revision: 1.0.23
 # Created: Unknown (legacy; initial commit can establish earliest publication)
 # Created By: Unknown (legacy)
 # Purpose: Serve visual estate UI and authenticated, canonical R3A Steward API adapters
@@ -26,6 +26,7 @@
 # Changed: 2026-11-08T14:30:00Z | R3A-010/#49/#51 | Codex GPT-6 | Publish an externally configured, same-host existing portal login URL in website identity metadata.
 # Changed: 2026-11-09T18:10:00Z | AP3/R3A-010 | R3A Coordinator | Add a same-origin native R3A login entry and suppress R3 portal discovery in native mode.
 # Changed: 2026-11-09T19:57:00Z | AP3/R3A-010-LIVE-LOGIN | R3A Coordinator | Route the R3A origin to native login and return authenticated users to the integrated workspace.
+# Changed: 2026-11-11 | #51 | Serve the browser-local preference adapter used when localStorage is restricted.
 # Changed: 2026-11-09T20:25:00Z | R3A-WEBSITE-WIDE-AUTH | R3A Coordinator | Enforce the shared Website session on engineering inventory and snapshot APIs.
 # Dependencies: web/steward-login.html; web/steward-login.js; independent AP3 native identity configuration.
 
@@ -448,6 +449,34 @@ def artwork_file(relative_path: str):
 # Visual prototype: source approved art directly from preserved ZIP; do not use substitute imagery.
 ZIP_PATH = ROOT / "assets" / "visual-concepts" / "Riverview3_Visual_Concept_Library.zip"
 VISUAL_NAME = "Riverview3_Visual_Concept_Library/backgrounds/R3_modern_estate_clean_concept.png"
+VISUAL_BACKGROUND_PATH = (ROOT / "assets" / "visual-concepts" /
+                         "Riverview3_Visual_Concept_Library" / "backgrounds" /
+                         "R3_modern_estate_clean_concept.png")
+
+
+def _read_approved_visual_background() -> bytes:
+    """Read the approved image from the release projection or source archive.
+
+    The release bundle carries only the exact runtime image, not the 53 MB
+    design-library archive. The archive remains a development fallback for
+    older source checkouts. Both consumers use this single validated reader.
+    """
+    if VISUAL_BACKGROUND_PATH.is_file():
+        try:
+            data = VISUAL_BACKGROUND_PATH.read_bytes()
+        except OSError as exc:
+            raise HTTPException(503, "Approved visual background unreadable") from exc
+    elif ZIP_PATH.is_file():
+        try:
+            with zipfile.ZipFile(ZIP_PATH) as archive:
+                data = archive.read(VISUAL_NAME)
+        except (OSError, KeyError, zipfile.BadZipFile) as exc:
+            raise HTTPException(503, "Approved visual background unavailable") from exc
+    else:
+        raise HTTPException(503, "Approved visual background unavailable")
+    if len(data) < 24 or data[:8] != bytes([137, 80, 78, 71, 13, 10, 26, 10]):
+        raise HTTPException(503, "Approved visual background is not a valid PNG")
+    return data
 
 @app.get("/")
 def visual_home():
@@ -527,6 +556,17 @@ def steward_access_script():
         raise HTTPException(404, "Steward access interface unavailable")
     return FileResponse(script, media_type="text/javascript", headers={"Cache-Control": "no-cache",
                        "X-Content-Type-Options": "nosniff"})
+
+
+@app.get("/web/browser-preferences.js")
+def browser_preferences_script():
+    script = ROOT / "web" / "browser-preferences.js"
+    if not script.is_file():
+        raise HTTPException(404, "Browser preference adapter unavailable")
+    return FileResponse(script, media_type="text/javascript", headers={
+        "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"})
+
+
 @app.get("/web/steward-workspace-api.mjs")
 def steward_workspace_module():
     """Serve the same-origin client for the versioned Steward workspace APIs."""
@@ -563,15 +603,7 @@ def _base_snapshot():
     except HTTPException:
         source_commit, source_branch, working_tree_clean = None, None, None
 
-    if not ZIP_PATH.is_file():
-        raise HTTPException(503, "Approved visual archive unavailable")
-    try:
-        with zipfile.ZipFile(ZIP_PATH) as archive:
-            data = archive.read(VISUAL_NAME)
-    except (OSError, KeyError, zipfile.BadZipFile) as exc:
-        raise HTTPException(503, "Approved visual background unavailable") from exc
-    if len(data) < 24 or data[:8] != bytes([137, 80, 78, 71, 13, 10, 26, 10]):
-        raise HTTPException(503, "Approved visual background is not a valid PNG")
+    data = _read_approved_visual_background()
     width, height = struct.unpack(">II", data[16:24])
 
     return {
@@ -702,13 +734,5 @@ async def _snapshot_r3a_runtime(request: Request):
 
 @app.get("/api/v1/visual/background")
 def visual_background():
-    if not ZIP_PATH.is_file():
-        raise HTTPException(503, "Approved visual archive unavailable")
-    try:
-        with zipfile.ZipFile(ZIP_PATH) as archive:
-            if VISUAL_NAME not in archive.namelist():
-                raise HTTPException(503, "Approved background missing from archive")
-            data = archive.read(VISUAL_NAME)
-    except (OSError, zipfile.BadZipFile) as exc:
-        raise HTTPException(503, "Approved visual archive unreadable") from exc
+    data = _read_approved_visual_background()
     return Response(content=data, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})

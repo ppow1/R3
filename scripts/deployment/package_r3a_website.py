@@ -2,8 +2,9 @@
 """Create and verify a deterministic, source-pinned R3A Website release bundle.
 
 The bundle contains the complete tracked application source, deployment
-configuration and runbooks at one Git commit. The visual concept library ZIP is
-excluded because it is not loaded by the application or deployment.
+configuration, runbooks, and projected runtime visual at one Git commit. The
+large visual concept library ZIP is excluded; its required approved background
+member is included separately with source provenance.
 """
 import argparse
 import gzip
@@ -19,7 +20,7 @@ import tarfile
 SHA = re.compile(r"^[0-9a-f]{40}$")
 EXCLUDED = {
     "assets/visual-concepts/Riverview3_Visual_Concept_Library.zip":
-    "design reference archive; not loaded or installed by the Website",
+    "source archive omitted; required background member is projected as a separately verified runtime file",
 }
 
 
@@ -122,14 +123,21 @@ def verify(package: Path, expected_digest: str | None = None):
         required = {
             "website/r3_app.py", "website/requirements-deploy.lock",
             "website/web/steward.html", "website/web/steward-workspace-api.mjs",
+            "website/web/browser-preferences.js",
+            "website/assets/visual-concepts/Riverview3_Visual_Concept_Library/backgrounds/R3_modern_estate_clean_concept.png",
             "website/deploy/systemd/r3a-ap3-website-lan-https-backend.conf",
             "website/deploy/nginx/r3a-website-lan-https.conf",
             "website/r3a_plugins/steward_access.r3a-native.config.example.json",
         }
         if not required <= set(by_name):
             raise ValueError("package is missing required Website/runtime/config files")
+        background = archive.extractfile(by_name[
+            "website/assets/visual-concepts/Riverview3_Visual_Concept_Library/backgrounds/R3_modern_estate_clean_concept.png"
+        ]).read()
+        if len(background) < 24 or background[:8] != bytes([137, 80, 78, 71, 13, 10, 26, 10]):
+            raise ValueError("packaged Website background is not a PNG")
         if "website/assets/visual-concepts/Riverview3_Visual_Concept_Library.zip" in by_name:
-            raise ValueError("non-runtime design archive must not be packaged")
+            raise ValueError("large visual source archive must not be packaged")
     return {
         "package": str(package), "package_sha256": actual_digest,
         "source_commit": manifest["source_commit"], "file_count": len(expected),

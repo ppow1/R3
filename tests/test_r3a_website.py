@@ -21,6 +21,7 @@ Changed: 2026-11-09T19:57:00Z | AP3/R3A-010-LIVE-LOGIN | Verify native-mode base
 Changed: 2026-11-09T21:20:00Z | R3A-LOGIN-REDIRECT-LOOP | Verify only canonical session 401 redirects and operation 401s trigger a session recheck.
 Changed: 2026-11-10 | #51 | Verify the authenticated workspace loads effective configuration for institution-timezone presentation.
 Changed: 2026-11-11 | #51 | Verify R3A engineering registry projection, truthful settings scope, and live CME snapshot projection.
+Changed: 2026-11-11 | #51 | Verify the browser preference adapter is same-origin served and auth storage stays separate.
 Supersedes: None.
 Contracts: r3a.steward-session.v1; r3a.grace-objective-submission.v1; R3A AP0 diagnostic socket.
 Tests: python -m unittest tests.test_r3a_website.
@@ -30,7 +31,10 @@ from __future__ import annotations
 
 import os
 import asyncio
+import tempfile
 import unittest
+import zipfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
@@ -58,6 +62,45 @@ class StewardWebsiteApiTests(unittest.TestCase):
         response = self.client.get("/web/steward-workspace-api.mjs")
         self.assertEqual(response.status_code, 200)
         self.assertIn("r3a.steward-workspace-web.v1", response.text)
+
+    def test_browser_preferences_adapter_is_served_and_contains_no_auth_client_storage(self):
+        adapter = self.client.get("/web/browser-preferences.js")
+        self.assertEqual(adapter.status_code, 200)
+        self.assertIn("session-memory fallback only", adapter.text)
+        self.assertIn("r3aBrowserPreferences", adapter.text)
+        with patch.dict(os.environ, {"R3_WEBSITE_AUTH_MODE": "legacy"}):
+            page = self.client.get("/")
+        self.assertIn('<script src="/web/browser-preferences.js"></script>', page.text)
+        self.assertIn('id="browser-preferences-status" role="status"', page.text)
+        self.assertNotIn("localStorage.", page.text)
+
+    def test_visual_background_endpoint_serves_projected_asset_without_source_archive(self):
+        png = bytes([137, 80, 78, 71, 13, 10, 26, 10]) + bytes(16) + b"runtime image"
+        with tempfile.TemporaryDirectory() as temporary:
+            projected = Path(temporary) / "background.png"
+            projected.write_bytes(png)
+            with (
+                patch("r3_app.VISUAL_BACKGROUND_PATH", projected),
+                patch("r3_app.ZIP_PATH", Path(temporary) / "omitted-concept-library.zip"),
+            ):
+                response = self.client.get("/api/v1/visual/background")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "image/png")
+        self.assertEqual(response.content, png)
+
+    def test_visual_background_endpoint_retains_source_archive_fallback(self):
+        png = bytes([137, 80, 78, 71, 13, 10, 26, 10]) + bytes(16) + b"archive image"
+        with tempfile.TemporaryDirectory() as temporary:
+            archive_path = Path(temporary) / "concepts.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("Riverview3_Visual_Concept_Library/backgrounds/R3_modern_estate_clean_concept.png", png)
+            with (
+                patch("r3_app.VISUAL_BACKGROUND_PATH", Path(temporary) / "missing.png"),
+                patch("r3_app.ZIP_PATH", archive_path),
+            ):
+                response = self.client.get("/api/v1/visual/background")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, png)
 
     def test_native_login_is_same_origin_nostore_and_never_discovers_r3_portal_in_native_mode(self):
         page = self.client.get("/login")

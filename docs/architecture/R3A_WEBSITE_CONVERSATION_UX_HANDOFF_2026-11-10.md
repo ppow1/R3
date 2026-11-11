@@ -66,5 +66,6 @@ Extend `r3a.website-about.v1` (or add a separately versioned status contract) wi
 5. Test streamed events only after a real stream contract exists; otherwise verify accurate polling and no fake deltas.
 6. Test enabled conversation mutations against the actual authorization and audit responses before enabling their UI controls.
 7. Check keyboard/IME behavior, narrow viewport, focus order, accessible action names, and tooltip discoverability.
+8. With browser site storage denied (or a test profile whose storage API throws), reload the workspace and verify navigation/chat initialization still completes, the UI reports tab-only preference persistence, layout controls remain usable for the session, and no auth/session credential is written to browser storage. Restore normal storage and verify ordinary preference persistence.
 
 Source-level regression tests do not replace this authenticated browser acceptance. The Website branch must not independently deploy or restart shared services.

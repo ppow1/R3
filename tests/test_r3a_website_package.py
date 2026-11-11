@@ -26,16 +26,18 @@ class WebsitePackageTests(unittest.TestCase):
                 "r3_app.py": "app = object()\n",
                 "requirements-deploy.lock": "fastapi==1.2 --hash=sha256:unused\n",
                 "web/steward.html": "<main>Steward</main>\n",
+                "web/browser-preferences.js": "window.r3aBrowserPreferences = {};\n",
                 "web/steward-workspace-api.mjs": "export {};\n",
                 "deploy/systemd/r3a-ap3-website-lan-https-backend.conf": "[Service]\n",
                 "deploy/nginx/r3a-website-lan-https.conf": "server {}\n",
                 "r3a_plugins/steward_access.r3a-native.config.example.json": "{}\n",
+                "assets/visual-concepts/Riverview3_Visual_Concept_Library/backgrounds/R3_modern_estate_clean_concept.png": bytes([137, 80, 78, 71, 13, 10, 26, 10]).decode("latin1") + "\0" * 16 + "runtime",
                 "assets/visual-concepts/Riverview3_Visual_Concept_Library.zip": "not-runtime-data",
             }
             for name, content in files.items():
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(content, encoding="utf-8")
+                path.write_bytes(content.encode("latin1") if isinstance(content, str) else content)
             subprocess.run(["git", "init", "-q", str(root)], check=True)
             subprocess.run(["git", "-C", str(root), "config", "user.name", "Package Test"], check=True)
             subprocess.run(["git", "-C", str(root), "config", "user.email", "package-test@example.invalid"], check=True)
@@ -49,7 +51,11 @@ class WebsitePackageTests(unittest.TestCase):
             self.assertEqual(first.read_bytes(), second.read_bytes())
             self.assertEqual(result["source_commit"], commit)
             self.assertTrue(result["verified"])
-            self.assertEqual(result["file_count"], 7)
+            self.assertEqual(result["file_count"], 9)
+            with __import__("tarfile").open(first, "r:gz") as archive:
+                names = {member.name for member in archive.getmembers()}
+            self.assertIn("website/assets/visual-concepts/Riverview3_Visual_Concept_Library/backgrounds/R3_modern_estate_clean_concept.png", names)
+            self.assertNotIn("website/assets/visual-concepts/Riverview3_Visual_Concept_Library.zip", names)
             manifest = website_package.verify(first)
             self.assertEqual(manifest["package_sha256"], Path(str(first) + ".sha256").read_text().split()[0])
             with self.assertRaises(FileExistsError):
