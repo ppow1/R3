@@ -2,7 +2,7 @@
 R3 CONTROLLED DOCUMENT
 File: docs/operations/development-bridge/B2_EXTERNAL_DEVELOPMENT_CONTROL_HANDOFF.md
 Component: EXTERNAL-DEV-BRIDGE-RUNBOOK
-File Revision: 1.0.0
+File Revision: 1.0.1
 Created: 2026-11-11 UTC (date precision)
 Created By: ChatGPT GPT-6, acting on Steward instruction
 Purpose: Provide the operational handoff and usage guidance for future R3A development sessions
@@ -10,6 +10,7 @@ Execution Model: External ChatGPT/GitHub/Windows development coordination; not R
 Observability: GitHub Issue #61 execution receipts and screenshot evidence
 Dependencies: ppow1/R3 Issue #61; Windows B-2 Multi-Target Bridge
 Authority: Steward; external development tooling only
+Changed: 2026-11-11 UTC | B2-STARTUP-001 | ChatGPT GPT-6 | Link two-window session startup instructions
 Changed: 2026-11-11 UTC | B2-HANDOFF-001 | ChatGPT GPT-6 | Initial publication
 Supersedes: None
 Contracts: B-2 GitHub dispatch and target routing as documented; not an R3A runtime contract
@@ -44,6 +45,10 @@ ChatGPT (inspect evidence, choose next step)
 ```
 
 GitHub is the intermediate message/evidence service; this is **not a direct interactive terminal session**.
+
+## New-session startup: two required Windows terminals
+
+Before dispatching, confirm that **both** the Administrator Coordinator PowerShell window and the separate Multi-Target Bridge polling window are running. If either is missing, follow the exact commands in [B-2 two-window startup](../../../hints/b2-development-bridge-startup.md). The root [AI_HINTS.md](../../../AI_HINTS.md) also contains both manual startup commands. **Do not start a duplicate bridge.** These Windows terminals are external development tools, not R3A runtime components.
 
 ## Current concrete locations
 
