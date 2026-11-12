@@ -1,0 +1,12 @@
+{
+  "sources": [
+    {
+      "source_id": "knowledge.r3a.process-state-machine",
+      "path": "/absolute/path/to/r3a_runtime/state_machines/process.json",
+      "freshness_max_age_seconds": 86400
+    }
+  ],
+  "max_results": 10,
+  "max_document_bytes": 1048576,
+  "database_dsn_env": "R3A_KNOWLEDGE_DATABASE_DSN"
+}

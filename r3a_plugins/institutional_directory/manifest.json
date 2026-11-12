@@ -1,0 +1,542 @@
+{
+  "schema_version": 1,
+  "plugin_id": "r3a.institutional-directory",
+  "plugin_version": "1.1.1",
+  "artifact_ref": "plugin.py",
+  "artifact_sha256": "cb2fe69b62b13e9fb885fffb9f127e4dab5bedcbe850ca95e5061ec484fbc145",
+  "configuration_schema": {
+    "schema_id": "r3a.institutional-directory.config.v1",
+    "type": "object",
+    "required": [
+      "dsn_env",
+      "schema",
+      "connect_timeout_seconds"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "dsn_env": {
+        "type": "string",
+        "pattern": "[A-Z][A-Z0-9_]*"
+      },
+      "schema": {
+        "type": "string",
+        "pattern": "[A-Za-z_][A-Za-z0-9_]{0,62}"
+      },
+      "connect_timeout_seconds": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10
+      }
+    }
+  },
+  "provider": {
+    "provider_id": "r3a.institutional-directory",
+    "provider_version": "1.1.1",
+    "entrypoint": "r3a_plugins.institutional_directory.plugin:create_provider",
+    "artifact_sha256": "cb2fe69b62b13e9fb885fffb9f127e4dab5bedcbe850ca95e5061ec484fbc145"
+  },
+  "operation": {
+    "contract_id": "r3a.capability-operation.v1",
+    "contract_version": "1.0.0",
+    "operation_id": "institutional.directory.discover",
+    "operation_revision": "1.1.1",
+    "provider": {
+      "provider_id": "r3a.institutional-directory",
+      "provider_version": "1.1.1",
+      "entrypoint": "r3a_plugins.institutional_directory.plugin:create_provider",
+      "artifact_sha256": "cb2fe69b62b13e9fb885fffb9f127e4dab5bedcbe850ca95e5061ec484fbc145"
+    },
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "office_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resident_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 250
+        }
+      },
+      "additionalProperties": false
+    },
+    "output_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_id",
+        "schema_version",
+        "observed_at",
+        "source",
+        "offices",
+        "residents",
+        "capabilities"
+      ],
+      "properties": {
+        "schema_id": {
+          "const": "r3a.institutional-directory.v1",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "type": "integer"
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source_id",
+            "source_contract",
+            "snapshot_sha256",
+            "observed_at",
+            "freshness",
+            "availability",
+            "error",
+            "row_counts",
+            "potentially_truncated",
+            "transaction_isolation",
+            "timestamp_basis"
+          ],
+          "properties": {
+            "source_id": {
+              "const": "riverview_authority.directory",
+              "type": "string"
+            },
+            "source_contract": {
+              "const": "riverview-authority.directory.v1",
+              "type": "string"
+            },
+            "snapshot_sha256": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "observed_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "freshness": {
+              "enum": [
+                "fresh",
+                "unavailable"
+              ],
+              "type": "string"
+            },
+            "availability": {
+              "enum": [
+                "measured",
+                "unavailable"
+              ],
+              "type": "string"
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "row_counts": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "potentially_truncated": {
+              "type": "boolean"
+            },
+            "transaction_isolation": {
+              "type": "string"
+            },
+            "timestamp_basis": {
+              "type": "string"
+            }
+          }
+        },
+        "offices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "office_id",
+              "office_role",
+              "status",
+              "residents",
+              "capabilities"
+            ],
+            "properties": {
+              "office_id": {
+                "type": "string"
+              },
+              "office_role": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "residents": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "capabilities": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "capability_id",
+                    "owner_office",
+                    "authority_action",
+                    "enabled",
+                    "availability_policy",
+                    "registration_blocker",
+                    "input_schema",
+                    "authorization_contract",
+                    "resources",
+                    "availability_state",
+                    "availability_basis"
+                  ],
+                  "properties": {
+                    "capability_id": {
+                      "type": "string"
+                    },
+                    "owner_office": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "authority_action": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "enabled": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "availability_policy": {
+                      "type": [
+                        "string",
+                        "object",
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "registration_blocker": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "input_schema": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
+                    "authorization_contract": {
+                      "type": [
+                        "string",
+                        "object",
+                        "null"
+                      ]
+                    },
+                    "resources": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "resource_id",
+                          "implementation_ref"
+                        ],
+                        "properties": {
+                          "resource_id": {
+                            "type": "string"
+                          },
+                          "implementation_ref": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "availability_state": {
+                      "const": "unavailable",
+                      "type": "string"
+                    },
+                    "availability_basis": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "residents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "resident_id",
+              "display_name",
+              "office_id",
+              "office_role",
+              "office_status",
+              "binding_revision",
+              "availability",
+              "availability_state"
+            ],
+            "properties": {
+              "resident_id": {
+                "type": "string"
+              },
+              "display_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "office_id": {
+                "type": "string"
+              },
+              "office_role": {
+                "type": "string"
+              },
+              "office_status": {
+                "type": "string"
+              },
+              "binding_revision": {
+                "type": [
+                  "integer",
+                  "string"
+                ]
+              },
+              "availability": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "availability_state": {
+                "enum": [
+                  "measured",
+                  "unavailable"
+                ],
+                "type": "string"
+              }
+            }
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "capability_id",
+              "owner_office",
+              "authority_action",
+              "enabled",
+              "availability_policy",
+              "registration_blocker",
+              "input_schema",
+              "authorization_contract",
+              "resources",
+              "availability_state",
+              "availability_basis"
+            ],
+            "properties": {
+              "capability_id": {
+                "type": "string"
+              },
+              "owner_office": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "authority_action": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "enabled": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "availability_policy": {
+                "type": [
+                  "string",
+                  "object",
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "registration_blocker": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "input_schema": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "authorization_contract": {
+                "type": [
+                  "string",
+                  "object",
+                  "null"
+                ]
+              },
+              "resources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "resource_id",
+                    "implementation_ref"
+                  ],
+                  "properties": {
+                    "resource_id": {
+                      "type": "string"
+                    },
+                    "implementation_ref": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              },
+              "availability_state": {
+                "const": "unavailable",
+                "type": "string"
+              },
+              "availability_basis": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "effect_class": "read",
+    "caller_constraints": {
+      "allowed_principals": [],
+      "allowed_residents": [],
+      "allowed_services": []
+    },
+    "target_scope_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "required_grants": [
+      "institutional.directory.discover"
+    ],
+    "evidence": {
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "verification_obligations": [
+        "read_only_authoritative_snapshot",
+        "preserve_snapshot_digest_and_source_contract",
+        "report_unavailable_directory_configuration_without_fabricating_records",
+        "do_not_treat_capability_catalog_or_directory_binding_as_execution_authorization"
+      ]
+    },
+    "recovery": {
+      "idempotency_required": false,
+      "idempotency_scope": "invocation",
+      "replay_safe": true,
+      "reconciliation_operation_id": null
+    },
+    "execution": {
+      "timeout_seconds": 20,
+      "retry_disposition": "safe_retry"
+    },
+    "lifecycle": {
+      "desired_state": "enabled"
+    },
+    "resident_tool": {
+      "name": "institutional_directory_discover",
+      "description": "Read Riverview authoritative institutional offices, current resident bindings, and office-owned capability catalog metadata with snapshot provenance. Directory discovery does not authorize invocation."
+    }
+  },
+  "module_manifest": {
+    "contract_id": "r3a.module-manifest.v1",
+    "contract_version": "1.0.0",
+    "module_id": "r3a.institutional-directory",
+    "module_version": "1.1.1",
+    "owner": "Institutional Directory",
+    "binding": {
+      "contract_id": "r3a.capability-provider.v1",
+      "protocol_major": 1,
+      "protocol_min_minor": 0,
+      "protocol_max_minor": 0,
+      "entrypoint": "r3a_plugins.institutional_directory.plugin:create_provider"
+    },
+    "dependencies": [],
+    "configuration": {
+      "schema_ref": "r3a.institutional-directory.config.v1",
+      "configuration_ref": "capability_operations[].configuration"
+    },
+    "capability_refs": [
+      "institutional.directory.discover"
+    ],
+    "resource_refs": [],
+    "state_namespace": "r3a.institutional-directory",
+    "migration_contract": "r3a.stateless-provider.v1",
+    "recovery_policy": "operation-contract.v1",
+    "artifact": {
+      "artifact_ref": "plugin.py",
+      "artifact_sha256": "cb2fe69b62b13e9fb885fffb9f127e4dab5bedcbe850ca95e5061ec484fbc145"
+    },
+    "environment": {
+      "allowlist": [
+        "R3A_DIRECTORY_POSTGRES_DSN"
+      ]
+    }
+  }
+}

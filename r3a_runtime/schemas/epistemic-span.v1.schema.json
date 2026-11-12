@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://riverview.invalid/schemas/r3a.resident.epistemic-span.v1.schema.json",
+  "title": "R3A Epistemic Span",
+  "description": "Passage-level epistemic annotation and source provenance. Classification is not proof.",
+  "type": "object",
+  "required": ["span_id", "start", "end", "text", "classification", "sources", "classified_by", "classified_at", "audit_status"],
+  "properties": {
+    "span_id": {"type": "string", "minLength": 1},
+    "start": {"type": "integer", "minimum": 0},
+    "end": {"type": "integer", "minimum": 1},
+    "text": {"type": "string", "minLength": 1},
+    "classification": {"enum": ["VERIFIED", "CANON", "REASONED", "GENERAL", "CREATIVE", "UNKNOWN"]},
+    "sources": {"type": "array", "items": {"type": "object", "required": ["source_id", "locator"], "properties": {"source_id": {"type": "string"}, "locator": {"type": "string"}, "observed_at": {"type": ["string", "null"]}, "digest": {"type": ["string", "null"]}}, "additionalProperties": true}},
+    "classified_by": {"type": "string"},
+    "classified_at": {"type": "string", "format": "date-time"},
+    "audit_status": {"enum": ["pending", "passed", "mismatch", "indeterminate"]},
+    "audit_finding_ref": {"type": ["string", "null"]},
+    "supersedes_span_id": {"type": ["string", "null"]}
+  },
+  "allOf": [{"if": {"properties": {"classification": {"enum": ["VERIFIED", "CANON"]}}}, "then": {"properties": {"sources": {"minItems": 1}}}}],
+  "additionalProperties": false
+}

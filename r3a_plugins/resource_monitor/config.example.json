@@ -1,0 +1,10 @@
+{
+  "host_id": "replace-with-the-host-identifier-from-external-configuration",
+  "timeout_seconds": 5,
+  "max_age_seconds": 60,
+  "executables": [
+    "lsblk",
+    "smartctl",
+    "nvidia-smi"
+  ]
+}

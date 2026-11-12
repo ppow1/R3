@@ -1,0 +1,95 @@
+{
+  "contract_id": "r3a.capability-operation.v1",
+  "contract_version": "1.0.0",
+  "operation_id": "infrastructure.octominer.telemetry.read",
+  "operation_revision": "2.0.0",
+  "provider": {
+    "provider_id": "r3a.octominer-telemetry",
+    "provider_version": "2.0.0",
+    "entrypoint": "r3a_plugins.octominer_telemetry.plugin:create_provider",
+    "artifact_sha256": "af8aae26cad6f603f69658fea6dde2b868eadf1f4bdce6106b46f4c561587a86"
+  },
+  "input_schema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "array",
+    "items": {
+      "type": "object",
+      "required": [
+        "source_id",
+        "content"
+      ],
+      "properties": {
+        "source_id": {
+          "type": "string"
+        },
+        "content": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "effect_class": "read",
+  "caller_constraints": {
+    "allowed_principals": [],
+    "allowed_residents": [
+      "resident.grace"
+    ],
+    "allowed_services": []
+  },
+  "target_scope_schema": {
+    "type": "object",
+    "properties": {
+      "source_ids": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "host_ids": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "additionalProperties": false
+  },
+  "required_grants": [
+    "infrastructure.octominer.telemetry.read"
+  ],
+  "evidence": {
+    "schema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "verification_obligations": [
+      "preserve_source_provenance_and_digest",
+      "state_source_freshness_and_timestamp_basis",
+      "do_not_infer_unavailable_measurements"
+    ]
+  },
+  "recovery": {
+    "idempotency_required": false,
+    "idempotency_scope": "invocation",
+    "replay_safe": true,
+    "reconciliation_operation_id": null
+  },
+  "execution": {
+    "timeout_seconds": 30,
+    "retry_disposition": "safe_retry"
+  },
+  "lifecycle": {
+    "desired_state": "enabled"
+  },
+  "resident_tool": {
+    "name": "OctoMiner GPU Telemetry",
+    "description": "Read GPU, filesystem, compute-process, model-server, ComfyUI, request and bounded-history telemetry from independently configured R3A sources."
+  }
+}

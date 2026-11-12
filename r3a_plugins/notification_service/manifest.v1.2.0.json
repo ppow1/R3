@@ -1,0 +1,69 @@
+{
+  "contract_id": "r3a.notification-service-manifest.v1",
+  "contract_version": "1.0.0",
+  "module_id": "r3a.notifications",
+  "module_version": "1.2.0",
+  "module_type": "http_service",
+  "entrypoint": "r3a_plugins.notification_service.server:main",
+  "health_path": "/healthz",
+  "api_contract": "r3a.notification-inbox.v1",
+  "api_schema_ref": "notification-inbox.v1.schema.json",
+  "source_contract": "r3a.notification-intake@1.0.0",
+  "persistence": "postgresql",
+  "schema_namespace": "r3a_notification",
+  "state_schema_version": 3,
+  "optional_phone_transport": "ntfy-publish.v1",
+  "lifecycle": [
+    "activate",
+    "deactivate",
+    "upgrade"
+  ],
+  "artifact_ref": "server.py",
+  "artifact_sha256": "919e743eb5a80ca63a1013f0346ca10297d39cdd677aecabad40d9c8540aced8",
+  "supporting_artifacts": [
+    {
+      "artifact_ref": "store.py",
+      "artifact_sha256": "059a1ef19c4f48e430b19a599062e5f91718fc27471af19680beeba9295c6992"
+    },
+    {
+      "artifact_ref": "ntfy.py",
+      "artifact_sha256": "f08df1a83d42a63d5f107f2786e079650bfb733157a4c1b00f6add05450310f3"
+    },
+    {
+      "artifact_ref": "notification-inbox.v1.schema.json",
+      "artifact_sha256": "f24a12c30262d78e6151b76e6cfc96a86800dcd7502fedc1ec20667c5fbbfcee"
+    },
+    {
+      "artifact_ref": "../notification_source/manifest.json",
+      "artifact_sha256": "8288542a21d1ca8d407d5af005b289a087db00a5827009ea45f6c719f7b90ca7"
+    },
+    {
+      "artifact_ref": "../notification_source/plugin.py",
+      "artifact_sha256": "19d080f806313c5cf33f48d34f19bef7a87ddcee71193f39a4ee98ad735f3239"
+    },
+    {
+      "artifact_ref": "../../r3a_runtime/schemas/activity-intake.v1.schema.json",
+      "artifact_sha256": "7a2279c005933c3eea5975303d537d77eafbd5ddc8f8e0086ebb673eec5e666c"
+    },
+    {
+      "artifact_ref": "../../r3a_runtime/timestamp_presentation.py",
+      "artifact_sha256": "cc31a525058f316fa5608fc3f621812fb3e44e84e804e0db7a3d654065d1b228"
+    },
+    {
+      "artifact_ref": "config.schema.json",
+      "artifact_sha256": "55e6ee7619b818864d2ecb310d4c6784687a019fc8f65eac84af99ae3cb09c92"
+    },
+    {
+      "artifact_ref": "../../r3a_runtime/notifications.py",
+      "artifact_sha256": "f68ae33b230a32d4e04a4c1b5f46ed563b5629941999f47343f881e2774a2e2d"
+    },
+    {
+      "artifact_ref": "../../r3a_runtime/notification_delivery.py",
+      "artifact_sha256": "569575116ca08305139570b659db8d68f4d97803f4455a4be1d9728a9d4a2666"
+    },
+    {
+      "artifact_ref": "../../r3a_runtime/capability_contracts.py",
+      "artifact_sha256": "107ea3b45871477ab24038114d4f00b1bf92d4b78b2ca4882c859635800780c3"
+    }
+  ]
+}

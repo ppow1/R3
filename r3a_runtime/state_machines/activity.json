@@ -1,0 +1,17 @@
+{
+  "machine_id": "activity.generic",
+  "machine_version": 1,
+  "states": ["QUEUED", "RUNNING", "WAITING", "RECOVERING", "BLOCKED", "COMPLETED", "FAILED", "CANCELLED"],
+  "transitions": {
+    "QUEUED": ["RUNNING", "CANCELLED", "BLOCKED"],
+    "RUNNING": ["WAITING", "RECOVERING", "BLOCKED", "COMPLETED", "FAILED", "CANCELLED"],
+    "WAITING": ["QUEUED", "RUNNING", "BLOCKED", "CANCELLED"],
+    "RECOVERING": ["QUEUED", "RUNNING", "BLOCKED", "FAILED", "CANCELLED"],
+    "BLOCKED": ["RECOVERING", "QUEUED", "CANCELLED"],
+    "COMPLETED": [],
+    "FAILED": ["RECOVERING"],
+    "CANCELLED": []
+  },
+  "terminal": ["COMPLETED", "CANCELLED"],
+  "recoverable": ["QUEUED", "RUNNING", "WAITING", "RECOVERING", "BLOCKED", "FAILED"]
+}

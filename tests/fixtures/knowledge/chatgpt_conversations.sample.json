@@ -1,0 +1,21 @@
+[
+  {
+    "id": "conversation-alpha",
+    "title": "Operations notes",
+    "create_time": 1760000000.0,
+    "update_time": 1760000120.0,
+    "mapping": {
+      "node-u1": {"message": {"id": "message-u1", "create_time": 1760000001.0, "author": {"role": "user"}, "content": {"parts": ["What is the review sequence?"]}}},
+      "node-s1": {"message": {"id": "message-s1", "create_time": 1760000002.0, "author": {"role": "system"}, "content": {"parts": ["ignored hidden metadata"]}}},
+      "node-a1": {"message": {"id": "message-a1", "create_time": 1760000003.0, "author": {"role": "assistant"}, "content": {"parts": ["Review the source, then record a Steward decision.", {"asset_pointer": "omitted"}]}}}
+    }
+  },
+  {
+    "id": "conversation-beta",
+    "title": "Contact details review",
+    "create_time": 1760100000.0,
+    "mapping": {
+      "node-u2": {"message": {"id": "message-u2", "create_time": 1760100001.0, "author": {"role": "user"}, "content": {"parts": ["Please contact resident@example.invalid about this. API_KEY=abc123"]}}}
+    }
+  }
+]

@@ -15,14 +15,18 @@ Changed: 2026-11-11 UTC | B2-STARTUP-001 | ChatGPT GPT-6 | Add two-window extern
 Changed: 2026-11-11 UTC | B2-HANDOFF-001 | ChatGPT GPT-6 | Index external B-2 development control handoff
 History/Predecessor: Git blob c434f7feb31931f1ef57658ac4e55ed1bee09675
 Changed: 2026-11-05 UTC | R3-DEV-BOOTSTRAP-001 | ChatGPT GPT-6 | Add concise development bootstrap pointer
+Changed: 2026-11-06T03:39:05Z | R3A-BASELINE-001 | Codex GPT-6 | Add the R3A architecture baseline index.
+Changed: 2026-11-06T03:49:54Z | R3A-BASELINE-001 | Codex GPT-6 | Record documentation review scope accurately.
+Changed: 2026-11-06T05:02:18Z | R3A-BASELINE-1.0-CORRECTION | Codex GPT-6 | Require R3A roadmap compliance in engineering session bootstrap.
+Changed: 2026-11-08 UTC | CHARACTER-ARCHITECTURE | Codex GPT-6 | Index resident dossier architecture and source inventory.
 Changed: 2026-11-05 UTC | R3-MANIFEST-DEPLOY-001 | ChatGPT GPT-6 | Index manifest-driven deployment runbook and scripts
 Changed: 2026-11-04 UTC | R3-GRANT-RUNBOOK-MIGRATION | ChatGPT GPT-6 | Direct all new grant/delegation runbooks to R3
 Changed: 2026-11-02 UTC | R3-AVATAR-001 | ChatGPT GPT-6 | Index resident avatar implementation notes
 Changed: 2026-10-31 UTC | R3-COMMS-001 | ChatGPT GPT-6 | Index mandatory Comms incident capture
 Supersedes: None
 Contracts: hints/file-provenance.md
-Tests: Manual source inspection; automated validation pending
-History/Predecessor: Git blob 819202ddbc84aab85040fd9c78d4e9c82118e0c4
+Tests: Manual source/index review; no automated tests run.
+History/Predecessor: Git blob 7747ef612528c990621bfb9e907473ac68da925a
 -->
 # AI_HINTS.md — Riverview 3
 
@@ -46,6 +50,7 @@ Start with [the hints index](hints/README.md). Keep this root file short; put de
 - Preserve authorization, audit, recovery, substantive verification, and truthful UI status without unnecessary bureaucracy.
 - Do not migrate Riverview 2 wholesale or modify production/backups without explicit authorization.
 - Favor small, testable changes and verified outcomes.
+- For R3A engineering assignments, follow the mandatory approved-roadmap and coordination gates in [Development Bootstrap](hints/development-bootstrap.md) and [Development Governance](hints/development-governance.md). An unapproved roadmap revision does not authorize implementation.
 
 ## External B-2 startup for a new development session
 
@@ -75,7 +80,10 @@ $Script = Join-Path $Folder 'Riverview-GitHub-Bridge-B2-MultiTarget.ps1'
 - **External ChatGPT-to-Windows/Codex development bridge (B-2):** [operational handoff](docs/operations/development-bridge/B2_EXTERNAL_DEVELOPMENT_CONTROL_HANDOFF.md) and [November 11 executive summary](docs/operations/development-bridge/B2_2026-11-11_EXECUTIVE_SUMMARY.md). Use private GitHub Issue #61 to dispatch to verified Windows PowerShell/Codex targets, check execution receipts, and retrieve screenshot evidence. **This is development tooling outside Riverview, not an R3A runtime component.** See also [hints index](hints/README.md).
 - [Engineering and current handoff](hints/engineering.md)
 - [Institutional architecture and durable state](hints/architecture.md)
+- [R3A architecture baseline, AP0 specification, roadmap, and contracts](docs/architecture/R3A_ARCHITECTURE_CHARTER.md)
 - [Deployment and command execution](hints/deployment.md) — [manifest-driven runbook](docs/runbooks/R3_MANIFEST_DEPLOYMENT.md) and [deployment scripts](scripts/deployment/Deploy-R3.ps1) (currently plan-only; no live activation)
 - [Resident avatar system](hints/resident-avatar-system.md) — replaceable website avatar runtime, browser animation API, and pending authorized backend connection
+- [Resident character architecture](docs/architecture/R3A_RESIDENT_CHARACTER_ARCHITECTURE.md) — versioned dossiers, modular prompts, and [Coordinator/Autonomy integration handoff](docs/architecture/R3A_RESIDENT_CHARACTER_INTEGRATION_HANDOFF.md)
+- [Resident source inventory](docs/architecture/resident-source-inventory.md) — identity and HR database authority findings, roster discrepancy, source confidence, and protected-source limits
 
 When asked to add material to AI_HINTS, update a focused `hints/` document and add or adjust a concise pointer here only if needed.

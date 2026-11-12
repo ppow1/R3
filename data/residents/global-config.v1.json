@@ -1,0 +1,29 @@
+{
+  "schema_id": "r3a.resident.global-config",
+  "schema_version": 1,
+  "revision": "1.0.0",
+  "personality_defaults": {
+    "warmth": 50,
+    "humor": 50,
+    "formality": 50,
+    "assertiveness": 50,
+    "curiosity": 50,
+    "spontaneity": 50,
+    "empathy": 50,
+    "expressiveness": 50,
+    "professional_directness": 50
+  },
+  "override_scopes": ["institution_default", "resident", "approved_experiment"],
+  "override_precedence": ["institution_default", "resident", "approved_experiment"],
+  "epistemic": {
+    "legacy_classes": ["VERIFIED", "CANON", "REASONED", "GENERAL", "CREATIVE", "UNKNOWN"],
+    "multipass_required": false,
+    "verified_requires_sources": true,
+    "canonical_requires_sources": true
+  },
+  "privacy": {
+    "prompt_allowed_classifications": ["public", "institutional"],
+    "personnel_sensitive_requires_authorized_runtime_projection": true,
+    "protected_sources_in_git": false
+  }
+}

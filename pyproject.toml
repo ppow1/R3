@@ -1,0 +1,39 @@
+# R3 CONTROLLED SOURCE
+# File: pyproject.toml
+# Component: R3A-AP0-PACKAGING
+# File Revision: 1.0.1
+# Created: 2026-11-06 UTC (exact time not independently captured)
+# Created By: Codex GPT-6
+# Purpose: Define the isolated AP0 Python runtime package and pinned dependency bounds.
+# Execution Model: Install in the dedicated R3A virtual environment.
+# Observability: Package version and dependency metadata.
+# Dependencies: Python >=3.12; psycopg 3 connection pool and binary PostgreSQL protocol support.
+# Authority: AP0-M1 implementation authorization in GitHub Issue #42.
+# Changed: 2026-11-06T15:46:11Z | R3A-AP0-M1 | Codex GPT-6 | Finalize AP0 package metadata and provenance.
+# Changed: 2026-11-09T17:31:32Z | AP3-NATIVE-AUTH | R3 Integration | Add the local native identity operator CLI entry point.
+# Supersedes: None.
+# Contracts: AP0-001–013; AP0-M1 D1–D9.
+# Tests: Fresh venv installation and isolated live runtime.
+# History/Predecessor: New file; initial publication recorded in Git.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "r3a-ap0-runtime"
+version = "0.1.0"
+description = "R3A AP0 isolated institutional runtime"
+requires-python = ">=3.12"
+dependencies = ["psycopg[binary,pool]>=3.2,<4"]
+
+[project.scripts]
+r3a = "r3a_runtime.cli:main"
+r3a-steward-identity = "r3a_runtime.steward_identity_cli:main"
+
+[tool.setuptools.packages.find]
+include = ["r3a_runtime*", "r3a_plugins*"]
+
+[tool.setuptools.package-data]
+r3a_runtime = ["migrations/*.sql", "state_machines/*.json", "schemas/*.json", "providers/*.manifest.json", "residents/*.json"]
+r3a_plugins = ["**/*.json"]

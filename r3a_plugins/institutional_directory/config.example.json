@@ -1,0 +1,5 @@
+{
+  "dsn_env": "R3A_DIRECTORY_POSTGRES_DSN",
+  "schema": "riverview_authority",
+  "connect_timeout_seconds": 3
+}
